@@ -1,0 +1,426 @@
+@import '@fontsource-variable/inter/opsz.css';
+@import '@fontsource-variable/jetbrains-mono';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------- токены: тёплый серый, чёрный, электрик-синий ---------- */
+:root {
+  --bg: #ecece9;
+  --bg-2: #e3e3df;
+  --panel: #f4f4f1;
+  --ink: #0e0e0e;
+  --ink-2: rgba(14, 14, 14, 0.58);
+  --ink-3: rgba(14, 14, 14, 0.36);
+  --line: rgba(14, 14, 14, 0.14);
+  --line-2: rgba(14, 14, 14, 0.28);
+  --accent: #0a2bff;
+  --accent-ink: #ffffff;
+  --fill: rgba(14, 14, 14, 0.05);
+  --fill-2: rgba(14, 14, 14, 0.09);
+  --bubble: #e0e0dc;
+  --pos: #16a34a;
+  --neg: #e11d48;
+  --warn: #d97706;
+  --border: var(--line);
+  --card-solid: var(--panel);
+}
+.dark {
+  --bg: #0f0f0e;
+  --bg-2: #171716;
+  --panel: #151514;
+  --ink: #ecece9;
+  --ink-2: rgba(236, 236, 233, 0.6);
+  --ink-3: rgba(236, 236, 233, 0.38);
+  --line: rgba(236, 236, 233, 0.14);
+  --line-2: rgba(236, 236, 233, 0.3);
+  --accent: #2e4dff;
+  --accent-ink: #ffffff;
+  --fill: rgba(236, 236, 233, 0.06);
+  --fill-2: rgba(236, 236, 233, 0.11);
+  --bubble: #1f1f1d;
+  --pos: #4ade80;
+  --neg: #fb7185;
+  --warn: #fbbf24;
+  --border: var(--line);
+  --card-solid: var(--panel);
+}
+
+html { -webkit-text-size-adjust: 100%; background: var(--bg); }
+body {
+  @apply antialiased;
+  font-family: 'Inter Variable', Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  background: var(--bg);
+  color: var(--ink);
+  letter-spacing: -0.012em;
+}
+::selection { background: var(--accent); color: #fff; }
+button, input, select, textarea { font: inherit; letter-spacing: inherit; }
+
+/* ---------- типографика ---------- */
+.display {
+  font-variation-settings: 'opsz' 32;
+  font-weight: 500;
+  letter-spacing: -0.055em;
+  line-height: 0.92;
+}
+.h1 { @apply display text-[44px] sm:text-[64px] lg:text-[84px]; }
+.h1-sm { @apply display text-[38px] sm:text-[52px]; }
+.h2 { @apply display text-[28px] sm:text-[36px]; letter-spacing: -0.04em; }
+.h3 { font-weight: 500; letter-spacing: -0.03em; @apply text-[20px] sm:text-[24px] leading-tight; }
+.h4 { font-weight: 500; letter-spacing: -0.02em; @apply text-[16px] sm:text-[17px] leading-snug; }
+.mono { font-family: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0; font-feature-settings: normal; }
+.label { @apply mono text-[11px] uppercase tracking-[0.08em]; color: var(--ink-3); }
+.idx { @apply mono text-[11px]; color: var(--accent); }
+.num { font-variant-numeric: tabular-nums; }
+.muted { color: var(--ink-2); }
+.faint { color: var(--ink-3); }
+.pos { color: var(--pos); }
+.neg { color: var(--neg); }
+.warn { color: var(--warn); }
+.accent { color: var(--accent); }
+.bg-accent { background: var(--accent) !important; }
+.text-accent { color: var(--accent) !important; }
+
+/* ---------- линии, панели ---------- */
+.hair { border-color: var(--line); }
+.rule { border-top: 1px solid var(--line); }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 22px; }
+.card { @apply panel; }
+.card-solid { background: var(--panel); }
+.bg-red { background: var(--neg) !important; } .bg-green { background: var(--pos) !important; } .bg-orange { background: var(--warn) !important; }
+.text-red { color: var(--neg) !important; } .text-green { color: var(--pos) !important; } .text-orange { color: var(--warn) !important; }
+.fill { background: var(--fill); }
+
+/* строка списка — тонкие линии как в референсе */
+.row { @apply flex items-center gap-4 py-4; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.row-hover { @apply transition-colors; margin: 0 -12px; padding-left: 12px; padding-right: 12px; border-radius: 12px; }
+.row-hover:hover { background: var(--fill); }
+
+/* ---------- кнопки-пилюли ---------- */
+.btn { @apply inline-flex items-center justify-center gap-1.5 rounded-full px-4 py-2 text-[14px] font-medium transition select-none whitespace-nowrap; letter-spacing: -0.01em; line-height: 1.2; }
+.btn:active { transform: scale(.97); }
+.btn:disabled { opacity: .4; pointer-events: none; }
+.btn-primary { @apply btn; background: var(--accent); color: var(--accent-ink); }
+.btn-primary:hover { filter: brightness(1.08); }
+.btn-ghost { @apply btn; background: transparent; color: var(--ink); border: 1px solid var(--line-2); }
+.btn-ghost:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn-soft { @apply btn; background: var(--fill); color: var(--ink); }
+.btn-soft:hover { background: var(--fill-2); }
+.btn-dark { @apply btn; background: var(--ink); color: var(--bg); }
+.btn-icon { @apply inline-flex items-center justify-center rounded-full transition; width: 36px; height: 36px; color: var(--ink); border: 1px solid var(--line-2); background: transparent; }
+.btn-icon:hover { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.btn-icon:active { transform: scale(.95); }
+
+/* навигация-пилюли */
+.pill { @apply inline-flex items-center rounded-full px-3.5 py-1.5 text-[13px] font-medium transition; color: var(--ink); border: 1px solid var(--line); background: transparent; letter-spacing: -0.01em; }
+.pill:hover { border-color: var(--ink); }
+.pill.on { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+
+/* ---------- поля ---------- */
+.input {
+  @apply w-full rounded-2xl px-4 py-3 text-[16px] outline-none transition;
+  background: var(--panel);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.input:hover { border-color: var(--line-2); }
+.input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(10, 43, 255, 0.14); }
+.input::placeholder { color: var(--ink-3); }
+.input.err { border-color: var(--neg); box-shadow: 0 0 0 3px rgba(225, 29, 72, 0.12); }
+select.input { appearance: none; }
+/* инлайн-правка: подчёркивание вместо рамки */
+.inline-edit { @apply outline-none bg-transparent num; border-bottom: 1px dashed var(--line-2); cursor: text; }
+.inline-edit:hover { border-bottom-color: var(--ink); }
+.inline-edit:focus { border-bottom: 1px solid var(--accent); }
+.editable { cursor: text; border-bottom: 1px dashed transparent; transition: border-color .15s; }
+.editable:hover { border-bottom-color: var(--line-2); }
+
+.seg { @apply inline-flex flex-wrap rounded-full p-[3px] text-[13px] font-medium; border: 1px solid var(--line); }
+.seg > button { @apply rounded-full px-3 py-1 transition; color: var(--ink-2); }
+.seg > button.on { background: var(--ink); color: var(--bg); }
+
+.chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium; border: 1px solid var(--line); color: var(--ink-2); }
+.chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+.progress { @apply h-[3px] w-full overflow-hidden rounded-full; background: var(--fill-2); }
+.progress > div { @apply h-full rounded-full transition-all duration-700; background: var(--accent); }
+.progress.dark > div { background: var(--ink); }
+
+.scroll-thin::-webkit-scrollbar { width: 6px; height: 6px; }
+.scroll-thin::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 999px; }
+
+.recharts-tooltip-wrapper { outline: none; }
+.tt { @apply panel px-3 py-2 text-[13px]; }
+
+/* ---------- модалка ---------- */
+.sheet-backdrop { @apply fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-6; background: rgba(14,14,14,.4); animation: fade .18s ease-out both; overscroll-behavior: contain; }
+.sheet { @apply panel w-full sm:max-w-md rounded-t-[26px] sm:rounded-[26px] p-5 sm:p-7; background: var(--bg); animation: rise .28s cubic-bezier(.2,.8,.2,1) both; max-height: min(92dvh, 92svh); overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem); }
+/* телефон: шторка снизу, «ручка» сверху, нижние вкладки на это время прячутся (body.sheet-open), низ — с запасом под домашний индикатор */
+@media (max-width: 639px) {
+  .sheet { border-left: 0; border-right: 0; border-bottom: 0; max-height: min(94dvh, 94svh); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem); }
+  .sheet::before { content: ''; display: block; width: 36px; height: 5px; border-radius: 99px; background: var(--line-2); margin: -6px auto 14px; }
+  /* вторая шторка поверх первой (подтверждение) — первая приглушается и чуть отъезжает назад, как в iOS */
+  .sheet-backdrop.behind > .sheet { transform: translateY(-12px) scale(.955); opacity: .5; filter: saturate(.8); transition: transform .3s var(--ease-out), opacity .3s, filter .3s; }
+  .sheet-backdrop.behind { background: transparent; }
+  body.sheet-open .tabbar { transform: translateY(120%); opacity: 0; pointer-events: none; }
+}
+.tabbar { transition: transform .3s var(--ease-io), opacity .25s; }
+/* нативные поля даты на iOS не сжимаются и уезжают за край — режем по ширине и уплотняем */
+input[type="datetime-local"].input, input[type="date"].input, input[type="time"].input { min-width: 0; max-width: 100%; -webkit-appearance: none; appearance: none; text-align: left; }
+input[type="datetime-local"].input::-webkit-date-and-time-value, input[type="date"].input::-webkit-date-and-time-value { text-align: left; min-height: 1.5em; }
+@media (max-width: 639px) { .sheet .grid > label { min-width: 0; } .sheet input[type="datetime-local"].input { padding-left: 12px; padding-right: 8px; font-size: 15px; letter-spacing: -.01em; } }
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+@keyframes rise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: translateY(0) } }
+.animate-rise { animation: rise .35s cubic-bezier(.2,.8,.2,1) both; }
+
+.safe-b { padding-bottom: max(env(safe-area-inset-bottom), 0px); }
+/* iOS PWA: шапка не залезает под часы/чёлку, нижние вкладки — над домашним индикатором */
+.safe-t { padding-top: env(safe-area-inset-top, 0px); }
+.tabbar { padding-bottom: max(env(safe-area-inset-bottom, 0px), 12px); }
+/* НЕ ставить overflow-x: hidden на html/body — в iOS Safari это ломает вертикальную прокрутку. Режем по корню приложения. */
+#root { overflow-x: clip; padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
+.arrow::after { content: ' ↗'; font-weight: 400; }
+
+/* =====================================================================
+   ДВИЖЕНИЕ. Один набор кривых и длительностей на весь сайт, чтобы всё «дышало» одинаково.
+   ===================================================================== */
+:root {
+  --ease-out: cubic-bezier(.2, .8, .2, 1);       /* мягкий выезд */
+  --ease-spring: cubic-bezier(.34, 1.56, .64, 1);  /* пружина с перелётом */
+  --ease-io: cubic-bezier(.65, 0, .35, 1);
+  --t-fast: .16s; --t-base: .28s; --t-slow: .5s;
+}
+
+/* цвета темы перетекают, а не щёлкают */
+html.theme-anim, html.theme-anim body, html.theme-anim .panel, html.theme-anim .btn, html.theme-anim .pill,
+html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-anim .row, html.theme-anim .tabbar > div, html.theme-anim .sticky {
+  transition: background-color .45s var(--ease-io), color .45s var(--ease-io), border-color .45s var(--ease-io) !important;
+}
+
+/* ---------- появление: страница и её части каскадом ---------- */
+@keyframes pageIn { from { opacity: 0; transform: translateY(14px) scale(.995); filter: blur(4px) } to { opacity: 1; transform: none; filter: none } }
+@keyframes pageOut { to { opacity: 0; transform: translateY(-8px) scale(.995); filter: blur(3px) } }
+.page-enter { animation: pageIn var(--t-slow) var(--ease-out) backwards; }
+.page-exit { animation: pageOut .18s var(--ease-io) both; pointer-events: none; }
+
+/* дочерние .animate-rise внутри страницы стартуют по очереди */
+.page-enter .animate-rise { animation: rise .55s var(--ease-out) both; }
+.page-enter .animate-rise:nth-child(1) { animation-delay: .04s }
+.page-enter .animate-rise:nth-child(2) { animation-delay: .10s }
+.page-enter .animate-rise:nth-child(3) { animation-delay: .16s }
+.page-enter .animate-rise:nth-child(4) { animation-delay: .22s }
+.page-enter .animate-rise:nth-child(5) { animation-delay: .28s }
+.page-enter .animate-rise:nth-child(6) { animation-delay: .34s }
+.page-enter .animate-rise:nth-child(n+7) { animation-delay: .40s }
+
+/* строки списков — каскад */
+@keyframes rowIn { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
+.stagger > * { animation: rowIn .45s var(--ease-out) both; }
+.stagger > *:nth-child(1) { animation-delay: .03s } .stagger > *:nth-child(2) { animation-delay: .07s }
+.stagger > *:nth-child(3) { animation-delay: .11s } .stagger > *:nth-child(4) { animation-delay: .15s }
+.stagger > *:nth-child(5) { animation-delay: .19s } .stagger > *:nth-child(6) { animation-delay: .23s }
+.stagger > *:nth-child(7) { animation-delay: .27s } .stagger > *:nth-child(8) { animation-delay: .31s }
+.stagger > *:nth-child(n+9) { animation-delay: .35s }
+
+/* большой заголовок — буквы «проявляются» снизу */
+@keyframes headIn { from { opacity: 0; transform: translateY(.35em); clip-path: inset(0 0 100% 0) } to { opacity: 1; transform: none; clip-path: inset(-20% 0 -20% 0) } }
+.page-enter .h1 { animation: headIn .7s var(--ease-out) both; animation-delay: .05s; }
+.page-enter .label:first-child { animation: rowIn .5s var(--ease-out) both; }
+
+/* ---------- кнопки: пружина, подъём, свечение ---------- */
+.btn, .btn-icon, .pill, .chip, .seg > button, .tabbar a {
+  transition: transform var(--t-base) var(--ease-spring), background-color var(--t-base) var(--ease-out),
+              color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out),
+              box-shadow var(--t-base) var(--ease-out), filter var(--t-base) var(--ease-out);
+  will-change: transform;
+}
+.btn:hover, .btn-icon:hover { transform: translateY(-1px); }
+.btn:active, .btn-icon:active { transform: translateY(0) scale(.95); transition-duration: .08s; }
+.btn-primary:hover { box-shadow: 0 8px 24px -8px var(--accent); filter: brightness(1.06); }
+.btn-primary:active { box-shadow: 0 2px 8px -4px var(--accent); }
+.btn-ghost:hover, .btn-icon:hover { box-shadow: 0 6px 20px -10px rgba(0,0,0,.35); }
+/* стрелка ↗ в кнопках уезжает по диагонали */
+.btn span:last-child, .arrow::after { display: inline-block; transition: transform var(--t-base) var(--ease-spring); }
+.btn:hover span:last-child { transform: translate(2px, -2px); }
+.arrow:hover::after { transform: translate(2px, -2px); }
+/* иконки в кнопках слегка «оживают» */
+.btn svg, .btn-icon svg { transition: transform var(--t-base) var(--ease-spring); }
+.btn:hover svg { transform: scale(1.12) rotate(-6deg); }
+.btn-icon:hover svg { transform: rotate(12deg) scale(1.1); }
+
+/* ripple на primary/dark */
+.btn-primary, .btn-dark { position: relative; overflow: hidden; }
+.btn-primary::after, .btn-dark::after {
+  content: ''; position: absolute; inset: 0; background: radial-gradient(circle at var(--rx, 50%) var(--ry, 50%), rgba(255,255,255,.35) 0, transparent 55%);
+  opacity: 0; transform: scale(.4); transition: opacity .5s, transform .5s var(--ease-out); pointer-events: none;
+}
+.btn-primary:active::after, .btn-dark:active::after { opacity: 1; transform: scale(2); transition: 0s; }
+
+/* пилюли навигации */
+.pill:hover { transform: translateY(-1px); }
+.pill.on { box-shadow: 0 4px 14px -6px rgba(0,0,0,.4); }
+.seg > button.on { box-shadow: 0 2px 8px -3px rgba(0,0,0,.4); }
+.chip:hover { transform: translateY(-1px); border-color: var(--line-2); }
+
+/* нижние вкладки телефона — пружина и подсветка */
+.tabbar a { position: relative; }
+.tabbar a svg { transition: transform .35s var(--ease-spring); }
+.tabbar a.active svg, .tabbar a[aria-current] svg { transform: translateY(-2px) scale(1.15); }
+.tabbar a:active svg { transform: scale(.85); }
+.tabbar a::before { content: ''; position: absolute; top: 4px; left: 50%; width: 4px; height: 4px; border-radius: 99px; background: var(--accent);
+  transform: translateX(-50%) scale(0); transition: transform .35s var(--ease-spring); }
+.tabbar a.active::before { transform: translateX(-50%) scale(1); }
+
+/* ---------- панели, строки, поля ---------- */
+.panel { transition: transform var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), border-color var(--t-base); }
+.panel.lift:hover { transform: translateY(-2px); box-shadow: 0 14px 40px -18px rgba(0,0,0,.35); border-color: var(--line-2); }
+.row-hover { transition: background-color var(--t-fast) var(--ease-out), transform var(--t-base) var(--ease-out); }
+.row-hover:hover { transform: translateX(3px); }
+.input { transition: border-color var(--t-base), box-shadow var(--t-base), transform var(--t-base) var(--ease-out); }
+.input:focus { transform: translateY(-1px); }
+.progress > div { transition: width .9s var(--ease-out); }
+
+/* ---------- живые индикаторы ---------- */
+@keyframes pulseDot { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, currentColor 45%, transparent) } 70% { box-shadow: 0 0 0 7px transparent } }
+.dot-live { color: var(--accent); animation: pulseDot 2.2s var(--ease-out) infinite; }
+@keyframes breathe { 0%, 100% { transform: scale(1); opacity: .55 } 50% { transform: scale(1.25); opacity: 1 } }
+.thinking span { display: inline-block; width: 6px; height: 6px; border-radius: 99px; background: currentColor; animation: breathe 1.2s ease-in-out infinite; }
+.thinking span:nth-child(2) { animation-delay: .18s } .thinking span:nth-child(3) { animation-delay: .36s }
+
+/* сообщения чата всплывают */
+@keyframes bubbleIn { from { opacity: 0; transform: translateY(10px) scale(.96) } to { opacity: 1; transform: none } }
+.bubble-in { animation: bubbleIn .35s var(--ease-spring) both; transform-origin: bottom left; }
+.bubble-in.me { transform-origin: bottom right; }
+
+/* чекбокс задачи — галочка «прыгает» */
+@keyframes pop { 0% { transform: scale(.6) } 60% { transform: scale(1.18) } 100% { transform: scale(1) } }
+.check-pop { animation: pop .35s var(--ease-spring) both; }
+.done-fade { transition: opacity .4s var(--ease-out), text-decoration-color .4s; }
+
+/* число «накручивается» */
+.num-roll { display: inline-block; font-variant-numeric: tabular-nums; }
+
+/* иконка темы вращается при смене */
+@keyframes spinIn { from { transform: rotate(-90deg) scale(.6); opacity: 0 } to { transform: none; opacity: 1 } }
+.theme-icon { animation: spinIn .45s var(--ease-spring) both; }
+
+/* тост — с пружиной */
+@keyframes toastIn { from { opacity: 0; transform: translateY(16px) scale(.9) } to { opacity: 1; transform: none } }
+.toast-in { animation: toastIn .4s var(--ease-spring) both; }
+
+/* шторка/модалка */
+.sheet { animation: rise .38s var(--ease-spring) both; }
+
+/* скелетоны — мягкое мерцание */
+@keyframes shimmer { 0% { background-position: -400px 0 } 100% { background-position: 400px 0 } }
+.animate-pulseSoft { background: linear-gradient(90deg, var(--fill) 25%, var(--fill-2) 50%, var(--fill) 75%); background-size: 800px 100%; animation: shimmer 1.6s linear infinite; }
+
+/* ---------- уважение к настройке «меньше движения» ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+}
+
+/* строка списка: лёгкий сдвиг при наведении без ломки разделителей */
+.row-slide { transition: transform var(--t-base) var(--ease-out), background-color var(--t-fast); }
+.row-slide:hover { transform: translateX(4px); }
+
+
+/* ---------- УХОД: закрытие шторок, удаление строк, выполнение задач ---------- */
+@keyframes sheetOut { to { opacity: 0; transform: translateY(24px) scale(.98) } }
+@keyframes sheetOutMobile { to { transform: translateY(100%) } }
+@keyframes fadeOut { to { opacity: 0 } }
+.sheet-backdrop.closing { animation: fadeOut .22s var(--ease-io) both; pointer-events: none; }
+.sheet-backdrop.closing > * { animation: sheetOut .22s var(--ease-io) both !important; }
+@media (max-width: 639px) { .sheet-backdrop.closing > * { animation: sheetOutMobile .26s var(--ease-io) both !important; } }
+
+/* строка уезжает вправо, потом схлопывается по высоте */
+@keyframes rowOut { 0% { opacity: 1; transform: none } 60% { opacity: 0; transform: translateX(28px) } 100% { opacity: 0; transform: translateX(28px) } }
+@keyframes collapse { to { max-height: 0; padding-top: 0; padding-bottom: 0; margin-top: 0; margin-bottom: 0; border-width: 0; opacity: 0 } }
+.leaving { animation: rowOut .28s var(--ease-io) both, collapse .26s var(--ease-io) .2s both; overflow: hidden; max-height: 160px; pointer-events: none; }
+/* выполнено: строка чуть подпрыгивает, подсвечивается и уходит вниз */
+@keyframes doneOut { 0% { transform: none; opacity: 1 } 30% { transform: translateY(-3px) scale(1.01); background: color-mix(in srgb, var(--accent) 10%, transparent) } 100% { transform: translateY(10px); opacity: 0 } }
+.leaving-done { animation: doneOut .38s var(--ease-io) both, collapse .26s var(--ease-io) .3s both; overflow: hidden; max-height: 160px; pointer-events: none; border-radius: 12px; }
+/* карточка (мозг) — сдувается */
+@keyframes cardOut { to { opacity: 0; transform: scale(.92) translateY(6px); filter: blur(2px) } }
+.leaving-card { animation: cardOut .26s var(--ease-io) both; pointer-events: none; }
+
+/* новая строка: влетает и на секунду подсвечивается */
+@keyframes arrive { 0% { opacity: 0; transform: translateY(-8px); background: color-mix(in srgb, var(--accent) 14%, transparent) }
+                    40% { opacity: 1; transform: none; background: color-mix(in srgb, var(--accent) 12%, transparent) } 100% { background: transparent } }
+.arrived { animation: arrive 1.4s var(--ease-out) both; border-radius: 12px; }
+
+/* кнопка после успеха: галочка «выстреливает» */
+@keyframes btnDone { 0% { transform: scale(1) } 35% { transform: scale(.92) } 70% { transform: scale(1.06) } 100% { transform: scale(1) } }
+.btn-done { animation: btnDone .45s var(--ease-spring) both; background: var(--pos) !important; color: #fff !important; }
+
+@media (prefers-reduced-motion: reduce) {
+  .leaving, .leaving-done, .leaving-card, .arrived, .sheet-backdrop.closing, .sheet-backdrop.closing > * { animation-duration: .01ms !important; animation-delay: 0s !important; }
+}
+
+
+/* ---------- свайпы (телефон) ---------- */
+/* свайп строки, iOS-стиль: слева зелёная «готово», справа красная «удалить». Короткий свайп раскрывает кнопку, длинный — сразу выполняет */
+.swipe { position: relative; overflow: hidden; touch-action: pan-y; margin: 0 -16px; padding: 0 16px; }
+.swipe-fg { position: relative; will-change: transform; background: var(--bg); }
+.swipe-bg { position: absolute; inset: 0; display: flex; align-items: stretch; opacity: 0; transition: opacity .12s, background-color .2s; color: #fff; overflow: hidden; }
+.swipe-bg.right { justify-content: flex-start; background: var(--pos); }
+.swipe-bg.left  { justify-content: flex-end;   background: var(--neg); }
+.swipe-bg.show { opacity: 1; }
+/* кнопка растёт вместе со сдвигом; иконка держится у края строки, при «полном» свайпе — подпрыгивает */
+.swipe-act { display: flex; flex-direction: row; align-items: center; gap: 4px; min-width: 84px; font-size: 11px; font-weight: 600; letter-spacing: -.01em; color: #fff; background: transparent; border: 0; padding: 0; }
+.swipe-act > * { flex: none; }
+.swipe-act span { display: none; }
+.swipe-act::after { content: none; }
+.swipe-bg.left .swipe-act { justify-content: flex-start; padding-left: 26px; }
+.swipe-bg.right .swipe-act { justify-content: flex-end; padding-right: 26px; }
+.swipe-act svg { transition: transform .22s var(--ease-spring); }
+.swipe-bg.armed .swipe-act svg { transform: scale(1.3); }
+.swipe.open .swipe-act { flex-direction: column; justify-content: center !important; padding: 0 !important; width: 84px !important; }
+.swipe.open .swipe-act span { display: block; }
+.swipe.open .swipe-fg { box-shadow: 0 0 0 1px var(--line); }
+.swipe:last-child .swipe-fg > .row, .swipe:last-child .swipe-fg > .row-hover { border-bottom: 0; }
+.swipe .row:last-child { border-bottom: 1px solid var(--line); }
+.swipe:last-child .row:last-child { border-bottom: 0; }
+@media (min-width: 768px) { .swipe { margin: 0; padding: 0; } .swipe-fg { background: transparent; } }
+/* карточки (мозг): фон свайпа скруглён как карточка, сама карточка непрозрачна */
+.swipe-card { margin: 0; padding: 0; border-radius: 22px; }
+.swipe-card .swipe-fg { background: transparent; }
+.swipe-card .swipe-bg { border-radius: 22px; }
+.swipe-card .swipe-fg > .panel { background: var(--card-solid); }
+@media (hover: hover) and (pointer: fine) { .swipe-bg { display: none; } }
+/* на телефоне корзина в строках видна всегда, но тихо; свайп — основной способ */
+@media (hover: none) { .row .btn-icon.opacity-0 { opacity: .35 !important; } }
+
+/* ---------- пустые состояния ---------- */
+.empty-glyph { color: var(--ink-3); animation: glyphIn .8s var(--ease-out) both; }
+@keyframes glyphIn { from { opacity: 0; transform: translateY(6px) scale(.9) } to { opacity: 1; transform: none } }
+.empty-glyph path, .empty-glyph circle, .empty-glyph rect { stroke-dasharray: 200; stroke-dashoffset: 200; animation: draw 1.1s var(--ease-out) .1s forwards; }
+@keyframes draw { to { stroke-dashoffset: 0 } }
+
+/* ---------- кольцо прогресса ---------- */
+.ring-fill { transition: stroke-dashoffset 1s var(--ease-out); }
+/* столбики графика — плавная смена цвета/прозрачности при выборе дня */
+.bar-cell { transition: opacity .25s, fill .25s; cursor: pointer; }
+
+/* ---------- тёмная тема: не плоско-серая, а с лёгким «зерном» и глубиной ---------- */
+.dark body {
+  background-color: var(--bg);
+  background-image:
+    radial-gradient(1200px 600px at 20% -10%, rgba(46, 77, 255, .10), transparent 60%),
+    radial-gradient(900px 500px at 110% 20%, rgba(236, 236, 233, .04), transparent 60%);
+  background-attachment: fixed;
+}
+.dark body::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0; opacity: .045; mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+}
+.dark #root { position: relative; z-index: 1; }
+.dark .panel { background: linear-gradient(180deg, rgba(236,236,233,.035), rgba(236,236,233,.012)), var(--panel); }
+
+/* ---------- цифры: главные суммы плотнее и тяжелее ---------- */
+.num { font-feature-settings: 'tnum', 'cv11', 'ss01'; }
+.h1 .num, .num.big { font-weight: 600; letter-spacing: -.05em; }

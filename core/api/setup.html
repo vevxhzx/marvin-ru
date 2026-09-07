@@ -1,0 +1,336 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Первый запуск</title>
+<style>
+  :root { --bg:#ecece9; --panel:#f4f4f1; --ink:#161616; --ink-2:#6b6b68; --ink-3:#a3a3a0; --line:rgba(22,22,22,.10); --fill:rgba(22,22,22,.05);
+          --accent:#0a2bff; --pos:#1f9d55; --neg:#e11d48; --warn:#c27803; --r:22px; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#0f0f0e; --panel:#151514; --ink:#ecece9; --ink-2:#a3a3a0; --ink-3:#6b6b68; --line:rgba(236,236,233,.10); --fill:rgba(236,236,233,.06); --accent:#3b5bff; } }
+  * { box-sizing:border-box; }
+  html,body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.5 -apple-system,Inter,"Segoe UI",Roboto,sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:720px; margin:0 auto; padding:28px 18px calc(48px + env(safe-area-inset-bottom)); }
+  .kicker { font:500 11px/1 ui-monospace,"JetBrains Mono",monospace; letter-spacing:.14em; text-transform:uppercase; color:var(--ink-3); }
+  h1 { font-size:clamp(44px,10vw,84px); line-height:.95; letter-spacing:-.05em; font-weight:600; margin:10px 0 6px; }
+  h1 .a { color:var(--accent); }
+  h2 { font-size:26px; letter-spacing:-.03em; font-weight:600; margin:0 0 6px; }
+  .sub { color:var(--ink-2); font-size:15px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:var(--r); padding:22px; margin-top:18px; animation:rise .4s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes rise { from { opacity:0; transform:translateY(10px) } to { opacity:1; transform:none } }
+  .steps { display:flex; gap:6px; margin:22px 0 4px; }
+  .steps i { flex:1; height:4px; border-radius:99px; background:var(--fill); transition:background .3s; }
+  .steps i.on { background:var(--accent); }
+  .label { display:block; font:500 11px/1 ui-monospace,monospace; letter-spacing:.12em; text-transform:uppercase; color:var(--ink-3); margin:16px 0 8px; }
+  .input, select.input { width:100%; padding:13px 16px; font:inherit; font-size:16px; border-radius:16px; border:1px solid var(--line); background:var(--bg); color:var(--ink); outline:none; transition:border-color .2s, box-shadow .2s; }
+  .input:focus { border-color:var(--accent); box-shadow:0 0 0 3px rgba(10,43,255,.14); }
+  .row { display:flex; gap:10px; align-items:center; }
+  .btn { display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:12px 20px; border-radius:99px; border:1px solid var(--line); background:var(--panel); color:var(--ink); font:500 15px/1 inherit; cursor:pointer; transition:transform .15s, background .2s, opacity .2s; white-space:nowrap; }
+  .btn:active { transform:scale(.97); }
+  .btn.primary { background:var(--accent); color:#fff; border-color:transparent; }
+  .btn.dark { background:var(--ink); color:var(--bg); border-color:transparent; }
+  .btn:disabled { opacity:.45; cursor:default; }
+  .choice { display:grid; gap:10px; }
+  .card { border:1px solid var(--line); border-radius:18px; padding:16px 18px; cursor:pointer; transition:border-color .2s, background .2s, transform .2s; background:var(--bg); }
+  .card:hover { transform:translateY(-1px); }
+  .card.on { border-color:var(--accent); box-shadow:0 0 0 2px rgba(10,43,255,.18); }
+  .card b { display:block; font-size:16px; letter-spacing:-.01em; }
+  .card small { color:var(--ink-2); font-size:13px; display:block; margin-top:3px; }
+  .card .tag { float:right; font:500 10px/1 ui-monospace,monospace; letter-spacing:.1em; text-transform:uppercase; padding:5px 8px; border-radius:99px; background:var(--fill); color:var(--ink-2); }
+  .card .tag.rec { background:var(--accent); color:#fff; }
+  .status { margin-top:10px; padding:11px 14px; border-radius:14px; font-size:14px; background:var(--fill); display:none; }
+  .status.show { display:block; animation:rise .3s both; }
+  .status.ok { background:rgba(31,157,85,.12); color:var(--pos); }
+  .status.err { background:rgba(225,29,72,.10); color:var(--neg); }
+  .status.warn { background:rgba(194,120,3,.12); color:var(--warn); }
+  .muted { color:var(--ink-2); font-size:14px; }
+  .faint { color:var(--ink-3); font-size:13px; }
+  code { font-family:ui-monospace,"JetBrains Mono",monospace; font-size:.92em; background:var(--fill); padding:2px 6px; border-radius:6px; }
+  .nav { display:flex; justify-content:space-between; gap:10px; margin-top:22px; }
+  .hw { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .hw div { background:var(--bg); border:1px solid var(--line); border-radius:14px; padding:12px 14px; }
+  .hw .v { font-size:18px; font-weight:600; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .bar { height:6px; border-radius:99px; background:var(--fill); overflow:hidden; margin-top:8px; }
+  .bar i { display:block; height:100%; background:var(--accent); width:0; transition:width .4s; }
+  a { color:var(--accent); text-decoration:none; }
+  .spin { display:inline-block; width:14px; height:14px; border:2px solid currentColor; border-right-color:transparent; border-radius:50%; animation:sp .7s linear infinite; vertical-align:-2px; }
+  @keyframes sp { to { transform:rotate(360deg) } }
+  .hidden { display:none !important; }
+  details { margin-top:10px; } summary { cursor:pointer; color:var(--ink-2); font-size:14px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="kicker">первый запуск · 5 минут</div>
+  <h1 id="h1">привет<span class="a">*</span></h1>
+  <div class="sub">Соберём вашего ассистента: имя, мозг, Telegram. Ничего не устанавливается без вашего «да».</div>
+  <div class="steps"><i class="on"></i><i></i><i></i><i></i><i></i></div>
+
+  <!-- 1. имя -->
+  <section class="panel" data-step="1">
+    <h2>как его зовут?</h2>
+    <div class="sub">Имя — это и обращение в чате, и слово, на которое он откликается голосом. Лучше 2–3 слога по-русски.</div>
+    <label class="label">имя ассистента</label>
+    <input class="input" id="name" placeholder="Марвин" value="Марвин" />
+    <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px" id="nameChips"></div>
+    <label class="label">как обращаться к вам</label>
+    <input class="input" id="owner" placeholder="сэр / босс / Андрей" value="Сэр" />
+    <label class="label">характер</label>
+    <div class="choice" id="style">
+      <div class="card on" data-v="swag"><b>С огоньком</b><small>Ирония, «сэр», шутки к месту — дворецкий из «Железного человека»</small></div>
+      <div class="card" data-v="neutral"><b>По делу</b><small>Коротко, вежливо, без шуток</small></div>
+    </div>
+    <div class="nav"><span></span><button class="btn primary" onclick="go(2)">дальше →</button></div>
+  </section>
+
+  <!-- 2. железо и мозг -->
+  <section class="panel hidden" data-step="2">
+    <h2>мозг</h2>
+    <div class="sub">Смотрю ваше железо и подбираю вариант.</div>
+    <div class="hw" id="hw" style="margin-top:14px"><div><div class="faint">определяю…</div><div class="v"><span class="spin"></span></div></div></div>
+    <div class="status" id="hwNote"></div>
+    <label class="label">где будет думать</label>
+    <div class="choice" id="mode">
+      <div class="card" data-v="local"><span class="tag">приватно</span><b>Только на этом компьютере</b><small>Ollama. Ничего не уходит в интернет. Нужна видеокарта от 4 ГБ (или терпение).</small></div>
+      <div class="card" data-v="hybrid"><span class="tag">рекомендуем</span><b>Компьютер + облако</b><small>Личное (деньги, календарь, заметки) — локально. Общие вопросы — в облако, обезличенно. Лучшее из двух миров.</small></div>
+      <div class="card" data-v="cloud"><span class="tag">без видеокарты</span><b>Только облако</b><small>Работает на любом ноутбуке. Но все ваши данные уходят провайдеру — честно предупреждаем.</small></div>
+    </div>
+    <div id="modeWhy" class="status"></div>
+    <div class="nav"><button class="btn" onclick="go(1)">← назад</button><button class="btn primary" onclick="go(3)">дальше →</button></div>
+  </section>
+
+  <!-- 3. локальная модель -->
+  <section class="panel hidden" data-step="3">
+    <h2>локальная модель</h2>
+    <div class="sub" id="ollamaSub">Модели крутятся через <a href="https://ollama.com/download" target="_blank">Ollama</a> — бесплатная программа, ставится за минуту.</div>
+    <div class="status" id="ollamaSt"></div>
+    <label class="label">модель</label>
+    <div class="choice" id="models"></div>
+    <div id="pullBox" class="hidden">
+      <div class="row" style="justify-content:space-between;margin-top:14px"><span class="muted" id="pullTxt">скачиваю…</span><span class="faint" id="pullPct"></span></div>
+      <div class="bar"><i id="pullBar"></i></div>
+    </div>
+    <div class="row" style="margin-top:14px;flex-wrap:wrap">
+      <button class="btn dark" id="pullBtn" onclick="pull()">скачать модель</button>
+      <span class="faint" id="pullHint"></span>
+    </div>
+    <div class="nav"><button class="btn" onclick="go(2)">← назад</button><button class="btn primary" onclick="go(4)">дальше →</button></div>
+  </section>
+
+  <!-- 4. облако -->
+  <section class="panel hidden" data-step="4">
+    <h2>облако</h2>
+    <div class="sub" id="cloudSub">Бесплатный ключ берётся за минуту, карта не нужна. Отправляется только текст вопроса, имена и суммы вырезаются.</div>
+    <label class="label">провайдер</label>
+    <div class="choice" id="providers"></div>
+    <label class="label">ключ</label>
+    <div class="row"><input class="input" id="apiKey" placeholder="gsk_… / sk-or-…" autocomplete="off" /><button class="btn" onclick="checkCloud()">проверить</button></div>
+    <div class="faint" id="keyUrl" style="margin-top:6px"></div>
+    <div id="customBox" class="hidden"><label class="label">адрес API</label><input class="input" id="baseUrl" placeholder="http://127.0.0.1:1234/v1" /><label class="label">модель</label><input class="input" id="cloudModel" placeholder="имя модели" /></div>
+    <details><summary>нужен прокси (если провайдер не открывается)</summary><input class="input" id="cloudProxy" placeholder="socks5://user:pass@host:1080" style="margin-top:8px" /></details>
+    <div class="status" id="cloudSt"></div>
+    <div class="nav"><button class="btn" onclick="go(3)">← назад</button><div class="row"><button class="btn" id="skipCloud" onclick="go(5)">пропустить</button><button class="btn primary" onclick="go(5)">дальше →</button></div></div>
+  </section>
+
+  <!-- 5. telegram -->
+  <section class="panel hidden" data-step="5">
+    <h2>telegram</h2>
+    <div class="sub">Бот — это ваш карман: писать, кидать чеки и фото, получать напоминания. Отвечает только вам.</div>
+    <ol class="muted" style="padding-left:20px;margin:12px 0">
+      <li>Откройте в Telegram <a href="https://t.me/BotFather" target="_blank">@BotFather</a>, отправьте <code>/newbot</code>, придумайте имя.</li>
+      <li>Скопируйте токен вида <code>123456789:AAF…</code> и вставьте сюда.</li>
+    </ol>
+    <div class="row"><input class="input" id="tgToken" placeholder="токен от BotFather" autocomplete="off" /><button class="btn" onclick="checkTg()">проверить</button></div>
+    <details><summary>прокси для Telegram (если api.telegram.org недоступен)</summary><input class="input" id="tgProxy" placeholder="socks5://user:pass@host:1080" style="margin-top:8px" /></details>
+    <div class="status" id="tgSt"></div>
+    <div id="ownerBox" class="hidden">
+      <label class="label">ваш telegram id</label>
+      <div class="row"><input class="input" id="ownerId" placeholder="определю сам" /><button class="btn dark" id="ownerBtn" onclick="waitOwner()">я написал боту</button></div>
+      <div class="faint" style="margin-top:6px">Откройте <a id="botLink" href="#" target="_blank">бота</a>, нажмите «Start» (или отправьте что угодно), затем нажмите кнопку — ID подставится сам.</div>
+      <div class="status" id="ownerSt"></div>
+    </div>
+    <div class="nav"><button class="btn" onclick="go(4)">← назад</button><div class="row"><button class="btn" onclick="finish(true)">без Telegram</button><button class="btn primary" id="finishBtn" onclick="finish(false)">готово ✓</button></div></div>
+  </section>
+
+  <section class="panel hidden" data-step="6">
+    <h2 id="doneH">готово</h2>
+    <div class="sub" id="doneSub">Перезапускаюсь с новыми настройками…</div>
+    <div class="status show" id="doneSt" style="margin-top:14px"><span class="spin"></span> жду ядро…</div>
+  </section>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s)
+const api = async (m, p, b) => { const r = await fetch(p, { method: m, headers: b ? { 'content-type': 'application/json' } : undefined, body: b ? JSON.stringify(b) : undefined }); if (!r.ok) throw new Error(await r.text()); return r.json() }
+const st = (id, kind, html) => { const e = $(id); e.className = 'status show ' + (kind || ''); e.innerHTML = html }
+const S = { step: 1, style: 'swag', mode: 'hybrid', model: '', provider: 'groq', hw: null, rec: null, tgOk: false, cloudOk: false, botUser: '' }
+
+const NAMES = ['Марвин', 'Веспер', 'Атлас', 'Ирис', 'Оскар', 'Нова', 'Феликс', 'Юна']
+$('#nameChips').innerHTML = NAMES.map((n) => `<button class="btn" style="padding:7px 12px;font-size:13px" onclick="$('#name').value='${n}'">${n}</button>`).join('')
+
+function pick(boxId, key, cb) { const box = $(boxId); box.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (!c) return; box.querySelectorAll('.card').forEach((x) => x.classList.remove('on')); c.classList.add('on'); S[key] = c.dataset.v; cb && cb(c.dataset.v) }) }
+pick('#style', 'style'); pick('#mode', 'mode', onMode); pick('#models', 'model', () => { $('#pullBox').classList.add('hidden'); refreshOllama() }); pick('#providers', 'provider', onProvider)
+
+function setMode(v) { $('#mode').querySelectorAll('.card').forEach((x) => x.classList.toggle('on', x.dataset.v === v)); S.mode = v; onMode(v) }
+function onMode(v) {
+  const why = { local: 'Облако не понадобится — шаг с ключом пропустим. Разговор и общие вопросы тоже возьмёт локальная модель (медленнее и проще, но приватно).',
+    hybrid: 'Личное — на компьютере, общее — в облако. Так быстрее и умнее всего.',
+    cloud: 'Ollama не нужна — шаг с моделью пропустим. Помните: заметки, траты и календарь при этом будут обрабатываться на серверах провайдера.' }
+  st('#modeWhy', v === 'cloud' ? 'warn' : '', why[v])
+}
+
+function go(n) {
+  if (n === 3 && S.mode === 'cloud') n = 4
+  if (n === 4 && S.mode === 'local') n = n < S.step ? 3 : 5
+  if (n === 3 && S.step === 4 && S.mode === 'cloud') n = 2
+  document.querySelectorAll('[data-step]').forEach((s) => s.classList.toggle('hidden', +s.dataset.step !== n))
+  document.querySelectorAll('.steps i').forEach((i, k) => i.classList.toggle('on', k < n))
+  S.step = n; window.scrollTo({ top: 0, behavior: 'smooth' })
+  if (n === 2 && !S.hw) loadHw()
+  if (n === 3) refreshOllama()
+  if (n === 4 && !$('#providers').children.length) loadProviders()
+  if (n === 5) $('#h1').innerHTML = ($('#name').value || 'марвин').toLowerCase() + '<span class="a">*</span>'
+}
+
+async function loadHw() {
+  try {
+    const { hardware: h, recommend: r } = await api('GET', '/api/setup/hardware')
+    S.hw = h; S.rec = r
+    const gb = (x) => x ? x + ' ГБ' : '—'
+    $('#hw').innerHTML = `<div><div class="faint">видеокарта</div><div class="v" style="font-size:14px">${h.gpu || 'не найдена'}</div></div>
+      <div><div class="faint">видеопамять</div><div class="v">${gb(h.vram_gb)}</div></div>
+      <div><div class="faint">оперативная</div><div class="v">${gb(h.ram_gb)}</div></div>
+      <div><div class="faint">ollama</div><div class="v" style="font-size:14px">${h.ollama_running ? 'запущена' : h.ollama ? 'установлена' : 'нет'}</div></div>`
+    st('#hwNote', '', r.why + (h.notes.length ? '<br><span class="faint">' + h.notes.join(' ') + '</span>' : ''))
+    setMode(r.mode); S.model = r.model
+  } catch (e) { st('#hwNote', 'err', 'Не смог определить железо: ' + e.message) }
+}
+
+function renderModels() {
+  const r = S.rec || { all: [], model: '' }
+  const have = new Set((S.ollamaModels || []).map((m) => m.split(':')[0] + ':' + (m.split(':')[1] || 'latest')))
+  const list = r.all
+  $('#models').innerHTML = list.map((m) => {
+    const rec = m.id === r.model, ok = have.has(m.id) || (S.ollamaModels || []).some((x) => x === m.id || x.startsWith(m.id + '-') || x === m.id.replace(':latest', ''))
+    const fits = m.min_vram <= (r.effective_vram || 0)
+    return `<div class="card ${m.id === S.model ? 'on' : ''}" data-v="${m.id}" style="${fits ? '' : 'opacity:.5'}">
+      <span class="tag ${rec ? 'rec' : ''}">${rec ? 'рекомендуем' : ok ? 'скачана' : m.size_gb + ' ГБ'}</span><b>${m.id}</b><small>${m.title}${fits ? '' : ' · не влезет в вашу память'}</small></div>`
+  }).join('')
+  if (!S.model) S.model = r.model
+}
+
+async function refreshOllama() {
+  const o = await api('GET', '/api/setup/ollama').catch(() => ({ running: false, installed: false, models: [] }))
+  S.ollamaModels = o.models
+  renderModels()
+  const has = S.model && o.models.some((x) => x === S.model || x.split(':')[0] === S.model.split(':')[0] && (x.split(':')[1] || 'latest') === S.model.split(':')[1])
+  if (!o.installed && !o.running) {
+    st('#ollamaSt', 'warn', `Ollama не найдена. <a href="https://ollama.com/download" target="_blank">Скачайте и установите</a> (одна кнопка), затем вернитесь — я замечу сам. <button class="btn" style="padding:6px 12px;font-size:13px;margin-left:6px" onclick="refreshOllama()">проверить снова</button>`)
+    $('#pullBtn').disabled = true
+  } else if (!o.running) {
+    st('#ollamaSt', 'warn', 'Ollama установлена, но не запущена. Запустите её из меню Пуск и нажмите <button class="btn" style="padding:6px 12px;font-size:13px" onclick="refreshOllama()">проверить снова</button>')
+    $('#pullBtn').disabled = true
+  } else if (has) {
+    st('#ollamaSt', 'ok', `Ollama запущена, модель ${S.model} уже на месте ✓`)
+    $('#pullBtn').disabled = true; $('#pullHint').textContent = ''
+  } else {
+    st('#ollamaSt', 'ok', 'Ollama запущена. Осталось скачать модель — один раз, дальше всё офлайн.')
+    $('#pullBtn').disabled = false; $('#pullHint').textContent = 'скачивание идёт в фоне, можно продолжать настройку'
+  }
+}
+
+let pullTimer = null
+async function pull() {
+  if (!S.model) return
+  $('#pullBox').classList.remove('hidden'); $('#pullBtn').disabled = true
+  await api('POST', '/api/setup/ollama/pull', { model: S.model })
+  clearInterval(pullTimer)
+  pullTimer = setInterval(async () => {
+    const p = await api('GET', '/api/setup/ollama/pull/' + S.model)
+    const pct = p.total ? Math.round(p.done / p.total * 100) : 0
+    $('#pullBar').style.width = pct + '%'; $('#pullPct').textContent = p.total ? pct + '% · ' + (p.done / 2 ** 30).toFixed(1) + ' / ' + (p.total / 2 ** 30).toFixed(1) + ' ГБ' : ''
+    $('#pullTxt').textContent = p.status === 'success' ? 'готово ✓' : p.status === 'error' ? 'ошибка: ' + p.error : (p.status || 'скачиваю…')
+    if (p.status === 'success' || p.status === 'error') { clearInterval(pullTimer); refreshOllama() }
+  }, 1200)
+}
+
+async function loadProviders() {
+  const list = await api('GET', '/api/setup/providers')
+  const desc = { groq: 'Очень быстро, бесплатно, из России без VPN. Лучший старт.', openrouter: 'Один ключ — десятки моделей, есть бесплатные. Из России работает.', nvidia: 'Бесплатно, большие модели (DeepSeek, Llama). Из России работает.', deepseek: 'Платно, но копейки. Умный и дешёвый.', gemini: 'Google. Из России только через прокси.', custom: 'LM Studio, vLLM, свой сервер — любой OpenAI-совместимый адрес.' }
+  const order = ['groq', 'openrouter', 'nvidia', 'deepseek', 'gemini', 'custom']
+  $('#providers').innerHTML = order.map((id) => { const p = list.find((x) => x.id === id); if (!p) return ''; return `<div class="card ${id === S.provider ? 'on' : ''}" data-v="${id}"><span class="tag ${id === 'groq' ? 'rec' : ''}">${p.free === false ? 'платно' : p.free ? 'бесплатно' : 'свой'}</span><b>${p.title}</b><small>${desc[id] || ''}</small></div>` }).join('')
+  S.providers = list; onProvider(S.provider)
+}
+function onProvider(id) {
+  const p = (S.providers || []).find((x) => x.id === id) || {}
+  $('#customBox').classList.toggle('hidden', id !== 'custom')
+  $('#keyUrl').innerHTML = p.key_url ? `Ключ: <a href="${p.key_url}" target="_blank">${p.key_url}</a>` : ''
+  $('#cloudSt').className = 'status'; S.cloudOk = false
+}
+async function checkCloud() {
+  st('#cloudSt', '', '<span class="spin"></span> проверяю…')
+  const r = await api('POST', '/api/setup/check/cloud', { provider: S.provider, api_key: $('#apiKey').value.trim(), model: $('#cloudModel').value.trim(), base_url: $('#baseUrl').value.trim(), proxy: $('#cloudProxy').value.trim() }).catch((e) => ({ ok: false, detail: e.message }))
+  S.cloudOk = r.ok
+  st('#cloudSt', r.ok ? 'ok' : 'err', (r.ok ? '✓ ' : '') + r.detail)
+}
+async function checkTg() {
+  st('#tgSt', '', '<span class="spin"></span> проверяю…')
+  const r = await api('POST', '/api/setup/check/telegram', { token: $('#tgToken').value.trim(), proxy: $('#tgProxy').value.trim() }).catch((e) => ({ ok: false, detail: e.message }))
+  S.tgOk = r.ok
+  st('#tgSt', r.ok ? 'ok' : 'err', (r.ok ? '✓ ' : '') + r.detail)
+  if (r.ok) { S.botUser = r.username; $('#botLink').href = 'https://t.me/' + r.username; $('#ownerBox').classList.remove('hidden') }
+  if (r.need_proxy) document.querySelector('[data-step="5"] details').open = true
+}
+async function waitOwner() {
+  $('#ownerBtn').disabled = true; st('#ownerSt', '', '<span class="spin"></span> жду ваше сообщение боту (до 90 секунд)…')
+  const r = await api('POST', '/api/setup/telegram/owner', { token: $('#tgToken').value.trim(), proxy: $('#tgProxy').value.trim() }).catch((e) => ({ ok: false, detail: e.message }))
+  $('#ownerBtn').disabled = false
+  if (r.ok) { $('#ownerId').value = r.owner_id; st('#ownerSt', 'ok', `✓ Это вы, ${r.name}. ID ${r.owner_id}. Бот уже ответил вам в Telegram.`) }
+  else st('#ownerSt', 'err', r.detail)
+}
+
+async function finish(noTg) {
+  const name = ($('#name').value || 'Марвин').trim()
+  const ch = {
+    'assistant.name': name, 'assistant.name_latin': translit(name), 'owner.name': ($('#owner').value || 'Сэр').trim(),
+    'persona.style': S.style, 'brain.mode': S.mode, 'setup.done': true,
+  }
+  if (S.mode !== 'cloud' && S.model) ch['brain.ollama.model'] = S.model
+  if (S.mode !== 'local') {
+    ch['brain.cloud.provider'] = S.provider
+    const key = $('#apiKey').value.trim(); if (key) ch[S.provider === 'gemini' ? 'brain.gemini.api_key' : 'brain.cloud.api_key'] = key
+    if (S.provider === 'custom') { ch['brain.cloud.base_url'] = $('#baseUrl').value.trim(); ch['brain.cloud.model'] = $('#cloudModel').value.trim() }
+    const px = $('#cloudProxy').value.trim(); if (px) ch['brain.cloud.proxy'] = px
+    if (S.mode === 'cloud') ch['brain.vision.where'] = 'cloud'
+  }
+  if (!noTg) {
+    const tok = $('#tgToken').value.trim(), oid = parseInt($('#ownerId').value, 10)
+    if (!tok || !oid) { st('#ownerSt', 'err', 'Нужны токен и ваш ID — или нажмите «без Telegram», подключите позже в настройках.'); $('#ownerBox').classList.remove('hidden'); return }
+    ch['telegram.token'] = tok; ch['telegram.owner_id'] = oid
+    const px = $('#tgProxy').value.trim(); if (px) ch['telegram.proxy'] = px
+  }
+  await api('POST', '/api/setup/save', { changes: ch })
+  go(6); $('#h1').innerHTML = name.toLowerCase() + '<span class="a">*</span>'
+  $('#doneH').textContent = name + ' готов'
+  $('#doneSub').textContent = noTg ? 'Перезапускаюсь. Telegram можно подключить позже: ⚙ Настройки → telegram.' : `Перезапускаюсь. Через несколько секунд ${name} напишет вам в Telegram.`
+  await api('POST', '/api/setup/restart').catch(() => {})
+  let tries = 0
+  const t = setInterval(async () => {
+    tries++
+    try { const h = await api('GET', '/api/health'); if (h.ok && h.name === name) { clearInterval(t); st('#doneSt', 'ok', '✓ Ядро поднялось. Открываю сайт…'); setTimeout(() => location.href = '/', 900) } }
+    catch { if (tries > 40) { clearInterval(t); st('#doneSt', 'warn', 'Ядро не поднялось за минуту. Если запускали не через start.bat — запустите его заново, настройки уже сохранены.') } }
+  }, 1500)
+}
+function translit(s) { const m = { а: 'a', б: 'b', в: 'v', г: 'g', д: 'd', е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i', й: 'y', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'h', ц: 'c', ч: 'ch', ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '', э: 'e', ю: 'yu', я: 'ya' }; return s.toLowerCase().split('').map((c) => m[c] ?? c).join('').replace(/[^a-z0-9]/g, '') || 'assistant' }
+
+// если мастер уже пройден — сразу на сайт (кроме явного ?again)
+api('GET', '/api/setup/state').then((s) => {
+  if (s.done && !location.search.includes('again')) location.href = '/'
+  const v = s.settings || {}
+  const g = (k) => (v[k] && v[k].value !== undefined) ? v[k].value : v[k]
+  if (g('assistant.name')) $('#name').value = g('assistant.name')
+  if (g('owner.name')) $('#owner').value = g('owner.name')
+}).catch(() => {})
+</script>
+</body>
+</html>
