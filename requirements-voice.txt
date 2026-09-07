@@ -1,0 +1,10 @@
+# Голосовой аддон (install_voice.bat): распознавание речи, слово-активация, микрофон, трей.
+# Также включает распознавание голосовых сообщений Telegram (faster-whisper).
+faster-whisper>=1.1
+av>=12
+numpy>=1.26
+vosk>=0.3.45
+sounddevice>=0.4.6
+pystray>=0.19
+pillow>=10
+keyboard>=0.13

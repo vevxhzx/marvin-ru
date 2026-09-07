@@ -1,0 +1,111 @@
+# ==========================================================
+#  Файл настроек ассистента.
+#  Обычно его НЕ нужно править руками: при первом запуске откроется мастер в браузере
+#  (http://localhost:8765/setup), а дальше всё меняется в ⚙ Настройках на сайте.
+#  Строки с "#" — подсказки.
+# ==========================================================
+
+assistant:
+  name: "Марвин"              # имя ассистента: так он представляется и на это слово откликается голосом (2–3 слога, по-русски)
+  name_latin: "marvin"        # латиницей — для заголовков окон и логов
+  aliases: ""                 # другие варианты имени через запятую, например "марв, marvin"
+
+owner:
+  name: "Сэр"                 # как ассистент к вам обращается («сэр», «босс», ваше имя)
+  timezone: "Europe/Moscow"
+
+telegram:
+  token: ""                   # токен бота от @BotFather (заполняется мастером)
+  owner_id: 0                 # ваш Telegram ID (мастер определит сам по команде /start)
+  morning_digest: "08:30"     # утренний дайджест ЧЧ:ММ; пусто — выключить
+  proxy: ""                   # если api.telegram.org недоступен: "socks5://логин:пароль@хост:1080" или "http://хост:8080"
+
+brain:
+  # Режим мозга (выбирается мастером):
+  #   local  — только Ollama на вашем ПК. Ничего не уходит в интернет.
+  #   hybrid — Ollama для личного (деньги, календарь, заметки) + облако для общих вопросов. Личное обезличивается.
+  #   cloud  — только облако (без видеокарты). Все данные уходят к провайдеру — честно предупреждаем.
+  mode: "hybrid"
+  ollama:
+    url: "http://127.0.0.1:11434"
+    model: ""                 # модель Ollama; мастер подберёт под видеокарту (например qwen3.5:4b / qwen3.5:9b / gemma4:e4b)
+    embed_model: "nomic-embed-text"   # смысловой поиск по мозгу (ollama pull nomic-embed-text)
+    vision_model: ""          # отдельная модель зрения; пусто — если основная сама видит картинки (qwen3.5, gemma4)
+    keep_alive: "2h"          # держать модель в видеопамяти после ответа (0 — выгружать сразу)
+    num_ctx: 4096
+  vision:
+    where: "auto"             # auto — ПК, при сбое облако | cloud — всегда облако | local — только ПК
+    allow_cloud: true
+  cloud:
+    provider: "groq"          # groq | openrouter | nvidia | deepseek | openai | gemini | custom
+    api_key: ""
+    model: ""                 # пусто — модель по умолчанию у провайдера
+    base_url: ""              # только для custom (LM Studio, vLLM…): http://127.0.0.1:1234/v1
+    proxy: ""
+    voice_model: ""
+  gemini:
+    api_key: ""
+    model: "auto"
+    proxy: ""
+    anonymize: true           # вырезать имена/суммы/телефоны перед отправкой в облако
+    auto: true                # общие вопросы — в облако сами; личное — всегда локально
+    mark_source: true         # помечать источник ответа: ⚡ правила / 🧠 локально / ☁️ облако
+
+persona:
+  style: "swag"               # swag — с юмором и «сэр»; neutral — строго по делу
+  humor_level: 8              # 0..10
+
+finance:
+  currency: "RUB"
+  main_account: "Основной"    # название главного счёта (мастер спросит)
+
+files:
+  index_dirs: []
+  trash_dir: ""               # куда собирать файлы «на удаление» (ассистент сам ничего не удаляет). Пусто — Документы/_на_удаление
+
+voice:
+  enabled: true
+  stt:
+    model: "small"            # whisper: tiny / base / small / medium
+    device: "cpu"             # cuda — если поставили gpu.bat
+    fast: true
+    cloud: false              # распознавать голос через Groq Whisper (быстро, но голос уходит в облако)
+  tts:
+    engine: "edge"            # edge (онлайн, голоса Microsoft) / silero (офлайн, ставится silero.bat) / off
+    speaker: "eugene"
+    edge_voice: "ru-RU-DmitryNeural"
+    reply_in_telegram: "never"
+  pc:
+    hotkey: "ctrl+shift+space"
+    mic: ""
+    silence_sec: 1.5
+    max_command_sec: 20
+    followup_sec: 6
+    conversation_sec: 12
+    conversation_mode_sec: 120
+    beep: true
+    stream: true
+    speak_reminders: true
+    morning_report: true
+    night_from: 23
+    night_to: 7
+    night_volume: 0.45
+    filler_sec: 1.5
+    games: []
+
+server:
+  host: "0.0.0.0"
+  port: 8765
+
+google:
+  enabled: false
+  client_id: ""
+  client_secret: ""
+  calendar_id: ""
+  proxy: ""
+
+backup:
+  enabled: true
+  dir: "./data/backups"
+  keep_days: 30
+  extra_dir: ""

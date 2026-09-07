@@ -1,0 +1,18 @@
+# Ядро: API + сайт + Telegram + планировщик. Ставится install.bat.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+sqlmodel>=0.0.22
+aiogram>=3.13
+apscheduler>=3.10,<4
+pyyaml>=6
+httpx[socks]>=0.27
+python-dateutil>=2.9
+aiohttp-socks>=0.9
+segno>=1.6
+edge-tts>=6.1
+num2words>=0.5
+python-multipart>=0.0.9
+psutil>=5.9
+pillow>=10
+pdfplumber>=0.11
+openpyxl>=3.1
