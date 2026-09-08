@@ -159,6 +159,20 @@ def _strip_fillers(t: str) -> str:
     return t.strip(" ,.-—:")
 
 
+_Q = r"^\s*(?:а\s+)?(?:что|чё|че|как|какие|каков\w*)\s+(?:там\s+)?(?:у\s+меня\s+)?"
+FIN_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:финанс\w*|деньг\w*|денежк\w*|баланс\w*|бюджет\w*|кошельк\w*|бабк\w*|касс\w*)\W*$", re.I)
+TASK_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:задач\w*|делам|дела)\W*$", re.I)
+EVENT_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:встреч\w*|календар\w*|событи\w*|планам)\W*$", re.I)
+# претензия к ответу: «сверься», «откуда ты это взял», «у меня другие данные», «ты выдумал» → не заметка, а перепроверка
+RECHECK_RX = re.compile(r"^\s*(?:откуда\s+(?:ты\s+)?(?:это\s+)?(?:взял|взяла|берёшь|берешь)|сверься|свериться|перепроверь|проверь\s+(?:ещё|еще|данные|базу|цифры)|"
+                        r"(?:это|у\s+меня)\s+(?:же\s+)?(?:там\s+)?(?:другие|не\s+те|неверные|неправильные)\s+(?:данные|цифры|значения|суммы)|"
+                        r"ты\s+(?:это\s+)?(?:выдумал|придумал|сочинил|ошибся|врёшь|врешь|наврал)|не\s+сходится|неправильно\s+посчитал)", re.I)
+# вопрос/претензия к ассистенту — никогда не заметка
+_QUESTION_RX = re.compile(r"^(что|как|почему|зачем|когда|где|кто|куда|откуда|сколько|какой|какая|какие|каков\w*|можешь|расскажи|объясни|посоветуй|"
+                          r"разве|неужели|серьёзно|серьезно|правда|ты\s+(?:уверен|точно|серьёзно|серьезно|что|это|же|сам|вообще|опять|снова)|сверься|перепроверь|проверь|исправь|"
+                          r"не\s+так|неправильно|ошиб\w*|у\s+меня\s+(?:же\s+)?(?:там\s+)?друг\w*)\b", re.I)
+
+
 def rules(text: str, channel: str) -> Reply | None:
     t = text.strip()
     low = t.lower()
@@ -222,8 +236,20 @@ def rules(text: str, channel: str) -> Reply | None:
         return Reply(registry.list_tasks(), ["list_tasks"])
     if low in ("календарь", "события", "встречи", "план на неделю", "что на неделе"):
         return Reply(registry.list_events(7), ["list_events"])
-    if low in ("финансы", "баланс", "деньги", "сколько денег", "отчет", "отчёт", "сводка", "траты"):
+    if low in ("финансы", "баланс", "деньги", "сколько денег", "отчет", "отчёт", "сводка", "траты") or FIN_REPORT_RX.match(low):
         return Reply(registry.finance_summary(30), ["finance_summary"])
+    if TASK_REPORT_RX.match(low):
+        return Reply(registry.list_tasks(), ["list_tasks"])
+    if EVENT_REPORT_RX.match(low):
+        return Reply(registry.list_events(7), ["list_events"])
+    if RECHECK_RX.match(low):
+        # «сверься», «откуда ты это взял», «у меня другие данные» — перечитать базу по теме последних сообщений
+        topic = " ".join(h["text"] for h in _history(channel, 4)).lower()
+        if re.search(r"задач|дел[аы]\b", topic) and not re.search(r"финанс|деньг|баланс|трат", topic):
+            return Reply("Перечитал базу.\n" + registry.list_tasks(), ["list_tasks"])
+        if re.search(r"встреч|календар|событи", topic) and not re.search(r"финанс|деньг|баланс|трат", topic):
+            return Reply("Перечитал базу.\n" + registry.list_events(7), ["list_events"])
+        return Reply("Перечитал базу — вот точные цифры.\n" + registry.finance_summary(30), ["finance_summary"])
     if low in ("долги", "мои долги", "кредиты"):
         return Reply(registry.list_debts(), ["list_debts"])
     if UNDO_RX.match(low):
@@ -562,13 +588,33 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
 _SAVED_RX = re.compile(r"\b(запис[ая]|записал|сохран[ия]|сохранил|запомн[ию]|запомнил|добав[ия]л|зафиксир|внес|внёс)\w*", re.I)
 
 
+_FORCED = [
+    (re.compile(r"баланс|финанс|сколько\s+(?:у\s+меня\s+)?денег|деньг|бюджет|куда\s+(?:ушл|дел)|как\s+(?:я\s+)?трач", re.I), "finance_summary", {"days": 30}),
+    (re.compile(r"долг|кредит|кому\s+(?:я\s+)?должен", re.I), "list_debts", {}),
+    (re.compile(r"задач|что\s+(?:мне\s+)?(?:надо|нужно)\s+сделать|мои\s+дела", re.I), "list_tasks", {}),
+    (re.compile(r"встреч|календар|событи|что\s+у\s+меня\s+(?:на\s+неделе|завтра|сегодня)|план\w*\s+на", re.I), "list_events", {"days": 7}),
+]
+
+
+def _forced_tool(text: str) -> tuple[str, dict] | None:
+    """Вопрос о личных данных (без глагола-действия), на который модель ответила «из головы»: какой инструмент дать вместо неё."""
+    if not _looks_like_question(text) and not re.search(r"\?$|сколько|какие|что\s+по|как\s+(?:там\s+)?(?:у\s+меня|мои|с\s+)", text, re.I):
+        return None
+    if re.search(r"\b(добавь|запиши|потратил|купил|заплатил|перевёл|перевел|напомни|создай|удали|отмени|закрой|перенеси)\b", text, re.I):
+        return None
+    for rx, name, args in _FORCED:
+        if rx.search(text):
+            return name, args
+    return None
+
+
 def _claims_saved(answer: str) -> bool:
     return bool(_SAVED_RX.search(answer or ""))
 
 
 def _looks_like_question(text: str) -> bool:
     t = text.strip().lower()
-    return t.endswith("?") or bool(re.match(r"^(что|как|почему|зачем|когда|где|кто|сколько|какой|какая|какие|можешь|расскажи|объясни|посоветуй)\b", t))
+    return t.endswith("?") or bool(_QUESTION_RX.match(t)) or bool(RECHECK_RX.match(t))
 
 
 # --------------------------------------------------------------------------- история чата
@@ -638,6 +684,11 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                  "• Дело без времени («починить полку», «купить молоко») → add_task. С «до пятницы» — add_task с due.\n"
                  "• Если непонятно, событие это или задача, — задай ОДИН короткий уточняющий вопрос вместо угадывания.\n"
                  "• Просто вопрос или болтовня — отвечай без инструментов.\n"
+                 "• ЦИФРЫ ТОЛЬКО ИЗ ИНСТРУМЕНТОВ. Спрашивают про баланс, траты, доходы, долги, задачи, встречи — сначала вызови "
+                 "finance_summary / spent / list_debts / list_tasks / list_events / agenda и отвечай по их результату. "
+                 "Придумывать суммы, даты и остатки ЗАПРЕЩЕНО. Не вызвал инструмент — значит, не знаешь, так и скажи.\n"
+                 "• Пользователь спорит, сомневается или просит перепроверить («откуда взял», «сверься») — это НЕ заметка: "
+                 "вызови инструмент заново и ответь по фактам.\n"
                  "Даты передавай в ISO 8601. После результата инструмента — короткий ответ в характере."}]
     for h in _history(channel):
         messages.append({"role": h["role"], "content": h["text"]})
@@ -647,6 +698,15 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     try:
         for _ in range(4):  # максимум 4 вызова инструментов подряд
             out = await llm.ollama_chat(messages, registry.tools_schema(with_cloud=allow_cloud))
+            if not out["tool_calls"] and not actions:
+                forced = _forced_tool(text)
+                if forced:
+                    # вопрос о данных, а модель инструмент не вызвала (и, скорее всего, сочинила цифры) — вызываем сами
+                    name, args = forced
+                    log.info("[%s] модель ответила без инструмента на вопрос о данных → %s", channel, name)
+                    res = registry.run_tool(name, args, channel)
+                    actions.append(name)
+                    return Reply(res, actions, "ollama")
             if not out["tool_calls"]:
                 content = (await _russian_only(messages, out)) or "…"
                 if not actions and _claims_saved(content) and not _looks_like_question(text):
@@ -682,8 +742,12 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
             messages.append({"role": "assistant", "content": out["content"], "tool_calls": [
                 {"function": {"name": c["name"], "arguments": c["arguments"]}} for c in out["tool_calls"]]})
             for c in out["tool_calls"]:
-                res = registry.run_tool(c["name"], c["arguments"], channel)
-                actions.append(c["name"])
+                if c["name"] == "add_note" and _looks_like_question(text):
+                    res = "Это вопрос или возражение, а не заметка — НЕ сохранено. Ответь по существу; если нужны данные — вызови соответствующий инструмент."
+                    log.info("[%s] модель хотела записать вопрос в заметки — отклонено", channel)
+                else:
+                    res = registry.run_tool(c["name"], c["arguments"], channel)
+                    actions.append(c["name"])
                 messages.append({"role": "tool", "content": res})
         out = await llm.ollama_chat(messages)
         return Reply((await _russian_only(messages, out)) or "Готово.", actions, "ollama")
