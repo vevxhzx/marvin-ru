@@ -34,6 +34,8 @@ NOW = datetime(2026, 9, 6, 14, 0)  # воскресенье
     ("сегодня вечером тренировка", datetime(2026, 9, 6, 19, 0), "тренировка"),
     ("встреча 12.09 в 11:30", datetime(2026, 9, 12, 11, 30), "встреча"),
     ("купить молоко", None, "купить молоко"),
+    ("иду на др 12 числа", datetime(2026, 9, 12, 10, 0), "иду на др"),
+    ("оплатить 3 числа", datetime(2026, 10, 3, 10, 0), "оплатить"),
 ])
 def test_dates(text, expected, rest):
     dt, r = parse_datetime(text, NOW)
@@ -71,6 +73,15 @@ def test_event_and_reminder():
     assert "add_event" in r.actions
     evs = calendar.list_events()
     assert evs[0].title == "Встреча с Ваней" and evs[0].start.hour == 15
+
+
+def test_event_phrase_cleanup():
+    """«Поставь событие что я иду на др 12 числа» → название без служебных слов, дата — 12-е число."""
+    from core.services import calendar
+    r = run("Поставь событие что я иду на др 12 числа")
+    assert "add_event" in r.actions
+    ev = [e for e in calendar.list_events(limit=50) if "др" in e.title][0]
+    assert ev.title == "Я иду на др" and ev.start.day == 12
 
 
 def test_task_flow():
@@ -374,6 +385,18 @@ def test_insights_smoke():
     assert isinstance(insights.upcoming_birthdays(30), list)
 
 
+def test_birthdays_only_yearly():
+    """Разовое «иду на др 12-го» — обычный план; праздником считается только ежегодное событие."""
+    from core.services import calendar as cal, insights
+    from datetime import datetime as _dt, timedelta as _td
+    soon = _dt.now().replace(hour=12, minute=0, second=0, microsecond=0) + _td(days=2)
+    cal.add_event("иду на др к Пете", soon, 60)
+    assert insights.upcoming_birthdays(7) == []
+    cal.add_event("др мамы", soon, 60, repeat="yearly")
+    names = [b["who"] for b in insights.upcoming_birthdays(7)]
+    assert names == ["мамы"]
+
+
 def test_answer_cache_key():
     from core.brain.agent import _cache_key
     assert _cache_key("что такое инфляция", "web")
@@ -519,3 +542,36 @@ def test_media_endpoint():
     assert c.get("/media/%2e%2e/config.yaml").status_code in (404, 400)
     assert c.get("/media/2099-01/nope.jpg").status_code == 404
     (brain_notes.MEDIA_DIR / rel).unlink()
+
+
+def test_finance_question_is_rule_not_llm():
+    """«что по финансам» — сводка из базы правилом, без похода в LLM (LLM выдумывала цифры)."""
+    from core.brain import agent
+    for t in ("что по финансам", "Что там по деньгам?", "как у меня с балансом", "чё по бабкам"):
+        r = agent.rules(t, "test")
+        assert r is not None and "finance_summary" in r.actions, t
+    assert "list_tasks" in agent.rules("что по задачам", "test").actions
+
+
+def test_recheck_is_not_a_note():
+    """«откуда ты взял… сверься» — перепроверка, а не заметка в мозг."""
+    from core.brain import agent
+    t = "откуда ты взял эти значения, у меня же там другие данные сейчас, сверься"
+    assert agent._looks_like_question(t)
+    assert agent._forced_tool("сколько у меня денег") == ("finance_summary", {"days": 30})
+    assert agent._forced_tool("потратил 700 на еду") is None
+    assert agent._forced_tool("что такое инфляция") is None
+    r = agent.rules(t, "test")
+    assert r is not None and "finance_summary" in r.actions and "Перечитал" in r.text
+
+
+def test_analysis_request_not_recorded():
+    """«…разбери ситуацию, а не записывай» — длинный рассказ с суммами не должен стать событием/заметкой по шаблону."""
+    from core.brain import agent
+    t = ("что по финансам, завтра еще должно придти за монтаж роликов 8500, и 22000 с сдачи квартиры, "
+         "но 28500 нужно будет потратить 11 числа на пошлину. разбери ситуацию а не записывай куда то")
+    assert agent.rules(t, "test") is None
+    assert agent._is_analysis(t) and agent._forced_tool(t) is None
+    # короткие команды с двумя суммами по-прежнему работают шаблоном
+    assert "add_debt" in agent.rules("долг Сберу 120к плачу 8к 25-го", "test").actions
+    assert agent.rules("сдача квартиры завтра в 10", "test") is None or "add_event" in agent.rules("сдача квартиры завтра в 10", "test").actions

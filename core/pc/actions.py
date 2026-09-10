@@ -21,6 +21,9 @@ IS_WIN = sys.platform.startswith("win")
 def open_url(url: str, api: str = "") -> str:
     if url == "__self__":
         url = api or "http://127.0.0.1:8765"
+    if not re.match(r"^https?://", url, re.I):
+        # file:// / javascript: / ms-settings: и прочее в браузер не отдаём — только веб-адреса
+        return "Это не веб-адрес, открывать не буду."
     webbrowser.open(url)
     return ""
 
@@ -51,16 +54,19 @@ def open_app(name: str) -> str:
         if IS_WIN:
             os.startfile(name)  # type: ignore[attr-defined]
         return ""
+    # имя приходит из речи/LLM — в командную строку его не подставляем (раньше было start "" "{name}" через shell=True:
+    # фраза вида «открой x" & shutdown /s & "» выполнилась бы как команда). Запускаем только то, что реально
+    # нашлось в PATH/App Paths, и только как список аргументов, без оболочки.
+    if any(ch in name for ch in '"&|<>^%;\n\r') or len(name) > 120:
+        return f"Не похоже на имя программы: «{name[:40]}…», сэр."
     # 1) прямой запуск (calc, notepad, code, chrome…)
     try:
-        if IS_WIN:
-            subprocess.Popen(f'start "" "{name}"', shell=True)
-            time.sleep(0.6)
-            # start "" "xyz" при неизвестной программе показывает окно ошибки — проверяем ярлыки заранее ниже
-        else:
-            subprocess.Popen([name])
-        # если это известная команда — на этом всё
-        if IS_WIN and _which(name):
+        exe = _which(name)
+        if exe:
+            if IS_WIN:
+                os.startfile(exe)  # type: ignore[attr-defined]  # без консольного окна, как двойной клик
+            else:
+                subprocess.Popen([exe], start_new_session=True)
             return ""
     except Exception:
         pass
@@ -74,14 +80,30 @@ def open_app(name: str) -> str:
         best = sorted(cands, key=len)[0]
         os.startfile(str(apps[best]))  # type: ignore[attr-defined]
         return f"Запустил {apps[best].stem}."
-    if not _which(name):
-        return f"Не нашёл программу «{name}» ни в системе, ни в меню «Пуск», сэр."
-    return ""
+    return f"Не нашёл программу «{name}» ни в системе, ни в меню «Пуск», сэр."
 
 
-def _which(name: str) -> bool:
+def _which(name: str) -> str | None:
+    """Полный путь к программе: PATH, затем реестр Windows «App Paths» (так `start` находит chrome, code, winword…)."""
     import shutil
-    return bool(shutil.which(name) or shutil.which(name + ".exe"))
+    exe = shutil.which(name) or shutil.which(name + ".exe")
+    if exe or not IS_WIN:
+        return exe
+    try:
+        import winreg  # type: ignore
+        key_name = name if name.lower().endswith(".exe") else name + ".exe"
+        for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+            try:
+                with winreg.OpenKey(root, rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{key_name}") as k:
+                    val, _ = winreg.QueryValueEx(k, None)
+                    val = os.path.expandvars(str(val)).strip('"')
+                    if val and Path(val).is_file():
+                        return val
+            except OSError:
+                continue
+    except Exception:
+        pass
+    return None
 
 
 def open_path(path: str) -> str:

@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 import asyncio
 import os
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -21,7 +21,12 @@ from ..services import brain_notes, calendar, finance, insights, pc, tasks
 from ..services.scheduler import morning_digest_text
 
 app = FastAPI(title="Assistant Core", version="0.1")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+# CORS: сайт живёт на том же origin, что и API, — чужим сайтам доступ не нужен. Разрешаем только dev-сервер Vite.
+app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+                   allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+# доступ с других устройств — только с токеном (см. core/api/auth.py); с самого ПК — свободно
+from .auth import AuthMiddleware  # noqa: E402
+app.add_middleware(AuthMiddleware)
 
 
 # ---------------- живые обновления (сайт узнаёт о действиях из Telegram/голоса мгновенно) ----------------
@@ -891,16 +896,32 @@ async def phone_access(request: Request):
 
     ts, lan = await _asyncio.to_thread(tailscale_ip), lan_ip()
     host = socket.gethostname().lower()
+    # в ссылку зашит токен доступа: первый заход по ней ставит cookie на год, дальше адрес можно открывать без ?t=
+    from .auth import token as _tok, is_local as _is_lb
+    if not _is_lb(request):
+        raise HTTPException(403, "Ссылки для телефона выдаются только с самого компьютера")
+    t = _tok()
     items = []
     if ts:
-        items.append({"kind": "tailscale", "title": "Tailscale — из любой сети", "url": f"http://{ts}:{port}",
-                      "alt": f"http://{host}:{port}", "qr": qr(f"http://{ts}:{port}")})
+        items.append({"kind": "tailscale", "title": "Tailscale — из любой сети", "url": f"http://{ts}:{port}/?t={t}",
+                      "alt": f"http://{host}:{port}/?t={t}", "qr": qr(f"http://{ts}:{port}/?t={t}")})
     if lan:
-        items.append({"kind": "lan", "title": "Домашний Wi-Fi — телефон в той же сети", "url": f"http://{lan}:{port}", "qr": qr(f"http://{lan}:{port}")})
+        items.append({"kind": "lan", "title": "Домашний Wi-Fi — телефон в той же сети", "url": f"http://{lan}:{port}/?t={t}", "qr": qr(f"http://{lan}:{port}/?t={t}")})
     # с какого адреса открыт сайт сейчас: если не localhost — телефон уже может так же
     opened_from = request.headers.get("host", "")
     return {"tailscale": bool(ts), "host": host, "port": port, "items": items, "opened_from": opened_from,
-            "is_windows": __import__("os").name == "nt"}
+            "is_windows": __import__("os").name == "nt",
+            "note": "Ссылка содержит ключ доступа — не публикуйте её. Отозвать все старые ссылки: кнопка «новый ключ»."}
+
+
+@app.post("/api/phone/rotate")
+def phone_rotate(request: Request):
+    """Новый ключ доступа: все телефоны, где сайт был открыт по старой ссылке, потеряют доступ до нового QR."""
+    from .auth import rotate, is_local as _is_lb
+    if not _is_lb(request):
+        raise HTTPException(403, "Только с самого компьютера")
+    rotate()
+    return {"ok": True}
 
 
 VOICES = [

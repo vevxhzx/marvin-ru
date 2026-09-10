@@ -15,7 +15,7 @@ from apscheduler.triggers.cron import CronTrigger
 from ..config import DB_PATH, ROOT, cfg
 from ..services import calendar, finance, tasks
 from ..services.finance import money
-from ..db import remember, session
+from ..db import get_setting, set_setting
 
 log = logging.getLogger("assistant.sched")
 Notifier = Callable[[str], Awaitable[None]]
@@ -68,8 +68,57 @@ def backup_db() -> Path | None:
                     f.unlink(missing_ok=True)
         except Exception as e:  # pragma: no cover
             log.warning("extra backup failed: %s", e)
+    # картинки заметок/чеков (data/media): без них восстановленная база ссылается в пустоту.
+    # Копируем зеркалом в backups/media — только новые/изменённые файлы, поэтому дёшево даже при тысячах фото.
+    try:
+        n = _sync_media(bdir / "media")
+        if extra:
+            _sync_media(Path(extra) / "media")
+        if n:
+            log.info("backup media: +%d файлов", n)
+    except Exception as e:  # pragma: no cover
+        log.warning("media backup failed: %s", e)
     log.info("backup -> %s", dst)
     return dst
+
+
+def _sync_media(dst_dir: Path) -> int:
+    """Зеркало data/media → dst_dir: копируются файлы, которых нет или которые отличаются размером/временем. Ничего не удаляет."""
+    from .brain_notes import MEDIA_DIR
+    if not MEDIA_DIR.exists():
+        return 0
+    copied = 0
+    for src in MEDIA_DIR.rglob("*"):
+        if not src.is_file():
+            continue
+        rel = src.relative_to(MEDIA_DIR)
+        dst = dst_dir / rel
+        try:
+            st = src.stat()
+            if dst.exists():
+                dt = dst.stat()
+                if dt.st_size == st.st_size and int(dt.st_mtime) >= int(st.st_mtime):
+                    continue
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+            copied += 1
+        except Exception as e:  # pragma: no cover
+            log.warning("media copy %s: %s", rel, e)
+    return copied
+
+
+def _quiet_now() -> bool:
+    """Тихие часы для инициативных уведомлений. notifications.quiet_from / quiet_to в config.yaml (часы, 0–23)."""
+    n = getattr(cfg, "notifications", None)
+    try:
+        start = int(getattr(n, "quiet_from", 23) if getattr(n, "quiet_from", 23) is not None else 23) % 24
+        end = int(getattr(n, "quiet_to", 8) if getattr(n, "quiet_to", 8) is not None else 8) % 24
+    except (TypeError, ValueError):
+        start, end = 23, 8
+    h = datetime.now().hour
+    if start == end:
+        return False
+    return (h >= start or h < end) if start > end else (start <= h < end)
 
 
 def last_backup() -> dict:
@@ -84,14 +133,23 @@ def last_backup() -> dict:
 
 
 def build(notify: Notifier) -> AsyncIOScheduler:
-    sch = AsyncIOScheduler(timezone=cfg.owner.timezone)
+    # misfire_grace_time: ПК спал/ноут был закрыт — задача, пропущенная меньше чем на час, всё равно выполнится один раз
+    # (coalesce), а не молча пропадёт (по умолчанию у APScheduler 1 секунда) и не выстрелит пачкой.
+    sch = AsyncIOScheduler(timezone=cfg.owner.timezone,
+                           job_defaults={"misfire_grace_time": 3600, "coalesce": True, "max_instances": 1})
     # «через N секунд после старта» — с часовым поясом планировщика, иначе на ПК с другим системным TZ задачи считаются «пропущенными»
     from datetime import datetime as _dtm
     _tz = sch.timezone
     _soon = lambda sec: _dtm.now(_tz) + timedelta(seconds=sec)  # noqa: E731
 
-    async def _notify(text: str, buttons=None):
-        """notify может быть старым (только text) — кнопки передаём, если умеет."""
+    async def _notify(text: str, buttons=None, urgent: bool = False):
+        """notify может быть старым (только text) — кнопки передаём, если умеет.
+        Тихие часы (notifications.quiet_from..quiet_to, по умолчанию 23–8): инициативные сообщения ассистента
+        (бюджет, подписки, дни рождения, вечерний обзор) ночью не шлём — они догонят днём или не нужны вовсе.
+        urgent=True (напоминание о событии, которое человек сам поставил на это время) — шлём всегда."""
+        if not urgent and _quiet_now():
+            log.info("тихие часы — пропускаю уведомление: %s", text[:60])
+            return
         try:
             await notify(text, buttons)  # type: ignore[call-arg]
         except TypeError:
@@ -108,12 +166,12 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             when = "уже сейчас" if mins == 0 else f"через {mins} мин"
             text = f"⏰ «{e.title}» — {when} ({e.start:%H:%M})" + (f", {e.location}" if e.location else "") + ". Не подведите меня, сэр."
             ping("reminder", text=text, id=f"ev{e.id}-{e.start:%Y%m%d%H%M}")
-            await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏰ +1 час", f"ev:{e.id}:hour"), ("📅 Завтра", f"ev:{e.id}:tomorrow")])
+            await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏰ +1 час", f"ev:{e.id}:hour"), ("📅 Завтра", f"ev:{e.id}:tomorrow")], urgent=True)
 
     async def task_reminders():
         for t, text in tasks.due_task_reminders():
             ping("reminder", text=text, id=f"task{t.id}-{t.remind_stage}")
-            await _notify(text, [("✅ Сделал", f"task:{t.id}:done"), ("⏰ +1 час", f"task:{t.id}:hour"), ("📅 Завтра", f"task:{t.id}:tomorrow")])
+            await _notify(text, [("✅ Сделал", f"task:{t.id}:done"), ("⏰ +1 час", f"task:{t.id}:hour"), ("📅 Завтра", f"task:{t.id}:tomorrow")], urgent=True)
 
     async def semantic_job():
         from . import semantic
@@ -134,7 +192,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     async def recurring():
         for r in finance.process_due_recurring():
             ping("recurring")
-            await notify(f"💳 Провёл регулярный платёж: «{r.title}» {money(r.amount)}. Следующий {r.next_date:%d.%m}.")
+            await _notify(f"💳 Провёл регулярный платёж: «{r.title}» {money(r.amount)}. Следующий {r.next_date:%d.%m}.")
 
     async def _photo(path, caption):
         """Картинка владельцу, если notify умеет (атрибут .photo); иначе — текст."""
@@ -184,7 +242,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         from . import insights
         for text in insights.budget_alerts():
             ping("reminder", text=text, id=f"budget-{hash(text)}")
-            await notify(text)
+            await _notify(text)
 
     async def weekly():
         from . import insights
@@ -216,7 +274,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             text = (f"🎂 {when.capitalize()} — {b['title']}. Идеи подарка, если ещё не купили: что-то по его увлечению, "
                     f"впечатление (билеты, мастер-класс) или подарочная карта — беспроигрышно, хоть и скучно. Сказать «задача: купить подарок {b['who']}» — и я напомню.")
             ping("reminder", text=text, id=key)
-            await notify(text)
+            await _notify(text)
 
     async def self_check():
         """Тихая самодиагностика раз в день — только в лог и в статус (в Telegram НЕ шлём, по просьбе владельца)."""
@@ -231,7 +289,28 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         except Exception as e:  # pragma: no cover
             log.warning("self-check failed: %s", e)
 
-    sch.add_job(evening_budget, CronTrigger(hour=21, minute=0), id="evening_budget")
+    async def evening_review():
+        """21:00 — незакрытые дела с дедлайном сегодня/просроченные: одно сообщение, кнопки «сделал / завтра» под каждым.
+        Не чаще раза в день (переживает перезапуск), не шлём, если список пуст."""
+        key = f"evening_review:{datetime.now():%Y-%m-%d}"
+        if get_setting(key):
+            return
+        due = tasks.evening_review()
+        if not due:
+            return
+        set_setting(key, "1")
+        n = len(due)
+        head = f"🌙 Вечер, сэр. {'Осталась' if n == 1 else 'Остались'} {n} {'задача' if n == 1 else 'задачи' if n < 5 else 'задач'} с дедлайном:"
+        ping("reminder", text=head, id=key)
+        await _notify(head)
+        for t in due[:5]:
+            when = "сегодня" if t.due.date() == datetime.now().date() else f"было {t.due:%d.%m}"
+            await _notify(f"• «{t.title}» — {when}", [("✅ Сделал", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow")])
+        if n > 5:
+            await _notify(f"…и ещё {n - 5}. Полный список — «мои задачи».")
+
+    sch.add_job(evening_review, CronTrigger(hour=21, minute=0), id="evening_review")
+    sch.add_job(evening_budget, CronTrigger(hour=21, minute=2), id="evening_budget")
     sch.add_job(weekly, CronTrigger(day_of_week="sun", hour=19, minute=0), id="weekly_digest")
     sch.add_job(weekly_card, CronTrigger(day_of_week="sun", hour=19, minute=2), id="weekly_card")
     sch.add_job(monthly_card, CronTrigger(day=1, hour=11, minute=0), id="monthly_card")

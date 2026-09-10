@@ -382,10 +382,106 @@ TOOLS[CLOUD_TOOL] = {
 }
 
 
+# ---------------- Валидация аргументов от LLM ----------------
+# Модель (особенно маленькая локальная) присылает что угодно: отрицательные суммы, days=-5, пустые названия,
+# строки вместо чисел, лишние поля. Без проверки это тихо ломало данные: add_expense(-700) записывался как трата 700,
+# add_task("   ") создавал задачу без названия. Здесь — единая граница, по схеме инструмента + здравый смысл.
+MAX_AMOUNT = 1_000_000_000      # 1 млрд ₽ — выше этого почти наверняка ошибка распознавания
+MAX_DAYS = 3650                 # периоды/горизонты: до 10 лет
+MAX_TITLE = 300                 # названия событий/задач/долгов
+MAX_TEXT = 8000                 # заметки
+_AMOUNT_KEYS = {"amount", "total", "payment", "balance"}
+_DAYS_KEYS = {"days", "duration_min"}
+_TITLE_KEYS = {"title", "category", "account", "to_account", "from_account", "debt", "query", "location"}
+_TEXT_KEYS = {"text", "note", "question"}
+_SIGNED_OK = {"set_balance"}    # баланс счёта может быть отрицательным (кредитка/овердрафт)
+
+
+class ToolArgError(ValueError):
+    """Понятное для LLM описание, что не так с аргументами (без трейсбека)."""
+
+
+def _coerce(name: str, key: str, spec: dict, val: Any) -> Any:
+    typ = spec.get("type")
+    if val is None:
+        return None
+    if typ in ("number", "integer"):
+        if isinstance(val, bool):
+            raise ToolArgError(f"{key}: нужно число")
+        if isinstance(val, str):
+            v = val.strip().replace(" ", "").replace("\u00a0", "").replace(",", ".")
+            v = "".join(ch for ch in v if ch.isdigit() or ch in ".-")
+            if not v or v in ("-", "."):
+                raise ToolArgError(f"{key}: нужно число, а не «{val[:40]}»")
+            val = float(v)
+        if not isinstance(val, (int, float)):
+            raise ToolArgError(f"{key}: нужно число")
+        if val != val or val in (float("inf"), float("-inf")):
+            raise ToolArgError(f"{key}: нужно число")
+        if typ == "integer":
+            val = int(round(val))
+        if key in _AMOUNT_KEYS and name not in _SIGNED_OK and not (key == "payment" and val == 0):
+            if val <= 0:
+                raise ToolArgError(f"{key}: сумма должна быть больше нуля (получил {val}). Для возврата денег используй add_income.")
+            if val > MAX_AMOUNT:
+                raise ToolArgError(f"{key}: сумма {val:,.0f} неправдоподобно велика — переспроси пользователя.")
+        if key in _AMOUNT_KEYS and abs(val) > MAX_AMOUNT:
+            raise ToolArgError(f"{key}: значение неправдоподобно велико — переспроси пользователя.")
+        if key in _DAYS_KEYS and not (1 <= val <= MAX_DAYS if key == "days" else 1 <= val <= 60 * 24 * 14):
+            raise ToolArgError(f"{key}: должно быть от 1 до {MAX_DAYS if key == 'days' else 20160}, получил {val}")
+        if key in ("day", "pay_day") and not (1 <= val <= 31):
+            raise ToolArgError(f"{key}: день месяца от 1 до 31, получил {val}")
+        if key == "priority" and not (1 <= val <= 3):
+            val = min(3, max(1, val))
+        if key == "rate" and not (0 <= val <= 1000):
+            raise ToolArgError(f"rate: ставка в процентах от 0 до 1000, получил {val}")
+        return val
+    if typ == "string":
+        if not isinstance(val, str):
+            val = str(val)
+        val = val.strip()
+        if key in _TITLE_KEYS:
+            if len(val) > MAX_TITLE:
+                val = val[:MAX_TITLE].rstrip()
+        elif key in _TEXT_KEYS and len(val) > MAX_TEXT:
+            val = val[:MAX_TEXT].rstrip()
+        return val
+    if typ == "array":
+        if isinstance(val, str):
+            val = [x.strip() for x in val.split(",") if x.strip()]
+        if not isinstance(val, list):
+            raise ToolArgError(f"{key}: нужен список")
+        return val[:50]
+    return val
+
+
+def validate_args(name: str, args: dict[str, Any] | None) -> dict[str, Any]:
+    """Приводит аргументы к схеме инструмента, отбрасывает лишние, проверяет обязательные и диапазоны.
+    Бросает ToolArgError с текстом, который можно вернуть модели как результат инструмента."""
+    spec = TOOLS[name]["function"]["parameters"]
+    props: dict = spec.get("properties", {})
+    required: list = spec.get("required", [])
+    if not isinstance(args, dict):
+        args = {}
+    out: dict[str, Any] = {}
+    for key, val in args.items():
+        if key not in props:
+            continue  # выдуманные моделью поля игнорируем
+        out[key] = _coerce(name, key, props[key], val)
+    missing = [k for k in required if out.get(k) in (None, "", [])]
+    if missing:
+        raise ToolArgError(f"не хватает обязательных полей: {', '.join(missing)}. Уточни у пользователя.")
+    return out
+
+
 def run_tool(name: str, args: dict[str, Any], channel: str = "tg") -> str:
     fn = FUNCS.get(name)
     if not fn:
         return f"Неизвестный инструмент {name}"
+    try:
+        args = validate_args(name, args)
+    except ToolArgError as e:
+        return f"Инструмент {name} не выполнен: {e}"
     try:
         return str(fn(**args, _channel=channel))
     except TypeError:

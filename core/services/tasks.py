@@ -123,3 +123,19 @@ def delete_task(task_id: int) -> bool:
         s.delete(t)
         s.commit()
         return True
+
+
+def evening_review() -> list[Task]:
+    """Что не закрыто к вечеру: дедлайн был сегодня или раньше (просрочено), задача открыта.
+    Только для вечернего вопроса «перенести на завтра?» — ничего не меняет."""
+    nw = now()
+    end_today = nw.replace(hour=23, minute=59, second=59)
+    with session() as s:
+        rows = s.exec(select(Task).where(Task.done == False, Task.due != None, Task.due <= end_today)  # noqa: E711,E712
+                      .order_by(Task.priority, Task.due)).all()
+        return list(rows)
+
+
+def postpone_to_tomorrow(task_id: int, hour: int = 10) -> Task | None:
+    tmr = (now() + timedelta(days=1)).replace(hour=hour, minute=0, second=0, microsecond=0)
+    return update_task(task_id, due=tmr)

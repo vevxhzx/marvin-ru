@@ -1,7 +1,6 @@
 """Календарь и напоминания. Поддерживает повторяющиеся события (каждый день / пн-ср-пт / месяц / год)."""
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime, timedelta
 
 from dateutil.relativedelta import relativedelta
@@ -70,7 +69,6 @@ def _occurrences(ev: Event, start: datetime, end: datetime) -> list[datetime]:
     skip = set(filter(None, (ev.skip_dates or "").split(",")))
     until = ev.repeat_until or (end + timedelta(days=1))
     out: list[datetime] = []
-    dur_days = 0
     if ev.repeat == "daily":
         cur = ev.start
         if cur < start:

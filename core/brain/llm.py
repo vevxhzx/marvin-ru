@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import re
+import time
 from typing import Any, Awaitable, Callable
 
 import httpx
@@ -24,7 +25,7 @@ def _local_client(timeout: float) -> httpx.AsyncClient:
 OLLAMA_MODEL = cfg.brain.ollama.model
 # держать модель в видеопамяти между запросами (иначе Ollama выгружает через 5 мин и первый ответ ждёт 5–15 с)
 OLLAMA_KEEP_ALIVE = str(getattr(cfg.brain.ollama, "keep_alive", "2h") or "2h")
-OLLAMA_NUM_CTX = int(getattr(cfg.brain.ollama, "num_ctx", 4096) or 4096)
+OLLAMA_NUM_CTX = int(getattr(cfg.brain.ollama, "num_ctx", 8192) or 8192)   # 4096 не хватало: схемы инструментов + промпт + история ≈ 4.5–5k токенов → Ollama резала промпт и обрывала ответ
 # режим короткого ответа (голос): ограничение длины генерации — для TTS и восприятия на слух
 short_mode: contextvars.ContextVar[bool] = contextvars.ContextVar("short_mode", default=False)
 GEMINI_KEY = (cfg.brain.gemini.api_key or "").strip()
@@ -84,8 +85,9 @@ async def unload_ollama() -> bool:
 
 
 async def set_game_mode(on: bool) -> str:
-    global GAME_MODE
+    global GAME_MODE, _AVAIL_CACHE
     GAME_MODE = on
+    _AVAIL_CACHE = (0.0, False)   # сбросить кэш доступности: после «игра окончена» модель должна вернуться сразу
     if on:
         freed = await unload_ollama()
         return ("Игровой режим: локальная модель выгружена из видеопамяти, до отмены отвечаю только через облако "
@@ -130,9 +132,25 @@ MARK_SOURCE = bool(getattr(cfg.brain.gemini, "mark_source", True))
 
 
 # ---------------- Ollama ----------------
-async def ollama_available() -> bool:
+_AVAIL_CACHE: tuple[float, bool] = (0.0, False)
+AVAIL_TTL = 15.0
+
+
+async def ollama_available(force: bool = False) -> bool:
+    """Жива ли Ollama. Результат кэшируется на 15 с: проверку зовут перед каждым сообщением, из /api/health каждые 30 с
+    и из фоновых задач — без кэша это лишний HTTP-запрос (до 5 с таймаута) на каждое действие."""
+    global _AVAIL_CACHE
     if GAME_MODE:
         return False
+    ts, ok = _AVAIL_CACHE
+    if not force and time.monotonic() - ts < AVAIL_TTL:
+        return ok
+    ok = await _ollama_probe()
+    _AVAIL_CACHE = (time.monotonic(), ok)
+    return ok
+
+
+async def _ollama_probe() -> bool:
     try:
         async with _local_client(5) as c:
             r = await c.get(f"{OLLAMA_URL}/api/tags")
@@ -190,9 +208,18 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
     """Возвращает {'content': str, 'tool_calls': [{'name','arguments'}]}."""
     sink = token_sink.get()
     stream = bool(sink) and not json_mode
+    num_predict = 160 if short_mode.get() else 512
+    # оценка размера запроса: если не влезает в num_ctx, Ollama молча отрежет начало (системный промпт!) и оборвёт ответ.
+    # Лучше один раз перезагрузить модель с окном побольше, чем получить «Сэр,» вместо ответа.
+    est = (sum(len(str(m.get("content") or "")) for m in messages) + (len(json.dumps(tools, ensure_ascii=False)) if tools else 0)) // 3 + 200
+    num_ctx = OLLAMA_NUM_CTX
+    while est + num_predict > num_ctx and num_ctx < 32768:
+        num_ctx *= 2
+    if num_ctx != OLLAMA_NUM_CTX:
+        log.warning("Запрос ≈%d токенов не влезает в num_ctx=%d — на этот раз беру %d (модель перезагрузится, +несколько секунд). "
+                    "Поставьте brain.ollama.num_ctx: %d в настройках, чтобы так было всегда.", est, OLLAMA_NUM_CTX, num_ctx, num_ctx)
     payload: dict[str, Any] = {"model": OLLAMA_MODEL, "messages": messages, "stream": stream, "keep_alive": OLLAMA_KEEP_ALIVE,
-                               "options": {"temperature": temperature, "num_ctx": OLLAMA_NUM_CTX,
-                                           "num_predict": 160 if short_mode.get() else 512}}
+                               "options": {"temperature": temperature, "num_ctx": num_ctx, "num_predict": num_predict}}
     if tools:
         payload["tools"] = tools
     if json_mode:

@@ -68,7 +68,11 @@ async def main(with_tg: bool) -> None:
     first_run = not setup_done()
     if first_run:
         with_tg = False
-        log.info("Первый запуск: открываю мастер настройки http://localhost:%s/setup", cfg.server.port)
+        if os.getenv("ASSISTANT_DOCKER"):
+            from core.api.auth import token as _tok
+            log.info("Первый запуск: мастер настройки → http://localhost:%s/setup?t=%s  (ссылка с ключом доступа)", cfg.server.port, _tok())
+        else:
+            log.info("Первый запуск: открываю мастер настройки http://localhost:%s/setup", cfg.server.port)
         if not os.getenv("ASSISTANT_NO_BROWSER"):
             import webbrowser
             asyncio.get_event_loop().call_later(1.5, lambda: webbrowser.open(f"http://localhost:{cfg.server.port}/setup"))
@@ -119,6 +123,11 @@ async def main(with_tg: bool) -> None:
     from core.config import ROOT
     if (ROOT / "web" / "site" / "index.html").exists() or (ROOT / "web" / "dist" / "index.html").exists():
         log.info("Сайт: http://localhost:%s  (открой в браузере)", cfg.server.port)
+        if os.getenv("ASSISTANT_DOCKER"):
+            # в Docker браузер приходит не с loopback → нужна ссылка с ключом доступа (см. core/api/auth.py)
+            from core.api.auth import token as _tok
+            log.info("Docker: открывайте сайт по ссылке с ключом → http://localhost:%s/?t=%s  (ключ в data/api_token)",
+                     cfg.server.port, _tok())
     else:
         log.warning("Папка web/site не найдена (%s) — показываю пробную страницу. "
                     "Скачай папку web/site из проекта и положи в web\\", ROOT / "web" / "site")

@@ -7,9 +7,7 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 import zipfile
-from pathlib import Path
 
 from ..config import DATA_DIR
 

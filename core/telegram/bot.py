@@ -470,7 +470,7 @@ async def photo_msg(m: Message, as_document: bool = False):
         if to_brain:
             # в мозг: короткое описание — чтобы потом искать «та фотка с графиком»
             about = await asyncio.wait_for(llm.describe_image(b64, "Опиши, что на фото, одной-двумя фразами: главное содержимое, текст на картинке если есть. Без вступлений.", private=False, short=True), timeout=120) or ""
-            n = _save_photo_note(raw, caption, about)
+            _save_photo_note(raw, caption, about)
             if agent.on_change:
                 agent.on_change("chat", {"channel": "tg", "actions": ["add_note"]})
             txt = "🧠 В мозг: фото" + (f" + «{caption[:80]}»" if caption else "") + (f"\n<i>{_html.escape(about[:200])}</i>" if about else "")

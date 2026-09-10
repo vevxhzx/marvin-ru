@@ -5,7 +5,6 @@ from __future__ import annotations
 
 import base64
 import logging
-import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -22,7 +21,10 @@ GAME_DEFAULT = {"cs2.exe", "dota2.exe", "valorant.exe", "valorant-win64-shipping
                 "league of legends.exe", "rust.exe", "tarkov.exe", "escapefromtarkov.exe", "pubg.exe", "tslgame.exe", "warthunder.exe", "aces.exe",
                 "wot.exe", "worldoftanks.exe", "baldursgate3.exe", "bg3.exe", "bg3_dx11.exe", "helldivers2.exe", "starfield.exe", "hogwartslegacy.exe",
                 "minecraft.exe", "javaw.exe", "roblox.exe", "robloxplayerbeta.exe", "destiny2.exe", "deadlock.exe", "marvel-win64-shipping.exe",
-                "palworld-win64-shipping.exe", "stalker2-win64-shipping.exe", "spacemarine2.exe", "kingdomcome.exe", "monsterhunterwilds.exe"}
+                "palworld-win64-shipping.exe", "stalker2-win64-shipping.exe", "spacemarine2.exe", "kingdomcome.exe", "monsterhunterwilds.exe",
+                # тяжёлые рабочие программы, которым нужна вся видеокарта (монтаж/графика) — тоже выгружаем модель
+                "afterfx.exe", "adobe premiere pro.exe", "premiere pro.exe", "adobe media encoder.exe", "davinci resolve.exe", "resolve.exe",
+                "blender.exe", "cinema 4d.exe", "unrealeditor.exe", "unity.exe"}
 _game_on = False
 _game_seen_at = 0.0
 
@@ -33,9 +35,18 @@ def setup(api: str, data_dir: Path, games: list[str] | None = None) -> None:
     GAMES = {g.lower() for g in (games or [])} | GAME_DEFAULT
 
 
+def _headers() -> dict:
+    try:
+        from ..config import DATA_DIR
+        tok = (DATA_DIR / "api_token").read_text(encoding="utf-8").strip()
+        return {"X-Auth-Token": tok} if tok else {}
+    except Exception:
+        return {}
+
+
 def _post(path: str, body: dict, timeout: float = 20):
     import httpx
-    with httpx.Client(timeout=timeout, trust_env=False) as c:
+    with httpx.Client(timeout=timeout, trust_env=False, headers=_headers()) as c:
         return c.post(f"{API}{path}", json=body)
 
 
@@ -89,7 +100,7 @@ def morning_check(say) -> None:
     _morning_done = today
     try:
         import httpx
-        with httpx.Client(timeout=15, trust_env=False) as c:
+        with httpx.Client(timeout=15, trust_env=False, headers=_headers()) as c:
             d = c.get(f"{API}/api/dashboard").json()
         txt = (d.get("digest") or "").strip()
     except Exception as e:

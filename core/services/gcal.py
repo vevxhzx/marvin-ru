@@ -21,14 +21,13 @@ import logging
 import secrets
 import time
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 from sqlmodel import select
 
-from ..config import DATA_DIR, TZ, cfg, ROOT
+from ..config import DATA_DIR, TZ, cfg
 from ..db import Event, get_setting, session, set_setting
 
 log = logging.getLogger("assistant.gcal")

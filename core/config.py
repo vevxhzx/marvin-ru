@@ -63,6 +63,8 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "telegram.token": ("str", "Токен Telegram-бота (от @BotFather)", True),
     "telegram.owner_id": ("int", "Ваш Telegram ID (от @userinfobot)", False),
     "telegram.morning_digest": ("str", "Утренний дайджест (ЧЧ:ММ, пусто — выключить)", False),
+    "notifications.quiet_from": ("int", "Тихие часы: с (час 0–23) — ночью ассистент сам не пишет", False),
+    "notifications.quiet_to": ("int", "Тихие часы: до (час 0–23)", False),
     "telegram.proxy": ("str", "Прокси для Telegram (если api.telegram.org недоступен)", False),
     "brain.mode": ("str", "Режим мозга: local / hybrid / cloud", False),
     "brain.ollama.url": ("str", "Адрес Ollama", False),

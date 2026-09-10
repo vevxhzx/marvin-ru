@@ -64,6 +64,21 @@ _V = getattr(cfg, "voice", None)
 _PC = getattr(_V, "pc", None)
 API = str(getattr(_PC, "api", "") or f"http://127.0.0.1:{getattr(getattr(cfg, 'server', None), 'port', 8765)}")
 HOTKEY = str(getattr(_PC, "hotkey", "ctrl+shift+j") or "ctrl+shift+j")
+
+
+def _api_headers() -> dict:
+    """Ключ доступа к ядру: на своём ПК (127.0.0.1) не нужен; если ядро на другой машине — берём из data/api_token
+    рядом (та же папка) или из voice.pc.api_token в config.yaml."""
+    tok = str(getattr(_PC, "api_token", "") or "")
+    if not tok:
+        try:
+            tok = (Path(__file__).parent / "data" / "api_token").read_text(encoding="utf-8").strip()
+        except Exception:
+            tok = ""
+    return {"X-Auth-Token": tok} if tok else {}
+
+
+API_HEADERS = _api_headers()
 MIC = getattr(_PC, "mic", None) or None                     # имя/номер устройства; None = по умолчанию
 SILENCE_SEC = float(getattr(_PC, "silence_sec", 1.5) or 1.5)   # пауза, после которой команда считается законченной
 MAX_CMD_SEC = float(getattr(_PC, "max_command_sec", 20) or 20)
@@ -406,7 +421,7 @@ def _write_wav(pcm: np.ndarray, path: Path) -> None:
 def _ask_core(text: str) -> str:
     import httpx
     try:
-        with httpx.Client(timeout=150, trust_env=False) as c:
+        with httpx.Client(timeout=150, trust_env=False, headers=API_HEADERS) as c:
             r = c.post(f"{API}/api/chat", json={"text": text, "channel": "voice"})
             r.raise_for_status()
             return r.json().get("text") or "Готово, сэр."
@@ -428,7 +443,7 @@ def _ask_core_stream(text: str, on_sentence) -> tuple[str, float | None]:
     buf, spoken, first_at, final = "", "", None, None
     LAST_VIA = ""
     try:
-        with httpx.Client(timeout=httpx.Timeout(150, connect=5), trust_env=False) as c:
+        with httpx.Client(timeout=httpx.Timeout(150, connect=5), trust_env=False, headers=API_HEADERS) as c:
             with c.stream("POST", f"{API}/api/chat/stream", json={"text": text, "channel": "voice"}) as r:
                 r.raise_for_status()
                 kind = ""
@@ -477,7 +492,7 @@ def _reminder_listener() -> None:
     seen: set[str] = set()
     while _running:
         try:
-            with httpx.Client(timeout=httpx.Timeout(None, connect=5), trust_env=False) as c:
+            with httpx.Client(timeout=httpx.Timeout(None, connect=5), trust_env=False, headers=API_HEADERS) as c:
                 with c.stream("GET", f"{API}/api/events/stream") as r:
                     for line in r.iter_lines():
                         if not _running:
@@ -529,7 +544,7 @@ def _speak_pending() -> None:
 def _core_alive() -> bool:
     import httpx
     try:
-        with httpx.Client(timeout=3, trust_env=False) as c:
+        with httpx.Client(timeout=3, trust_env=False, headers=API_HEADERS) as c:
             return c.get(f"{API}/api/health").status_code == 200
     except Exception:
         return False
@@ -606,7 +621,6 @@ def main() -> None:
     with sd.RawInputStream(samplerate=SR, blocksize=CHUNK, dtype="int16", channels=1, device=dev, callback=_mic_callback):
         set_state("idle")
         log.info("Готов. Жду «%s»…", identity.title())
-        greeted = False
         followup_until = 0.0
         noise_samples: list[float] = []
         while _running:

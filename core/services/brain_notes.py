@@ -115,14 +115,61 @@ def delete_note(nid: int) -> bool:
     return True
 
 
+PREVIEW_MAX_BYTES = 1_500_000  # больше — это не HTML-страница, а файл; читаем только начало
+
+
+def _is_public_http_url(url: str) -> bool:
+    """Превью тянем только с публичных http(s)-адресов: не с localhost, не из домашней сети (роутер, NAS, сам
+    ассистент на 8765), не с облачных метаданных. Ссылка приходит из чата/TG и может быть чем угодно."""
+    import ipaddress
+    import socket
+    u = urlparse(url)
+    if u.scheme not in ("http", "https") or not u.hostname:
+        return False
+    host = u.hostname.lower()
+    if host in ("localhost",) or host.endswith((".local", ".internal", ".localhost")):
+        return False
+    try:
+        infos = socket.getaddrinfo(host, None)
+    except socket.gaierror:
+        return False
+    for fam, _, _, _, sockaddr in infos:
+        try:
+            ip = ipaddress.ip_address(sockaddr[0])
+        except ValueError:
+            return False
+        if not ip.is_global:
+            return False
+    return True
+
+
 async def fetch_preview(url: str) -> dict:
     """Заголовок, описание, картинка (OpenGraph). Не падает, если сайт недоступен."""
     meta = {"title": None, "description": None, "image": None, "domain": urlparse(url).netloc.replace("www.", "")}
+    if not _is_public_http_url(url):
+        return meta
     try:
-        async with httpx.AsyncClient(timeout=8, follow_redirects=True,
+        async with httpx.AsyncClient(timeout=8, follow_redirects=False,
                                      headers={"User-Agent": "Mozilla/5.0 (compatible; AssistantBot/1.0)"}) as c:
-            r = await c.get(url)
-            html = r.text[:300_000]
+            # редиректы проходим сами, проверяя каждый адрес (иначе публичный домен мог бы прыгнуть на 127.0.0.1)
+            cur, html = url, ""
+            for _ in range(5):
+                async with c.stream("GET", cur) as r:
+                    if r.status_code in (301, 302, 303, 307, 308) and r.headers.get("location"):
+                        cur = str(r.url.join(r.headers["location"]))
+                        if not _is_public_http_url(cur):
+                            return meta
+                        continue
+                    if not r.headers.get("content-type", "text/html").lower().startswith(("text/html", "application/xhtml")):
+                        return meta
+                    buf = b""
+                    async for chunk in r.aiter_bytes():
+                        buf += chunk
+                        if len(buf) >= PREVIEW_MAX_BYTES:
+                            break
+                    enc = r.encoding or "utf-8"
+                    html = buf.decode(enc, errors="replace")[:300_000]
+                    break
     except Exception:
         return meta
 

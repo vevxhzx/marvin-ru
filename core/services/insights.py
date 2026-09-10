@@ -9,10 +9,9 @@ import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
-from dateutil.relativedelta import relativedelta
 from sqlmodel import select
 
-from ..db import Event, Memory, Note, Recurring, Task, Transaction, get_setting, session, set_setting
+from ..db import Memory, Note, Task, Transaction, get_setting, session, set_setting
 from . import calendar, finance
 from .finance import money
 
@@ -138,7 +137,8 @@ def upcoming_birthdays(days: int = 7) -> list[dict]:
     now = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
     out = []
     for e in calendar.list_events(now, now + timedelta(days=days + 1), limit=200):
-        if BDAY_RX.search(e.title):
+        # только ежегодные: «др мамы каждый год 14 марта». Разовое «иду на др 12-го» — обычный план, не праздник
+        if e.repeat == "yearly" and BDAY_RX.search(e.title):
             out.append({"id": e.id, "title": e.title, "date": e.start.isoformat(), "in_days": (e.start.date() - now.date()).days,
                         "who": re.sub(r"^\W*(др|день\s+рождения|днюха)\W*", "", e.title, flags=re.I).strip() or e.title})
     return out

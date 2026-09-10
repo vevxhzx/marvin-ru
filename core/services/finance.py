@@ -27,8 +27,8 @@ def _num(x, name: str = "Сумма", min_: float | None = 0, max_: float | None
         raise FinanceError(f"{name} должна быть {'больше' if strict_min else 'не меньше'} {money(min_)}")
     if max_ is not None and v > max_:
         raise FinanceError(f"{name} не может быть больше {money(max_)}")
-    if abs(v) > 1e12:
-        raise FinanceError(f"{name}: слишком большое число")
+    if abs(v) > 1e9:
+        raise FinanceError(f"{name}: {money(v)} — неправдоподобно много. Если это не опечатка, разбейте на части.")
     return round(v, 2)
 
 
@@ -747,8 +747,8 @@ def pay_debt(debt_id_or_title: int | str, amount: float, auto: bool = False,
     if auto:
         amount = min(float(amount), d.remaining)  # финальный платёж бывает меньше обычного
     amount = _num(amount, "Платёж", 0, max_=d.remaining, strict_min=True)
-    tx = add_transaction(amount, "expense", "Долги", f"Платёж: {d.title}" + (" (авто)" if auto else ""),
-                         account, source="system" if auto else source, date=date, debt_id=d.id)
+    add_transaction(amount, "expense", "Долги", f"Платёж: {d.title}" + (" (авто)" if auto else ""),
+                    account, source="system" if auto else source, date=date, debt_id=d.id)
     with session() as s:
         d = s.get(Debt, d.id)
         d.remaining = round(max(0.0, d.remaining - amount), 2)

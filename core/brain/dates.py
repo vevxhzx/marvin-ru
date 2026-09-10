@@ -177,12 +177,13 @@ def parse_datetime(text: str, now: datetime | None = None) -> tuple[datetime | N
                     except ValueError:
                         date = None
                 else:
-                    m = re.search(r"\b(\d{1,2})[- ]?го\b", t)
+                    # «25-го», «12 числа», «12-е число» — день этого месяца (или следующего, если уже прошёл)
+                    m = re.search(r"\b(\d{1,2})(?:[- ]?го|[- ]?е)?\s*(?:числа|число)\b", t) or re.search(r"\b(\d{1,2})[- ]?го\b", t)
                     if m:
                         d = int(m.group(1))
-                        date = now.replace(day=min(d, 28))
-                        if d < now.day:
-                            date += relativedelta(months=1)
+                        base = now if d >= now.day else now + relativedelta(months=1)
+                        last = (base.replace(day=1) + relativedelta(months=1) - timedelta(days=1)).day
+                        date = base.replace(day=min(d, last))
                         t = t.replace(m.group(0), " ")
 
     if date is None and time_set:
