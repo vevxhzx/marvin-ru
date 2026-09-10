@@ -142,15 +142,17 @@ export function useOrder(key, ids) {
     return ids
   })
   useEffect(() => { localStorage.setItem(key, JSON.stringify(order)) }, [key, order])
-  const move = (from, to) => setOrder((o) => { const a = [...o]; const [x] = a.splice(a.indexOf(from), 1); a.splice(a.indexOf(to), 0, x); return a })
+  // ставим from на место to: при движении вперёд — после него, назад — перед ним
+  const move = (from, to) => setOrder((o) => { const a = [...o]; const i = a.indexOf(from), j = a.indexOf(to); if (i < 0 || j < 0 || i === j) return o; a.splice(i, 1); a.splice(j, 0, from); return a })
   return [order, move, () => setOrder(ids)]
 }
 
-export function Draggable({ id, onMove, children, className = '' }) {
+export function Draggable({ id, onMove, children, className = '', disabled = false }) {
   const [over, setOver] = useState(false)
   const [dragging, setDragging] = useState(false)
+  if (disabled) return <div className={className}>{children}</div>
   return (
-    <div className={`${className} transition-all duration-300 ${dragging ? 'scale-[.98] opacity-40' : ''} ${over ? 'ring-2 ring-accent/40 rounded-2xl' : ''}`}
+    <div className={`${className} transition-all duration-300 ${dragging ? 'opacity-40' : ''} ${over ? '!outline-[var(--accent)] !outline-2' : ''}`}
       draggable onDragStart={(e) => { e.dataTransfer.setData('text/widget', id); e.dataTransfer.effectAllowed = 'move'; setDragging(true) }}
       onDragEnd={() => setDragging(false)}
       onDragOver={(e) => { if (e.dataTransfer.types.includes('text/widget')) { e.preventDefault(); setOver(true) } }}

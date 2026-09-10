@@ -25,7 +25,7 @@ export function LiveDot({ live, onClick }) {
   const c = live.core === 'wait' ? 'var(--ink-3)' : live.core === 'down' ? 'var(--neg)' : busy ? 'var(--green, #30d158)' : live.brain ? 'var(--accent)' : 'var(--warn)'
   const t = live.core === 'wait' ? 'подключение…' : live.core === 'down' ? 'ядро офлайн' : busy ? `ПК: ${PC_LABEL[live.pc.mode]}` : live.brain ? 'мозг онлайн' : 'только правила'
   return (
-    <button onClick={onClick} title={t} className="relative grid h-5 w-5 place-items-center">
+    <button onClick={onClick} data-tip={t} aria-label={t} className="relative grid h-5 w-5 place-items-center">
       <span className={`inline-block h-2 w-2 rounded-full ${live.core === 'ok' ? 'dot-live' : ''}`} style={{ background: c, color: c }} />
       {busy && <span className="absolute inset-0 rounded-full border" style={{ borderColor: c, animation: 'breathe 1.2s ease-in-out infinite' }} />}
     </button>
@@ -36,7 +36,7 @@ export function LiveDot({ live, onClick }) {
 export function LivePopover({ live, onClose }) {
   const pc = live.pc
   return (
-    <div className="panel absolute left-0 top-[46px] z-[70] w-[280px] !p-3 text-[13px] shadow-xl" style={{ animation: 'rise .22s cubic-bezier(.2,.8,.2,1)' }} onMouseLeave={onClose}>
+    <div className="elevated absolute left-0 top-[46px] z-[70] w-[280px] !p-3 text-[13px]" style={{ animation: 'rise .2s var(--ease-out)' }} onMouseLeave={onClose}>
       <Row ok={live.core === 'ok'} label="ядро" val={live.core === 'ok' ? 'онлайн' : live.core === 'down' ? 'не отвечает' : '…'} />
       <Row ok={live.brain} label="локальный мозг" val={live.brain ? 'онлайн' : 'спит / не запущен'} />
       <Row ok={!!pc?.alive} label="ПК-клиент (voice.bat)" val={pc?.alive ? PC_LABEL[pc.mode] || pc.mode : 'не на связи'} />
@@ -73,11 +73,11 @@ export function MicButton({ onText, className = '' }) {
   const stop = () => rec.current?.stop()
   return (
     <span className={`relative inline-flex items-center ${className}`}>
-      <button onClick={on ? stop : start} className={`btn-icon !h-9 !w-9 ${on ? '!bg-red !text-white' : ''}`} title={on ? 'Остановить' : 'Сказать голосом (микрофон браузера)'}>
+      <button onClick={on ? stop : start} className={`btn-icon !h-9 !w-9 ${on ? '!bg-red !text-white' : ''}`} data-tip={on ? 'остановить' : 'сказать голосом'} aria-label="Голосовой ввод">
         {on ? <Square size={13} /> : <Mic size={15} />}
       </button>
       {on && <span className="absolute inset-0 rounded-full border-2" style={{ borderColor: 'var(--neg)', animation: 'breathe 1s ease-in-out infinite' }} />}
-      {on && interim && <span className="panel absolute right-0 top-11 z-[70] max-w-[280px] truncate !px-3 !py-1.5 text-[12px] shadow-lg">{interim}</span>}
+      {on && interim && <span className="elevated absolute right-0 top-11 z-[70] max-w-[280px] truncate !px-3 !py-1.5 text-[12px]">{interim}</span>}
     </span>
   )
 }

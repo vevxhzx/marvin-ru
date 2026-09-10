@@ -35,20 +35,20 @@ export function Num({ value, fmt = (n) => Math.round(n).toLocaleString('ru-RU'),
   return <span className={`num-roll ${className}`}>{fmt(v)}</span>
 }
 
-/* Заголовок раздела в духе референса: большой строчный заголовок + моно-индекс + подпись справа */
+/* Заголовок раздела: компактный, спокойный. idx — счётчик справа от названия (не номер главы) */
 export function Section({ title, idx, hint, action, children, className = '' }) {
   return (
     <section className={`animate-rise ${className}`}>
       {(title || action) && (
-        <div className="mb-4 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
-          <div className="flex items-baseline gap-3">
-            {title && <h2 className="h2">{title}</h2>}
-            {idx != null && <span className="idx">({String(idx).padStart(2, '0')})</span>}
+        <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+          <div className="min-w-0">
+            <div className="flex items-baseline gap-2">
+              {title && <h2 className="h2">{title}</h2>}
+              {idx != null && idx !== 0 && <span className="idx">{idx}</span>}
+            </div>
+            {hint && <div className="muted mt-1 max-w-[520px] text-[13px] leading-snug">{hint}</div>}
           </div>
-          <div className="flex items-center gap-3">
-            {hint && <span className="muted hidden max-w-[320px] text-[13px] leading-snug sm:block">{hint}</span>}
-            {action}
-          </div>
+          {action && <div className="flex items-center gap-2">{action}</div>}
         </div>
       )}
       {children}
@@ -56,13 +56,16 @@ export function Section({ title, idx, hint, action, children, className = '' }) 
   )
 }
 
-/* Шапка страницы: огромный заголовок как «видеомонтажёр» */
-export function PageHead({ kicker, title, idx, right, children }) {
+/* Шапка страницы: заголовок + подпись + действия справа */
+export function PageHead({ kicker, title, idx, right, children, sub }) {
   return (
-    <header className="animate-rise mb-10 sm:mb-14">
-      {kicker && <div className="label mb-3">{kicker}</div>}
+    <header className="animate-rise mb-8 sm:mb-10">
+      {kicker && <div className="label mb-2">{kicker}</div>}
       <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
-        <h1 className="h1 max-w-[12ch]">{title}{idx != null && <span className="idx ml-3 align-middle text-[12px]">({String(idx).padStart(2, '0')})</span>}</h1>
+        <div className="min-w-0">
+          <h1 className="h1">{title}{idx != null && idx !== 0 && <span className="idx ml-3 align-middle">{idx}</span>}</h1>
+          {sub && <div className="muted mt-2 text-[14px]">{sub}</div>}
+        </div>
         {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
       </div>
       {children}
@@ -81,15 +84,15 @@ const GLYPHS = {
   sleep: <><path d="M30 8a16 16 0 1010 24A14 14 0 0130 8z" /></>,
   search: <><circle cx="21" cy="21" r="12" /><path d="M30 30l10 10" /></>,
 }
-export function Empty({ icon, glyph, text, sub, hint, onHint }) {
+export function Empty({ icon, glyph, text, sub, hint, onHint, compact }) {
   return (
-    <div className="empty flex flex-col items-start justify-center py-8 sm:py-10">
+    <div className={`empty flex flex-col items-start justify-center ${compact ? 'py-5' : 'py-8 sm:py-10'}`}>
       {glyph && GLYPHS[glyph] ? (
-        <svg width="48" height="48" viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="empty-glyph mb-4">{GLYPHS[glyph]}</svg>
+        <svg width={compact ? 36 : 44} height={compact ? 36 : 44} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="empty-glyph mb-3">{GLYPHS[glyph]}</svg>
       ) : icon ? <div className="mb-3 text-2xl">{icon}</div> : null}
       <div className="h4">{text}</div>
-      {sub && <div className="muted mt-1 text-[14px]">{sub}</div>}
-      {hint && <button type="button" className="pill mt-4 !text-[13px]" onClick={() => onHint ? onHint(hint) : window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: hint } }))}>сказать: «{hint}» ↗</button>}
+      {sub && <div className="muted mt-1 text-[13.5px]">{sub}</div>}
+      {hint && <button type="button" className="btn-soft btn-sm mt-4" onClick={() => onHint ? onHint(hint) : window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: hint } }))}>«{hint}» <span>↗</span></button>}
     </div>
   )
 }
@@ -384,26 +387,58 @@ export function useDoneFlash(ms = 1100) {
   return [on ? 'btn-done' : '', flash]
 }
 
-export function Toast({ msg, kind }) {
-  if (!msg) return null
+/* ---------- уведомления: один глобальный стек (Toaster в App), страницы зовут useToast()/toast() ---------- */
+const _toasts = { list: [], subs: new Set(), seq: 0 }
+const _emit = () => _toasts.subs.forEach((f) => f([..._toasts.list]))
+export function toast(title, { sub, kind = '', ms } = {}) {
+  const id = ++_toasts.seq
+  _toasts.list = [..._toasts.list.slice(-3), { id, title, sub, kind }]
+  _emit()
+  setTimeout(() => { _toasts.list = _toasts.list.map((t) => (t.id === id ? { ...t, out: true } : t)); _emit() }, ms || (kind === 'err' ? 4200 : 2600))
+  setTimeout(() => { _toasts.list = _toasts.list.filter((t) => t.id !== id); _emit() }, (ms || (kind === 'err' ? 4200 : 2600)) + 240)
+  return id
+}
+export function Toaster() {
+  const [list, setList] = useState([])
+  useEffect(() => { _toasts.subs.add(setList); return () => _toasts.subs.delete(setList) }, [])
+  if (!list.length) return null
   return createPortal(
-    <div className="pointer-events-none fixed inset-x-0 bottom-24 z-[80] flex justify-center sm:bottom-8">
-      <div className={`toast-in max-w-[90vw] rounded-full px-4 py-2.5 text-[14px] font-medium ${kind === 'err' ? 'bg-red text-white' : ''}`} style={kind === 'err' ? {} : { background: 'var(--ink)', color: 'var(--bg)' }}>{msg}</div>
+    <div className="pointer-events-none fixed inset-x-3 top-3 z-[120] flex flex-col items-center gap-2 sm:inset-x-auto sm:bottom-6 sm:right-6 sm:top-auto sm:items-end">
+      {list.map((t) => (
+        <div key={t.id} className={`toast toast-in ${t.kind} ${t.out ? 'out' : ''}`}>
+          <span className="toast-ic">{t.kind === 'err' ? <X size={14} /> : <Check size={14} />}</span>
+          <div className="min-w-0">
+            <div className="font-medium leading-snug">{t.title}</div>
+            {t.sub && <div className="muted mt-0.5 text-[12.5px] leading-snug">{t.sub}</div>}
+          </div>
+        </div>
+      ))}
     </div>,
     document.body
   )
 }
-
+/* обратная совместимость: страницы рендерят <Toast {...toast} /> — теперь это ничего не рисует, всё идёт через Toaster */
+export function Toast() { return null }
 export function useToast() {
-  const [t, setT] = useState({ msg: '', kind: '' })
-  const show = (msg, kind = '') => { setT({ msg, kind }); setTimeout(() => setT({ msg: '', kind: '' }), kind === 'err' ? 3800 : 2400) }
-  const err = (e) => show(typeof e === 'string' ? e : (e?.message || 'Ошибка'), 'err')
-  show.err = err
+  const [t] = useState({ msg: '', kind: '' })
+  const show = (msg, kind = '', sub) => { if (msg) toast(msg, { kind: kind === 'err' ? 'err' : kind || 'ok', sub }) }
+  show.err = (e) => show(typeof e === 'string' ? e : (e?.message || 'Ошибка'), 'err')
   return [t, show]
 }
 
-export function Skeleton({ h = 80 }) {
-  return <div className="fill animate-pulseSoft rounded-2xl" style={{ height: h }} />
+/* Переключатель да/нет */
+export function Switch({ on, onChange, label }) {
+  return (
+    <button type="button" role="switch" aria-checked={!!on} aria-label={label} className={`switch ${on ? 'on' : ''}`} onClick={() => onChange(!on)} />
+  )
+}
+
+export function Skeleton({ h = 80, className = '' }) {
+  return <div className={`fill animate-pulseSoft rounded-2xl ${className}`} style={{ height: h }} />
+}
+/* Скелет списка: N строк как в реальном списке */
+export function ListSkeleton({ n = 4 }) {
+  return <div className="space-y-3 py-2">{Array.from({ length: n }, (_, i) => <div key={i} className="flex items-center gap-3"><div className="fill animate-pulseSoft h-6 w-6 rounded-full" /><div className="fill animate-pulseSoft h-4 rounded-md" style={{ width: `${45 + ((i * 17) % 40)}%` }} /></div>)}</div>
 }
 
 /* Подтверждение вместо window.confirm */
@@ -419,4 +454,45 @@ export function Confirm({ open, title, text, onOk, onClose, danger }) {
   )
 }
 
-export const PRIORITY = { 1: { dot: 'bg-red', label: 'Важно' }, 2: { dot: 'bg-orange', label: 'Обычная' }, 3: { dot: 'bg-green', label: 'Низкая' } }
+export const PRIORITY = { 1: { dot: 'bg-red', label: 'Важно', cls: 'neg' }, 2: { dot: 'bg-orange', label: 'Обычная', cls: 'warn' }, 3: { dot: 'bg-green', label: 'Низкая', cls: 'pos' } }
+
+/* Точка приоритета → всплывающий выбор. Рисуется через портал в body: строки задач лежат внутри
+   .swipe с overflow:hidden, и обычный absolute-попап там просто обрезался. */
+export function PriorityDot({ value, onChange, disabled }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btn = useRef(null)
+  const toggle = () => {
+    if (disabled) return
+    if (open) return setOpen(false)
+    const r = btn.current.getBoundingClientRect()
+    const left = Math.min(r.right - 152, window.innerWidth - 160)
+    const below = r.bottom + 6 + 120 < window.innerHeight
+    setPos({ left: Math.max(8, left), top: below ? r.bottom + 6 : undefined, bottom: below ? undefined : window.innerHeight - r.top + 6 })
+    setOpen(true)
+  }
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => { if (!btn.current?.contains(e.target) && !e.target.closest?.('[data-pr-menu]')) setOpen(false) }
+    const k = (e) => e.key === 'Escape' && setOpen(false)
+    const s = () => setOpen(false)
+    document.addEventListener('mousedown', h); document.addEventListener('touchstart', h, { passive: true }); document.addEventListener('keydown', k); window.addEventListener('scroll', s, true)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('touchstart', h); document.removeEventListener('keydown', k); window.removeEventListener('scroll', s, true) }
+  }, [open])
+  return (
+    <>
+      <button ref={btn} type="button" className="btn-icon !h-7 !w-7" data-tip={open ? undefined : PRIORITY[value]?.label} onClick={toggle} aria-label="Приоритет" aria-expanded={open}>
+        <span className={`h-2 w-2 rounded-full ${PRIORITY[value]?.dot}`} />
+      </button>
+      {open && pos && createPortal(
+        <div data-pr-menu className="elevated fixed z-[120] w-[152px] !p-1" style={{ left: pos.left, top: pos.top, bottom: pos.bottom, animation: 'rise .16s var(--ease-out)' }}>
+          <div className="label px-2.5 pb-1 pt-1.5 !text-[10px]">важность</div>
+          {[1, 2, 3].map((p) => (
+            <button key={p} type="button" className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] hover:bg-[var(--fill)] ${p === value ? 'font-medium' : ''}`} onClick={() => { setOpen(false); if (p !== value) onChange(p) }}>
+              <span className={`h-2 w-2 rounded-full ${PRIORITY[p].dot}`} />{PRIORITY[p].label}{p === value && <Check size={12} className="ml-auto text-accent" />}
+            </button>
+          ))}
+        </div>, document.body)}
+    </>
+  )
+}

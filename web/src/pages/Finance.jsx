@@ -23,7 +23,7 @@ export default function Finance() {
   const [subs, setSubs] = useState([])
   const [sheet, setSheet] = useState(null) // 'tx' | 'debt' | 'rec' | 'account' | {pay} | {debt} | {tx} | {rec} | {confirm}
   const [showClosed, setShowClosed] = useState(false)
-  const [toast, show] = useToast()
+  const [, show] = useToast()
   const { tick, bump } = useRefresh()
 
   const load = async () => {
@@ -309,7 +309,6 @@ export default function Finance() {
       <CatSheet open={sheet === 'cat' || !!sheet?.cat} cat={sheet?.cat} onClose={() => setSheet(null)} onDone={done} onErr={show.err} />
       <PaySheet debt={sheet?.pay} accounts={accounts} onClose={() => setSheet(null)} onDone={done} onErr={show.err} />
       <Confirm open={!!sheet?.confirm} title={sheet?.confirm?.title} text={sheet?.confirm?.text} danger onClose={() => setSheet(null)} onOk={async () => { setSheet(null); await sheet.confirm.ok() }} />
-      <Toast msg={toast.msg} kind={toast.kind} />
     </div>
   )
 }

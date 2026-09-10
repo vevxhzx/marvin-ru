@@ -6,6 +6,9 @@ async function req(method, path, body) {
     headers: body ? { 'content-type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   })
+  if (r.status === 401) {
+    const e = new Error('Нет доступа с этого устройства. Откройте сайт по QR из ⚙ Настроек → «с телефона» на компьютере.'); e.status = 401; throw e
+  }
   if (!r.ok) {
     let msg = `${method} ${path} → ${r.status}`
     try { const j = await r.json(); if (j?.detail) msg = typeof j.detail === 'string' ? j.detail : (j.detail[0]?.msg || msg) } catch {}
@@ -179,3 +182,9 @@ export const CAT_COLORS = {
 export const catColor = (c) => CAT_COLORS[c] || '#8e8e93'
 export const CAT_ICONS = { 'Еда': '🍔', 'Транспорт': '🚕', 'Жильё': '🏠', 'Подписки': '📱', 'Здоровье': '💊', 'Развлечения': '🎮', 'Одежда': '👕', 'Техника': '💻', 'Долги': '💳', 'Другое': '📦', 'Зарплата': '💰', 'Фриланс': '🧑‍💻', 'Прочий доход': '🎁' }
 export const catIcon = (c) => CAT_ICONS[c] || '•'
+
+/* Подписи горячих клавиш под платформу: на маке ⌘/⌥, на Windows/Linux — Ctrl/Alt */
+export const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || '') || /Mac OS X/.test(navigator.userAgent || '')
+export const kb = (k) => (isMac ? `⌘${k}` : `Ctrl+${k}`)
+export const kbAlt = (k) => (isMac ? `⌥${k}` : `Alt+${k}`)
+export const kbShiftEnter = isMac ? '⇧↵' : 'Shift+↵'

@@ -27,7 +27,7 @@ export default function Mind() {
     return () => { window.removeEventListener('paste', onPaste); window.removeEventListener('drop', onDrop); window.removeEventListener('dragover', onDrag) }
   }, [img]) // eslint-disable-line
   const [mode, setMode] = useState('text')     // text | semantic — как искали в последний раз
-  const [toast, show] = useToast()
+  const [, show] = useToast()
   const [leaveCls, leave] = useLeave()
   const { tick, bump } = useRefresh()
 
@@ -73,7 +73,7 @@ export default function Mind() {
         right={<Pills value={tab} onChange={setTab} options={[['all', 'всё'], ['note', 'мысли'], ['photo', 'фото'], ['link', 'ссылки']]} />} />
 
       <form onSubmit={submit} className="animate-rise">
-        <Card className="!p-2 !rounded-[26px]">
+        <Card className="!p-2 !rounded-4xl">
           {img && (
             <div className="relative m-1 mb-0 inline-block animate-rise">
               <img src={img.url} alt="" className="max-h-40 rounded-2xl object-cover" />
@@ -116,7 +116,6 @@ export default function Mind() {
           <button className="absolute right-4 top-4 grid h-10 w-10 place-items-center rounded-full bg-white/15 text-white safe-t"><X size={18} /></button>
         </div>
       )}
-      <Toast msg={toast.msg} kind={toast.kind} />
     </div>
   )
 }
