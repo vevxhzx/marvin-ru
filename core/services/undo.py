@@ -5,12 +5,12 @@ from datetime import datetime, timedelta
 
 from sqlmodel import select
 
-from ..db import ActionLog, Debt, Event, Link, Note, Recurring, Task, Transaction, session
+from ..db import ActionLog, Debt, Event, Goal, Link, Note, Order, Recurring, Task, Transaction, session
 from . import finance
 
-_TABLES = {"event": Event, "task": Task, "transaction": Transaction, "debt": Debt, "recurring": Recurring, "note": Note, "link": Link}
+_TABLES = {"event": Event, "task": Task, "transaction": Transaction, "debt": Debt, "recurring": Recurring, "note": Note, "link": Link, "order": Order, "goal": Goal}
 _LABEL = {"add_event": "событие", "add_task": "задачу", "add_expense": "трату", "add_income": "доход", "pay_debt": "платёж по долгу",
-          "add_debt": "долг", "add_recurring": "регулярный платёж", "add_note": "заметку", "add_link": "ссылку", "bulk_delete": "удаление"}
+          "add_debt": "долг", "add_recurring": "регулярный платёж", "add_note": "заметку", "add_link": "ссылку", "bulk_delete": "удаление", "add_order": "заказ", "add_goal": "цель"}
 
 
 def last_action(channel: str | None = None, max_age_min: int = 24 * 60) -> ActionLog | None:
@@ -19,13 +19,25 @@ def last_action(channel: str | None = None, max_age_min: int = 24 * 60) -> Actio
         return s.exec(q.order_by(ActionLog.id.desc())).first()
 
 
+def undo_ids(ids: list[int]) -> int:
+    """Откатить несколько действий разом (пачка из сортировщика списков). Возвращает, сколько записей реально удалено."""
+    n = 0
+    with session() as s:
+        rows = s.exec(select(ActionLog).where(ActionLog.id.in_(ids), ActionLog.undone == False)).all()  # noqa: E712
+    for a in sorted(rows, key=lambda x: x.id, reverse=True):
+        if a.ref_table == "trash":
+            continue
+        if _undo_one(a):
+            n += 1
+    return n
+
+
 def undo_last(channel: str | None = None) -> str | None:
     """Откатывает последнее действие. Возвращает текст для пользователя или None, если отменять нечего."""
     a = last_action(channel)
     if not a:
         return None
     label = _LABEL.get(a.kind, a.kind)
-    ok = False
     if a.ref_table == "trash":
         from . import bulk
         n = bulk.restore(a.ref_id)
@@ -34,6 +46,14 @@ def undo_last(channel: str | None = None) -> str | None:
             if a2:
                 a2.undone = True; s.add(a2); s.commit()
         return f"Вернул из корзины {n} записей ({a.title}). Балансы на месте." if n else f"Корзина ({a.title}) уже пуста, сэр."
+    ok = _undo_one(a)
+    if not ok:
+        return f"Последнее действие ({label} «{a.title}») уже удалено, сэр."
+    return f"Отменил {label} «{a.title}». Как будто и не было."
+
+
+def _undo_one(a: ActionLog) -> bool:
+    """Удалить запись, на которую ссылается действие, и пометить действие отменённым. False — записи уже нет."""
     if a.ref_table == "transaction":
         ok = finance.delete_transaction(a.ref_id)   # вернёт баланс/остаток долга
     else:
@@ -44,6 +64,15 @@ def undo_last(channel: str | None = None) -> str | None:
                 if a.ref_table == "debt":
                     for r in s.exec(select(Recurring).where(Recurring.debt_id == row.id)).all():
                         s.delete(r)
+                if a.ref_table == "order":
+                    from ..db import WorkSession
+                    for t in s.exec(select(Transaction).where(Transaction.order_id == row.id)).all():
+                        t.order_id = None; s.add(t)          # оплаты остаются доходами, просто без привязки
+                    for w in s.exec(select(WorkSession).where(WorkSession.order_id == row.id)).all():
+                        w.order_id = None; s.add(w)
+                if a.ref_table == "goal":
+                    for t in s.exec(select(Transaction).where(Transaction.goal_id == row.id)).all():
+                        t.goal_id = None; s.add(t)
                 if a.ref_table == "event" and getattr(row, "google_id", None):
                     from .calendar import _gcal_remove
                     _gcal_remove(row.id, row.google_id)
@@ -55,6 +84,4 @@ def undo_last(channel: str | None = None) -> str | None:
         if a2:
             a2.undone = True
             s.add(a2); s.commit()
-    if not ok:
-        return f"Последнее действие ({label} «{a.title}») уже удалено, сэр."
-    return f"Отменил {label} «{a.title}». Как будто и не было."
+    return ok

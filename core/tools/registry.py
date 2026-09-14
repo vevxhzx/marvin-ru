@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -301,15 +302,48 @@ def add_note(text: str, tags: list[str] | None = None, _channel: str = "tg") -> 
     return f"Заметка #{n.id} сохранена."
 
 
-@tool("search_notes", "Найти заметки/ссылки/события в памяти по слову.", {"query": {"type": "string"}}, ["query"])
+@tool("edit_note", "Исправить или дополнить уже сохранённую заметку/мысль в памяти. query — 1–3 слова, по которым её найти; "
+      "text — новый полный текст (если переписать) или append — что дописать в конец. Вызывай на «исправь заметку про …», "
+      "«дополни мысль о …», «в заметке про очки поменяй …».",
+      {"query": {"type": "string"}, "text": {"type": "string"}, "append": {"type": "string"}, "title": {"type": "string"}}, ["query"])
+def edit_note(query: str, text: str | None = None, append: str | None = None, title: str | None = None, **_) -> str:
+    n = brain_notes.find_note(query)
+    if not n:
+        return f"Заметку по «{query}» не нашёл."
+    if not (text or append or title):
+        return f"Нашёл заметку #{n.id} «{(n.title or n.text)[:60]}», но не понял, что в ней менять — спроси у пользователя."
+    n = brain_notes.update_note(n.id, text=text, title=title, append=append)
+    return f"Заметка #{n.id} обновлена: «{(n.title or n.text)[:80]}»."
+
+
+@tool("search_notes", "Найти в памяти (заметки, ссылки, журнал событий) всё, что человек записывал по теме. "
+      "Вызывай на «что я говорил(а) про…», «найди», «когда я…», «напомни, что там с…». query — 1–3 ключевых слова.",
+      {"query": {"type": "string", "description": "Ключевые слова, например «дача» или «врач анализы»"}}, ["query"])
 def search_notes(query: str, **_) -> str:
-    notes = brain_notes.list_notes(10, query)
-    links = brain_notes.list_links(10, query)
-    mem = brain_notes.search_memory(query, 10)
-    out = [f"📝 {n.created_at:%d.%m} {n.text[:100]}" for n in notes]
-    out += [f"🔗 {l.created_at:%d.%m} {l.title or l.url}" for l in links]
-    out += [f"🧠 {m.created_at:%d.%m} {m.text[:100]}" for m in mem]
-    return "\n".join(out[:15]) or "Ничего не нашёл."
+    """Поиск по словам. Русская морфология: ищем по основе слова (врачу/врача → «врач»), несколько слов — объединяем."""
+    q = (query or "").strip()
+    words = [w for w in re.findall(r"[\w-]+", q) if len(w) >= 3]
+    stems = [w[:-2] if len(w) >= 6 else (w[:-1] if len(w) >= 5 else w) for w in words]   # грубая основа: без окончания
+    keys = [q] if q else []
+    keys += [k for k in stems if k.lower() != q.lower()]
+    seen: set[tuple[str, int]] = set()
+    notes, links, mem = [], [], []
+    for k in keys[:4]:
+        for n in brain_notes.list_notes(10, k):
+            if ("n", n.id) not in seen:
+                seen.add(("n", n.id)); notes.append(n)
+        for l in brain_notes.list_links(10, k):
+            if ("l", l.id) not in seen:
+                seen.add(("l", l.id)); links.append(l)
+        for m in brain_notes.search_memory(k, 10):
+            if ("m", m.id) not in seen:
+                seen.add(("m", m.id)); mem.append(m)
+        if len(notes) + len(links) + len(mem) >= 15:
+            break
+    out = [f"📝 {n.created_at:%d.%m.%Y} {(n.title + ': ') if n.title else ''}{(n.text or n.raw or '')[:160]}" for n in notes]
+    out += [f"🔗 {l.created_at:%d.%m.%Y} {l.title or l.url}" for l in links]
+    out += [f"🧠 {m.created_at:%d.%m.%Y} {m.text[:120]}" for m in mem]
+    return "\n".join(out[:15]) or "Ничего не нашёл. Попробуй другое слово."
 
 
 @tool("today_briefing", "Что сегодня: события, задачи, платежи, баланс.", {})
@@ -355,6 +389,168 @@ def find_subscriptions(**_) -> str:
     if not subs:
         return "Повторяющихся списаний, похожих на подписки, не нашёл."
     return "Похоже на подписки: " + "; ".join(f"{x['name']} {money(x['amount'])}/мес ({x['times']} раз)" for x in subs[:8])
+
+
+# ---------------- Заказы (фриланс) ----------------
+@tool("add_order", "Добавить заказ (фриланс/монтаж): название, клиент, сумма, дедлайн. Вызывай на «заказ: …», «взял заказ …», "
+      "«новый проект для …». Если человек надиктовал несколько деталей — всё в одном вызове.",
+      {"title": {"type": "string", "description": "Что делаем: «ролик для Пятёрочки», «монтаж свадьбы»"},
+       "client": {"type": "string", "description": "Имя клиента/компании, если названо"},
+       "price": {"type": "number", "description": "Сумма в рублях, если названа"},
+       "deadline": {"type": "string", "description": "Срок сдачи в ISO 8601, если назван"},
+       "notes": {"type": "string", "description": "ТЗ, детали, ссылки — как сказал человек"},
+       "estimate_h": {"type": "number", "description": "Оценка часов, если названа"}}, ["title"])
+def add_order(title: str, client: str | None = None, price: float = 0, deadline: str | None = None, notes: str | None = None,
+              estimate_h: float = 0, _channel: str = "tg") -> str:
+    from ..services import orders
+    o = orders.add_order(title, price or 0, client, _dt(deadline), notes, estimate_h or 0, source=_channel)
+    v = orders.order_view(o)
+    return (f"Заказ #{o.id} «{o.title}»" + (f" для {v['client']}" if v["client"] else "") + (f", {money(o.price)}" if o.price else ", сумма не указана")
+            + (f", дедлайн {fmt_dt(o.deadline)}" if o.deadline else ", без дедлайна") + " — добавлен.")
+
+
+@tool("person_card", "Карточка человека или клиента: его заказы, оплаты, долги, встречи, задачи и заметки — всё, что с ним связано. "
+      "Вызывай на «что по Ване», «кто такой Иванов», «что у меня с Пятёрочкой», «карточка клиента …», «напомни про Лену».",
+      {"name": {"type": "string", "description": "Имя, фамилия, ник или компания — как назвал человек"}}, ["name"])
+def person_card(name: str, **_) -> str:
+    from ..services import people
+    c = people.find_person(name)
+    if not c:
+        return f"Такого человека не знаю: «{name}». Скажите «клиент: {name}» или «человек: {name}, друг» — заведу карточку."
+    return people.card_text(people.card(c))
+
+
+@tool("add_person", "Завести человека (не клиента): друг, родственник, подрядчик — чтобы собирать всё о нём в карточку. "
+      "Вызывай на «человек: Лена, сестра», «запомни человека …», «добавь контакт …». Для клиентов по заказам — add_order с client.",
+      {"name": {"type": "string"}, "notes": {"type": "string", "description": "Кто это / чем важен"},
+       "contact": {"type": "string", "description": "Телега, телефон, почта"}, "aliases": {"type": "string", "description": "Другие имена через запятую"},
+       "birthday": {"type": "string", "description": "День рождения «12.03»"}, "tags": {"type": "string", "description": "Теги через запятую"}}, ["name"])
+def add_person(name: str, notes: str | None = None, contact: str | None = None, aliases: str | None = None,
+               birthday: str | None = None, tags: str | None = None, **_) -> str:
+    from ..services import people
+    c = people.add_person(name, "person", contact, notes, aliases, birthday, tags)
+    return f"Карточка «{c.name}» заведена. Всё, где всплывёт это имя — задачи, встречи, заметки, долги — теперь собирается в одном месте."
+
+
+@tool("list_orders", "Показать заказы: что в работе, дедлайны, кто не оплатил, часы и ставка. Вызывай на «заказы», «что по заказам», "
+      "«кто мне должен», «сколько не оплачено».", {})
+def list_orders(**_) -> str:
+    from ..services import orders
+    return orders.summary_text()
+
+
+@tool("late_payments", "Кто задерживает оплату: сданные, но не оплаченные заказы старше порога, сколько дней, как клиент обычно платит. "
+      "Вызывай на «кто задерживает», «кто тянет с оплатой», «задержки по оплатам».", {})
+def late_payments(**_) -> str:
+    from ..services import pulse
+    return pulse.late_text()
+
+
+@tool("update_order", "Изменить заказ: статус (work/review/done/paid/cancelled), сумму, дедлайн, клиента, заметку. "
+      "«сдал ролик» → status=done; «правки по …» → review; «отменили …» → cancelled.",
+      {"query": {"type": "string", "description": "Номер или название заказа / имя клиента"},
+       "status": {"type": "string"}, "price": {"type": "number"}, "deadline": {"type": "string"}, "client": {"type": "string"}, "notes": {"type": "string"}}, ["query"])
+def update_order(query: str, status: str | None = None, price: float | None = None, deadline: str | None = None,
+                 client: str | None = None, notes: str | None = None, **_) -> str:
+    from ..services import orders
+    o = orders.find_order(query)
+    if not o:
+        return f"Заказ «{query}» не нашёл."
+    fields = {}
+    if status: fields["status"] = status
+    if price is not None: fields["price"] = price
+    if deadline: fields["deadline"] = _dt(deadline)
+    if client: fields["client"] = client
+    if notes: fields["notes"] = (o.notes + "\n" if o.notes else "") + notes
+    o = orders.update_order(o.id, **fields)
+    return f"Заказ #{o.id} «{o.title}»: {orders.STATUS_LABEL[o.status]}" + (f", {money(o.price)}" if o.price else "") + (f", до {fmt_dt(o.deadline)}" if o.deadline else "") + "."
+
+
+@tool("order_payment", "Записать оплату/аванс по заказу (деньги пришли от клиента). Вызывай на «пришёл аванс 10к за ролик», "
+      "«Пятёрочка заплатила 25000», «получил оплату за …».",
+      {"query": {"type": "string", "description": "Заказ или клиент"}, "amount": {"type": "number"}, "account": {"type": "string"}}, ["query", "amount"])
+def order_payment(query: str, amount: float, account: str | None = None, _channel: str = "tg") -> str:
+    from ..services import orders
+    o = orders.find_order(query)
+    if not o:
+        return f"Заказ «{query}» не нашёл — записать как обычный доход?"
+    orders.add_payment(o.id, amount, account=account, source=_channel)
+    v = orders.order_view(orders.get_order(o.id))
+    return f"Оплата {money(amount)} по «{o.title}» записана в доходы." + (f" Осталось {money(v['left'])}." if v["left"] > 0 else " Заказ оплачен полностью ✓")
+
+
+@tool("pomodoro", "Таймер-помодоро / учёт времени по заказу. action: start (по умолчанию 25 мин), break (перерыв 5), stop, status. "
+      "Вызывай на «помодоро», «запусти таймер на ролик», «стоп таймер», «сколько я сегодня работал».",
+      {"action": {"type": "string", "description": "start / break / stop / status"}, "query": {"type": "string", "description": "Заказ, над которым работаем (для start)"},
+       "minutes": {"type": "integer"}}, ["action"])
+def pomodoro(action: str, query: str | None = None, minutes: int = 25, _channel: str = "tg") -> str:
+    from ..services import orders
+    action = (action or "status").lower()
+    if action == "stop":
+        w = orders.stop_session()
+        st = orders.timer_state()
+        return (f"Таймер остановлен. Сегодня {st['today_min']} мин фокуса, {st['today_sessions']} помодоро." if w else "Таймер и так не шёл.")
+    if action == "break":
+        st = orders.active_session()
+        w = orders.start_session(st.order_id if st else None, minutes if minutes and minutes != 25 else None, kind="break", source=_channel)
+        return f"Перерыв {w.planned_min} мин. Скажу, когда пора обратно."
+    if action == "start":
+        o = orders.find_order(query) if query else None
+        if query and not o:
+            return f"Заказ «{query}» не нашёл. Запустить таймер без заказа?"
+        w = orders.start_session(o.id if o else None, minutes if minutes and minutes != 25 else None, source=_channel)
+        return f"Помодоро {w.planned_min} мин" + (f" по «{o.title}»" if o else "") + " пошло. Сообщу, когда закончится."
+    st = orders.timer_state()
+    if st["active"]:
+        return f"Идёт {'перерыв' if st['kind'] == 'break' else 'помодоро'}" + (f" по «{st['order']}»" if st.get("order") else "") + f": осталось {st['left_sec'] // 60} мин. Сегодня {st['today_min']} мин фокуса."
+    return f"Таймер не идёт. Сегодня {st['today_min']} мин фокуса, {st['today_sessions']} помодоро."
+
+
+# ---------------- Цели-накопления и финансовые отчёты ----------------
+@tool("add_goal", "Создать цель-накопление (конверт): «подушка 300к к марту», «копим на камеру 120 тысяч».",
+      {"title": {"type": "string"}, "target": {"type": "number"}, "due": {"type": "string", "description": "К какой дате, ISO 8601"}}, ["title", "target"])
+def add_goal(title: str, target: float, due: str | None = None, _channel: str = "tg") -> str:
+    from ..services import goals
+    g = goals.add_goal(title, target, _dt(due), source=_channel)
+    v = goals.goal_view(g)
+    return f"Цель «{g.title}» {money(g.target)}" + (f" к {fmt_dt(g.due)} — это по {money(v['per_month'])} в месяц" if v["per_month"] else "") + ". Создана."
+
+
+@tool("save_to_goal", "Отложить деньги в цель/конверт: «отложил 10к в подушку», «в копилку на камеру 5000». Отрицательная сумма — взять из цели.",
+      {"query": {"type": "string"}, "amount": {"type": "number"}}, ["query", "amount"])
+def save_to_goal(query: str, amount: float, _channel: str = "tg") -> str:
+    from ..services import goals
+    g = goals.find_goal(query)
+    if not g:
+        return f"Цель «{query}» не нашёл. Есть: " + (", ".join(x["title"] for x in goals.list_goals()) or "ни одной")
+    r = goals.put_to_goal(g.id, amount, source=_channel)
+    v = r["goal"]
+    return f"«{v['title']}»: {money(v['saved'])} из {money(v['target'])} ({v['pct'] * 100:.0f}%)." + (" Цель достигнута 🎉" if r["reached"] else "")
+
+
+@tool("finance_report", "Финансовые отчёты: kind = goals (цели), buckets (50/30/20 — обязательное/хотелки/накопления), "
+      "compare (этот месяц против прошлого), runway (на сколько дней хватит денег до дохода), payments (хватает ли на ближайшие платежи).",
+      {"kind": {"type": "string"}}, ["kind"])
+def finance_report(kind: str, **_) -> str:
+    from ..services import goals
+    kind = (kind or "").lower()
+    if kind.startswith("goal") or kind.startswith("цел"):
+        return goals.goals_text()
+    if kind.startswith("bucket") or "50" in kind:
+        return goals.buckets_text()
+    if kind.startswith("comp") or "сравн" in kind:
+        return goals.month_compare_text()
+    if kind.startswith("pay") or "плат" in kind:
+        r = goals.payment_check(7)
+        if not r["payments"]:
+            return "На неделе обязательных платежей нет."
+        return (f"Платежей на 7 дней: {money(r['need'])} (" + ", ".join(f"{p['title']} {money(p['amount'])}" for p in r["payments"][:5]) + f"). На счетах {money(r['balance'])}."
+                + (f" Не хватает {money(r['short'])}." if r["short"] > 0 else " Хватает."))
+    r = goals.runway()
+    if r["runway_days"] is None:
+        return f"Свободных денег {money(r['free'])}, средних трат за месяц нет — считать нечего."
+    return (f"Свободных (после обязательных платежей) {money(r['free'])}, тратите в среднем {money(r['per_day_avg'])} в день → хватит на "
+            f"{r['runway_days']} дн., до дохода {r['days_left_to_income']} дн. " + ("Запас есть." if r["ok"] else f"Впритык не дотягиваете — держитесь в {money(r['safe_per_day'])}/день."))
 
 
 _DAYS_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]

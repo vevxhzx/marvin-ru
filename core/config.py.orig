@@ -101,7 +101,6 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "voice.pc.night_from": ("int", "Ночной режим с (час): тише и без лишних напоминаний вслух", False),
     "voice.pc.night_to": ("int", "Ночной режим до (час)", False),
     "voice.pc.filler_sec": ("str", "Через сколько секунд молчания мозга сказать «Секунду…» (0 — никогда)", False),
-    "voice.pc.tidy_downloads_days": ("int", "Ночная уборка «Загрузок» (voice.bat): файлы старше N дней — в Загрузки/Разобрано; 0 — выключено. Рабочий стол — только по команде", False),
     "voice.pc.games": ("str", "Свои игры для авто-игрового режима: имена exe через запятую (популярные знаю сам)", False),
     "finance.main_account": ("str", "Основной счёт", False),
     "persona.style": ("str", "Характер: swag (с юмором) / neutral (по делу)", False),

@@ -114,3 +114,28 @@ async def search(query: str, limit: int = 10) -> dict:
                 if l:
                     items.append({**l.model_dump(), "kind": "link", "score": round(score, 3)})
     return {"mode": "semantic", "items": items}
+
+
+def related_pairs(min_score: float = 0.62, limit: int = 200, max_items: int = 600) -> list[tuple[str, str, float]]:
+    """Пары похожих заметок/ссылок по уже посчитанным эмбеддингам (синхронно, без запросов к модели) — рёбра графа.
+    Возвращает [("note:1", "link:7", 0.71), …], у каждого узла не больше 3 соседей, чтобы граф не слипался в клубок."""
+    with session() as s:
+        embs = list(s.exec(select(Embedding).where(Embedding.model == llm.EMBED_MODEL).order_by(Embedding.id.desc()).limit(max_items)))
+    vecs = [(f"{e.ref_table}:{e.ref_id}", _vec(e.vector)) for e in embs]
+    vecs = [(k, v) for k, v in vecs if v]
+    pairs: list[tuple[float, str, str]] = []
+    for i in range(len(vecs)):
+        for j in range(i + 1, len(vecs)):
+            sc = _cos(vecs[i][1], vecs[j][1])
+            if sc >= min_score:
+                pairs.append((sc, vecs[i][0], vecs[j][0]))
+    pairs.sort(reverse=True)
+    out, per = [], {}
+    for sc, a, b in pairs:
+        if per.get(a, 0) >= 3 or per.get(b, 0) >= 3:
+            continue
+        per[a] = per.get(a, 0) + 1; per[b] = per.get(b, 0) + 1
+        out.append((a, b, sc))
+        if len(out) >= limit:
+            break
+    return out

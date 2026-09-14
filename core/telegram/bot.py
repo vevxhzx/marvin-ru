@@ -10,7 +10,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, BotCommand, Message
 
 from ..brain import agent
-from ..brain.persona import say
+from ..brain.persona import localize, say
 from ..config import cfg
 from ..tools import registry
 
@@ -63,6 +63,29 @@ async def tasks_cmd(m: Message):
     await m.answer(registry.list_tasks())
 
 
+@router.message(Command("orders"))
+async def orders_cmd(m: Message):
+    from ..services import orders
+    await m.answer(orders.summary_text())
+
+
+@router.message(Command("pomo"))
+async def pomo_cmd(m: Message):
+    """/pomo — 25 мин без заказа; /pomo ролик — по заказу; /pomo stop."""
+    arg = (m.text or "").split(maxsplit=1)[1].strip() if len((m.text or "").split(maxsplit=1)) > 1 else ""
+    if arg.lower() in ("stop", "стоп"):
+        await m.answer(registry.pomodoro("stop", _channel="tg"))
+        return
+    await m.answer(registry.pomodoro("start", query=arg or None, minutes=None, _channel="tg"),
+                   reply_markup=_kb([("⏹ Стоп", "pomo:0:stop")]))
+
+
+@router.message(Command("goals"))
+async def goals_cmd(m: Message):
+    from ..services import goals
+    await m.answer(goals.goals_text())
+
+
 @router.message(Command("events"))
 async def events_cmd(m: Message):
     await m.answer(registry.list_events(7))
@@ -92,6 +115,20 @@ async def voice_cmd(m: Message):
 async def game_cmd(m: Message):
     from core.brain import llm
     await m.answer(await llm.set_game_mode(not llm.GAME_MODE))
+
+
+@router.message(Command("app"))
+async def app_cmd(m: Message):
+    """Открыть сайт внутри Telegram (Mini App). Работает, когда задан telegram.webapp_url (см. funnel.bat)."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+    url = (getattr(cfg.telegram, "webapp_url", "") or "").strip()
+    if not url.startswith("https://"):
+        await m.answer("Приложение внутри Telegram ещё не подключено. На компьютере: <b>funnel.bat</b>, "
+                       "затем перезапуск start.bat. Проверить: ⚙ Настройки → Интеграции → Telegram. Подробно: docs/telegram-miniapp.md")
+        return
+    kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть приложение", web_app=WebAppInfo(url=url))]])
+    await m.answer("Сайт внутри Telegram — без VPN и переключений. Открывайте именно этой кнопкой (или ≡ слева от поля ввода): "
+                   "по обычной ссылке Telegram не передаёт данные для входа.", reply_markup=kb)
 
 
 @router.message(Command("diag"))
@@ -145,7 +182,7 @@ _MD_RX = _re.compile(r"(\*\*|__|`{1,3}|^#{1,6}\s+)", _re.M)
 def _to_html(text: str) -> str:
     """Ответы облачных моделей приходят в markdown с < > & — HTML-режим Telegram на этом падает.
     Экранируем всё, а простые **жирный** и `код` переводим в теги."""
-    t = _html.escape(text, quote=False)
+    t = _html.escape(localize(text), quote=False)
     t = _re.sub(r"```[a-zA-Z]*\n?(.*?)```", lambda mm: f"<pre>{mm.group(1)}</pre>", t, flags=_re.S)
     t = _re.sub(r"`([^`\n]+)`", r"<code>\1</code>", t)
     t = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t, flags=_re.S)
@@ -340,6 +377,30 @@ async def cb_reminder(cq: CallbackQuery):
             agent.on_change("chat", {"channel": "tg", "actions": ["reminder_action"]})
     except Exception as ex:
         log.warning("callback failed: %s", ex)
+        msg = f"Не получилось: {ex}"
+    await cq.answer(msg[:180])
+    try:
+        await cq.message.edit_text((cq.message.html_text or cq.message.text or "") + f"\n\n<i>{msg}</i>", reply_markup=None)
+    except Exception:
+        await cq.message.answer(msg)
+
+
+@router.callback_query(F.data.regexp(r"^pomo:\d+:(\d{1,3}|break|stop)$"))
+async def cb_pomo(cq: CallbackQuery):
+    """Кнопки под «помодоро готово»: ещё 25 / перерыв 5 / хватит."""
+    from core.services import orders
+    _, sid, act = cq.data.split(":")
+    oid = int(sid) or None
+    try:
+        if act == "stop":
+            orders.stop_session(); msg = "⏹ Таймер остановлен. Хорошая работа."
+        elif act == "break":
+            w = orders.start_session(oid, None, kind="break", source="tg"); msg = f"☕ Перерыв {w.planned_min} минут. Отойдите от монитора."
+        else:
+            w = orders.start_session(oid, int(act), source="tg"); msg = f"🍅 Ещё {w.planned_min} минут. Поехали."
+        if agent.on_change:
+            agent.on_change("timer", {})
+    except Exception as ex:
         msg = f"Не получилось: {ex}"
     await cq.answer(msg[:180])
     try:
@@ -614,6 +675,23 @@ async def build() -> tuple[Bot, Dispatcher]:
     return bot, dp
 
 
+async def _set_menu_button(bot: Bot) -> None:
+    """Кнопка-приложение слева от поля ввода (Mini App): открывает сайт прямо в Telegram.
+    Адрес берётся из telegram.webapp_url (публичный https://…ts.net из funnel.bat). Пусто — кнопка обычная."""
+    from aiogram.types import MenuButtonDefault, MenuButtonWebApp, WebAppInfo
+    url = (getattr(cfg.telegram, "webapp_url", "") or "").strip()
+    try:
+        if url.startswith("https://"):
+            await bot.set_chat_menu_button(chat_id=OWNER_ID, menu_button=MenuButtonWebApp(text="Открыть", web_app=WebAppInfo(url=url)))
+            log.info("Mini App в Telegram: %s", url)
+        else:
+            await bot.set_chat_menu_button(chat_id=OWNER_ID, menu_button=MenuButtonDefault())
+            if url:
+                log.warning("telegram.webapp_url должен начинаться с https:// — кнопка приложения не установлена")
+    except Exception as e:
+        log.warning("Не удалось установить кнопку приложения в Telegram: %s", e)
+
+
 async def check_connection(bot: Bot) -> bool:
     """Пытаемся достучаться до Telegram. False = недоступен (блокировка/нет сети)."""
     try:
@@ -626,12 +704,17 @@ async def check_connection(bot: Bot) -> bool:
             BotCommand(command="events", description="Календарь на неделю"),
             BotCommand(command="debts", description="Долги"),
             BotCommand(command="forecast", description="Прогноз кассы на месяц"),
+            BotCommand(command="orders", description="Заказы: дедлайны и кто должен"),
+            BotCommand(command="pomo", description="Помодоро 25 мин (/pomo ролик · /pomo stop)"),
+            BotCommand(command="goals", description="Цели и конверты"),
             BotCommand(command="week", description="Обзор недели: мысли и задачи"),
             BotCommand(command="report", description="Открытка-отчёт за неделю (/report 30 — месяц)"),
             BotCommand(command="voice", description="Голосовые ответы: на голосовые / всегда / никогда"),
             BotCommand(command="game", description="Игровой режим вкл/выкл (освободить видеокарту)"),
             BotCommand(command="diag", description="Диагностика мозга и облака"),
+            BotCommand(command="app", description="Открыть сайт внутри Telegram"),
         ])
+        await _set_menu_button(bot)
         return True
     except Exception as e:
         name = type(e).__name__

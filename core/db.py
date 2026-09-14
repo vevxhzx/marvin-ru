@@ -68,6 +68,7 @@ class Category(SQLModel, table=True):
     keywords: str = ""                 # через запятую, для авто-категоризации
     budget: float = 0.0                # лимит в месяц, 0 = без лимита
     custom: bool = False               # создана пользователем
+    bucket: str = ""                   # 50/30/20: need (обязательное) / want (хотелки) / save (накопления); '' — не размечена
 
 
 class Transaction(SQLModel, table=True):
@@ -82,6 +83,8 @@ class Transaction(SQLModel, table=True):
     source: str = "tg"
     import_hash: Optional[str] = Field(default=None, unique=True)  # дедупликация при импорте выписок
     debt_id: Optional[int] = Field(default=None, index=True)       # если это платёж по долгу — чтобы откат был честным
+    order_id: Optional[int] = Field(default=None, index=True)      # оплата/аванс по заказу (фриланс)
+    goal_id: Optional[int] = Field(default=None, index=True)       # перевод в конверт-накопление
 
 
 class Recurring(SQLModel, table=True):
@@ -109,6 +112,62 @@ class Debt(SQLModel, table=True):
     rate: float = 0.0                  # годовая ставка, %
     payment: float = 0.0               # ежемесячный платёж
     pay_day: int = 1                   # день месяца
+    closed: bool = False
+    created_at: datetime = Field(default_factory=now)
+
+
+# ---------- Заказы (фриланс): клиенты, заказы, рабочие сессии (помодоро), цели-накопления ----------
+class Client(SQLModel, table=True):
+    """Человек или компания: клиент по заказам либо просто «свой» (мама, Ваня). Карточка собирается из всей базы
+    по упоминаниям имени (people.py) — здесь только то, что нельзя вывести."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+    contact: Optional[str] = None      # телега / почта / телефон — одной строкой
+    notes: Optional[str] = None
+    kind: str = Field(default="client", index=True)   # client (по заказам) / person (близкие, друзья, подрядчики)
+    aliases: str = ""                  # другие имена через запятую: «Ваня, Иван Петров, @ivan»
+    birthday: Optional[str] = None     # «12.03» или «12.03.1990»
+    tags: str = ""                     # через запятую: «монтаж, друг, подрядчик»
+    created_at: datetime = Field(default_factory=now)
+
+
+class Order(SQLModel, table=True):
+    """Заказ: что монтируем, для кого, за сколько, к какому сроку и на какой стадии.
+    Оплаты — обычные транзакции (Transaction.order_id), так что доход по заказу и баланс — одна правда."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    client_id: Optional[int] = Field(default=None, index=True)
+    price: float = 0.0                 # договорённая сумма
+    status: str = Field(default="new", index=True)   # new / work / review / done / paid / cancelled
+    deadline: Optional[datetime] = Field(default=None, index=True)
+    notes: Optional[str] = None        # ТЗ, ссылки на исходники, правки
+    estimate_h: float = 0.0            # оценка часов (0 — не оценивал)
+    source: str = "web"
+    created_at: datetime = Field(default_factory=now)
+    done_at: Optional[datetime] = None
+    paid_at: Optional[datetime] = None
+
+
+class WorkSession(SQLModel, table=True):
+    """Помодоро/таймер: отрезок работы над заказом. Из них — реальные часы и ставка ₽/час."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    order_id: Optional[int] = Field(default=None, index=True)
+    kind: str = "focus"                # focus / break
+    started_at: datetime = Field(default_factory=now, index=True)
+    planned_min: int = 25
+    ended_at: Optional[datetime] = None
+    note: Optional[str] = None
+    source: str = "web"
+
+
+class Goal(SQLModel, table=True):
+    """Конверт/накопление: «подушка 300к к марту», «на камеру 120к»."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    target: float
+    saved: float = 0.0
+    due: Optional[datetime] = None
+    icon: str = "🎯"
     closed: bool = False
     created_at: datetime = Field(default_factory=now)
 
@@ -228,6 +287,10 @@ DEFAULT_CATEGORIES = [
 ]
 
 
+DEFAULT_BUCKETS = {"Еда": "need", "Транспорт": "need", "Жильё": "need", "Здоровье": "need", "Долги": "need",
+                   "Подписки": "want", "Развлечения": "want", "Одежда": "want", "Техника": "want", "Другое": "want"}
+
+
 def _migrate() -> None:
     """Добавляем новые колонки в старую базу, не теряя данные."""
     from sqlalchemy import inspect, text
@@ -235,11 +298,12 @@ def _migrate() -> None:
     wanted = {
         "note": {"title": "VARCHAR", "raw": "VARCHAR", "polished": "BOOLEAN DEFAULT 0", "image": "VARCHAR"},
         "link": {"polished": "BOOLEAN DEFAULT 0", "summary": "VARCHAR", "excerpt": "VARCHAR"},
-        "transaction": {"debt_id": "INTEGER"},
+        "transaction": {"debt_id": "INTEGER", "order_id": "INTEGER", "goal_id": "INTEGER"},
+        "category": {"budget": "FLOAT DEFAULT 0", "custom": "BOOLEAN DEFAULT 0", "bucket": "VARCHAR DEFAULT ''"},
         "event": {"repeat": "VARCHAR DEFAULT ''", "repeat_days": "VARCHAR DEFAULT ''", "repeat_until": "DATETIME",
                   "skip_dates": "VARCHAR DEFAULT ''", "reminded_for": "VARCHAR DEFAULT ''"},
         "task": {"remind_stage": "INTEGER DEFAULT 0"},
-        "category": {"budget": "FLOAT DEFAULT 0", "custom": "BOOLEAN DEFAULT 0"},
+        "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''"},
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
@@ -259,6 +323,10 @@ def init_db() -> None:
         if s.exec(select(Category)).first() is None:
             for name, kind, icon, kw in DEFAULT_CATEGORIES:
                 s.add(Category(name=name, kind=kind, icon=icon, keywords=kw))
+        # 50/30/20: стандартным категориям — корзина по умолчанию (только тем, у кого она ещё не задана)
+        for c in s.exec(select(Category).where(Category.kind == "expense")).all():
+            if not c.bucket and c.name in DEFAULT_BUCKETS:
+                c.bucket = DEFAULT_BUCKETS[c.name]; s.add(c)
         if s.exec(select(Account)).first() is None:
             main = str(getattr(getattr(cfg, "finance", None), "main_account", "") or "Основной")
             s.add(Account(name=main, kind="bank", is_main=True))

@@ -1,8 +1,8 @@
 """Редактор второго мозга: приводит заметки и ссылки к единому аккуратному виду.
 
-Работает через локальную LLM (Ollama). Оригинал пользователя всегда сохраняется в Note.raw.
-Если Ollama недоступна — заметка остаётся как есть (polished=False) и будет обработана позже
-фоновой задачей планировщика.
+Работает через локальную LLM (Ollama); в режиме brain.mode = cloud — через облако. Оригинал пользователя всегда
+сохраняется в Note.raw. Если модель недоступна — заметка остаётся как есть (polished=False) и будет обработана
+позже фоновой задачей планировщика.
 """
 from __future__ import annotations
 
@@ -40,6 +40,21 @@ page_text — это СЫРОЙ текст чужой веб-страницы, �
 Ничего кроме JSON."""
 
 
+async def _llm_json(system: str, user: str) -> dict | None:
+    """Локальная модель (json_mode) или, в режиме brain.mode=cloud, облако. None — никто не ответил."""
+    if await llm.ollama_available():
+        out = await llm.ollama_chat([{"role": "system", "content": system}, {"role": "user", "content": user}], temperature=0.2, json_mode=True)
+        return _parse(out["content"])
+    if llm.MODE == "cloud" and llm.cloud_enabled():
+        ans = await llm.cloud_chat(system + "\nОтвечай только JSON, без markdown и пояснений.", user)
+        return _parse(ans or "")
+    return None
+
+
+async def _llm_ready() -> bool:
+    return await llm.ollama_available() or (llm.MODE == "cloud" and llm.cloud_enabled())
+
+
 def _parse(text: str) -> dict | None:
     text = text.strip()
     m = re.search(r"\{.*\}", text, re.S)
@@ -62,7 +77,7 @@ def _clean_tags(tags) -> list[str]:
 
 async def polish_note(note_id: int) -> bool:
     """Обработать одну заметку. True — успешно."""
-    if not await llm.ollama_available():
+    if not await _llm_ready():
         return False
     with session() as s:
         n = s.get(Note, note_id)
@@ -70,11 +85,7 @@ async def polish_note(note_id: int) -> bool:
             return bool(n and n.polished)
         raw = n.raw or n.text
     try:
-        out = await llm.ollama_chat(
-            [{"role": "system", "content": NOTE_PROMPT}, {"role": "user", "content": raw}],
-            temperature=0.2, json_mode=True,
-        )
-        data = _parse(out["content"])
+        data = await _llm_json(NOTE_PROMPT, raw)
         if not data or not data.get("text"):
             return False
         text = str(data["text"]).strip()
@@ -100,7 +111,7 @@ async def polish_note(note_id: int) -> bool:
 
 
 async def polish_link(link_id: int) -> bool:
-    if not await llm.ollama_available():
+    if not await _llm_ready():
         return False
     with session() as s:
         l = s.get(Link, link_id)
@@ -109,11 +120,7 @@ async def polish_link(link_id: int) -> bool:
         payload = {"url": l.url, "page_title": l.title, "page_description": (l.description or "")[:300], "user_comment": l.comment or "",
                    "page_text": (l.excerpt or "")[:3500]}
     try:
-        out = await llm.ollama_chat(
-            [{"role": "system", "content": LINK_PROMPT}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
-            temperature=0.2, json_mode=True,
-        )
-        data = _parse(out["content"])
+        data = await _llm_json(LINK_PROMPT, json.dumps(payload, ensure_ascii=False))
         if not data:
             return False
         with session() as s:
@@ -142,7 +149,7 @@ async def polish_link(link_id: int) -> bool:
 
 async def polish_pending(limit: int = 10) -> int:
     """Фоновая обработка всего, что не успели (например, Ollama была выключена)."""
-    if not await llm.ollama_available():
+    if not await _llm_ready():
         return 0
     with session() as s:
         notes = [n.id for n in s.exec(select(Note).where(Note.polished == False).order_by(Note.id.desc()).limit(limit))]  # noqa: E712

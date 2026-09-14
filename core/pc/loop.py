@@ -29,10 +29,11 @@ _game_on = False
 _game_seen_at = 0.0
 
 
-def setup(api: str, data_dir: Path, games: list[str] | None = None) -> None:
-    global API, DATA_DIR, GAMES
+def setup(api: str, data_dir: Path, games: list[str] | None = None, tidy_downloads_days: int = 0) -> None:
+    global API, DATA_DIR, GAMES, TIDY_DOWNLOADS_DAYS
     API, DATA_DIR = api, data_dir
     GAMES = {g.lower() for g in (games or [])} | GAME_DEFAULT
+    TIDY_DOWNLOADS_DAYS = max(0, int(tidy_downloads_days or 0))
 
 
 def _headers() -> dict:
@@ -75,10 +76,44 @@ def heartbeat_loop(get_state, running) -> None:
                 log.info("Игра закрыта — игровой режим выключен, мозг снова в видеокарте")
         except Exception as e:
             log.debug("game watch: %s", e)
+        try:
+            nightly_tidy_check()
+        except Exception as e:
+            log.warning("ночная уборка: %s", e)
         for _ in range(20):
             if not running():
                 return
             time.sleep(1)
+
+
+# ---------------------------------------------------------------- ночная уборка «Загрузок» (voice.pc.tidy_downloads_days)
+TIDY_DOWNLOADS_DAYS = 0
+_tidy_done: str | None = None
+
+
+def nightly_tidy_check() -> None:
+    """Раз в сутки между 3 и 6 утра, если включено: старые файлы из «Загрузок» — в «Разобрано». Только Загрузки,
+    только старше N дней, с журналом — утром «отмени уборку» вернёт всё. Рабочий стол ночью не трогаем никогда."""
+    global _tidy_done
+    if not TIDY_DOWNLOADS_DAYS or not (3 <= datetime.now().hour < 6):
+        return
+    today = datetime.now().strftime("%Y-%m-%d")
+    if _tidy_done == today:
+        return
+    _tidy_done = today
+    from . import tidy
+    roots = tidy.roots_for(["downloads"])
+    if not roots:
+        return
+    plan = tidy.make_plan(roots, DATA_DIR, min_age_days=TIDY_DOWNLOADS_DAYS)
+    if not plan["total"]:
+        return
+    res = tidy.apply_plan(plan, DATA_DIR)
+    log.info("Ночная уборка Загрузок: %s", tidy.done_text(res))
+    try:
+        _post("/api/pc/result", {"text": "🌙 Ночная уборка: " + tidy.done_text(res), "channel": "system", "kind": "tidy_done"}, timeout=10)
+    except Exception as e:
+        log.debug("tidy report: %s", e)
 
 
 # ---------------------------------------------------------------- утренний доклад при первом пробуждении
@@ -134,6 +169,30 @@ def run_command(ev: dict, say) -> None:
             msg = actions.system_status()
             if channel == "voice":
                 _post("/api/pc/result", {"text": "🖥 " + msg, "channel": channel, "kind": "status"}, timeout=10)
+        elif action == "tidy":
+            from . import tidy
+            roots = tidy.roots_for([x for x in (arg or "desktop,downloads").split(",") if x])
+            plan = tidy.make_plan(roots, DATA_DIR)
+            _post("/api/pc/result", {"text": tidy.plan_text(plan), "channel": channel, "kind": "tidy_plan",
+                                     "extra": {"plan_id": plan["id"], "total": plan["total"]}}, timeout=10)
+            msg = tidy.plan_speech(plan) if channel == "voice" else ""
+        elif action == "tidy_apply":
+            from . import tidy
+            plan = tidy.load_plan(DATA_DIR, arg or None)
+            if not plan:
+                msg = "План уборки устарел — скажите «разбери рабочий стол» ещё раз."
+            else:
+                res = tidy.apply_plan(plan, DATA_DIR)
+                msg = tidy.done_text(res)
+                _post("/api/pc/result", {"text": msg, "channel": channel, "kind": "tidy_done"}, timeout=10)
+                if channel != "voice":
+                    msg = ""
+        elif action == "tidy_undo":
+            from . import tidy
+            msg = tidy.undo_text(tidy.undo_last(DATA_DIR))
+            _post("/api/pc/result", {"text": msg, "channel": channel, "kind": "tidy_undo"}, timeout=10)
+            if channel != "voice":
+                msg = ""
         elif action == "clipboard":
             txt = actions.clipboard_text()
             r = _post("/api/pc/clipboard", {"text": txt, "channel": channel}, timeout=60)

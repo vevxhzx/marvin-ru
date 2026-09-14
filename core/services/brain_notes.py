@@ -95,6 +95,29 @@ def list_notes(limit: int = 50, query: str | None = None) -> list[Note]:
         return list(s.exec(q.order_by(Note.created_at.desc()).limit(limit)))
 
 
+def update_note(nid: int, text: str | None = None, title: str | None = None, tags: list[str] | None = None,
+                append: str | None = None) -> Note | None:
+    """Править заметку: текст/заголовок/теги или дописать строку (append). Оригинал в raw не трогаем — он история.
+    Правленую руками заметку редактор больше не «причёсывает» (polished=True), чтобы не затереть правку."""
+    with session() as s:
+        n = s.get(Note, nid)
+        if not n:
+            return None
+        if append:
+            n.text = (n.text.rstrip() + "\n" + append.strip()).strip()
+        if text is not None and text.strip():
+            n.text = text.strip()
+        if title is not None:
+            n.title = title.strip() or None
+        if tags is not None:
+            n.tags = ",".join(t.strip().lstrip("#").lower() for t in tags if t.strip())
+        n.polished = True
+        s.add(n); s.commit(); s.refresh(n)
+        remember(s, "note", f"Правка мысли: {(n.title or n.text)[:100]}", "note", n.id)
+        s.commit()
+    return n   # семантический индекс пересчитается сам: index_pending сравнивает хэш текста
+
+
 def find_note(query: str) -> Note | None:
     notes = list_notes(1, query)
     return notes[0] if notes else None

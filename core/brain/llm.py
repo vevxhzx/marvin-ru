@@ -110,6 +110,11 @@ CLOUD_PROXY = (str(getattr(_cloud_cfg, "proxy", "") or "")).strip() or None
 # модель для голосовых ответов (пусто = та же). У Groq «compound» ходит в интернет и думает 3–8 с — для голоса берём обычную быструю.
 CLOUD_VOICE_MODEL = (str(getattr(_cloud_cfg, "voice_model", "") or "")).strip()
 # Готовые пресеты: адрес + бесплатная модель по умолчанию. Все — OpenAI-совместимый /chat/completions.
+# Режим cloud + инструменты у Groq: модель берём из живого списка /models (Groq часто выводит модели из оборота:
+# llama-4-scout и qwen3-32b исчезли летом 2026, llama-3.x ушли в Enterprise). Порядок — предпочтение.
+GROQ_TOOLS_PREFER = ("openai/gpt-oss-120b", "openai/gpt-oss-20b", "meta-llama/llama-4-scout-17b-16e-instruct",
+                     "qwen/qwen3-32b", "llama-3.3-70b-versatile", "llama-3.1-8b-instant")
+_GROQ_TOOLS_MODEL: str | None = None
 PROVIDERS: dict[str, dict] = {
     "openrouter": {"base_url": "https://openrouter.ai/api/v1", "model": "auto",
                    "title": "OpenRouter", "free": True, "ru_ok": True, "key_url": "https://openrouter.ai/keys"},
@@ -453,6 +458,8 @@ def reload_cloud_settings() -> str:
     _VISION_LOCAL_OK = None
     _CLOUD_RESOLVED = None
     _CLOUD_ROUTE_OK = None
+    global _GROQ_TOOLS_MODEL
+    _GROQ_TOOLS_MODEL = None
     _OR_AVOID_RUNTIME.clear()
     LAST_CLOUD_ERROR = None
     log.info("Облако перечитано: %s, модель %s, ключ %s, режим %s", cloud_title(), _cloud_model() or "по умолчанию",
@@ -582,7 +589,9 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         return ans
     if not cloud_enabled():
         return None
-    if cfg.brain.gemini.anonymize and not history_retry:  # анонимайзер общий для любого облака
+    # анонимайзер общий для любого облака. В режиме cloud он выключен: там облако и так выполняет инструменты с полными
+    # данными, а «[сумма]» вместо 700 в заметке при облачной редактуре просто портит заметку.
+    if cfg.brain.gemini.anonymize and not history_retry and MODE != "cloud":
         user_text = anonymize(user_text)
         history = [{**h, "text": anonymize(h["text"])} for h in (history or [])]
     messages = [{"role": "system", "content": system}]
@@ -644,6 +653,94 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             return await cloud_chat(system, user_text, history, _force_model=default_model)
         LAST_CLOUD_ERROR = _explain_cloud_error(e, r if r is not None and r.status_code >= 400 else None)
         log.warning("cloud error: %s", LAST_CLOUD_ERROR)
+        return None
+
+
+async def groq_tools_model(force: bool = False) -> str:
+    """Живая модель Groq для инструментов: первая из GROQ_TOOLS_PREFER, которая есть в /models. Кэш до перезапуска."""
+    global _GROQ_TOOLS_MODEL
+    if _GROQ_TOOLS_MODEL and not force:
+        return _GROQ_TOOLS_MODEL
+    ids = await list_cloud_models()
+    pick = next((m for m in GROQ_TOOLS_PREFER if m in ids), None)
+    if not pick:
+        # ничего из известного — любая чат-модель, кроме систем/классификаторов/аудио
+        chat = [i for i in ids if not any(x in i for x in ("compound", "guard", "whisper", "orpheus", "tts", "safeguard"))]
+        pick = chat[0] if chat else GROQ_TOOLS_PREFER[0]
+    _GROQ_TOOLS_MODEL = pick
+    log.info("Groq: модель для инструментов — %s", pick)
+    return pick
+
+
+async def list_cloud_models() -> list[str]:
+    """GET /models у текущего провайдера. Пустой список — не достучались (ошибка в логе, не исключение)."""
+    for name, proxy in _cloud_routes():
+        try:
+            async with _cloud_client(20, proxy) as c:
+                r = await c.get(f"{_cloud_base_url()}/models", headers={"Authorization": f"Bearer {CLOUD_KEY}"})
+                r.raise_for_status()
+                return [m.get("id", "") for m in r.json().get("data", [])]
+        except Exception as e:
+            log.debug("cloud models via %s failed: %s", name, e)
+    return []
+
+
+async def cloud_tools_chat(messages: list[dict], tools: list[dict], temperature: float = 0.2) -> dict | None:
+    """Облако с инструментами (режим brain.mode = cloud, когда локальной модели нет). Тот же формат ответа,
+    что у ollama_chat: {'content': str, 'tool_calls': [{'name','arguments'}]}. None — облако не ответило (причина
+    в LAST_CLOUD_ERROR). Анонимайзер здесь НЕ применяется: в этом режиме пользователь осознанно отдал данные провайдеру
+    (иначе инструменты бесполезны — «[сумма]» не запишешь). Gemini этот путь не поддерживает — только OpenAI-совместимые."""
+    global LAST_CLOUD_ERROR
+    if not cloud_enabled() or not CLOUD_PROVIDER or CLOUD_PROVIDER == "gemini":
+        return None
+    headers = {"Authorization": f"Bearer {CLOUD_KEY}", "Content-Type": "application/json"}
+    if CLOUD_PROVIDER == "openrouter":
+        headers["HTTP-Referer"] = "https://github.com/local-assistant"; headers["X-Title"] = "Local Assistant"
+    model = await resolve_cloud_model()
+    if CLOUD_PROVIDER == "groq" and (not CLOUD_MODEL or "compound" in model):
+        model = await groq_tools_model()   # compound свои tools не принимает; явная brain.cloud.model — уважается
+    msgs = []
+    for m in messages:
+        mm = {"role": m["role"], "content": m.get("content") or ""}
+        if m.get("tool_calls"):
+            mm["tool_calls"] = [{"id": f"call_{i}", "type": "function",
+                                 "function": {"name": tc["function"]["name"], "arguments": json.dumps(tc["function"].get("arguments") or {}, ensure_ascii=False)}}
+                                for i, tc in enumerate(m["tool_calls"])]
+            mm["content"] = mm["content"] or None
+        msgs.append(mm)
+    # ответы инструментов: OpenAI-формат требует tool_call_id — сопоставляем по порядку с последним assistant-сообщением
+    pending: list[str] = []
+    for mm in msgs:
+        if mm["role"] == "assistant" and mm.get("tool_calls"):
+            pending = [tc["id"] for tc in mm["tool_calls"]]
+        elif mm["role"] == "tool":
+            mm["tool_call_id"] = pending.pop(0) if pending else "call_0"
+    body = {"model": model, "messages": msgs, "tools": tools, "tool_choice": "auto", "temperature": temperature,
+            "max_tokens": 160 if short_mode.get() else 700}
+    r = None
+    try:
+        r = await _cloud_post("/chat/completions", body, headers, timeout=60)
+        if r.status_code == 404 and CLOUD_PROVIDER == "groq" and body["model"] == _GROQ_TOOLS_MODEL:
+            # модель вывели из оборота прямо сейчас — перечитать список и повторить один раз
+            body["model"] = await groq_tools_model(force=True)
+            r = await _cloud_post("/chat/completions", body, headers, timeout=60)
+        r.raise_for_status()
+        msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+        calls = []
+        for tc in msg.get("tool_calls") or []:
+            f = tc.get("function") or {}
+            args = f.get("arguments") or {}
+            if isinstance(args, str):
+                try:
+                    args = json.loads(args)
+                except json.JSONDecodeError:
+                    args = {}
+            calls.append({"name": f.get("name"), "arguments": args})
+        LAST_CLOUD_ERROR = None
+        return {"content": strip_think(msg.get("content") or ""), "tool_calls": calls}
+    except Exception as e:
+        LAST_CLOUD_ERROR = _explain_cloud_error(e, r if r is not None and r.status_code >= 400 else None)
+        log.warning("cloud tools error: %s", LAST_CLOUD_ERROR)
         return None
 
 

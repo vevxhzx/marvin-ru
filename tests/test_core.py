@@ -214,8 +214,8 @@ def test_recurring_and_edit_from_chat():
     assert "add_event" in r.actions and "вт, чт" in r.text
     ev = calendar.find_event("йога")
     assert ev.repeat == "weekly" and ev.repeat_days == "1,3"
-    # в списке на 2 недели — 4 вхождения
-    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    # в списке на 2 недели — ровно 4 вхождения (считаем с завтрашней полуночи: сегодняшняя 7:00 могла уже пройти)
+    start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
     occ = [e for e in calendar.list_events(start, start + timedelta(days=14), limit=500) if e.title == "Йога"]
     assert len(occ) == 4 and all(e.start.weekday() in (1, 3) for e in occ)
     r = run("перенеси йогу на 8")
@@ -575,3 +575,59 @@ def test_analysis_request_not_recorded():
     # короткие команды с двумя суммами по-прежнему работают шаблоном
     assert "add_debt" in agent.rules("долг Сберу 120к плачу 8к 25-го", "test").actions
     assert agent.rules("сдача квартиры завтра в 10", "test") is None or "add_event" in agent.rules("сдача квартиры завтра в 10", "test").actions
+
+
+def test_cards_render_and_evening_text_short(tmp_path):
+    """Открытки собираются на любых данных (пустая база, длинные заголовки, большие суммы) и не падают;
+    вечерний текст — короткий (≤ 5 строк)."""
+    from datetime import datetime, timedelta
+    from core.services import cards, calendar, finance, tasks
+    tasks.add_task("Очень длинное название задачи, которое точно не влезет в одну строку открытки и должно обрезаться многоточием", datetime.now().replace(hour=23), source="test")
+    calendar.add_event("Созвон с очень длинным названием, чтобы проверить обрезку строки в открытке", datetime.now() + timedelta(days=1), 60)
+    finance.add_transaction(123456789, "income", "Зарплата", "тест", None, source="test")
+    for fn, name in ((cards.morning_card, "m.png"), (cards.evening_card, "e.png"), (lambda p: cards.report_card(7, p), "r.png")):
+        out = fn(tmp_path / name)
+        assert out and out.exists() and out.stat().st_size > 1000
+        from PIL import Image
+        im = Image.open(out)
+        assert im.width == cards.W and 400 < im.height < 2600
+    txt = cards.evening_text()
+    assert 1 <= len(txt.splitlines()) <= 5
+    assert "Вечер" in txt
+
+
+def test_batch_sorter_splits_and_undoes(monkeypatch):
+    """Список дел в одном сообщении → нейронка раскладывает по типам, каждая запись — своя; «отмени» откатывает пачку."""
+    from core.brain import agent, llm, sorter
+    from core.services import brain_notes, calendar, tasks
+
+    text = "Задачи на день: доделать матрицу, купить очки, в 15:00 врач, мысль — попробовать рисовать"
+    assert sorter.looks_like_batch(text)
+    assert not sorter.looks_like_batch("потратил 700 на такси")
+    assert not sorter.looks_like_batch("запомни: очки на тумбочке, ключи в прихожей, паспорт в комоде")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    async def fake_items(_text):
+        return [{"kind": "task", "title": "Доделать матрицу", "when": today, "priority": 2},
+                {"kind": "task", "title": "купить очки", "when": today},
+                {"kind": "event", "title": "Врач", "when": f"{today}T15:00"},
+                {"kind": "note", "title": "Попробовать рисовать"}]
+
+    async def no_ollama(force=False):
+        return False
+    monkeypatch.setattr(sorter, "_ask_llm", fake_items)
+    monkeypatch.setattr(llm, "ollama_available", no_ollama)
+    monkeypatch.setattr(llm, "MODE", "cloud")
+
+    ch = "test-batch"
+    r = asyncio.run(agent.handle(text, ch))
+    assert "4 записи" in r.text and "Задачи (2)" in r.text and "календарь (1)" in r.text and "память (1)" in r.text
+    assert sorted(t.title for t in tasks.list_tasks()) == ["Доделать матрицу", "Купить очки"]
+    assert all(t.due and t.due.hour == 23 for t in tasks.list_tasks())   # дедлайн «сегодня» = конец дня, не 00:00
+    assert [e.title for e in calendar.list_events(datetime.now().replace(hour=0, minute=0), datetime.now().replace(hour=23, minute=59))] == ["Врач"]
+    assert brain_notes.list_notes(10)[0].text == "Попробовать рисовать"
+
+    r = asyncio.run(agent.handle("отмени", ch))
+    assert "всю пачку" in r.text and "4" in r.text
+    assert not tasks.list_tasks() and not brain_notes.list_notes(10)

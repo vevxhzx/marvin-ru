@@ -200,9 +200,6 @@ def rules(text: str, channel: str) -> Reply | None:
     low = t.lower()
     if FIN_TECH_RX.match(t):   # «хватит ли на платежи» — готовый отчёт, а не анализ моделью
         return _orders_rules(t, low, channel)
-    if pc.TIDY_RX.match(t) or pc.TIDY_UNDO_RX.match(t):   # «разбери рабочий стол» — уборка на ПК, а не «разбери ситуацию»
-        cmd = pc.parse(t)
-        return Reply(pc.dispatch(cmd, channel), [f"pc_{cmd.action}"])
     if _is_analysis(t) or _too_long_for_rules(t):
         # только быстрые отчёты/откат/явные префиксы («мозг:», «задача:») — остальное решает модель
         m_note = NOTE_RX.match(t)
@@ -499,7 +496,6 @@ POMO_STOP_RX = re.compile(r"^\s*(?:стоп|останови|выключи|хв
 POMO_BREAK_RX = re.compile(r"^\s*(?:перерыв|пауза|отдых)\s*(?:на\s+)?(\d{1,2})?\s*(?:мин\w*)?\s*[.!]?\s*$", re.I)
 POMO_Q_RX = re.compile(r"^\s*(?:сколько\s+(?:я\s+)?(?:сегодня\s+)?(?:работал\w*|наработал\w*|отработал\w*|фокус\w*)|(?:статус\s+)?таймер\??|помодоро\s+статус|сколько\s+осталось\s+(?:таймер\w*|помодоро))\W*$", re.I)
 ORDER_RX = re.compile(r"^\s*(?:новый\s+)?(?:заказ|проект|взял\w*\s+(?:заказ|проект|в\s+работу)|монтаж)\s*[:\-—]\s*(.+)$", re.I | re.S)
-LATE_Q_RX = re.compile(r"^\s*(?:кто\s+(?:задерживает|тянет|затягивает)(?:\s+(?:с\s+)?оплат(?:у|ы|ой|ами)?)?|задержки\s+(?:по\s+)?оплат\w*|просроченные\s+оплаты|кто\s+должен\s+давно)\W*$", re.I)
 ORDERS_Q_RX = re.compile(r"^\s*(?:мои\s+)?(?:заказы|проекты|что\s+по\s+заказам|кто\s+(?:мне\s+)?(?:должен|не\s+заплатил)|сколько\s+(?:мне\s+)?не\s+оплачено|дедлайны)\W*$", re.I)
 GOAL_RX = re.compile(r"^\s*(?:цель|копим|коплю|накопить|конверт)\s*(?:на)?\s*[:\-—]?\s*(.+)$", re.I | re.S)
 SAVE_RX = re.compile(r"^\s*(отложил\w*|положил\w*\s+в\s+копилку|в\s+копилку|перевёл\s+в\s+копилку|перевел\s+в\s+копилку|взял\w*\s+из|снял\w*\s+с|достал\w*\s+из)\s+(.+)$", re.I)
@@ -524,58 +520,9 @@ def _month_target(text: str):
     return datetime(year, mon, 1, 23, 59), (text[:m.start()] + " " + text[m.end():]).strip()
 
 
-PERSON_Q_RX = re.compile(r"^\s*(?:что\s+(?:по|у\s+меня\s+с|там\s+с|с)|кто\s+такой|кто\s+такая|кто\s+это|карточк[аи]\s+(?:клиента|человека)?|досье\s+(?:на)?|напомни\s+(?:мне\s+)?(?:про|кто\s+такой))\s+(?:по\s+)?([А-ЯЁA-Z@][\w@\-]*(?:\s+[А-ЯЁA-Z][\w\-]*)?)\s*[?.!]*\s*$", re.U)
-PERSON_ADD_RX = re.compile(r"^\s*(?:человек|контакт|персона|клиент)\s*[:\-—]\s*(.+)$", re.I)
-
-
-def _people_rules(t: str, channel: str) -> Reply | None:
-    """«что по Ване», «кто такой Иванов», «человек: Лена, сестра» — без модели."""
-    from ..services import people
-    m = PERSON_Q_RX.match(t)
-    if m:
-        c = people.find_person(m.group(1))
-        if c:
-            return Reply(people.card_text(people.card(c)), ["person_card"])
-        return None   # неизвестное имя — пусть решает модель/память
-    m = PERSON_ADD_RX.match(t)
-    if m:
-        body = m.group(1).strip()
-        kind = "client" if t.lower().lstrip().startswith("клиент") else "person"
-        name, _, rest = body.partition(",")
-        name = name.strip(" «»\"'")
-        if not name or len(name) > 60:
-            return None
-        c = people.add_person(name, kind, notes=rest.strip() or None)
-        return Reply(f"{'Клиент' if kind == 'client' else 'Карточка'} «{c.name}» — есть. Всё, где всплывёт это имя, теперь собирается в одном месте — спросите «что по …» или «кто такой …».", ["add_person"])
-    return None
-
-
-def people_hint(text: str, reply_text: str) -> str | None:
-    """Триггер: в реплике всплыл известный человек → одна строка контекста (неоплата, долг, встреча). Не повторяем то, что уже в ответе."""
-    from ..services import people
-    try:
-        found = people.people_in_text(text)
-    except Exception:
-        return None
-    lines = []
-    for c in found[:2]:
-        if c.name.lower() in (reply_text or "").lower() and ("👤" in (reply_text or "")):
-            continue
-        h = people.hint_once(c)
-        if h:
-            lines.append(h)
-    return "\n".join(lines) if lines else None
-
-
 def _orders_rules(t: str, low: str, channel: str) -> Reply | None:
     """Заказы, помодоро, цели и фин-отчёты без модели — мгновенно."""
     from ..services import goals, orders
-    r = _people_rules(t, channel)
-    if r:
-        return r
-    if LATE_Q_RX.match(t):
-        from ..services import pulse
-        return Reply(pulse.late_text(), ["late_payments"])
     if ORDERS_Q_RX.match(t):
         return Reply(orders.summary_text(), ["list_orders"])
     if GOALS_Q_RX.match(t):
@@ -870,9 +817,6 @@ def _resolve_confirm(text: str, channel: str) -> Reply | None:
         if "pc" in d:
             cmd = pc.PcCommand("power", d["pc"], say="Выключаю компьютер через 30 секунд. «Отмена выключения» — если передумали." if d["pc"] == "shutdown" else "Перезагружаю через 30 секунд.")
             return Reply(pc.dispatch(cmd, channel), ["pc_power"], "rules")
-        if "tidy" in d:
-            cmd = pc.PcCommand("tidy_apply", d["tidy"], say="Убираю. Отчёт — через пару секунд.")
-            return Reply(pc.dispatch(cmd, channel), ["pc_tidy"], "rules")
         res = registry.run_tool(d["name"], d["args"], channel)
         return Reply(res, [d["name"]], "rules")
     if NO_RX.match(text):
@@ -1182,7 +1126,6 @@ def _mark(r: Reply) -> Reply:
 
 # хук «что-то изменилось» — его ставит API, чтобы сайт обновлялся после Telegram/голоса
 on_change = None  # Callable[[str, dict], None] | None
-notify = None     # async (text, buttons=None) — сообщение владельцу в Telegram (ставит run.py); None — без Telegram
 
 
 def _changed(channel: str, actions: list[str]) -> None:
@@ -1383,12 +1326,6 @@ async def _handle(text: str, channel: str) -> Reply:
             r = Reply("Локальный мозг (Ollama) не запущен, а облако выключено. Без него я понимаю команды: «потратил 700 на такси», "
                       "«встреча в среду в 15:00», «что завтра», «сколько потратил на еду за неделю», «заплатил Ване 2000», "
                       "«задача: …», «мысль: …» — а вот свободный разговор подождёт, сэр.", [], "none")
-    # триггер «карточки людей»: в реплике всплыл известный человек → строка контекста (неоплата, долг, встреча).
-    # Не для голоса (лишние слова) и не для ответов, где карточка уже показана.
-    if r.via != "none" and not channel.endswith("voice") and "person_card" not in r.actions and "add_person" not in r.actions:
-        hint = people_hint(text, r.text)
-        if hint:
-            r.text = r.text.rstrip() + "\n\n" + hint
     _log_chat("assistant", r.text, channel)
     _changed(channel, r.actions)
     return _mark(r)

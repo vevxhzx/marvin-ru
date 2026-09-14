@@ -22,19 +22,43 @@ Notifier = Callable[[str], Awaitable[None]]
 
 
 def morning_digest_text() -> str:
+    """Короткий утренний текст: подпись к картинке (и запасной вариант, если картинка не собралась)."""
     d = datetime.now()
     wd = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"][d.weekday()]
-    lines = [f"☀️ Доброе утро, сэр. {wd.capitalize()}, {d:%d.%m}."]
+    addr = (getattr(getattr(cfg, "owner", None), "name", None) or "сэр").strip().lower()
+    lines = [f"☀️ Доброе утро, {addr}. {wd.capitalize()}, {d:%d.%m}."]
     evs = calendar.events_today()
-    lines.append("📅 " + ("\n".join(f"{e.start:%H:%M} — {e.title}" for e in evs) if evs else "Встреч нет. Подозрительно спокойно."))
-    ts = tasks.list_tasks(limit=5)
+    if evs:
+        first = evs[0]
+        more = f" и ещё {len(evs) - 1}" if len(evs) > 1 else ""
+        lines.append(f"📅 {first.start:%H:%M} — {first.title}{more}.")
+    else:
+        lines.append("📅 Встреч нет. Подозрительно спокойно.")
+    ts = tasks.list_tasks(limit=50)
     if ts:
-        lines.append("✅ Задачи: " + "; ".join(t.title for t in ts))
+        today = [t for t in ts if t.due and t.due.date() <= d.date()]
+        lines.append(f"✅ Задач: {len(ts)}" + (f", с дедлайном сегодня — {len(today)}." if today else "."))
     pays = finance.upcoming_payments(3)
     if pays:
-        lines.append("💳 Скоро платежи: " + "; ".join(f"{p.title} {money(p.amount)} ({p.next_date:%d.%m})" for p in pays))
+        lines.append(f"💳 Платежей на днях: {len(pays)} на {money(sum(p.amount for p in pays))}.")
+    try:
+        from . import orders
+        for n in orders.deadline_nudges()[:3]:
+            lines.append(n)
+        from . import pulse
+        lines += pulse.late_lines(2)
+        from . import people
+        for pt in people.people_today()[:2]:
+            if pt.get("hint"):
+                lines.append(pt["hint"])
+    except Exception as e:  # pragma: no cover
+        log.debug("orders nudges: %s", e)
     s = finance.summary(1)
-    lines.append(f"💰 Баланс: {money(s['total_balance'])}")
+    safe = s.get("safe") or {}
+    tail = f"💰 Баланс {money(s['total_balance'])}"
+    if safe.get("per_day") is not None:
+        tail += f" · можно тратить {money(safe['per_day'])} в день"
+    lines.append(tail + ".")
     return "\n".join(lines)
 
 
@@ -290,25 +314,64 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             log.warning("self-check failed: %s", e)
 
     async def evening_review():
-        """21:00 — незакрытые дела с дедлайном сегодня/просроченные: одно сообщение, кнопки «сделал / завтра» под каждым.
-        Не чаще раза в день (переживает перезапуск), не шлём, если список пуст."""
+        """21:00 — итоги дня: короткая карточка (закрыто / потрачено / завтра) + под ней незакрытые дела с дедлайном,
+        кнопки «сделал / завтра» под каждым. Не чаще раза в день (переживает перезапуск).
+        Если день пустой (ничего не закрыто, не потрачено, дедлайнов нет) — молчим."""
+        from . import cards
         key = f"evening_review:{datetime.now():%Y-%m-%d}"
         if get_setting(key):
             return
-        due = tasks.evening_review()
-        if not due:
+        if _quiet_now():
+            return
+        data = cards.evening_data()
+        due = data["due"]
+        if not due and not data["done"] and not data["spent"] and not data["earned"]:
             return
         set_setting(key, "1")
-        n = len(due)
-        head = f"🌙 Вечер, сэр. {'Осталась' if n == 1 else 'Остались'} {n} {'задача' if n == 1 else 'задачи' if n < 5 else 'задач'} с дедлайном:"
+        head = cards.evening_text(data)
         ping("reminder", text=head, id=key)
-        await _notify(head)
+        path = await asyncio.to_thread(cards.evening_card, None, data)
+        if not await _photo(path, head):
+            await _notify(head)
+        n = len(due)
         for t in due[:5]:
             when = "сегодня" if t.due.date() == datetime.now().date() else f"было {t.due:%d.%m}"
             await _notify(f"• «{t.title}» — {when}", [("✅ Сделал", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow")])
         if n > 5:
             await _notify(f"…и ещё {n - 5}. Полный список — «мои задачи».")
 
+    async def timer_tick():
+        """Помодоро истёк → одно сообщение всем каналам (сайт — тост, TG — кнопки, голос — озвучка через kind=reminder)."""
+        from . import orders
+        ev = orders.due_timer_ping()
+        if not ev:
+            return
+        st = ev.get("settings") or {}
+        if st.get("voice", True):
+            ping("reminder", text="🍅 " + ev["text"], id=f"timer-{datetime.now():%Y%m%d%H%M%S}")
+        ping("timer", done=ev.get("session_kind"), text=ev["text"], sound=st.get("sound", "bell"), volume=st.get("volume", 0.6), auto_break=ev.get("auto_break", False))
+        oid = ev.get("order_id") or 0
+        focus = st.get("focus", 25)
+        if ev.get("session_kind") == "break":
+            btns = [(f"▶ Ещё {focus}", f"pomo:{oid}:{focus}"), ("⏹ Хватит", "pomo:0:stop")]
+        elif ev.get("auto_break"):
+            btns = [(f"▶ Без перерыва, ещё {focus}", f"pomo:{oid}:{focus}"), ("⏹ Хватит", "pomo:0:stop")]
+        else:
+            btns = [(f"▶ Ещё {focus}", f"pomo:{oid}:{focus}"), (f"☕ Перерыв {ev.get('break_min', 5)}", f"pomo:{oid}:break"), ("⏹ Хватит", "pomo:0:stop")]
+        await _notify("🍅 " + ev["text"], btns, urgent=True)
+
+    async def payment_check():
+        from . import goals
+        try:
+            text = goals.payment_alert()
+        except Exception as e:  # pragma: no cover
+            log.warning("payment check failed: %s", e); return
+        if text:
+            ping("reminder", text=text, id=f"payshort-{datetime.now():%Y%m%d}")
+            await _notify(text)
+
+    sch.add_job(timer_tick, "interval", seconds=20, id="timer_tick", next_run_time=_soon(20))
+    sch.add_job(payment_check, CronTrigger(hour=10, minute=30), id="payment_check")
     sch.add_job(evening_review, CronTrigger(hour=21, minute=0), id="evening_review")
     sch.add_job(evening_budget, CronTrigger(hour=21, minute=2), id="evening_budget")
     sch.add_job(weekly, CronTrigger(day_of_week="sun", hour=19, minute=0), id="weekly_digest")

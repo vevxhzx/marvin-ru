@@ -8,12 +8,15 @@ import pytest  # noqa: E402
 from tests.test_core import fresh_db  # noqa: E402,F401  (autouse-фикстура)
 
 
-def _client(remote: bool):
-    """TestClient с адресом «удалённого» клиента: starlette подставляет host='testclient', а нам нужен не-loopback."""
+def _client(remote: bool, https: bool = False):
+    """TestClient с адресом «удалённого» клиента: starlette подставляет host='testclient', а нам нужен не-loopback.
+    https=True — сайт открыт по https (как через Funnel): иначе httpx не отправит Secure-cookie."""
     from fastapi.testclient import TestClient
     from core.api.app import app
-    c = TestClient(app, client=("192.168.1.50", 5555) if remote else ("127.0.0.1", 5555))
+    c = TestClient(app, client=("192.168.1.50", 5555) if remote else ("127.0.0.1", 5555),
+                   base_url="https://testserver" if https else "http://testserver")
     return c
+
 
 
 def test_api_open_from_localhost():
@@ -436,3 +439,227 @@ def test_history_skips_stale_and_error_messages():
     texts = [x["text"] for x in h]
     assert "свежее про ноутбук" in texts and "старое про отпуск" not in texts
     assert not any(t.startswith("Что-то пошло не так") for t in texts)
+
+
+# ---------------------------------------------------------------- Telegram Mini App / обратный прокси (Funnel)
+def _init_data(bot_token: str, user: dict, auth_date: int, tamper: bool = False) -> str:
+    """Собираем initData так же, как это делает Telegram (HMAC-SHA256, ключ HMAC('WebAppData', token))."""
+    import hashlib
+    import hmac
+    import json
+    from urllib.parse import urlencode
+    fields = {"auth_date": str(auth_date), "query_id": "AAH", "user": json.dumps(user, separators=(",", ":"))}
+    check = "\n".join(f"{k}={v}" for k, v in sorted(fields.items()))
+    key = hmac.new(b"WebAppData", bot_token.encode(), hashlib.sha256).digest()
+    h = hmac.new(key, check.encode(), hashlib.sha256).hexdigest()
+    if tamper:
+        fields["user"] = json.dumps({**user, "id": 999}, separators=(",", ":"))
+    return urlencode({**fields, "hash": h})
+
+
+@pytest.fixture
+def tg_cfg(tmp_path, monkeypatch):
+    from core.api import auth, tg_auth
+    monkeypatch.setattr(tg_auth.cfg.telegram, "token", "123456:TESTTOKEN", raising=False)
+    monkeypatch.setattr(tg_auth.cfg.telegram, "owner_id", 4242, raising=False)
+    monkeypatch.setattr(tg_auth, "SECRET_FILE", tmp_path / "secret")
+    monkeypatch.setattr(tg_auth, "_SECRET", None)
+    monkeypatch.setattr(auth, "TOKEN_FILE", tmp_path / "tok")
+    monkeypatch.setattr(auth, "_TOKEN", None)
+    tg_auth.reset_limits()
+    return tg_auth
+
+
+def test_proxied_loopback_is_not_local(tg_cfg):
+    """Через Tailscale Funnel запросы приходят с 127.0.0.1 с X-Forwarded-*: это внешний клиент, без ключа — 401,
+    а мастер и ссылки с ключом — 403 даже с ключом."""
+    from core.api import auth
+    c = _client(remote=False)
+    fwd = {"X-Forwarded-For": "203.0.113.7", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "pc.tail1.ts.net"}
+    assert c.get("/api/tasks").status_code == 200                      # реально с ПК — можно
+    assert c.get("/api/tasks", headers=fwd).status_code == 401         # через прокси — нет
+    assert c.get("/api/health", headers=fwd).status_code == 200        # публичное — да
+    assert c.get("/", headers=fwd).status_code in (200, 404)           # сам сайт без данных — да
+    tok = {"X-Auth-Token": auth.token(), **fwd}
+    assert c.get("/api/tasks", headers=tok).status_code == 200         # с ключом — можно
+    assert c.get("/api/phone", headers=tok).status_code == 403         # но мастер-ключи/QR — только с ПК
+    assert c.get("/api/setup/state", headers=tok).status_code == 403
+    assert c.post("/api/phone/rotate", headers=tok).status_code == 403
+
+
+def test_tg_login_owner_gets_session(tg_cfg):
+    import time
+    c = _client(remote=False, https=True)
+    fwd = {"X-Forwarded-For": "203.0.113.7", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "pc.tail1.ts.net"}
+    assert c.get("/api/tasks", headers=fwd).status_code == 401
+    init = _init_data("123456:TESTTOKEN", {"id": 4242, "first_name": "Босс"}, int(time.time()))
+    r = c.post("/api/tg/login", json={"init_data": init}, headers=fwd)
+    assert r.status_code == 200 and r.json()["ok"] and r.json()["name"] == "Босс"
+    ck = r.headers["set-cookie"].lower()
+    assert "assistant_tg=" in ck and "httponly" in ck and "secure" in ck and "samesite=none" in ck
+    assert c.get("/api/tasks", headers=fwd).status_code == 200        # дальше по cookie
+    assert c.get("/api/phone", headers=fwd).status_code == 403        # но не мастер-ключ
+    # сессия — не мастер-ключ: ротация ключа гасит и её
+    from core.api import auth
+    auth.rotate()
+    assert c.get("/api/tasks", headers=fwd).status_code == 401
+
+
+def test_tg_login_rejects_foreign_tampered_stale(tg_cfg):
+    import time
+    c = _client(remote=True)
+    now = int(time.time())
+    def login(init):
+        return c.post("/api/tg/login", json={"init_data": init})
+    assert login(_init_data("123456:TESTTOKEN", {"id": 1, "first_name": "Чужой"}, now)).status_code == 403
+    assert login(_init_data("123456:TESTTOKEN", {"id": 4242}, now, tamper=True)).status_code == 403
+    assert login(_init_data("123456:OTHER", {"id": 4242}, now)).status_code == 403           # подпись другим токеном
+    assert login(_init_data("123456:TESTTOKEN", {"id": 4242}, now - 3600)).status_code == 403  # старше 10 минут
+    assert login("").status_code in (403, 422)
+    assert login("user=%7B%22id%22%3A4242%7D&auth_date=1&hash=zz").status_code == 403
+    assert c.get("/api/tasks").status_code == 401  # ничего из этого сессии не дало
+
+
+def test_tg_login_rate_limited(tg_cfg):
+    import time
+    c = _client(remote=True)
+    bad = _init_data("123456:OTHER", {"id": 4242}, int(time.time()))
+    good = _init_data("123456:TESTTOKEN", {"id": 4242}, int(time.time()))
+    for _ in range(tg_cfg.TG_LOGIN_BURST):
+        assert c.post("/api/tg/login", json={"init_data": bad}).status_code == 403
+    r = c.post("/api/tg/login", json={"init_data": good})
+    assert r.status_code == 403 and "попыток" in r.json()["detail"]
+    tg_cfg.reset_limits()
+    assert c.post("/api/tg/login", json={"init_data": good}).status_code == 200
+
+
+def test_tg_session_token_properties(tg_cfg):
+    import time
+    t = tg_cfg.issue_session(4242)
+    assert tg_cfg.session_ok(t)
+    assert not tg_cfg.session_ok(t[:-1] + ("0" if t[-1] != "0" else "1"))                  # подпись
+    assert not tg_cfg.session_ok(tg_cfg.issue_session(1))                                    # не владелец
+    assert not tg_cfg.session_ok(tg_cfg.issue_session(4242, now=time.time() - 31 * 86400))  # истекла
+    assert not tg_cfg.session_ok(None) and not tg_cfg.session_ok("a.b") and not tg_cfg.session_ok("x" * 500)
+    assert "123456" not in t and "TESTTOKEN" not in t                                        # секретов внутри нет
+
+
+def test_origin_check_accepts_forwarded_host(tg_cfg):
+    """Через Funnel Host может быть внутренним, а Origin — публичным ts.net: CSRF-проверка учитывает X-Forwarded-Host."""
+    from core.api import auth
+    c = _client(remote=False)
+    h = {"X-Forwarded-For": "203.0.113.7", "X-Forwarded-Proto": "https", "X-Forwarded-Host": "pc.tail1.ts.net",
+         "Origin": "https://pc.tail1.ts.net", "X-Auth-Token": auth.token()}
+    assert c.post("/api/tg/logout", headers=h).status_code == 200
+    assert c.post("/api/tg/logout", headers={**h, "Origin": "https://evil.example"}).status_code == 403
+
+
+# ---------------------------------------------------------------- режим cloud без Ollama: инструменты через облако
+def test_cloud_mode_runs_tools_via_cloud(monkeypatch):
+    """brain.mode = cloud, Ollama нет: «потратил 700 на такси» через LLM-путь должно реально записаться,
+    а не упереться в «локальный мозг не запущен»."""
+    from core.brain import agent, llm
+    from core.services import finance
+    seen = {"tools": None, "n": 0}
+
+    async def fake_cloud_tools(messages, tools, temperature=0.2):
+        seen["n"] += 1
+        seen["tools"] = tools
+        if seen["n"] == 1:
+            return {"content": "", "tool_calls": [{"name": "add_expense", "arguments": {"amount": 700, "note": "такси"}}]}
+        return {"content": "Минус 700 на такси, записал.", "tool_calls": []}
+
+    async def _down(*a, **k):
+        return False
+
+    monkeypatch.setattr(llm, "MODE", "cloud")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "groq")
+    monkeypatch.setattr(llm, "cloud_enabled", lambda: True)
+    monkeypatch.setattr(llm, "ollama_available", _down)
+    monkeypatch.setattr(llm, "cloud_tools_chat", fake_cloud_tools)
+    monkeypatch.setattr(agent, "_history", lambda *a, **k: [])
+    r = asyncio.run(agent.via_ollama("на такси ушло семьсот", "web"))
+    assert r is not None and r.actions == ["add_expense"] and r.via == "gemini"
+    assert finance.summary(1)["spent"] == 700
+    names = [t["function"]["name"] for t in seen["tools"]]
+    assert "add_expense" in names and "ask_cloud" not in names   # облаку не даём инструмент «спроси облако»
+
+
+def test_cloud_mode_gemini_provider_has_no_tools(monkeypatch):
+    """Gemini не ходит по OpenAI-формату tools — в режиме cloud с Gemini поведение прежнее (None → команды-шаблоны)."""
+    from core.brain import agent, llm
+
+    async def _down(*a, **k):
+        return False
+    monkeypatch.setattr(llm, "MODE", "cloud")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "gemini")
+    monkeypatch.setattr(llm, "cloud_enabled", lambda: True)
+    monkeypatch.setattr(llm, "ollama_available", _down)
+    assert asyncio.run(agent.via_ollama("на такси ушло семьсот", "web")) is None
+
+
+def test_cloud_tools_chat_openai_format(monkeypatch):
+    """Формат запроса к провайдеру: tools, tool_call_id у ответов инструментов, аргументы строкой JSON."""
+    from core.brain import llm
+    captured = {}
+
+    class R:
+        status_code = 200
+        text = ""
+        def raise_for_status(self): pass
+        def json(self):
+            return {"choices": [{"message": {"content": "", "tool_calls": [{"function": {"name": "add_task", "arguments": "{\"title\": \"позвонить маме\"}"}}]}}]}
+
+    async def fake_post(path, body, headers, timeout=45):
+        captured.update(body); return R()
+
+    monkeypatch.setattr(llm, "MODE", "cloud")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "groq")
+    monkeypatch.setattr(llm, "CLOUD_KEY", "k")
+    monkeypatch.setattr(llm, "CLOUD_MODEL", "groq/compound")
+    monkeypatch.setattr(llm, "_cloud_post", fake_post)
+
+    async def fake_models():
+        return ["whisper-large-v3", "groq/compound", "openai/gpt-oss-20b", "openai/gpt-oss-120b"]
+    monkeypatch.setattr(llm, "list_cloud_models", fake_models)
+    monkeypatch.setattr(llm, "_GROQ_TOOLS_MODEL", None)
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"},
+            {"role": "assistant", "content": "", "tool_calls": [{"function": {"name": "add_task", "arguments": {"title": "x"}}}]},
+            {"role": "tool", "content": "ok"}]
+    out = asyncio.run(llm.cloud_tools_chat(msgs, [{"type": "function", "function": {"name": "add_task", "parameters": {}}}]))
+    assert out["tool_calls"] == [{"name": "add_task", "arguments": {"title": "позвонить маме"}}]
+    assert captured["model"] == "openai/gpt-oss-120b"                 # compound не умеет свои tools → живая модель из /models по предпочтению
+    assert captured["tools"] and captured["tool_choice"] == "auto"
+    a = captured["messages"][2]; t = captured["messages"][3]
+    assert a["tool_calls"][0]["function"]["arguments"] == '{"title": "x"}' and a["content"] is None
+    assert t["tool_call_id"] == a["tool_calls"][0]["id"]
+
+
+def test_persona_localize_owner_name(monkeypatch):
+    """Готовые реплики с «сэр» подстраиваются под owner.name (второй ассистент для мамы), пустое — без обращения."""
+    from core.brain import persona
+    monkeypatch.setattr(persona, "OWNER", "мам")
+    assert persona.localize("Есть, сэр. Баланс 5.") == "Есть, мам. Баланс 5."
+    assert persona.localize("Сэр, само себя оно не сделает.") == "Мам, само себя оно не сделает."
+    monkeypatch.setattr(persona, "OWNER", "")
+    assert persona.localize("Записал, сэр. «x» — завтра.") == "Записал. «x» — завтра."
+    assert persona.localize("Сэр, само себя оно не сделает.") == "Само себя оно не сделает."
+    monkeypatch.setattr(persona, "OWNER", "Сэр")
+    assert persona.localize("Есть, сэр.") == "Есть, сэр."
+    assert persona.localize("сэрвер упал") == "сэрвер упал"
+
+
+def test_past_tense_and_health_go_to_memory_not_calendar():
+    """«вчера была у врача, сказали пить таблетки», «утром давление 140 на 90» — это факты для памяти,
+    а не события на вчера/завтра в календаре. Планы с временем по-прежнему события."""
+    from core.brain import agent
+    for t in ["вчера была у врача, сказали пить таблетки", "утром давление 140 на 90, приняла таблетку",
+              "сдала анализы, результат будет в четверг", "позвонила Лене, договорились на субботу"]:
+        r = agent.rules(t, "test")
+        assert r is not None and r.actions == ["add_note"], t
+    for t in ["завтра в 10 к врачу", "в субботу в 12 приезжает Лена", "встреча в среду в 15:00 с Ваней"]:
+        r = agent.rules(t, "test")
+        assert r is not None and r.actions == ["add_event"], t
+    from core.brain.dates import parse_datetime
+    assert parse_datetime("завтра в 10 к врачу")[0].hour == 10        # «к врачу» — не «10к»
+    assert parse_datetime("потратил на 10к")[0] is None

@@ -79,14 +79,15 @@ def guess_category(text: str, kind: str = "expense") -> str:
         return "Другое" if kind == "expense" else "Прочий доход"
 
 
-def add_category(name: str, kind: str = "expense", icon: str = "•", keywords: str = "", budget: float = 0) -> Category:
+def add_category(name: str, kind: str = "expense", icon: str = "•", keywords: str = "", budget: float = 0, bucket: str = "") -> Category:
     name = _title(name, "Категория")
     if kind not in ("expense", "income"):
         kind = "expense"
     with session() as s:
         if s.exec(select(Category).where(Category.name == name)).first():
             raise FinanceError(f"Категория «{name}» уже есть")
-        c = Category(name=name, kind=kind, icon=(icon or "•")[:4], keywords=(keywords or "").lower(), budget=_num(budget or 0, "Лимит", 0), custom=True)
+        c = Category(name=name, kind=kind, icon=(icon or "•")[:4], keywords=(keywords or "").lower(), budget=_num(budget or 0, "Лимит", 0), custom=True,
+                     bucket=bucket if bucket in ("need", "want", "save") else "")
         s.add(c); s.commit(); s.refresh(c)
         return c
 
@@ -111,6 +112,10 @@ def update_category(cid: int, **fields) -> Category:
             c.keywords = fields["keywords"].lower()
         if fields.get("budget") is not None:
             c.budget = _num(fields["budget"] or 0, "Лимит", 0)
+        if fields.get("bucket") is not None:
+            if fields["bucket"] not in ("", "need", "want", "save"):
+                raise FinanceError("Корзина: need / want / save или пусто")
+            c.bucket = fields["bucket"]
         s.add(c); s.commit(); s.refresh(c)
         return c
 
@@ -283,7 +288,8 @@ def _account_exists(s, name: str | None) -> None:
 def add_transaction(amount: float, kind: str = "expense", category: str | None = None,
                     note: str | None = None, account: str | None = None,
                     to_account: str | None = None, date: datetime | None = None,
-                    source: str = "tg", import_hash: str | None = None, debt_id: int | None = None) -> Transaction:
+                    source: str = "tg", import_hash: str | None = None, debt_id: int | None = None,
+                    order_id: int | None = None, goal_id: int | None = None) -> Transaction:
     amount = _num(abs(float(amount)) if isinstance(amount, (int, float)) else amount, "Сумма", 0, strict_min=True)
     if kind not in ("expense", "income", "transfer"):
         raise FinanceError("Тип операции: expense / income / transfer")
@@ -305,7 +311,7 @@ def add_transaction(amount: float, kind: str = "expense", category: str | None =
             _account_exists(s, to_account)
         t = Transaction(amount=amount, kind=kind, category=category, note=(note or None), account=account,
                         to_account=to_account, date=date or datetime.now(), source=source,
-                        import_hash=import_hash, debt_id=debt_id)
+                        import_hash=import_hash, debt_id=debt_id, order_id=order_id, goal_id=goal_id)
         s.add(t)
         if kind == "expense":
             _shift_balance(s, account, -amount)
@@ -350,6 +356,19 @@ def delete_transaction(tx_id: int) -> bool:
                 d.closed = d.remaining <= 0
                 s.add(d)
                 remember(s, "finance", f"Отменён платёж {money(t.amount)} по «{d.title}», остаток {money(d.remaining)}", "debt", d.id)
+        if getattr(t, "goal_id", None):  # перевод в конверт — возвращаем «отложено» назад
+            from ..db import Goal
+            g = s.get(Goal, t.goal_id)
+            if g:
+                g.saved = max(0.0, g.saved - t.amount if t.kind == "expense" else g.saved + t.amount)
+                if g.closed and g.saved < g.target - 0.5:
+                    g.closed = False
+                s.add(g)
+        if getattr(t, "order_id", None) and t.kind == "income":  # оплата по заказу — заказ снова «ждёт оплату»
+            from ..db import Order
+            o = s.get(Order, t.order_id)
+            if o and o.status == "paid":
+                o.status = "done"; o.paid_at = None; s.add(o)
         s.delete(t)
         s.commit()
         return True

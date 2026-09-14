@@ -61,6 +61,25 @@ STATUS_RX = re.compile(r"^\s*(статус\s+(?:костюма|системы|к
 LOCK_RX = re.compile(r"^\s*(заблокируй\s+(?:комп|компьютер|экран|пк)|блокировка|выключи\s+(?:комп|компьютер|пк)|перезагрузи\s+(?:комп|компьютер|пк)|спящий\s+режим|усыпи\s+(?:комп|компьютер))\s*[.!]?\s*$", re.I)
 
 
+TIDY_RX = re.compile(r"^\s*(?:[а-яё]+,\s*)?(разбери|прибери|прибраться|убери(?:сь)?|наведи\s+порядок|почисти|расчисти|рассортируй|разгреби)\s+(?:на\s+|в\s+)?(?:мо[йю]\s+)?(рабоч\w+\s+стол\w*|стол\w*|загрузк\w*|скачанн\w*|десктоп\w*|всё|все|бардак)(?:\s+и\s+(?:в\s+|на\s+)?(рабоч\w+\s+стол\w*|стол\w*|загрузк\w*))?\s*[.!]?\s*$", re.I)
+TIDY_UNDO_RX = re.compile(r"^\s*(отмени|верни|откати)\s+(уборку|разбор|порядок|файлы\s+(?:на\s+место|обратно))\s*[.!]?\s*$", re.I)
+
+
+def _tidy_targets(*words: str | None) -> list[str]:
+    out = []
+    for w in words:
+        w = (w or "").lower()
+        if not w:
+            continue
+        if w in ("всё", "все", "бардак"):
+            return ["desktop", "downloads"]
+        if "загруз" in w or "скачан" in w:
+            out.append("downloads")
+        elif "стол" in w or "десктоп" in w:
+            out.append("desktop")
+    return list(dict.fromkeys(out)) or ["desktop", "downloads"]
+
+
 @dataclass
 class PcCommand:
     action: str                 # open_url / open_app / open_path / find / media / screen / clipboard / status / power
@@ -91,6 +110,13 @@ def parse(text: str) -> PcCommand | None:
         return PcCommand("screen", q, say="Смотрю на экран…")
     if CLIP_RX.match(t):
         return PcCommand("clipboard", "", say="Беру из буфера обмена.")
+    m = TIDY_RX.match(t)
+    if m:
+        targets = _tidy_targets(m.group(2), m.group(3))
+        where = " и ".join({"desktop": "на столе", "downloads": "в загрузках"}[x] for x in targets)
+        return PcCommand("tidy", ",".join(targets), say=f"Смотрю, что лежит {where}… Сначала покажу план, потом «да».")
+    if TIDY_UNDO_RX.match(t):
+        return PcCommand("tidy_undo", "", say="Возвращаю файлы на место.")
     if STATUS_RX.match(t):
         return PcCommand("status", "", say="Проверяю системы.")
     if LOCK_RX.match(t):
@@ -100,6 +126,10 @@ def parse(text: str) -> PcCommand | None:
     if re.match(r"^\s*отмен[аи]\s+выключени\w*\s*$", low):
         return PcCommand("power", "abort", say="Отменил выключение.")
     m = FIND_RX.match(t)
+    # «где лежит паспорт?», «где я оставила ключи» — вопрос к памяти, а не поиск файла на диске
+    if m and m.group(1).lower() == "где" and (low.endswith("?") or re.search(r"\b(лежит|лежат|находится|оставил|положил|дел|я|мы|у меня)\b", low)) \
+            and not re.search(r"\b(файл|папк|документ|фотк|фото|видео|презентац|скачан|загрузк|рабочем столе|диске)\w*", low):
+        m = None
     if m and len(m.group(2).split()) <= 6 and not re.search(r"\b(встреч|задач|заметк|мысл|трат|долг|событ)\w*", low):
         return PcCommand("find", m.group(2).strip(" «»\"'"), say=f"Ищу «{m.group(2).strip()}» на компьютере…")
     m = OPEN_RX.match(t)

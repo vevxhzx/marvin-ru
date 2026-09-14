@@ -39,6 +39,18 @@ def cash_forecast(days: int = 30) -> dict:
                 break
             sched[d.date()].append((r.title, r.amount if r.kind == "income" else -r.amount))
             d = finance._next_date(r.day, r.period, d)
+    # ожидаемые оплаты по заказам (фриланс): остаток по незакрытым заказам на дату дедлайна
+    expected_total, tax_total = 0.0, 0.0
+    try:
+        from . import orders, pulse
+        rate = pulse.tax_rate()   # налог самозанятого (режим фрилансера); 0 — не считаем
+        for e in orders.expected_income(days):
+            net = e["amount"] * (1 - rate)
+            sched[e["date"].date()].append((f"ожидается: {e['title']}", net))
+            expected_total += net
+            tax_total += e["amount"] - net
+    except Exception as e:  # pragma: no cover
+        log.debug("expected income: %s", e)
     points, cur, low, low_day = [], balance, balance, now.date()
     for i in range(days + 1):
         d = (now + timedelta(days=i)).date()
@@ -58,6 +70,7 @@ def cash_forecast(days: int = 30) -> dict:
     return {"points": points, "per_day": round(per_day), "low": round(low), "low_date": low_day.isoformat(),
             "next_income": next_income.isoformat() if next_income else None, "days_to_income": days_to_income,
             "safe_per_day": round(safe_per_day) if safe_per_day is not None else None,
+            "expected_income": round(expected_total), "expected_tax": round(tax_total),
             "ok": low >= 0}
 
 
@@ -66,6 +79,8 @@ def cash_forecast_text() -> str:
     parts = [f"Сейчас **{money(f['points'][0]['balance'])}**, тратите в среднем **{money(f['per_day'])}** в день."]
     if f["days_to_income"] is not None:
         parts.append(f"До ближайшего дохода {f['days_to_income']} дн. — безопасно тратить до **{money(f['safe_per_day'])}** в день.")
+    if f.get("expected_income"):
+        parts.append(f"Плюс по заказам ожидается **{money(f['expected_income'])}**" + (f" уже за вычетом налога ~{money(f['expected_tax'])}" if f.get("expected_tax") else "") + " (учтено в прогнозе).")
     if not f["ok"]:
         d = datetime.fromisoformat(f["low_date"])
         parts.append(f"⚠️ При текущем темпе **{d:%d.%m}** уйдёте в минус ({money(f['low'])}). Стоит притормозить.")
@@ -162,7 +177,7 @@ async def related_notes(note_id: int, limit: int = 3) -> list[dict]:
 
 # ---------------------------------------------------------------- еженедельный дайджест мыслей
 WEEKLY_PROMPT = """Ты — личный ассистент. Ниже заметки и ссылки человека за неделю, а также его незакрытые задачи.
-Сделай короткий воскресный обзор по-русски, дружелюбно и с лёгкой иронией (обращение «сэр»), формат:
+Сделай короткий воскресный обзор по-русски, дружелюбно и с лёгкой иронией (обращение «{owner}»), формат:
 
 **Темы недели** — 2–3 главные темы одной строкой каждая.
 **Стоит превратить в задачу** — 1–3 мысли, которые звучат как дело, но задачей не стали (цитируй кратко).
@@ -170,6 +185,11 @@ WEEKLY_PROMPT = """Ты — личный ассистент. Ниже замет
 **Одна мысль** — короткое наблюдение или мотивирующий подкол в конце.
 
 Не выдумывай того, чего нет в данных. Если заметок мало — так и скажи, коротко."""
+
+
+def _weekly_prompt() -> str:
+    from ..brain.persona import OWNER
+    return WEEKLY_PROMPT.replace("{owner}", OWNER or "друг")
 
 
 async def weekly_digest() -> str | None:
@@ -187,6 +207,15 @@ async def weekly_digest() -> str | None:
     data += ["ССЫЛКИ:"] + [f"- {l.title or l.url} ({', '.join(filter(None, [l.comment, l.tags]))})" for l in links[:15]]
     data += ["ОТКРЫТЫЕ ЗАДАЧИ (старые первыми):"] + [f"- {t.title} (с {t.created_at:%d.%m})" for t in open_tasks[:12]]
     data += [f"ВЫПОЛНЕНО ЗА НЕДЕЛЮ: {len(done_week)}"]
+    from . import pulse
+    tail = "".join("\n" + x for x in pulse.weekly_block())   # цифры фриланса — отдельными строками, модели не доверяем их пересказывать
+    if not await llm.ollama_available() and llm.MODE == "cloud" and llm.cloud_enabled():
+        try:
+            txt = await llm.cloud_chat(_weekly_prompt(), "\n".join(data))
+            if txt:
+                return "🗓 **Неделя в мыслях**\n" + txt.strip() + tail
+        except Exception as e:
+            log.warning("weekly digest (cloud) failed: %s", e)
     if not await llm.ollama_available():
         # без LLM — простой вариант
         tags: dict[str, int] = defaultdict(int)
@@ -195,11 +224,11 @@ async def weekly_digest() -> str | None:
                 tags[t] += 1
         top = ", ".join(k for k, _ in sorted(tags.items(), key=lambda kv: -kv[1])[:3]) or "без тегов"
         return (f"🗓 **Неделя в мыслях**: {len(notes)} заметок, {len(links)} ссылок, закрыто задач — {len(done_week)}.\n"
-                f"Темы: {top}. Открытых задач: {len(open_tasks)}" + (f", самая старая — «{open_tasks[0].title}»." if open_tasks else "."))
+                f"Темы: {top}. Открытых задач: {len(open_tasks)}" + (f", самая старая — «{open_tasks[0].title}»." if open_tasks else ".") + tail)
     try:
-        out = await llm.ollama_chat([{"role": "system", "content": WEEKLY_PROMPT}, {"role": "user", "content": "\n".join(data)}], temperature=0.5)
+        out = await llm.ollama_chat([{"role": "system", "content": _weekly_prompt()}, {"role": "user", "content": "\n".join(data)}], temperature=0.5)
         txt = (out.get("content") or "").strip()
-        return ("🗓 **Неделя в мыслях**\n" + txt) if txt else None
+        return ("🗓 **Неделя в мыслях**\n" + txt + tail) if txt else None
     except Exception as e:
         log.warning("weekly digest failed: %s", e)
         return None

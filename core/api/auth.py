@@ -7,6 +7,11 @@
 
 Как передавать токен: cookie `assistant_session` (браузер) или заголовок `X-Auth-Token` (скрипты, голосовой клиент
 на другой машине; на самом ПК он ходит на 127.0.0.1 и токен ему не нужен).
+
+Второй способ входа — Telegram Mini App (tg_auth.py): подписанные Telegram данные → отдельная короткоживущая сессия.
+
+Обратный прокси на этом же ПК (Tailscale Funnel/Serve): запросы приходят с 127.0.0.1, но с заголовками
+X-Forwarded-*. Такие запросы считаются ВНЕШНИМИ — без ключа/сессии не пускаем, мастер и ссылки с ключом не даём.
 """
 from __future__ import annotations
 
@@ -31,9 +36,12 @@ QUERY = "t"
 
 # без токена (нет ничего секретного / нужны снаружи): здоровье, PWA-манифест, статика сайта, OAuth-возврат от Google
 PUBLIC_PREFIXES = ("/assets/", "/icon-", "/apple-touch-icon", "/favicon")
-PUBLIC_EXACT = {"/api/health", "/manifest.json", "/api/google/callback", "/sw.js", "/robots.txt"}
-# только с самого компьютера, даже с токеном: мастер первого запуска и его API (пишут config.yaml, перезапускают процесс)
-LOCAL_ONLY_PREFIXES = ("/api/setup/", "/setup")
+PUBLIC_EXACT = {"/api/health", "/manifest.json", "/api/google/callback", "/sw.js", "/robots.txt", "/api/tg/login"}
+# только с самого компьютера, даже с токеном: мастер первого запуска и его API (пишут config.yaml, перезапускают процесс),
+# ссылки/QR с мастер-ключом (/api/phone)
+LOCAL_ONLY_PREFIXES = ("/api/setup/", "/setup", "/api/phone")
+# признаки обратного прокси: если они есть, реальный клиент — не loopback, даже если TCP-соединение с 127.0.0.1
+PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded", "x-real-ip")
 # откуда браузеру можно слать запросы к API (Origin): сам сайт (тот же host) + dev-сервер Vite
 DEV_ORIGINS = {"http://localhost:5173", "http://127.0.0.1:5173"}
 
@@ -67,10 +75,12 @@ def token() -> str:
 
 
 def rotate() -> str:
-    """Новый токен (старые ссылки/куки перестают работать)."""
+    """Новый токен (старые ссылки/куки перестают работать). Заодно сбрасываются все Telegram-сессии."""
     global _TOKEN
     TOKEN_FILE.unlink(missing_ok=True)
     _TOKEN = None
+    from . import tg_auth
+    tg_auth.rotate_secret()
     return token()
 
 
@@ -79,7 +89,18 @@ def rotate() -> str:
 IN_DOCKER = bool(os.getenv("ASSISTANT_DOCKER"))
 
 
+def behind_proxy(request: Request) -> bool:
+    return any(h in request.headers for h in PROXY_HEADERS)
+
+
+def is_https(request: Request) -> bool:
+    return request.url.scheme == "https" or request.headers.get("x-forwarded-proto", "").lower() == "https"
+
+
 def is_loopback(request: Request) -> bool:
+    """Соединение с самого компьютера. Через обратный прокси (Funnel) TCP-адрес тоже 127.0.0.1 — это НЕ loopback."""
+    if behind_proxy(request):
+        return False
     host = (request.client.host if request.client else "") or ""
     try:
         return ipaddress.ip_address(host).is_loopback
@@ -105,7 +126,10 @@ def _presented(request: Request) -> str | None:
 
 
 def is_authorized(request: Request) -> bool:
-    return is_loopback(request) or _token_ok(request)
+    if is_loopback(request) or _token_ok(request):
+        return True
+    from . import tg_auth
+    return tg_auth.session_from(request)
 
 
 def _host_ok(request: Request) -> bool:
@@ -140,8 +164,9 @@ def _origin_ok(request: Request) -> bool:
         return True
     if origin in DEV_ORIGINS:
         return True
-    host = request.headers.get("host", "")
-    return origin.lower() in (f"http://{host}".lower(), f"https://{host}".lower())
+    hosts = {request.headers.get("host", ""), request.headers.get("x-forwarded-host", "")} - {""}
+    ok = {f"{scheme}://{h}".lower() for h in hosts for scheme in ("http", "https")}
+    return origin.lower() in ok
 
 
 def _is_public(path: str) -> bool:
@@ -167,9 +192,10 @@ class AuthMiddleware(BaseHTTPMiddleware):
                 log.warning("Отказано %s %s: чужой Origin %r (CSRF?)", request.method, path, request.headers.get("origin"))
                 return JSONResponse({"detail": "Запрос с чужого сайта отклонён"}, status_code=403)
         if path.startswith(LOCAL_ONLY_PREFIXES) and not is_local(request):
-            return JSONResponse({"detail": "Мастер настройки доступен только с самого компьютера"}, status_code=403)
+            return JSONResponse({"detail": "Это действие доступно только с самого компьютера"}, status_code=403)
         if not _is_public(path) and not is_authorized(request):
-            log.warning("Отказано %s %s с %s (нет токена)", request.method, path, request.client.host if request.client else "?")
+            src = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
+            log.warning("Отказано %s %s с %s%s (нет ключа)", request.method, path, src, " через прокси" if behind_proxy(request) else "")
             return JSONResponse({"detail": "Нет доступа. Откройте сайт по ссылке/QR из ⚙ Настроек → «с телефона»."}, status_code=401)
         response = await call_next(request)
         # первый заход с телефона по ссылке с ?t=… → запоминаем в cookie и убираем токен из адресной строки
@@ -177,5 +203,5 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if q and not is_loopback(request) and hmac.compare_digest(q, token()) and not path.startswith("/api/"):  # noqa: E501
             clean = request.url.remove_query_params(QUERY)
             response = RedirectResponse(str(clean), status_code=303)
-            response.set_cookie(COOKIE, token(), max_age=365 * 86400, httponly=True, samesite="lax", path="/")
+            response.set_cookie(COOKIE, token(), max_age=365 * 86400, httponly=True, samesite="lax", path="/", secure=is_https(request))
         return response

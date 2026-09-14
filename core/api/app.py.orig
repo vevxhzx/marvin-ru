@@ -6,7 +6,6 @@ from typing import Optional
 
 from fastapi.responses import JSONResponse, RedirectResponse
 import asyncio
-import logging
 import os
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,10 +18,8 @@ from ..brain import agent
 from ..config import ROOT
 from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring, get_setting, set_setting
 from .. import identity
-from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, pulse, tasks
+from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, tasks
 from ..services.scheduler import morning_digest_text
-
-log = logging.getLogger("assistant.api")
 
 app = FastAPI(title="Assistant Core", version="0.1")
 # CORS: сайт живёт на том же origin, что и API, — чужим сайтам доступ не нужен. Разрешаем только dev-сервер Vite.
@@ -164,25 +161,16 @@ def pc_state():
 class PcResult(BaseModel):
     text: str
     channel: str = "voice"
-    kind: str = "result"          # result / find / screen / clipboard / status / tidy_plan / tidy_done / tidy_undo
-    extra: dict = {}
+    kind: str = "result"          # result / find / screen / clipboard / status
 
 
 @app.post("/api/pc/result")
-async def pc_result(r: PcResult):
-    """Результат команды с ПК (список найденных файлов, статус железа, план уборки) — в общий чат, чтобы было видно
-    на сайте/в TG. План уборки ждёт «да» тем же механизмом подтверждения, что крупные суммы и выключение ПК."""
+def pc_result(r: PcResult):
+    """Результат команды с ПК (список найденных файлов, статус железа) — в общий чат, чтобы было видно на сайте/в TG."""
     from ..services import pc
     pc.seen()
-    if r.kind == "tidy_plan" and r.extra.get("plan_id") and r.extra.get("total"):
-        agent._pending_set(r.channel, "confirm|" + _json.dumps({"tidy": r.extra["plan_id"]}))
     agent._log_chat("assistant", r.text, r.channel)
     broadcast("chat", {"channel": r.channel, "actions": [f"pc_{r.kind}"]})
-    if (r.channel.startswith("tg") or r.channel == "system") and agent.notify:   # system — ночная уборка: отчёт утром в Telegram
-        try:
-            await agent.notify(r.text)
-        except Exception as e:  # pragma: no cover
-            log.warning("pc_result → telegram: %s", e)
     return {"ok": True}
 
 
@@ -303,8 +291,6 @@ async def dashboard():
         f = finance.debt_forecast(d)
         debts.append({**d.model_dump(), **f})
     start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    pulse.auto_enable_if_used()
-    fl = pulse.freelance_settings()
     return {
         "today": [e.model_dump() for e in calendar.events_today()],
         "week": [e.model_dump() for e in calendar.list_events(start, start + timedelta(days=7))],
@@ -321,9 +307,7 @@ async def dashboard():
         "timer": orders.timer_state(),
         "orders": {"open": [o for o in orders.list_orders() if o["status"] in ("new", "work", "review")][:5],
                    "unpaid": sum(o["left"] for o in orders.list_orders() if o["status"] != "new"),
-                   "expected": orders.expected_income(30),
-                   "late": pulse.late_payments()[:3] if fl["enabled"] and fl["late_nudge"] else []},
-        "freelance": fl["enabled"],
+                   "expected": orders.expected_income(30)},
         "goals": goals.list_goals()[:4],
         "runway": goals.runway(),
         "payments": goals.payment_check(7),
@@ -813,74 +797,6 @@ def clients_del(cid: int):
     return {"ok": True}
 
 
-# ---------------- люди и граф ----------------
-class PersonIn(BaseModel):
-    name: Optional[str] = None
-    kind: Optional[str] = None
-    contact: Optional[str] = None
-    notes: Optional[str] = None
-    aliases: Optional[str] = None
-    birthday: Optional[str] = None
-    tags: Optional[str] = None
-
-
-@app.get("/api/people")
-def people_list():
-    from ..services import people
-    return people.list_people()
-
-
-@app.post("/api/people")
-def people_add(p: PersonIn):
-    from ..services import people
-    if not (p.name or "").strip():
-        raise HTTPException(400, "Нужно имя")
-    c = people.add_person(p.name, p.kind or "person", p.contact, p.notes, p.aliases, p.birthday, p.tags)
-    broadcast("chat", {"channel": "web", "actions": ["add_person"]})
-    return people.card(c)
-
-
-@app.get("/api/people/today")
-def people_today():
-    from ..services import people
-    return people.people_today()
-
-
-@app.get("/api/people/{cid}")
-def people_card(cid: int):
-    from ..services import people
-    from ..db import Client
-    with session() as s:
-        c = s.get(Client, cid)
-    if not c:
-        raise HTTPException(404)
-    return people.card(c, limit=20)
-
-
-@app.put("/api/people/{cid}")
-def people_update(cid: int, p: PersonIn):
-    from ..services import people
-    c = people.update_person(cid, **p.model_dump(exclude_none=True))
-    if not c:
-        raise HTTPException(404)
-    broadcast("chat", {"channel": "web", "actions": ["update_person"]})
-    return people.card(c, limit=20)
-
-
-@app.get("/api/graph")
-def graph_get(days: int = 365, focus: Optional[str] = None):
-    from ..services import graph
-    return graph.build(days=days, focus=focus)
-
-
-@app.get("/api/graph/backlinks/{kind}/{ref_id}")
-def graph_backlinks(kind: str, ref_id: int):
-    from ..services import graph
-    if kind not in ("note", "link", "person", "order", "tag"):
-        raise HTTPException(400)
-    return graph.backlinks(kind, ref_id)
-
-
 @app.get("/api/orders")
 def orders_list(status: Optional[str] = None, all: bool = False):
     return orders.list_orders(status, include_closed=all)
@@ -910,38 +826,6 @@ class PomoSettingsIn(BaseModel):
 @app.get("/api/orders/pomodoro")
 def pomo_get():
     return orders.pomo_settings()
-
-
-class FreelanceIn(BaseModel):
-    enabled: Optional[bool] = None
-    late_days: Optional[int] = None
-    late_nudge: Optional[bool] = None
-    rate_check: Optional[bool] = None
-    rate_tolerance: Optional[int] = None
-    tax_percent: Optional[int] = None
-    weekly: Optional[bool] = None
-
-
-@app.get("/api/orders/freelance")
-def freelance_get():
-    pulse.auto_enable_if_used()
-    return pulse.freelance_settings()
-
-
-@app.put("/api/orders/freelance")
-def freelance_put(p: FreelanceIn):
-    r = pulse.save_freelance_settings(p.model_dump(exclude_none=True))
-    broadcast("freelance_settings", r)
-    return r
-
-
-@app.get("/api/orders/pulse")
-def pulse_get():
-    """Пульс: задержки оплат + налог за месяц. Пусто, если режим фрилансера выключен."""
-    st = pulse.freelance_settings()
-    if not st["enabled"]:
-        return {"enabled": False, "late": [], "tax": None}
-    return {"enabled": True, "late": pulse.late_payments() if st["late_nudge"] else [], "tax": pulse.tax_month() if st["tax_percent"] else None, "settings": st}
 
 
 @app.put("/api/orders/pomodoro")
