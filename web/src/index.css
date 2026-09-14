@@ -10,11 +10,14 @@
    Одна палитра, одна шкала шрифтов, одна шкала отступов. Всё остальное — производные.
    ===================================================================== */
 :root {
-  /* поверхности: фон → поверхность → приподнятая поверхность */
-  --bg: #ecece9;
-  --bg-2: #e3e3df;
-  --surface: #f4f4f1;
-  --surface-2: #fbfbf9;
+  /* поверхности: фон → поверхность → приподнятая поверхность.
+     Оттенок (--tint-h/--tint-s) задаёт настройка «вид → оттенок»; нейтральный ≈ прежние #ecece9/#f4f4f1. */
+  --tint-h-light: 60; --tint-s-light: 4%; --tint-h-dark: 60; --tint-s-dark: 2%;
+  --tint-h: var(--tint-h-light); --tint-s: var(--tint-s-light);
+  --bg: hsl(var(--tint-h) var(--tint-s) 92.5%);
+  --bg-2: hsl(var(--tint-h) var(--tint-s) 89%);
+  --surface: hsl(var(--tint-h) var(--tint-s) 95.5%);
+  --surface-2: hsl(var(--tint-h) var(--tint-s) 98.5%);
   --panel: var(--surface);
   --card-solid: var(--surface);
   /* текст */
@@ -52,10 +55,11 @@
   --sidebar-w: 236px; --sidebar-w-min: 68px; --topbar-h: 56px; --content-max: 1120px;
 }
 .dark {
-  --bg: #0e0e0d;
-  --bg-2: #151514;
-  --surface: #141413;
-  --surface-2: #1b1b1a;
+  --tint-h: var(--tint-h-dark); --tint-s: var(--tint-s-dark);
+  --bg: hsl(var(--tint-h) var(--tint-s) 5.5%);
+  --bg-2: hsl(var(--tint-h) var(--tint-s) 8%);
+  --surface: hsl(var(--tint-h) var(--tint-s) 7.8%);
+  --surface-2: hsl(var(--tint-h) var(--tint-s) 10.5%);
   --ink: #ecece9;
   --ink-2: rgba(236, 236, 233, 0.64);
   --ink-3: rgba(236, 236, 233, 0.40);
@@ -86,7 +90,7 @@ body {
   color: var(--ink);
   letter-spacing: -0.011em;
 }
-::selection { background: var(--accent); color: #fff; }
+::selection { background: var(--accent); color: var(--accent-ink); }
 button, input, select, textarea { font: inherit; letter-spacing: inherit; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
 input:focus-visible, textarea:focus-visible, .composer:focus-within *:focus-visible { outline: none; }
@@ -110,7 +114,8 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
 .muted { color: var(--ink-2); }
 .faint { color: var(--ink-3); }
 .pos { color: var(--pos); } .neg { color: var(--neg); } .warn { color: var(--warn); } .accent { color: var(--accent); }
-.bg-accent { background: var(--accent) !important; }
+.bg-accent { background: var(--accent) !important; color: var(--accent-ink); }
+.text-accent-ink { color: var(--accent-ink) !important; }
 .text-accent { color: var(--accent) !important; }
 .bg-red { background: var(--neg) !important; } .bg-green { background: var(--pos) !important; } .bg-orange { background: var(--warn) !important; }
 .text-red { color: var(--neg) !important; } .text-green { color: var(--pos) !important; } .text-orange { color: var(--warn) !important; }
@@ -177,7 +182,7 @@ select.input { appearance: none; }
 .seg > button.on { background: var(--surface-2); color: var(--ink); box-shadow: var(--shadow-1); }
 
 .chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-medium; border: 1px solid var(--line); color: var(--ink-2); }
-.chip.on { background: var(--accent); color: #fff; border-color: var(--accent); }
+.chip.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 /* бейдж статуса: без рамки, мягкая заливка */
 .badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-[3px] text-[11.5px] font-medium; background: var(--fill); color: var(--ink-2); }
 .badge.accent { background: var(--accent-soft); color: var(--accent); }
@@ -190,6 +195,14 @@ select.input { appearance: none; }
 .switch::after { content: ''; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 99px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .3s var(--ease-spring); }
 .switch.on { background: var(--accent); }
 .switch.on::after { transform: translateX(16px); }
+
+/* ползунок (помодоро, громкость): тонкая линия + круглая ручка в цвет акцента */
+.range { -webkit-appearance: none; appearance: none; height: 24px; background: transparent; cursor: pointer; }
+.range::-webkit-slider-runnable-track { height: 3px; border-radius: 99px; background: var(--fill-2); }
+.range::-moz-range-track { height: 3px; border-radius: 99px; background: var(--fill-2); }
+.range::-webkit-slider-thumb { -webkit-appearance: none; width: 16px; height: 16px; margin-top: -6.5px; border-radius: 99px; background: var(--accent); border: 2px solid var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); transition: transform .2s var(--ease-spring); }
+.range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 99px; background: var(--accent); border: 2px solid var(--bg); box-shadow: 0 1px 3px rgba(0,0,0,.25); }
+.range:active::-webkit-slider-thumb { transform: scale(1.15); }
 
 /* тултип: data-tip="текст" */
 [data-tip] { position: relative; }
@@ -214,7 +227,8 @@ select.input { appearance: none; }
 .tt { @apply panel px-3 py-2 text-[13px]; }
 
 /* ---------- оболочка приложения ---------- */
-.sidebar { width: var(--sidebar-w); transition: width .3s var(--ease-out); }
+/* высота через --ui-zoom: масштаб интерфейса сделан CSS zoom, а 100vh под zoom ужимается — компенсируем */
+.sidebar { width: var(--sidebar-w); height: calc(100vh / var(--ui-zoom)); transition: width .3s var(--ease-out); }
 .sidebar.min { width: var(--sidebar-w-min); }
 .nav-item { @apply relative flex h-10 w-full items-center gap-3 rounded-xl px-3 text-[14px] font-medium; color: var(--ink-2); transition: background-color var(--t-fast), color var(--t-fast); }
 .nav-item:hover { background: var(--fill); color: var(--ink); }
@@ -243,7 +257,7 @@ select.input { appearance: none; }
 .act-card .act-ic { @apply grid h-7 w-7 shrink-0 place-items-center rounded-full; background: var(--pos-soft); color: var(--pos); }
 
 /* сообщение чата */
-.msg-me { background: var(--accent); color: #fff; border-radius: 18px 18px 6px 18px; }
+.msg-me { background: var(--accent); color: var(--accent-ink); border-radius: 18px 18px 6px 18px; }
 .msg-bot { border-radius: 4px 18px 18px 18px; }
 .msg-bot .md p + p { margin-top: .5em; }
 .md code { font-family: 'JetBrains Mono Variable', ui-monospace, monospace; font-size: .88em; padding: .1em .35em; border-radius: 5px; background: color-mix(in srgb, currentColor 9%, transparent); }
@@ -271,10 +285,10 @@ select.input { appearance: none; }
 
 /* ---------- модалка ---------- */
 .sheet-backdrop { @apply fixed inset-0 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-6; background: rgba(14,14,14,.32); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); animation: fade .18s ease-out both; overscroll-behavior: contain; }
-.sheet { @apply panel w-full sm:max-w-md p-5 sm:p-7 rounded-t-4xl sm:rounded-4xl; background: var(--surface-2); box-shadow: var(--shadow-3); animation: rise .28s cubic-bezier(.2,.8,.2,1) both; max-height: min(92dvh, 92svh); overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem); }
+.sheet { @apply panel w-full sm:max-w-md p-5 sm:p-7 rounded-t-4xl sm:rounded-4xl; background: var(--surface-2); box-shadow: var(--shadow-3); animation: rise .28s cubic-bezier(.2,.8,.2,1) both; max-height: calc(min(92dvh, 92svh) / var(--ui-zoom)); overflow: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 1.5rem); }
 /* телефон: шторка снизу, «ручка» сверху, нижние вкладки на это время прячутся (body.sheet-open), низ — с запасом под домашний индикатор */
 @media (max-width: 639px) {
-  .sheet { border-left: 0; border-right: 0; border-bottom: 0; max-height: min(94dvh, 94svh); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem); }
+  .sheet { border-left: 0; border-right: 0; border-bottom: 0; max-height: calc(min(94dvh, 94svh) / var(--ui-zoom)); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem); }
   .sheet::before { content: ''; display: block; width: 36px; height: 5px; border-radius: 99px; background: var(--line-2); margin: -6px auto 14px; }
   /* вторая шторка поверх первой (подтверждение) — первая приглушается и чуть отъезжает назад, как в iOS */
   .sheet-backdrop.behind > .sheet { transform: translateY(-12px) scale(.955); opacity: .5; filter: saturate(.8); transition: transform .3s var(--ease-out), opacity .3s, filter .3s; }
@@ -298,6 +312,14 @@ input[type="datetime-local"].input::-webkit-date-and-time-value, input[type="dat
 #root { overflow-x: clip; padding-left: env(safe-area-inset-left, 0px); padding-right: env(safe-area-inset-right, 0px); }
 .arrow::after { content: ' ↗'; font-weight: 400; }
 
+/* образец акцента: половинка светлого/тёмного варианта, чтобы было видно, как цвет живёт в обеих темах */
+.swatch { position: relative; width: 36px; height: 36px; border-radius: 99px; display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--sw-light) 50%, var(--sw-dark) 50%);
+  transition: transform var(--t-base) var(--ease-spring), box-shadow var(--t-base) var(--ease-out); }
+.swatch:hover { transform: scale(1.08); }
+.swatch.on { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--ink); }
+.swatch-dot { width: 8px; height: 8px; border-radius: 99px; background: #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.15); animation: pop .35s var(--ease-spring) both; }
+
 /* =====================================================================
    ДВИЖЕНИЕ. Один набор кривых и длительностей на весь сайт, чтобы всё «дышало» одинаково.
    ===================================================================== */
@@ -317,8 +339,9 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 /* ---------- появление: страница и её части каскадом ---------- */
 @keyframes pageIn { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
 @keyframes pageOut { to { opacity: 0; transform: translateY(-6px) } }
-.page-enter { animation: pageIn .4s var(--ease-out) backwards; }
-.page-exit { animation: pageOut .14s var(--ease-io) both; pointer-events: none; }
+.page-enter { animation: pageIn .42s var(--ease-out) backwards; }
+.page-exit { animation: pageOut .16s var(--ease-io) both; pointer-events: none; }
+@keyframes pageIn { from { opacity: 0; transform: translateY(10px) scale(.995) } to { opacity: 1; transform: none } }
 
 /* дочерние .animate-rise внутри страницы стартуют по очереди */
 .page-enter .animate-rise { animation: rise .55s var(--ease-out) both; }
@@ -343,6 +366,39 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 @keyframes headIn { from { opacity: 0; transform: translateY(.35em); clip-path: inset(0 0 100% 0) } to { opacity: 1; transform: none; clip-path: inset(-20% 0 -20% 0) } }
 .page-enter .h1 { animation: rowIn .5s var(--ease-out) both; animation-delay: .04s; }
 .page-enter .label:first-child { animation: rowIn .5s var(--ease-out) both; }
+
+/* ---------- поверхности: карточка чуть приподнимается под курсором, строки подсвечиваются без рывка ---------- */
+a > .panel, button > .panel, .panel.hover { transition: transform var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), border-color var(--t-base); }
+a:hover > .panel, button:hover > .panel, .panel.hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
+a:active > .panel, button:active > .panel { transform: translateY(0); transition-duration: .1s; }
+.row-hover { transition: background-color var(--t-fast) var(--ease-out), padding var(--t-base) var(--ease-out); }
+
+/* пилюли и сегменты: активное состояние «перетекает», а не щёлкает */
+.pill { transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-spring); }
+.pill:active { transform: scale(.96); }
+.seg > button { transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), transform var(--t-fast) var(--ease-spring); }
+.seg > button:active { transform: scale(.97); }
+
+/* переключатель: ползунок с лёгкой пружиной, фон плавно */
+.switch { transition: background .3s var(--ease-out), box-shadow .3s var(--ease-out); }
+.switch:active::after { width: 22px; }
+.switch::after { transition: transform .32s var(--ease-spring), width .15s var(--ease-out); }
+
+/* значения-числа: смена подсвечивается коротким «вдохом» */
+@keyframes numBreath { 0% { opacity: .4; transform: translateY(2px) } 100% { opacity: 1; transform: none } }
+.num-roll { display: inline-block; animation: numBreath .35s var(--ease-out) both; }
+
+/* пустые состояния: глиф проявляется медленнее текста */
+@keyframes glyphIn { from { opacity: 0; transform: translateY(6px) scale(.92) } to { opacity: 1; transform: none } }
+.empty-glyph { animation: glyphIn .6s var(--ease-out) both; animation-delay: .08s; }
+
+/* шторка: подложка и блюр появляются мягко, не мигают */
+@keyframes backdropIn { from { opacity: 0; backdrop-filter: blur(0px); -webkit-backdrop-filter: blur(0px) } to { opacity: 1; backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px) } }
+.sheet-backdrop { animation: backdropIn .28s var(--ease-out) both; }
+
+/* кнопка чата в шапке и иконки навигации — иконка чуть «кивает» при наведении */
+.nav-item:hover svg { transform: translateX(1px) scale(1.06); }
+.nav-item svg { transition: transform var(--t-base) var(--ease-spring), color var(--t-base); }
 
 /* ---------- кнопки: пружина, подъём, свечение ---------- */
 .btn, .btn-icon, .pill, .chip, .seg > button, .tabbar a {
@@ -533,3 +589,52 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 html { zoom: var(--ui-zoom); }
 .no-motion *, .no-motion *::before, .no-motion *::after { animation-duration: 0s !important; animation-delay: 0s !important; transition-duration: 0s !important; }
 .tabbar.compact a span { display: none; }
+
+
+/* ---------- шапки страниц на телефоне ---------- */
+/* Правая часть PageHead: на десктопе — ряд; на телефоне — сетка: сегменты тянутся на всю ширину,
+   главная кнопка (.head-primary) — крупная и акцентная, ничего не сжимается и не уезжает */
+.head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.nav-group-btn { display: inline-flex; gap: 4px; align-items: center; }
+@media (max-width: 639px) {
+  .head-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .head-actions > * { grid-column: 1 / -1; min-width: 0; }
+  .head-actions > .seg { display: flex; flex-wrap: nowrap; }
+  .head-actions > .seg > button { flex: 1; text-align: center; padding: 7px 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .head-actions > .nav-group-btn { display: flex; }
+  .head-actions > .nav-group-btn > .btn-ghost { flex: 1; }
+  .head-actions > .head-primary { height: 44px; font-size: 14.5px; box-shadow: 0 10px 24px -12px var(--accent); }
+  /* второстепенная кнопка (или её обёртка) прямо перед главной — делят строку: 1/3 + 2/3 */
+  .head-actions > :has(+ .head-primary):not(.seg):not(.nav-group-btn) { grid-column: 1; display: flex; }
+  .head-actions > :has(+ .head-primary):not(.seg):not(.nav-group-btn) > .btn-ghost { flex: 1; height: 44px; }
+  .head-actions > :not(.seg):not(.nav-group-btn) + .head-primary { grid-column: 2; }
+}
+
+/* ---------- композер на главной: тихий градиентный ореол ---------- */
+@property --ga { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+.composer-hero { position: relative; isolation: isolate; border-color: transparent; }
+.composer-hero::before {
+  content: ''; position: absolute; inset: -1px; z-index: -1; border-radius: inherit; padding: 1px;
+  background: conic-gradient(from var(--ga), color-mix(in srgb, var(--accent) 80%, transparent), color-mix(in srgb, var(--accent) 10%, transparent) 30%, color-mix(in srgb, var(--accent) 65%, transparent) 55%, color-mix(in srgb, var(--accent) 8%, transparent) 80%, color-mix(in srgb, var(--accent) 80%, transparent));
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude;
+  opacity: .55; transition: opacity .4s var(--ease-out), --ga 1.6s var(--ease-io);
+}
+.composer-hero::after {
+  content: ''; position: absolute; inset: -14px; z-index: -2; border-radius: inherit; pointer-events: none;
+  background: radial-gradient(60% 120% at 20% 50%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%), radial-gradient(50% 120% at 85% 50%, color-mix(in srgb, var(--accent) 16%, transparent), transparent 70%);
+  filter: blur(18px); opacity: .22; transition: opacity .5s var(--ease-out), transform .6s var(--ease-out);
+}
+.composer-hero:hover::before, .composer-hero:focus-within::before, .composer-hero:active::before { opacity: 1; --ga: 360deg; }
+.composer-hero:hover::after, .composer-hero:focus-within::after { opacity: .7; transform: scale(1.02); }
+.composer-hero:focus-within { box-shadow: var(--shadow-1); border-color: transparent; }
+.composer-hero.thinking::before { animation: ga-spin 2.4s linear infinite; opacity: 1; }
+@keyframes ga-spin { to { --ga: 360deg; } }
+.dark .composer-hero::after { opacity: .45; }
+.dark .composer-hero:hover::after, .dark .composer-hero:focus-within::after { opacity: .85; }
+.no-motion .composer-hero::before, .no-motion .composer-hero::after { transition: none; animation: none; }
+
+/* Telegram Mini App: сайт открыт внутри Telegram. Сверху — шапка Telegram (безопасная зона считается им самим),
+   свайп-закрытие отключено, боковой панели нет — всё как на телефоне */
+html.in-telegram .safe-t { padding-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px)); }
+html.in-telegram .tabbar { padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), 12px); }
+html.in-telegram body { overscroll-behavior-y: none; }

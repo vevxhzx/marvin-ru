@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { dat } from '../lib/name'
 import { Link } from 'react-router-dom'
 import { Check, ArrowUp, ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal, GripVertical, RotateCcw, X, Eye, EyeOff } from 'lucide-react'
-import { api, money, hhmm, dayLabel, MONTHS, isSameDay, relTime, plural, chatStream, kb } from '../lib/api'
+import { api, money, hhmm, dayLabel, shortDate, MONTHS, isSameDay, relTime, plural, chatStream, kb } from '../lib/api'
 import { Section, Empty, Num, useLeave, Swipe, ListSkeleton, Sheet, Switch } from '../components/ui'
 import { renderMd, ACT } from '../components/Chat'
 import { useRefresh } from '../App'
@@ -17,6 +17,8 @@ const WD = ['воскресенье', 'понедельник', 'вторник'
 const BLOCKS = [
   { id: 'tasks', label: 'задачи' },
   { id: 'events', label: 'сегодня в календаре' },
+  { id: 'orders', label: 'заказы' },
+  { id: 'people', label: 'кто сегодня' },
   { id: 'upcoming', label: 'платежи на неделе' },
   { id: 'recent', label: 'недавно в памяти' },
   { id: 'money', label: 'деньги' },
@@ -46,7 +48,7 @@ export default function Today({ openChat, address = 'сэр' }) {
   const [order, move, resetOrder] = useOrder('today.order.v2', BLOCK_IDS)
   const [custom, setCustom] = useState(false)
   const [editing, setEditing] = useState(false)   // режим перетаскивания
-  const visible = order.filter((id) => !prefs.hiddenBlocks.includes(id))
+  const visible = order.filter((id) => !prefs.hiddenBlocks.includes(id) && !(id === 'orders' && d && d.freelance === false))
 
   const now = new Date()
   const [leaveCls, leave] = useLeave()
@@ -56,6 +58,8 @@ export default function Today({ openChat, address = 'сэр' }) {
   const blocks = {
     tasks: <TasksBlock d={d} now={now} done={done} delTask={delTask} leaveCls={leaveCls} calm={prefs.density === 'calm'} />,
     events: <EventsBlock d={d} now={now} calm={prefs.density === 'calm'} />,
+    orders: <OrdersBlock d={d} />,
+    people: <PeopleBlock tick={tick} />,
     upcoming: <UpcomingBlock d={d} />,
     recent: <RecentBlock d={d} />,
     money: <MoneyBlock d={d} />,
@@ -173,7 +177,7 @@ function Composer({ onOpenChat, quick }) {
   const QUICK = [['задача', 'задача: '], ['трата', 'потратил '], ['встреча', 'встреча '], ['мысль', 'мысль: ']]
   return (
     <div className="mt-7 max-w-[680px]">
-      <form onSubmit={(e) => { e.preventDefault(); send() }} className="composer flex items-center gap-2 py-2 pl-4 pr-2">
+      <form onSubmit={(e) => { e.preventDefault(); send() }} className={`composer composer-hero flex items-center gap-2 py-2 pl-4 pr-2 ${busy ? 'thinking' : ''}`}>
         <textarea ref={inp} rows={1} value={q} onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }}
           placeholder={`сказать ${dat()}…`} className="py-1.5" />
         <button type="submit" disabled={!q.trim() || busy} className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" aria-label="Отправить"><ArrowUp size={16} strokeWidth={2.4} /></button>
@@ -217,7 +221,7 @@ function TasksBlock({ d, now, done, delTask, leaveCls, calm }) {
               return (
                 <Swipe key={t.id} onRight={() => done(t.id)} onLeft={() => delTask(t.id)}>
                   <div className={`row row-slide group ${leaveCls(t.id)}`}>
-                    <button onClick={() => done(t.id)} aria-label="Выполнено" className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${leaveCls(t.id) ? 'border-accent bg-accent text-white' : 'hover:border-accent'}`} style={leaveCls(t.id) ? {} : { borderColor: t.priority === 1 ? 'var(--neg)' : 'var(--line-2)' }}>
+                    <button onClick={() => done(t.id)} aria-label="Выполнено" className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${leaveCls(t.id) ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={leaveCls(t.id) ? {} : { borderColor: t.priority === 1 ? 'var(--neg)' : 'var(--line-2)' }}>
                       {leaveCls(t.id) ? <Check size={12} strokeWidth={3} className="check-pop" /> : <Check size={12} className="opacity-0 transition group-hover:opacity-40" />}
                     </button>
                     <div className="min-w-0 flex-1 truncate text-[14.5px] font-medium">{t.title}</div>
@@ -254,6 +258,73 @@ function EventsBlock({ d, now, calm }) {
           </div>
         </div>
       )}
+    </Section>
+  )
+}
+
+/* Заказы: что горит, кто должен, идёт ли таймер. Показывается только если заказы вообще есть — иначе блок молчит. */
+function OrdersBlock({ d }) {
+  const o = d.orders; const t = d.timer
+  if (!o || (!o.open.length && !o.unpaid && !t?.active)) return (
+    <Section title="заказы" action={<Link to="/orders" className="btn-ghost btn-sm">все <ArrowUpRight size={13} /></Link>}>
+      <div className="rule"><Empty glyph="tasks" text="Заказов в работе нет" sub="Возьмёте — скажите, я запомню дедлайн и буду ждать оплату" hint="заказ: ролик для Пятёрочки, 25к, до пятницы" compact /></div>
+    </Section>
+  )
+  const start = (id) => api.startTimer(id, 25).catch(() => {})
+  return (
+    <Section title="заказы" idx={o.open.length} action={<Link to="/orders" className="btn-ghost btn-sm">все <ArrowUpRight size={13} /></Link>}>
+      <div className="rule">
+        {t?.active && (
+          <div className="row !py-2.5">
+            <span className="h-2 w-2 shrink-0 animate-pulse rounded-full" style={{ background: t.kind === 'break' ? 'var(--pos)' : 'var(--accent)' }} />
+            <div className="min-w-0 flex-1 truncate text-[14.5px] font-medium">{t.kind === 'break' ? 'перерыв' : 'таймер'}<span className="muted font-normal"> · {t.kind === 'break' ? 'скоро обратно' : t.order || 'фокус'}</span></div>
+            <button className="btn-soft btn-sm !h-7" onClick={() => api.stopTimer().catch(() => {})}>стоп</button>
+          </div>
+        )}
+        {o.open.slice(0, 4).map((x) => (
+          <div key={x.id} className="row group !py-2.5">
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14.5px] font-medium">{x.title}{x.client ? <span className="muted font-normal"> · {x.client}</span> : ''}</div>
+              <div className={`text-[12px] ${x.overdue ? 'neg' : x.days_left != null && x.days_left <= 2 ? 'warn' : 'muted'}`}>{x.deadline ? (x.overdue ? 'дедлайн прошёл' : x.days_left === 0 ? 'сдать сегодня' : x.days_left === 1 ? 'сдать завтра' : `до ${shortDate(x.deadline).toLowerCase()}`) : 'без срока'}{x.left > 0 && x.paid > 0 ? ` · осталось ${money(x.left)}` : ''}</div>
+            </div>
+            {!(t?.active && t.order_id === x.id) && <button className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100" data-tip="таймер 25 мин" onClick={() => start(x.id)}>▶</button>}
+            <div className="num text-right text-[14.5px] font-medium">{x.price ? money(x.price) : ''}</div>
+          </div>
+        ))}
+        {(o.late || []).map((x) => (
+          <div key={'late' + x.order_id} className="row !py-2.5">
+            <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: 'var(--warn)' }} />
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14.5px] font-medium">{x.client || x.title}<span className="muted font-normal"> задерживает {x.days} {plural(x.days, 'день', 'дня', 'дней')}</span></div>
+              <div className="muted text-[12px]">«{x.title}»{x.typical_days != null ? ` · обычно платит за ${x.typical_days} ${plural(x.typical_days, 'день', 'дня', 'дней')}` : ''}</div>
+            </div>
+            <div className="num text-right text-[14.5px] font-medium warn">{money(x.left)}</div>
+          </div>
+        ))}
+        {o.unpaid > 0 && <div className="muted flex items-center justify-between py-2.5 text-[13px]"><span>ждут оплаты</span><b className="num accent">{money(o.unpaid)}</b></div>}
+      </div>
+    </Section>
+  )
+}
+
+/* Кто сегодня в календаре: имя + одна строка контекста от ассистента (долг, неоплата, ближайшее). Без встреч блок не показывается. */
+function PeopleBlock({ tick }) {
+  const [list, setList] = useState(null)
+  useEffect(() => { api.peopleToday().then(setList).catch(() => setList([])) }, [tick])
+  if (!list || !list.length) return null
+  return (
+    <Section title="кто сегодня" idx={list.length} action={<Link to="/people" className="btn-ghost btn-sm">люди <ArrowUpRight size={13} /></Link>}>
+      <div className="rule">
+        {list.map((p) => (
+          <Link key={p.id} to={`/people?id=${p.id}`} className="row row-hover !py-2.5">
+            <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full text-[12px] font-semibold" style={{ background: 'var(--accent-soft)', color: 'var(--accent)' }}>{p.name.split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase()).join('')}</div>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-[14.5px] font-medium">{p.name}<span className="muted font-normal"> · {hhmm(p.at)} {p.event}</span></div>
+              {p.hint && <div className="muted truncate text-[12px]">{p.hint.replace(/^👤\s*[^:]+:\s*/, '')}</div>}
+            </div>
+          </Link>
+        ))}
+      </div>
     </Section>
   )
 }
@@ -297,7 +368,7 @@ function MoneyBlock({ d }) {
   return (
     <section className="animate-rise">
       <button className="flex w-full items-center justify-between gap-3 text-left" onClick={toggle}>
-        <div className="flex items-baseline gap-3"><h2 className="h2">деньги</h2><span className="muted num text-[13px]">{money(f.total_balance)}</span>{cf.free < 0 && <span className="badge neg">минус в месяце</span>}</div>
+        <div className="flex flex-wrap items-baseline gap-3"><h2 className="h2">деньги</h2><span className="muted num text-[13px]">{money(f.total_balance)}</span>{cf.free < 0 && <span className="badge neg">минус в месяце</span>}{d.runway?.runway_days != null && <span className={`badge ${d.runway.ok ? '' : 'neg'}`}>хватит на {d.runway.runway_days} {plural(d.runway.runway_days, 'день', 'дня', 'дней')}</span>}{d.payments?.short > 0 && <span className="badge neg">на платежи не хватает {money(d.payments.short)}</span>}</div>
         <span className="btn-icon !h-8 !w-8">{more ? <ChevronUp size={15} /> : <ChevronDown size={15} />}</span>
       </button>
       {more && (

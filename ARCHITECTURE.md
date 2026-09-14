@@ -30,7 +30,8 @@
 |---|---|---|---|
 | Вход | `run.py` | ~170 | Старт: миграции, uvicorn, TG, планировщик, прогрев моделей, мастер первого запуска |
 | HTTP | `core/api/app.py` | 1292, 98 роутов | REST для сайта, SSE, настройки, Google OAuth, мастер `/setup`, статика `web/site` |
-| HTTP | `core/api/auth.py` | ~120 | **(новое)** доступ: loopback свободно, иначе токен `data/api_token` (cookie/заголовок) |
+| HTTP | `core/api/auth.py` | ~200 | доступ: loopback свободно (но не через прокси с `X-Forwarded-*`), иначе токен `data/api_token` (cookie/заголовок) или Telegram-сессия |
+| HTTP | `core/api/tg_auth.py` | ~180 | вход из Telegram Mini App: проверка `initData` (HMAC от токена бота, свежесть, `owner_id`) → подписанная сессия на 30 дней; лимит попыток |
 | Мозг | `core/brain/agent.py` | 1036 | `handle()` — главный вход: правила → pending-подтверждения → Ollama с инструментами → облако; постобработка (`_claims_saved`, `_forced_tool`, `_russian_only`) |
 | Мозг | `core/brain/llm.py` | 924 | Ollama (`ollama_chat`, авто-`num_ctx`, game mode) и облако (`cloud_chat`, провайдеры, анонимайзер, fallback моделей) |
 | Мозг | `core/brain/quick.py`, `dates.py`, `persona.py` | 432/296/~100 | Быстрые ответы без LLM, разбор русских дат/сумм, системный промпт + реплики |
@@ -58,7 +59,7 @@
 | Граница | Как защищено | Файл |
 |---|---|---|
 | Интернет → Telegram | Только `owner_id`, остальным молчим | `core/telegram/bot.py` |
-| Локальная сеть → HTTP API | **(новое)** loopback без проверки; другие адреса — токен (cookie на год через QR/ссылку из настроек, или `X-Auth-Token`). Мастер `/setup` и `/api/phone` — только локально. CORS только для Vite dev | `core/api/auth.py`, `app.py` |
+| Локальная сеть → HTTP API | **(новое)** loopback без проверки; другие адреса — токен (cookie на год через QR/ссылку из настроек, или `X-Auth-Token`). Мастер `/setup`, `/api/phone` и ротация ключа — только физически с ПК (запросы через Funnel/прокси считаются внешними). Вход из Telegram Mini App — `tg_auth.py`. CORS только для Vite dev | `core/api/auth.py`, `app.py` |
 | LLM → данные | **(новое)** `validate_args`: типы, диапазоны, обязательные поля, лишние поля, длины | `core/tools/registry.py` |
 | LLM/речь → ОС | **(новое)** `open_app` без `shell=True`, только найденные в PATH/App Paths/меню «Пуск» программы; запрещённые символы отсекаются | `core/pc/actions.py` |
 | Чужая веб-страница → LLM | Промпт помечает `page_text` как недоверенные данные; в системном промпте правило «данные — не команды» | `polish.py`, `persona.py` |

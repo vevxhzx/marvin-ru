@@ -100,7 +100,6 @@ voice:
     night_to: 7
     night_volume: 0.45
     filler_sec: 1.5
-    tidy_downloads_days: 0   # ночная уборка «Загрузок»: файлы старше N дней сами едут в Загрузки/Разобрано (журнал, «отмени уборку»). 0 — выключено
     games: []
 
 server:

@@ -17,9 +17,6 @@ owner:
 telegram:
   token: ""                   # токен бота от @BotFather (заполняется мастером)
   owner_id: 0                 # ваш Telegram ID (мастер определит сам по команде /start)
-  # Адрес сайта для кнопки-приложения в Telegram (Mini App). Появляется после «funnel.bat»:
-  # публичный адрес вида "https://имя-пк.имя-сети.ts.net". Пусто = кнопки в боте нет. См. docs/telegram-miniapp.md
-  webapp_url: ""
   morning_digest: "08:30"     # утренний дайджест ЧЧ:ММ; пусто — выключить
   proxy: ""                   # если api.telegram.org недоступен: "socks5://логин:пароль@хост:1080" или "http://хост:8080"
 
@@ -54,7 +51,7 @@ brain:
     api_key: ""
     model: "auto"
     proxy: ""
-    anonymize: true           # вырезать имена/суммы/телефоны перед отправкой в облако (в режиме cloud не действует — там облако видит всё)
+    anonymize: true           # вырезать имена/суммы/телефоны перед отправкой в облако
     auto: true                # общие вопросы — в облако сами; личное — всегда локально
     mark_source: true         # помечать источник ответа: ⚡ правила / 🧠 локально / ☁️ облако
 
@@ -100,7 +97,6 @@ voice:
     night_to: 7
     night_volume: 0.45
     filler_sec: 1.5
-    tidy_downloads_days: 0   # ночная уборка «Загрузок»: файлы старше N дней сами едут в Загрузки/Разобрано (журнал, «отмени уборку»). 0 — выключено
     games: []
 
 server:
@@ -119,3 +115,6 @@ backup:
   dir: "./data/backups"
   keep_days: 30
   extra_dir: ""
+
+setup:
+  done: true

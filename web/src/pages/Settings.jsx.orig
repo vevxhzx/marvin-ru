@@ -1,12 +1,11 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
-import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2 } from 'lucide-react'
-import { playChime } from '../lib/sound'
+import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone } from 'lucide-react'
 import { api, relTime, kb } from '../lib/api'
 import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton } from '../components/ui'
 import { enableNotifications, disableNotifications, notifyEnabled, notifyState } from '../lib/notify'
-import { usePrefs, prefs as PREFS, ACCENTS, TINTS, FONT_SIZES, RADII } from '../lib/prefs'
-import { useTheme, NAV_GROUPS, useRefresh } from '../App'
+import { usePrefs, prefs as PREFS, ACCENTS, FONT_SIZES, RADII } from '../lib/prefs'
+import { useTheme, NAV_GROUPS } from '../App'
 import { RotateCcw } from 'lucide-react'
 
 const GROUPS = [
@@ -27,7 +26,6 @@ const GROUPS = [
 const CATS = [
   { id: 'general', label: 'общее', groups: ['owner', 'assistant', 'persona', 'finance', 'notifications'], extra: ['browser-notif', 'phone'] },
   { id: 'look', label: 'вид', groups: [], extra: ['look'] },
-  { id: 'freelance', label: 'фриланс', groups: [], extra: ['freelance', 'pomodoro'] },
   { id: 'ai', label: 'мозг', groups: ['brain', 'brain.cloud'] },
   { id: 'voice', label: 'голос и пк', groups: ['voice'] },
   { id: 'memory', label: 'память и данные', groups: ['backup'], extra: ['data'] },
@@ -98,8 +96,6 @@ export default function Settings({ health }) {
 
   const extras = {
     look: <Appearance key="look" />,
-    freelance: <Freelance key="freelance" />,
-    pomodoro: <Pomodoro key="pomodoro" />,
     status: (
       <Section key="status" title="состояние" action={<button className="btn-icon outlined" data-tip="обновить" onClick={load}><RefreshCw size={15} /></button>}>
         {!status ? <ListSkeleton n={3} /> : (
@@ -220,18 +216,13 @@ function Appearance() {
           <Block label="тема">
             <Seg value={mode} onChange={setMode} options={[['auto', 'как в системе'], ['light', 'светлая'], ['dark', 'тёмная']]} />
           </Block>
-          <Block label="акцент" hint={ACCENTS[p.accent]?.label}>
+          <Block label="акцент">
             <div className="flex flex-wrap gap-2">
               {Object.entries(ACCENTS).map(([id, a]) => (
-                <button key={id} type="button" onClick={() => set({ accent: id })} data-tip={a.label} className={`swatch ${p.accent === id ? 'on' : ''}`} style={{ '--sw-light': a.light, '--sw-dark': a.dark }} aria-label={a.label}>
-                  {p.accent === id && <span className="swatch-dot" />}
+                <button key={id} type="button" onClick={() => set({ accent: id })} data-tip={a.label} className="grid h-9 w-9 place-items-center rounded-full transition" style={{ background: a.light, boxShadow: p.accent === id ? '0 0 0 2px var(--bg), 0 0 0 4px var(--ink)' : 'none' }} aria-label={a.label}>
+                  {p.accent === id && <span className="h-2 w-2 rounded-full bg-white" />}
                 </button>
               ))}
-            </div>
-          </Block>
-          <Block label="оттенок поверхностей" hint="фон и карточки чуть теплее, холоднее или в тон акценту">
-            <div className="flex flex-wrap gap-2">
-              {Object.entries(TINTS).map(([id, t]) => <button key={id} type="button" className={`pill ${p.tint === id ? 'on' : ''}`} onClick={() => set({ tint: id })}>{t.label}</button>)}
             </div>
           </Block>
         </Card>
@@ -271,93 +262,6 @@ function Appearance() {
       </Section>
       <button className="btn-ghost btn-sm" onClick={() => { PREFS.reset(); setMode('auto') }}><RotateCcw size={13} /> сбросить вид</button>
     </>
-  )
-}
-
-/* Помодоро: длина фокуса/перерывов, авто-перерыв, звук и голос. Хранится в базе — общее для сайта, Telegram и голоса, без перезапуска. */
-const POMO_SOUNDS = [['bell', 'колокол'], ['ding', 'динь'], ['tick', 'щелчки'], ['off', 'без звука']]
-/* Режим фрилансера: один выключатель на все «денежные» штуки для заказов, под ним — каждая ручка отдельно.
-   Выключен — раздел «Заказы», пульс, налог и строки в дайджесте не показываются; данные не трогаются. */
-function Freelance() {
-  const [p, setP] = useState(null)
-  const [, show] = useToast()
-  const { bump } = useRefresh()
-  useEffect(() => { api.freelance().then(setP).catch(show.err) }, []) // eslint-disable-line
-  if (!p) return <Section title="режим фрилансера"><Skeleton h={160} /></Section>
-  const save = (patch) => { const next = { ...p, ...patch }; setP(next); api.saveFreelance(patch).then((r) => { setP(r); bump(); window.dispatchEvent(new CustomEvent('freelance:changed', { detail: r })) }).catch(show.err) }
-  const Row = ({ title, sub, k }) => (
-    <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">{title}</div><div className="muted text-[12.5px]">{sub}</div></div><Switch on={!!p[k]} onChange={(v) => save({ [k]: v })} /></div>
-  )
-  return (
-    <Section title="режим фрилансера" hint="Заказы, дедлайны, ожидаемые оплаты, таймер. Всё ниже можно включать по одному — что не нужно, нигде не всплывает.">
-      <Card className="space-y-5">
-        <div className="flex items-center justify-between gap-4"><div><div className="text-[15px] font-medium">я фрилансер</div><div className="muted text-[12.5px]">раздел «Заказы» в меню, блок на главной, дедлайны в дайджесте, оплаты в прогнозе кассы</div></div><Switch on={p.enabled} onChange={(v) => save({ enabled: v })} /></div>
-        {p.enabled && (
-          <div className="space-y-5 animate-rise">
-            <div className="rule" />
-            <Row k="late_nudge" title="следить за оплатами" sub="сдал, а денег нет — напомню в дайджесте и на главной, покажу, за сколько клиент платит обычно" />
-            {p.late_nudge && (
-              <Block label="задержкой считать" hint={p.late_days === 0 ? 'сразу после сдачи' : `${p.late_days} дн. после сдачи`}>
-                <input type="range" min={0} max={30} step={1} value={p.late_days} onChange={(e) => setP({ ...p, late_days: Number(e.target.value) })} onMouseUp={(e) => save({ late_days: Number(e.target.value) })} onTouchEnd={(e) => save({ late_days: Number(e.target.value) })} onKeyUp={(e) => save({ late_days: Number(e.target.value) })} className="range w-full" />
-              </Block>
-            )}
-            <Row k="rate_check" title="считать ставку по факту" sub="если гоняли таймер и была оценка часов — покажу «12 ч из 8 · 2 100 ₽/ч вместо 3 100» в карточке заказа" />
-            {p.rate_check && (
-              <Block label="ругаться при перерасходе от" hint={`${p.rate_tolerance} % сверх оценки`}>
-                <input type="range" min={10} max={100} step={5} value={p.rate_tolerance} onChange={(e) => setP({ ...p, rate_tolerance: Number(e.target.value) })} onMouseUp={(e) => save({ rate_tolerance: Number(e.target.value) })} onTouchEnd={(e) => save({ rate_tolerance: Number(e.target.value) })} onKeyUp={(e) => save({ rate_tolerance: Number(e.target.value) })} className="range w-full" />
-              </Block>
-            )}
-            <Block label="налог с дохода по заказам" hint={p.tax_percent ? `${p.tax_percent} % — вычитаю из ожидаемого в прогнозе, считаю за месяц` : 'не считать'}>
-              <Seg value={String(p.tax_percent)} onChange={(v) => save({ tax_percent: Number(v) })} options={[['0', 'нет'], ['4', '4 % НПД'], ['6', '6 % НПД'], ['13', '13 %']]} />
-            </Block>
-            <Row k="weekly" title="фриланс в недельном отчёте" sub="заработано · часов · ставка · кто задерживает — три строки в конце «Недели в мыслях»" />
-          </div>
-        )}
-      </Card>
-    </Section>
-  )
-}
-
-function Pomodoro() {
-  const [p, setP] = useState(null)
-  const [, show] = useToast()
-  useEffect(() => { api.pomodoro().then(setP).catch(show.err) }, []) // eslint-disable-line
-  if (!p) return <Section title="помодоро"><Skeleton h={160} /></Section>
-  const save = (patch) => { const next = { ...p, ...patch }; setP(next); api.savePomodoro(patch).then(setP).catch(show.err) }
-  const num = (key, min, max, label, hint) => (
-    <Block label={label} hint={hint}>
-      <div className="flex items-center gap-2">
-        <input type="range" min={min} max={max} step={1} value={p[key]} onChange={(e) => setP({ ...p, [key]: Number(e.target.value) })} onMouseUp={(e) => save({ [key]: Number(e.target.value) })} onTouchEnd={(e) => save({ [key]: Number(e.target.value) })} onKeyUp={(e) => save({ [key]: Number(e.target.value) })} className="range flex-1" />
-        <span className="num w-[52px] text-right text-[13px] font-medium tabular-nums">{p[key]} мин</span>
-      </div>
-    </Block>
-  )
-  return (
-    <Section title="помодоро" hint="Работает везде одинаково: сайт, Telegram («таймер», «перерыв»), голос. Менять можно на ходу — перезапуск не нужен.">
-      <Card className="space-y-5">
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          {num('focus', 5, 90, 'фокус')}
-          {num('short', 1, 30, 'короткий перерыв')}
-          {num('long', 5, 60, 'длинный перерыв')}
-          <Block label="длинный перерыв каждый…" hint={p.long_every ? `${p.long_every}-й помидор` : 'никогда'}>
-            <Seg value={String(p.long_every)} onChange={(v) => save({ long_every: Number(v) })} options={[['0', 'никогда'], ['2', '2'], ['3', '3'], ['4', '4'], ['6', '6']]} />
-          </Block>
-        </div>
-        <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">перерыв сам по себе</div><div className="muted text-[12.5px]">после фокуса перерыв стартует автоматически, после перерыва — жду вас</div></div><Switch on={p.auto_break} onChange={(v) => save({ auto_break: v })} /></div>
-        <Block label="звук по завершении" hint="здесь и на колонках ПК (voice.bat)">
-          <div className="flex flex-wrap items-center gap-3">
-            <Seg value={p.sound} onChange={(v) => { save({ sound: v }); if (v !== 'off') playChime(v, p.volume) }} options={POMO_SOUNDS} />
-            {p.sound !== 'off' && <button type="button" className="btn-ghost btn-sm" onClick={() => playChime(p.sound, p.volume)}><Volume2 size={13} /> послушать</button>}
-          </div>
-        </Block>
-        {p.sound !== 'off' && (
-          <Block label="громкость" hint={`${Math.round(p.volume * 100)}%`}>
-            <input type="range" min={0.1} max={1} step={0.05} value={p.volume} onChange={(e) => setP({ ...p, volume: Number(e.target.value) })} onMouseUp={(e) => { save({ volume: Number(e.target.value) }); playChime(p.sound, Number(e.target.value)) }} onTouchEnd={(e) => save({ volume: Number(e.target.value) })} className="range w-full" />
-          </Block>
-        )}
-        <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">сказать голосом</div><div className="muted text-[12.5px]">«Помидор готов» — на ПК через voice.bat; выключено — только звук</div></div><Switch on={p.voice} onChange={(v) => save({ voice: v })} /></div>
-      </Card>
-    </Section>
   )
 }
 

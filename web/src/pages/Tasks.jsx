@@ -67,7 +67,7 @@ export default function Tasks() {
   return (
     <div className="space-y-10">
       <PageHead kicker={kicker} title="задачи" idx={open.length}
-        right={<><Seg value={view} onChange={setView} options={VIEWS} /><button className="btn-primary" onClick={() => setSheet(true)}><Plus size={15} /> задача</button></>} />
+        right={<><Seg value={view} onChange={setView} options={VIEWS} /><button className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> задача</button></>} />
 
       <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />
@@ -118,7 +118,7 @@ function Row({ t, onToggle, onDel, onPriority, now, extra = '' }) {
   return (
     <Swipe onRight={!going ? () => onToggle(t) : undefined} onLeft={!going ? () => onDel(t) : undefined} rightLabel={t.done ? 'вернуть' : 'готово'}>
       <div className={`row row-slide group done-fade ${t.done ? 'opacity-50' : ''} ${extra}`}>
-        <button onClick={() => !going && onToggle(t)} aria-label={t.done ? 'Вернуть' : 'Выполнено'} className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${checked ? 'border-accent bg-accent text-white' : 'hover:border-accent'}`} style={checked ? {} : { borderColor: t.priority === 1 ? 'var(--neg)' : 'var(--line-2)' }}>
+        <button onClick={() => !going && onToggle(t)} aria-label={t.done ? 'Вернуть' : 'Выполнено'} className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${checked ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={checked ? {} : { borderColor: t.priority === 1 ? 'var(--neg)' : 'var(--line-2)' }}>
           {checked ? <Check size={12} strokeWidth={3} className="check-pop" /> : <Check size={12} className="opacity-0 transition group-hover:opacity-40" />}
         </button>
         <div className="min-w-0 flex-1">

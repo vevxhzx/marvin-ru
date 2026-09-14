@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, Plus, Trash2, MapPin, Repeat, SkipForward } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { ChevronLeft, ChevronRight, Plus, Trash2, MapPin, Repeat, SkipForward, Check, CheckSquare, Briefcase } from 'lucide-react'
 import { api, hhmm, MONTHS_NOM, MONTHS, isSameDay, toLocalISO, dayLabel, REPEAT_LABELS, WD_SHORT_MON, plural } from '../lib/api'
 import { Card, Section, Empty, Sheet, Field, Seg, useToast, PageHead, Swipe, useLeave } from '../components/ui'
 import { useRefresh } from '../App'
@@ -18,7 +19,20 @@ export default function Calendar() {
   const key = (e) => `${e.id}:${e.start}`
   const del = (e) => leave(key(e), 'leaving', async () => { try { await api.delEvent(e.id); show(e.repeat ? 'Повтор удалён' : 'Событие удалено', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
   const skip = (e) => leave(key(e), 'done', async () => { try { await api.skipEvent(e.id, toLocalISO(e.start)); show('Этот раз пропущен', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
-  const rowOf = (e, compact) => (
+  const nav = useNavigate()
+  // задача с дедлайном живёт в календаре как строка с чекбоксом: отметил здесь — закрылась в задачах (одна запись в базе)
+  const toggleTask = (e) => leave(key(e), 'done', async () => { try { await (e.done ? api.undoneTask(e.task_id) : api.doneTask(e.task_id)); show(e.done ? 'Вернул в дела' : 'Сделано', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
+  // дедлайн заказа — строка-ссылка в «Заказы» (сдать / отметить — там же)
+  const markDone = (e) => leave(key(e), 'done', async () => { try { await api.updateOrder(e.order_id, { status: 'done' }); show('Заказ сдан', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
+  const rowOf = (e, compact) => e.kind === 'order' ? (
+    <Swipe key={key(e)} onRight={() => markDone(e)} rightLabel="сдан" rightIcon={<Check size={18} strokeWidth={2.6} />}>
+      <OrderRow e={e} onDone={() => markDone(e)} onOpen={() => nav('/orders')} compact={compact} extra={leaveCls(key(e))} />
+    </Swipe>
+  ) : e.kind === 'task' ? (
+    <Swipe key={key(e)} onRight={() => toggleTask(e)} rightLabel={e.done ? 'вернуть' : 'сделано'} rightIcon={<Check size={18} strokeWidth={2.6} />}>
+      <TaskRow e={e} onToggle={() => toggleTask(e)} onOpen={() => nav('/tasks')} compact={compact} extra={leaveCls(key(e))} />
+    </Swipe>
+  ) : (
     <Swipe key={key(e)} onLeft={() => del(e)} onRight={e.repeat ? () => skip(e) : undefined} leftLabel={e.repeat ? 'все повторы' : 'удалить'} rightLabel="пропустить" rightIcon={<SkipForward size={18} strokeWidth={2.4} />}>
       <EventRow e={e} onClick={() => setSheet(e)} compact={compact} extra={leaveCls(key(e))} />
     </Swipe>
@@ -30,7 +44,7 @@ export default function Calendar() {
     return [start, end]
   }, [cursor])
 
-  const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1])).then(setEvents).catch(() => setEvents([]))
+  const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([]))
   useEffect(() => { load() }, [range, tick])
 
   const cells = useMemo(() => {
@@ -41,7 +55,7 @@ export default function Calendar() {
   }, [cursor])
 
   const evs = events || []
-  const byDay = (d) => evs.filter((e) => isSameDay(e.start, d)).sort((a, b) => new Date(a.start) - new Date(b.start))
+  const byDay = (d) => evs.filter((e) => isSameDay(e.start, d) && !(e.kind === 'task' && e.done && !isSameDay(e.start, today))).sort((a, b) => new Date(a.start) - new Date(b.start))
   const dayEvents = byDay(selected)
   const today = new Date()
   const isToday = isSameDay(selected, today)
@@ -66,12 +80,12 @@ export default function Calendar() {
       <PageHead kicker={String(cursor.getFullYear())} title={MONTHS_NOM[cursor.getMonth()].toLowerCase()} idx={cursor.getMonth() + 1}
         right={<>
           <Seg value={view} onChange={setView} options={[['month', 'месяц'], ['week', 'неделя']]} />
-          <div className="flex gap-1">
+          <div className="nav-group-btn">
             <button className="btn-icon outlined" onClick={() => shift(-1)} aria-label="Предыдущий месяц"><ChevronLeft size={16} /></button>
             <button className={`btn-ghost !px-3 ${isToday && cursor.getMonth() === today.getMonth() ? 'opacity-50' : ''}`} onClick={goToday} data-tip="клавиша T">сегодня</button>
             <button className="btn-icon outlined" onClick={() => shift(1)} aria-label="Следующий месяц"><ChevronRight size={16} /></button>
           </div>
-          <button className="btn-primary" onClick={() => setSheet('new')}><Plus size={15} /> <span className="hidden sm:inline">событие</span></button>
+          <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> событие</button>
         </>} />
 
       <div className="grid grid-cols-1 gap-8 lg:grid-cols-[1.3fr_1fr] lg:gap-10">
@@ -85,9 +99,9 @@ export default function Calendar() {
                   return (
                     <button key={d.toISOString()} onClick={() => { setSelected(d); if (!inMonth) { const c = new Date(d); c.setDate(1); setCursor(c) } }}
                       className={`relative flex aspect-square flex-col items-center justify-start rounded-xl pt-1.5 transition sm:aspect-[1/0.85] ${isS ? 'fill' : 'hover:bg-[var(--fill)]'} ${inMonth ? '' : 'opacity-30'}`} style={isS ? { boxShadow: 'inset 0 0 0 1px var(--line-2)' } : {}}>
-                      <span className={`num grid h-7 w-7 place-items-center rounded-full text-[13.5px] font-medium ${isT ? 'bg-accent text-white' : ''}`}>{d.getDate()}</span>
+                      <span className={`num grid h-7 w-7 place-items-center rounded-full text-[13.5px] font-medium ${isT ? 'bg-accent text-accent-ink' : ''}`}>{d.getDate()}</span>
                       <div className="mt-auto mb-1.5 flex gap-0.5">
-                        {list.slice(0, 3).map((e) => <i key={e.id + e.start} className="h-1.5 w-1.5 rounded-full bg-accent" />)}
+                        {list.slice(0, 3).map((e) => <i key={e.id + e.start} className={`h-1.5 w-1.5 rounded-full ${e.kind === 'task' ? 'border border-[var(--accent)]' : e.kind === 'order' ? 'bg-[var(--warn)]' : 'bg-accent'}`} style={e.kind === 'task' && e.done ? { opacity: .4 } : {}} />)}
                         {list.length > 3 && <span className="faint text-[9px] leading-none">+{list.length - 3}</span>}
                       </div>
                     </button>
@@ -101,11 +115,11 @@ export default function Calendar() {
                 {weekDays.map((d) => (
                   <button key={d.toISOString()} onClick={() => setSelected(d)} className={`flex flex-col items-center py-3 transition ${isSameDay(d, selected) ? 'fill' : ''}`}>
                     <span className="label !text-[10.5px]">{WD[(d.getDay() + 6) % 7]}</span>
-                    <span className={`num mt-1 grid h-8 w-8 place-items-center rounded-full text-[15px] font-semibold ${isSameDay(d, today) ? 'bg-accent text-white' : ''}`}>{d.getDate()}</span>
+                    <span className={`num mt-1 grid h-8 w-8 place-items-center rounded-full text-[15px] font-semibold ${isSameDay(d, today) ? 'bg-accent text-accent-ink' : ''}`}>{d.getDate()}</span>
                   </button>
                 ))}
               </div>
-              <div className="scroll-thin max-h-[60vh] overflow-y-auto">
+              <div className="scroll-thin max-h-[calc(60vh/var(--ui-zoom))] overflow-y-auto">
                 {weekDays.map((d) => {
                   const list = byDay(d); if (!list.length) return null
                   return (
@@ -126,7 +140,9 @@ export default function Calendar() {
                 {upcoming.map((e) => (
                   <button key={key(e)} className="row row-hover w-full text-left" onClick={() => setSelected(new Date(e.start))}>
                     <span className="muted num w-[116px] shrink-0 text-[13px]">{dayLabel(e.start).toLowerCase()}, {hhmm(e.start)}</span>
-                    <span className="truncate text-[14.5px] font-medium">{e.title}</span>
+                    <span className={`truncate text-[14.5px] font-medium ${e.kind === 'task' && e.done ? 'line-through opacity-50' : ''}`}>{e.title}</span>
+                    {e.kind === 'task' && <CheckSquare size={12} className="faint shrink-0" />}
+                    {e.kind === 'order' && <Briefcase size={12} className="faint shrink-0" />}
                     {e.repeat && <Repeat size={12} className="faint shrink-0" />}
                   </button>
                 ))}
@@ -137,7 +153,7 @@ export default function Calendar() {
 
         {/* день: таймлайн с линией «сейчас»; на телефоне — сразу под шапкой */}
         <Section className="order-1 lg:order-2" title={dayLabel(selected).toLowerCase()} idx={selected.getDate()}
-          hint={`${selected.getDate()} ${MONTHS[selected.getMonth()]}${dayEvents.length ? ` · ${dayEvents.length} ${plural(dayEvents.length, 'событие', 'события', 'событий')}` : ''}`}
+          hint={dayHint(selected, dayEvents)}
           action={<button className="btn-ghost btn-sm" onClick={() => setSheet('new')}><Plus size={14} /> в этот день</button>}>
           {events === null ? <div className="fill h-40 animate-pulseSoft rounded-2xl" /> : dayEvents.length === 0 ? (
             <div className="rule"><Empty glyph="calendar" text={isToday ? 'Сегодня свободно' : 'Ничего не запланировано'} sub={isToday ? 'Подозрительно спокойно, сэр' : 'День свободен'} hint={isToday ? 'ужин в 7 вечера' : `встреча ${selected.getDate()} ${MONTHS[selected.getMonth()]} в 15`} /></div>
@@ -201,6 +217,50 @@ function EventRow({ e, onClick, compact, extra = '' }) {
   )
 }
 
+function dayHint(selected, list) {
+  const n = (k) => list.filter((e) => e.kind === k).length
+  const ev = list.filter((e) => e.kind !== 'task' && e.kind !== 'order').length
+  const parts = []
+  if (ev) parts.push(`${ev} ${plural(ev, 'событие', 'события', 'событий')}`)
+  if (n('task')) parts.push(`${n('task')} ${plural(n('task'), 'задача', 'задачи', 'задач')}`)
+  if (n('order')) parts.push(`${n('order')} ${plural(n('order'), 'дедлайн', 'дедлайна', 'дедлайнов')}`)
+  return `${selected.getDate()} ${MONTHS[selected.getMonth()]}${parts.length ? ' · ' + parts.join(' · ') : ''}`
+}
+
+function OrderRow({ e, onDone, onOpen, compact, extra = '' }) {
+  const overdue = new Date(e.start) < new Date()
+  return (
+    <div className={`row row-slide row-hover ${compact ? '!py-2 !border-0' : ''} ${extra}`}>
+      <div className="w-12 shrink-0"><div className={`num text-[14.5px] font-semibold ${e.all_day ? 'faint !text-[11px] !font-medium' : ''}`}>{e.all_day ? 'день' : hhmm(e.start)}</div>{!compact && <div className="faint text-[11px]">заказ</div>}</div>
+      <button onClick={onDone} aria-label="Сдан" data-tip="сдан" className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 hover:border-accent active:scale-90" style={{ borderColor: overdue ? 'var(--neg)' : 'var(--line-2)' }}>
+        <Briefcase size={11} className="faint" />
+      </button>
+      <button onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <div className="truncate text-[14.5px] font-medium">{e.title}</div>
+        {overdue && <div className="neg text-[12px]">дедлайн прошёл</div>}
+      </button>
+      <ChevronRight size={15} className="faint" />
+    </div>
+  )
+}
+
+function TaskRow({ e, onToggle, onOpen, compact, extra = '' }) {
+  const overdue = !e.done && new Date(e.start) < new Date()
+  return (
+    <div className={`row row-slide row-hover ${compact ? '!py-2 !border-0' : ''} ${extra}`}>
+      <div className="w-12 shrink-0"><div className={`num text-[14.5px] font-semibold ${e.all_day ? 'faint !text-[11px] !font-medium' : ''}`}>{e.all_day ? 'день' : hhmm(e.start)}</div>{!compact && <div className="faint text-[11px]">задача</div>}</div>
+      <button onClick={onToggle} aria-label={e.done ? 'Вернуть' : 'Выполнено'} className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${e.done ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={e.done ? {} : { borderColor: e.priority === 1 ? 'var(--neg)' : 'var(--line-2)' }}>
+        {e.done && <Check size={13} strokeWidth={3} />}
+      </button>
+      <button onClick={onOpen} className="min-w-0 flex-1 text-left">
+        <div className={`truncate text-[14.5px] font-medium ${e.done ? 'line-through opacity-50' : ''}`}>{e.title}</div>
+        {overdue && <div className="neg text-[12px]">просрочено</div>}
+      </button>
+      <ChevronRight size={15} className="faint" />
+    </div>
+  )
+}
+
 function EventSheet({ open, ev, day, onClose, onDone, onErr }) {
   const [f, setF] = useState({})
   useEffect(() => {
@@ -239,7 +299,7 @@ function EventSheet({ open, ev, day, onClose, onDone, onErr }) {
         <Field label="Повтор">
           <div className="flex flex-wrap gap-1.5">{Object.entries(REPEAT_LABELS).map(([v, l]) => <button type="button" key={v} onClick={() => setF({ ...f, repeat: v, repeat_days: v === 'weekly' && !f.repeat_days?.length ? [(new Date(f.start).getDay() + 6) % 7] : f.repeat_days })} className={`chip !py-1.5 ${(f.repeat || '') === v ? 'on' : ''}`}>{l}</button>)}</div>
           {f.repeat === 'weekly' && (
-            <div className="mt-2 flex gap-1">{WD_SHORT_MON.map((w, i) => <button type="button" key={w} onClick={() => toggleDay(i)} className={`num grid h-9 w-9 place-items-center rounded-full text-[13px] font-medium transition ${f.repeat_days?.includes(i) ? 'bg-accent text-white' : 'fill'}`}>{w}</button>)}</div>
+            <div className="mt-2 flex gap-1">{WD_SHORT_MON.map((w, i) => <button type="button" key={w} onClick={() => toggleDay(i)} className={`num grid h-9 w-9 place-items-center rounded-full text-[13px] font-medium transition ${f.repeat_days?.includes(i) ? 'bg-accent text-accent-ink' : 'fill'}`}>{w}</button>)}</div>
           )}
           {f.repeat && <div className="mt-2 flex items-center gap-2"><span className="faint text-[12px]">до</span><input type="date" className="input !w-auto !py-1.5" value={f.repeat_until || ''} onChange={(e) => setF({ ...f, repeat_until: e.target.value })} /><span className="faint text-[12px]">(пусто — бессрочно)</span></div>}
         </Field>

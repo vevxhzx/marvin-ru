@@ -61,12 +61,12 @@ export function PageHead({ kicker, title, idx, right, children, sub }) {
   return (
     <header className="animate-rise mb-8 sm:mb-10">
       {kicker && <div className="label mb-2">{kicker}</div>}
-      <div className="flex flex-wrap items-end justify-between gap-x-8 gap-y-4">
+      <div className="flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between sm:gap-x-8">
         <div className="min-w-0">
           <h1 className="h1">{title}{idx != null && idx !== 0 && <span className="idx ml-3 align-middle">{idx}</span>}</h1>
           {sub && <div className="muted mt-2 text-[14px]">{sub}</div>}
         </div>
-        {right && <div className="flex flex-wrap items-center gap-2">{right}</div>}
+        {right && <div className="head-actions">{right}</div>}
       </div>
       {children}
     </header>

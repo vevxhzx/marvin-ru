@@ -103,8 +103,6 @@ async def main(with_tg: bool) -> None:
     async def _null_notify(text: str, buttons=None) -> None:
         log.info("[notify] %s", text)
 
-    from core.brain import agent as _agent
-    _agent.notify = notify   # результаты с ПК (план уборки, найденные файлы) для команд из Telegram
     sch = scheduler.build(notify or _null_notify)
     sch.start()
 

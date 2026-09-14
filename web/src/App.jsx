@@ -1,20 +1,24 @@
 import { useEffect, useState, createContext, useContext, useCallback, useRef } from 'react'
 import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Sun, Moon, Monitor, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, Bell, History, MessageCircle } from 'lucide-react'
+import { Sun, Moon, Monitor, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, Bell, History, MessageCircle, Briefcase, Square, Play, Users } from 'lucide-react'
 import Settings from './pages/Settings'
 import { notifyFromEvent } from './lib/notify'
+import { chimeFromEvent } from './lib/sound'
 import Today from './pages/Today'
 import Finance from './pages/Finance'
 import Calendar from './pages/Calendar'
 import Tasks from './pages/Tasks'
 import Mind from './pages/Mind'
 import Memory from './pages/Memory'
+import People from './pages/People'
+import Orders, { useTimer, mmss } from './pages/Orders'
 import Chat from './components/Chat'
 import Palette from './components/Palette'
 import { useLive, LiveDot, LivePopover, MicButton } from './components/Live'
 import { setName, lower } from './lib/name'
-import { usePrefs } from './lib/prefs'
+import { usePrefs, prefs as PREFS, pullRemote, CLIENT_ID } from './lib/prefs'
 import { api, relTime, kb, kbAlt } from './lib/api'
+import { tg, tgBackButton } from './lib/tg'
 import { Toaster, toast } from './components/ui'
 
 /* Навигация по смыслу: рабочее пространство и система */
@@ -24,11 +28,13 @@ export const NAV_GROUPS = [
     { to: '/tasks', label: 'задачи', icon: CheckSquare, key: '2' },
     { to: '/calendar', label: 'календарь', icon: CalendarDays, key: '3' },
     { to: '/finance', label: 'финансы', icon: Wallet, key: '4' },
-    { to: '/mind', label: 'мозг', icon: Brain, key: '5' },
+    { to: '/orders', label: 'заказы', icon: Briefcase, key: '5' },
+    { to: '/mind', label: 'мозг', icon: Brain, key: '6' },
+    { to: '/people', label: 'люди', icon: Users, key: '9' },
   ] },
   { title: 'система', items: [
-    { to: '/memory', label: 'память', icon: History, key: '6' },
-    { to: '/settings', label: 'настройки', icon: SettingsIcon, key: '7' },
+    { to: '/memory', label: 'память', icon: History, key: '7' },
+    { to: '/settings', label: 'настройки', icon: SettingsIcon, key: '8' },
   ] },
 ]
 const NAV = NAV_GROUPS.flatMap((g) => g.items)
@@ -39,7 +45,9 @@ const ThemeCtx = createContext(null)
 export const useTheme = () => useContext(ThemeCtx)
 
 function useThemeState() {
-  const [mode, setMode] = useState(() => localStorage.getItem('theme') || 'auto')
+  const [mode, setModeState] = useState(() => localStorage.getItem('theme') || 'auto')
+  const setMode = useCallback((m) => { setModeState(m); PREFS.set({ theme: m }) }, [])
+  useEffect(() => { const h = (e) => setModeState(e.detail || 'auto'); window.addEventListener('prefs:theme', h); return () => window.removeEventListener('prefs:theme', h) }, [])
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
     const apply = () => {
@@ -61,7 +69,7 @@ export const useRefresh = () => useContext(RefreshCtx)
 
 /* Центр уведомлений: напоминания, действия из Telegram/голоса, автоплатежи. Хранится в браузере (последние 40) */
 const INBOX_KEY = 'inbox.v1'
-const ACT_WORDS = { add_event: 'событие в календаре', add_task: 'задача', add_expense: 'трата', add_income: 'доход', add_note: 'мысль', add_link: 'ссылка', add_debt: 'долг', pay_debt: 'платёж по долгу', move_event: 'событие перенесено', complete_task: 'задача закрыта', add_recurring: 'регулярный платёж', undo: 'отмена', bulk_delete: 'удаление' }
+const ACT_WORDS = { add_event: 'событие в календаре', add_task: 'задача', add_expense: 'трата', add_income: 'доход', add_note: 'мысль', add_link: 'ссылка', add_debt: 'долг', pay_debt: 'платёж по долгу', move_event: 'событие перенесено', complete_task: 'задача закрыта', add_recurring: 'регулярный платёж', undo: 'отмена', bulk_delete: 'удаление', add_order: 'заказ', update_order: 'заказ обновлён', order_payment: 'оплата по заказу', pomodoro: 'таймер', add_goal: 'цель', save_to_goal: 'в копилку' }
 const CH_WORDS = { tg: 'Telegram', 'tg-voice': 'Telegram · голос', voice: 'голос', system: 'авто', web: 'сайт' }
 function useInbox() {
   const [items, setItems] = useState(() => { try { return JSON.parse(localStorage.getItem(INBOX_KEY) || '[]') } catch { return [] } })
@@ -75,6 +83,7 @@ export function inboxFromEvent(d) {
   if (!d) return null
   if (d.kind === 'reminder') return { title: d.text || 'Напоминание', sub: 'напоминание', tone: 'accent' }
   if (d.kind === 'recurring') return { title: d.text || 'Регулярный платёж проведён', sub: 'авто', tone: 'ok' }
+  if (d.kind === 'payment_alert') return { title: d.text || 'На ближайшие платежи может не хватить', sub: 'финансы', tone: 'accent' }
   if (d.kind === 'chat' && d.channel && d.channel !== 'web' && d.actions?.length) {
     const what = [...new Set(d.actions.map((a) => ACT_WORDS[a]).filter(Boolean))]
     if (what.length) return { title: what.join(', ').replace(/^./, (c) => c.toUpperCase()), sub: `из ${CH_WORDS[d.channel] || d.channel}`, tone: 'ok' }
@@ -108,6 +117,75 @@ if (typeof window !== 'undefined') {
   }, { passive: true })
 }
 
+/* Идущее помодоро — в шапке на всех страницах: осталось, по какому заказу, стоп одной кнопкой */
+function TopTimer() {
+  const { t, left, reload } = useTimer()
+  const nav = useNavigate()
+  if (!t?.active) return null
+  const brk = t.kind === 'break'
+  return (
+    <div className={`flex items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1 text-[12.5px] md:hidden ${brk ? 'soft-pos' : 'soft-accent'} ${left === 0 ? 'animate-pulse' : ''}`}>
+      <button className="flex items-center gap-1.5" onClick={() => nav('/orders')} data-tip={t.order || (brk ? 'перерыв' : 'фокус')}>
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'currentColor' }} />
+        <span className="num font-medium tabular-nums">{mmss(left)}</span>
+        {t.order && <span className="hidden max-w-[140px] truncate lg:inline">{t.order}</span>}
+      </button>
+      <button className="grid h-6 w-6 place-items-center rounded-full transition hover:bg-[var(--fill)]" aria-label="Стоп" data-tip="стоп" onClick={() => api.stopTimer().then(reload).catch(() => {})}><Square size={10} /></button>
+    </div>
+  )
+}
+
+/* Мини-помодоро в сайдбаре: кольцо + время + заказ. Нет таймера — кнопка «▶ 25:00» (длина из настроек).
+   Клик по времени — на страницу заказов, стоп — квадрат. В свёрнутой панели — только кольцо. */
+function SideTimer({ min }) {
+  const { t, left, reload } = useTimer()
+  const nav = useNavigate()
+  const [busy, setBusy] = useState(false)
+  const active = !!t?.active
+  const brk = t?.kind === 'break'
+  const total = active ? t.planned_min * 60 : 1
+  const pct = active ? Math.min(1, left / total) : 0
+  const R = min ? 11 : 13, C = 2 * Math.PI * R, S = R * 2 + 6
+  const color = brk ? 'var(--pos)' : 'var(--accent)'
+  const run = (fn) => { if (busy) return; setBusy(true); fn().then(reload).catch(() => {}).finally(() => setBusy(false)) }
+  const ring = (
+    <span className="relative grid shrink-0 place-items-center" style={{ width: S, height: S }}>
+      <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} className="-rotate-90">
+        <circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke="var(--line-2)" strokeWidth="2" />
+        {active && <circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} style={{ transition: 'stroke-dashoffset 1s linear' }} />}
+      </svg>
+      {active ? <span className={`absolute h-1.5 w-1.5 rounded-full ${left === 0 ? 'dot-live' : ''}`} style={{ background: color, color }} /> : <Play size={9} className="absolute muted" />}
+    </span>
+  )
+  if (min) {
+    return (
+      <button className="grid h-9 w-9 place-items-center rounded-xl transition hover:bg-[var(--fill)]" data-tip={active ? `${mmss(left)} · ${t.order || (brk ? 'перерыв' : 'фокус')} · клик — стоп` : `помодоро ${t?.focus_min || 25} мин`} data-tip-side="right"
+        onClick={() => run(() => (active ? api.stopTimer() : api.startTimer(null, null)))}>{ring}</button>
+    )
+  }
+  if (!active) {
+    return (
+      <button className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[12.5px] transition hover:bg-[var(--fill)]" onClick={() => run(() => api.startTimer(null, null))} data-tip="запустить помодоро">
+        {ring}
+        <span className="num font-medium tabular-nums">{String(t?.focus_min || 25).padStart(2, '0')}:00</span>
+        <span className="muted truncate">{t?.today_sessions ? `сегодня ${t.today_sessions} 🍅` : 'помодоро'}</span>
+      </button>
+    )
+  }
+  return (
+    <div className={`flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-1.5 text-[12.5px] ${brk ? 'soft-pos' : 'soft-accent'}`} style={{ animation: 'rise .25s var(--ease-out)' }}>
+      <button className="flex min-w-0 flex-1 items-center gap-2.5" onClick={() => nav('/orders')} data-tip={t.order || (brk ? 'перерыв' : 'фокус')}>
+        {ring}
+        <span className="min-w-0 text-left leading-tight">
+          <span className={`num block font-medium tabular-nums ${left === 0 ? 'animate-pulse' : ''}`}>{mmss(left)}</span>
+          <span className="block truncate text-[11px] opacity-70">{t.order || (brk ? 'перерыв' : 'фокус')}</span>
+        </span>
+      </button>
+      <button className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-[var(--fill)]" aria-label="Стоп" data-tip="стоп" onClick={() => run(() => api.stopTimer())}><Square size={10} /></button>
+    </div>
+  )
+}
+
 /* Состояние ассистента для шапки/сайдбара: готов · думает · офлайн · только правила */
 export function assistantState(live, busy) {
   if (busy) return { dot: 'var(--accent)', text: 'думаю…', pulse: true }
@@ -122,7 +200,7 @@ export function assistantState(live, busy) {
 function Sidebar({ min, setMin, live, busy, mode, cycle, ThemeIcon, hiddenNav = [] }) {
   const st = assistantState(live, busy)
   return (
-    <aside className={`sidebar sticky top-0 hidden h-screen shrink-0 flex-col border-r hair px-3 py-4 md:flex ${min ? 'min' : ''}`}>
+    <aside className={`sidebar sticky top-0 hidden shrink-0 flex-col border-r hair px-3 py-4 md:flex ${min ? 'min' : ''}`}>
       <NavLink to="/" className={`mb-5 flex items-center gap-2.5 px-2 ${min ? 'justify-center px-0' : ''}`}>
         <Logo />
         {!min && <span className="text-[15px] font-semibold tracking-[-0.03em]">{lower()}</span>}
@@ -144,6 +222,7 @@ function Sidebar({ min, setMin, live, busy, mode, cycle, ThemeIcon, hiddenNav = 
         ))}
       </nav>
       <div className={`mt-4 space-y-2 ${min ? 'flex flex-col items-center' : ''}`}>
+        {!hiddenNav.includes('/orders') && <SideTimer min={min} />}
         <div className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-[12.5px] ${min ? 'justify-center px-0' : ''}`} style={{ background: 'var(--fill)' }} title={st.text}>
           <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${st.pulse ? 'dot-live' : ''}`} style={{ background: st.dot, color: st.dot }} />
           {!min && <span className="muted truncate">{st.text}</span>}
@@ -180,7 +259,7 @@ function InboxPanel({ inbox, onClose }) {
         <div className="text-[13px] font-medium">уведомления</div>
         {inbox.items.length > 0 && <button className="faint text-[12px] hover:text-accent" onClick={inbox.clear}>очистить</button>}
       </div>
-      <div className="scroll-thin max-h-[60vh] overflow-y-auto">
+      <div className="scroll-thin max-h-[calc(60vh/var(--ui-zoom))] overflow-y-auto">
         {inbox.items.length === 0 ? (
           <div className="px-4 py-8 text-center">
             <div className="text-[14px] font-medium">Пока тихо</div>
@@ -215,17 +294,22 @@ function Shell({ inbox }) {
     load(); const t = setInterval(load, 30000); return () => clearInterval(t)
   }, [])
   useEffect(() => { window.scrollTo({ top: 0 }) }, [loc.pathname])
+  // внутри Telegram: системная кнопка «назад» в шапке ведёт на главную (с главной Telegram сам показывает «закрыть»)
+  useEffect(() => {
+    if (!tg.active) return
+    return tgBackButton(loc.pathname !== '/', () => nav('/'))
+  }, [loc.pathname, nav])
   const [palOpen, setPalOpen] = useState(false)
   const [livePop, setLivePop] = useState(false)
   const [inboxOpen, setInboxOpen] = useState(false)
   const live = useLive(health)
-  // ⌘K / ⌘/ — палитра; ⌘J — чат; Alt+1..7 — разделы
+  // ⌘K / ⌘/ — палитра; ⌘J — чат; Alt+1..9 — разделы
   useEffect(() => {
     const h = (e) => {
       const mod = e.metaKey || e.ctrlKey
       if (mod && (e.key.toLowerCase() === 'k' || e.key === '/')) { e.preventDefault(); setPalOpen((v) => !v) }
       else if (mod && e.key.toLowerCase() === 'j') { e.preventDefault(); setChatOpen((v) => !v) }
-      else if (e.altKey && !mod && /^[1-7]$/.test(e.key)) { const it = NAV.find((n) => n.key === e.key); if (it) { e.preventDefault(); nav(it.to) } }
+      else if (e.altKey && !mod && /^[1-9]$/.test(e.key)) { const it = NAV.find((n) => n.key === e.key); if (it) { e.preventDefault(); nav(it.to) } }
     }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   }, [nav])
@@ -238,6 +322,13 @@ function Shell({ inbox }) {
     return () => { window.removeEventListener('assistant:chat', h); window.removeEventListener('assistant:busy', b) }
   }, [])
 
+  // 401 от любого запроса: чужое устройство / истёкшая сессия Telegram — вместо вечных скелетонов честный экран
+  const [denied, setDenied] = useState(null)
+  useEffect(() => {
+    const h = (e) => setDenied((d) => d || e.detail)
+    window.addEventListener('assistant:denied', h); return () => window.removeEventListener('assistant:denied', h)
+  }, [])
+
   const cycle = () => {
     document.documentElement.classList.add('theme-anim')
     setTimeout(() => document.documentElement.classList.remove('theme-anim'), 600)
@@ -247,12 +338,29 @@ function Shell({ inbox }) {
   const st = assistantState(live, busy)
   const [prefs] = usePrefs()
   const [address, setAddress] = useState('сэр')
-  useEffect(() => { api.settings().then((d) => { const it = d.items?.find((x) => x.key === 'owner.name'); if (it?.value) setAddress(String(it.value).toLowerCase()) }).catch(() => {}) }, [])
-  const mobileNav = (prefs.tabbar || []).map((to) => NAV.find((n) => n.to === to)).filter(Boolean).slice(0, 5)
+  useEffect(() => {
+    const load = () => api.settings().then((d) => { const it = d.items?.find((x) => x.key === 'owner.name'); setAddress(it?.value ? String(it.value).toLowerCase() : '') }).catch(() => {})
+    load(); pullRemote()
+    const h = (e) => { if (e.detail?.kind === 'settings') load() }
+    window.addEventListener('assistant:event', h)
+    return () => window.removeEventListener('assistant:event', h)
+  }, [])
+  // режим фрилансера: выключен — «заказы» уходят из меню/палитры/нижней панели (страница остаётся доступна по адресу)
+  const [freelance, setFreelance] = useState(() => localStorage.getItem('freelance.on') !== '0')
+  useEffect(() => {
+    const apply = (r) => { setFreelance(!!r.enabled); localStorage.setItem('freelance.on', r.enabled ? '1' : '0') }
+    api.freelance().then(apply).catch(() => {})
+    const h = (e) => apply(e.detail || {})
+    window.addEventListener('freelance:changed', h); return () => window.removeEventListener('freelance:changed', h)
+  }, [])
+  const hiddenNav = freelance ? prefs.hiddenNav : [...prefs.hiddenNav, '/orders']
+  const mobileNav = (prefs.tabbar || []).filter((to) => freelance || to !== '/orders').map((to) => NAV.find((n) => n.to === to)).filter(Boolean).slice(0, 5)
+
+  if (denied) return <Gate denied={denied} />
 
   return (
     <div className="flex min-h-screen">
-      <Sidebar min={min} setMin={setMin} live={live} busy={busy} mode={mode} cycle={cycle} ThemeIcon={ThemeIcon} hiddenNav={prefs.hiddenNav} />
+      <Sidebar min={min} setMin={setMin} live={live} busy={busy} mode={mode} cycle={cycle} ThemeIcon={ThemeIcon} hiddenNav={hiddenNav} />
 
       <div className="flex min-w-0 flex-1 flex-col">
         {/* top bar */}
@@ -268,11 +376,12 @@ function Shell({ inbox }) {
             </button>
             <div className="flex items-center gap-1.5">
               <button className="btn-icon !h-9 !w-9 md:hidden" onClick={() => setPalOpen(true)} aria-label="Поиск"><Search size={16} /></button>
+              <TopTimer />
               <MicButton onText={(t) => { setChatSeed({ text: t, n: Date.now(), send: true }); setChatOpen(true) }} className="hidden sm:inline-flex" />
               <div className="relative">
                 <button className="btn-icon !h-9 !w-9" onClick={() => setInboxOpen((v) => !v)} aria-label="Уведомления" data-tip="уведомления">
                   <Bell size={16} />
-                  {inbox.unread > 0 && <span className="absolute right-1.5 top-1.5 grid h-4 min-w-[16px] place-items-center rounded-full px-1 text-[10px] font-semibold text-white" style={{ background: 'var(--accent)' }}>{inbox.unread}</span>}
+                  {inbox.unread > 0 && <span className="absolute right-1.5 top-1.5 grid h-4 min-w-[16px] place-items-center rounded-full px-1 text-[10px] font-semibold" style={{ background: 'var(--accent)', color: 'var(--accent-ink)' }}>{inbox.unread}</span>}
                 </button>
                 {inboxOpen && <InboxPanel inbox={inbox} onClose={() => setInboxOpen(false)} />}
               </div>
@@ -300,7 +409,9 @@ function Shell({ inbox }) {
             <Route path="/finance" element={<Finance />} />
             <Route path="/calendar" element={<Calendar />} />
             <Route path="/tasks" element={<Tasks />} />
+            <Route path="/orders" element={<Orders />} />
             <Route path="/mind" element={<Mind />} />
+            <Route path="/people" element={<People />} />
             <Route path="/memory" element={<Memory />} />
             <Route path="/settings" element={<Settings health={health} />} />
           </Routes>
@@ -318,7 +429,7 @@ function Shell({ inbox }) {
       {/* bottom tabs (mobile) */}
       <nav className={`tabbar fixed inset-x-0 bottom-0 z-[60] md:hidden ${prefs.compactNav ? 'compact' : ''}`}>
         <div className="mx-3 flex items-stretch justify-around rounded-full border hair px-1 py-1" style={{ background: 'var(--surface-2)', boxShadow: 'var(--shadow-2)' }}>
-          {(mobileNav.length ? mobileNav : MOBILE_NAV).map(({ to, label, icon: I }) => (
+          {(mobileNav.length ? mobileNav : MOBILE_NAV.filter((n) => freelance || n.to !== '/orders')).map(({ to, label, icon: I }) => (
             <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) =>
               `flex flex-1 flex-col items-center gap-0.5 rounded-full py-2 text-[10px] font-medium transition ${isActive ? 'text-accent' : 'faint'}`}>
               <I size={19} strokeWidth={2} /> <span>{label}</span>
@@ -330,6 +441,35 @@ function Shell({ inbox }) {
       <Chat open={chatOpen} onClose={() => setChatOpen(false)} seed={chatSeed} />
       <Palette open={palOpen} onClose={() => setPalOpen(false)} openChat={() => setChatOpen(true)} setTheme={setMode} />
       <Toaster />
+    </div>
+  )
+}
+
+function Gate({ denied }) {
+  const tgMode = denied.tg
+  const title = tgMode ? (denied.tgError ? 'Telegram не подтвердил вход' : 'Сессия истекла') : 'Нет доступа с этого устройства'
+  // webview Telegram, но без данных для входа: сайт открыт как обычная ссылка, а не кнопкой бота
+  const tgLink = !tgMode && /Telegram|TelegramBot|tgWebApp/i.test(navigator.userAgent + location.hash) || (!tgMode && !!window.Telegram)
+  const text = tgMode
+    ? (denied.tgError ? `${denied.tgError}.` : 'Закройте приложение и откройте его снова — Telegram подтвердит вход заново.')
+    : tgLink
+      ? 'Сайт открыт как обычная ссылка — так Telegram не передаёт данные для входа. Вернитесь в чат с ботом и нажмите кнопку «Открыть» слева от поля ввода или отправьте /app и нажмите кнопку под ответом.'
+      : 'Этот ассистент отвечает только своему владельцу. Откройте сайт по QR из ⚙ Настроек → «телефон» на компьютере или через кнопку «Открыть» в чате с ботом в Telegram.'
+  return (
+    <div className="safe-t flex min-h-screen items-center justify-center px-6">
+      <div className="animate-rise w-full max-w-sm text-center">
+        <div className="mx-auto mb-5 flex h-12 w-12 items-center justify-center rounded-2xl" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
+          <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: 'var(--ink-3)' }} />
+        </div>
+        <div className="h3">{title}</div>
+        <p className="muted mt-2 text-[14px] leading-relaxed">{text}</p>
+        {tgMode ? (
+          <button className="btn-primary mt-6" onClick={() => { try { tg.app?.close() } catch {} location.reload() }}>закрыть и открыть заново</button>
+        ) : (
+          <button className="btn-ghost mt-6" onClick={() => location.reload()}>проверить снова</button>
+        )}
+        <div className="faint mt-8 text-[12px]">Данные не покидают компьютер владельца. Этот экран — всё, что видно без входа.</div>
+      </div>
     </div>
   )
 }
@@ -349,9 +489,12 @@ export default function App() {
         try { d = JSON.parse(ev.data) } catch {}
         if (d) window.dispatchEvent(new CustomEvent('assistant:event', { detail: d }))
         if (d?.kind === 'pc_state') return          // пульс ПК-клиента — данные не менялись
+        if (d?.kind === 'ui_prefs') { if (d.origin !== CLIENT_ID) pullRemote(); return }   // оформление поменяли на другом устройстве
+        if (d?.kind === 'settings') return          // owner.name и т.п. — Shell перечитает сам по assistant:event
         clearTimeout(timer); timer = setTimeout(bump, 150)
         if (d) {
           try { notifyFromEvent(d) } catch {}
+          try { chimeFromEvent(d) } catch {}
           const it = inboxFromEvent(d)
           if (it) { inbox.push(it); if (document.visibilityState === 'visible') toast(it.title, { sub: it.sub, kind: it.tone === 'ok' ? 'ok' : '' }) }
         }

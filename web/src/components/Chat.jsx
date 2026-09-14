@@ -100,7 +100,7 @@ export default function Chat({ open, onClose, seed }) {
   const canUndo = lastBot?.actions?.some((a) => a !== 'clarify' && a !== 'ask_cloud' && ACT[a])
   return (
     <div className={`sheet-backdrop ${closing ? 'closing' : ''} sm:!items-end sm:!justify-end sm:!p-4`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="elevated flex h-[92dvh] w-full flex-col !rounded-t-4xl !rounded-b-none sm:h-[min(760px,calc(100vh-32px))] sm:w-[440px] sm:!rounded-[24px]" style={{ animation: 'rise .3s var(--ease-out) both' }}>
+      <div className="elevated flex h-[calc(92dvh/var(--ui-zoom))] w-full flex-col !rounded-t-4xl !rounded-b-none sm:h-[min(760px,calc(100vh/var(--ui-zoom)-32px))] sm:w-[440px] sm:!rounded-[24px]" style={{ animation: 'rise .3s var(--ease-out) both' }}>
         {/* шапка */}
         <div className="flex items-center justify-between gap-3 border-b hair px-4 py-3">
           <div className="flex items-center gap-2.5">

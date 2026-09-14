@@ -5,6 +5,7 @@ import { api, money, moneyShort, catIcon, shortDate, hhmm, toLocalISO, fullDate,
 import { Card, Section, PageHead, Empty, Sheet, Field, Seg, Pills, Skeleton, useToast, Toast, Money, Inline, Confirm, Num, useLeave, useArrived, Swipe } from '../components/ui'
 import { useRefresh } from '../App'
 import { Forecast, ImportButton } from '../components/Widgets'
+import { Goals, Techniques, BucketPills } from '../components/FinanceSmart'
 
 const n = (v) => { const x = parseNum(v); return Number.isNaN(x) ? undefined : x }
 
@@ -21,6 +22,8 @@ export default function Finance() {
   const [safe, setSafe] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [subs, setSubs] = useState([])
+  const [goals, setGoals] = useState(null)
+  const [tech, setTech] = useState(null)
   const [sheet, setSheet] = useState(null) // 'tx' | 'debt' | 'rec' | 'account' | {pay} | {debt} | {tx} | {rec} | {confirm}
   const [showClosed, setShowClosed] = useState(false)
   const [, show] = useToast()
@@ -31,6 +34,8 @@ export default function Finance() {
     setSum(s); setDaily(dl); setTxs(t); setDebts(d); setRec(r); setCats(c); setAccounts(a); setBudgets(b.budgets); setSafe(b.safe)
     api.get('/api/insights/forecast').then(setForecast).catch(() => {})
     api.get('/api/insights/subscriptions').then(setSubs).catch(() => {})
+    api.goals().then(setGoals).catch(() => {})
+    api.techniques().then(setTech).catch(() => {})
   }
   useEffect(() => { load().catch(show.err) }, [days, tick])
 
@@ -59,7 +64,7 @@ export default function Finance() {
         right={<>
           <Seg value={days} onChange={setDays} options={[[7, '7 дн'], [30, '30 дн'], [90, '90 дн']]} />
           <ImportButton onDone={(r) => { show(r.text.split('\n').slice(0, 2).join(' ')); load(); bump() }} onErr={show.err} />
-          <button className="btn-primary" onClick={() => setSheet('tx')}><Plus size={15} /> операция</button>
+          <button className="btn-primary head-primary" onClick={() => setSheet('tx')}><Plus size={15} /> операция</button>
         </>}>
         <div className="muted mt-4 flex flex-wrap gap-x-6 gap-y-1 text-[14px]">
           <span>за {days} дн: −<b className="num">{money(sum.spent)}</b></span>
@@ -152,6 +157,12 @@ export default function Finance() {
           </div>
         </div>
       </Section>
+
+      {/* 01c · конверты */}
+      <Goals goals={goals} onChange={() => { load(); bump() }} onErr={show.err} onOk={(m) => m && show(m)} />
+
+      {/* 01d · техники */}
+      <Techniques t={tech} onOpenCat={(name) => { const c = cats.find((x) => x.name === name); if (c) setSheet({ cat: c }) }} />
 
       {/* 02 · траты */}
       <Section title="траты" idx={3} hint={`${money(sum.spent)} за ${days} дн · ≈ ${money(sum.spent / Math.max(1, days))} в день`}>
@@ -395,7 +406,7 @@ function RecRow({ r, act, onOpen, leave, extra = '' }) {
     <Swipe onLeft={!r.debt_id && leave ? () => leave(`r${r.id}`, 'leaving', () => act(() => api.delRecurring(r.id), 'Удалено')) : undefined}
       onRight={toggle} rightLabel={r.active ? 'пауза' : 'включить'} rightIcon={r.active ? <Pause size={18} strokeWidth={2.2} /> : <Play size={18} strokeWidth={2.2} />}>
     <div className={`row group !py-3.5 ${r.active ? '' : 'opacity-50'} ${extra}`}>
-      <span className={`mono grid h-9 w-9 shrink-0 place-items-center rounded-full border hair text-[12px] uppercase ${r.debt_id ? 'bg-accent !border-transparent text-white' : ''}`}>{r.debt_id ? '%' : r.kind === 'income' ? '+' : (r.category || '•')[0]}</span>
+      <span className={`mono grid h-9 w-9 shrink-0 place-items-center rounded-full border hair text-[12px] uppercase ${r.debt_id ? 'bg-accent !border-transparent text-accent-ink' : ''}`}>{r.debt_id ? '%' : r.kind === 'income' ? '+' : (r.category || '•')[0]}</span>
       <div className="min-w-0 flex-1">
         <button className="truncate text-left text-[15px] font-medium hover:text-accent" onClick={onOpen}>{r.title}</button>
         <div className="faint text-[12px]">каждое <Inline value={r.day} min={1} max={31} fmt={(v) => `${v}-е`} onSave={(v) => save({ day: v })} /> · след. {shortDate(r.next_date)}{r.debt_id ? ' · долг' : ''}</div>
@@ -619,11 +630,11 @@ const ICONS = ['🛒', '☕', '🍕', '🚗', '🏋️', '🎁', '🐶', '👶',
 
 function CatSheet({ open, cat, onClose, onDone, onErr }) {
   const [f, setF] = useState({})
-  useEffect(() => { if (open) setF(cat ? { name: cat.name, icon: cat.icon || '•', keywords: cat.keywords || '', budget: cat.budget || '' } : { name: '', icon: '🛒', keywords: '', budget: '' }) }, [open, cat])
+  useEffect(() => { if (open) setF(cat ? { name: cat.name, icon: cat.icon || '•', keywords: cat.keywords || '', budget: cat.budget || '', bucket: cat.bucket || '' } : { name: '', icon: '🛒', keywords: '', budget: '', bucket: 'want' }) }, [open, cat])
   const submit = async (e) => {
     e.preventDefault()
     try {
-      const body = { name: f.name, icon: f.icon, keywords: f.keywords, budget: n(f.budget) || 0 }
+      const body = { name: f.name, icon: f.icon, keywords: f.keywords, budget: n(f.budget) || 0, bucket: f.bucket || '' }
       if (cat) await api.updateCategory(cat.id, body); else await api.addCategory({ ...body, kind: 'expense' })
       onDone(cat ? 'Категория сохранена' : 'Категория добавлена')
     } catch (err) { onErr(err) }
@@ -640,6 +651,7 @@ function CatSheet({ open, cat, onClose, onDone, onErr }) {
         </div>
         <Field label="Лимит в месяц" hint="0 — без лимита"><Money value={f.budget} onChange={(v) => setF({ ...f, budget: v })} min={0} big /></Field>
         <Field label="Ключевые слова" hint="через запятую"><input className="input" placeholder="кофейня, starbucks, кофе" value={f.keywords || ''} onChange={(e) => setF({ ...f, keywords: e.target.value })} /></Field>
+        {(!cat || cat.kind === 'expense') && <Field label="Корзина 50 / 30 / 20" hint="обязательное · хотелки · накопления"><BucketPills value={f.bucket} onChange={(b) => setF({ ...f, bucket: b })} /></Field>}
         <div className="flex gap-2">
           {cat && !protectedCat && <button type="button" className="btn-icon" title="Удалить (операции уйдут в «Другое»)" onClick={async () => { try { await api.delCategory(cat.id); onDone('Категория удалена') } catch (err) { onErr(err) } }}><Trash2 size={15} /></button>}
           <button className="btn-primary flex-1 !py-3">{cat ? 'сохранить' : 'добавить'}</button>

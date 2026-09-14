@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { dat, gen } from '../lib/name'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings, Search, MessageCircle, Plus, Moon, Sun, Monitor, Undo2, Gamepad2, BarChart3, Coins, Flame, History, Link2, FileText, CornerDownLeft } from 'lucide-react'
+import { Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings, Search, MessageCircle, Plus, Moon, Sun, Monitor, Undo2, Gamepad2, BarChart3, Coins, Flame, History, Link2, FileText, CornerDownLeft, Briefcase, Timer, Target, Users, Share2 } from 'lucide-react'
 import { api, kb, kbAlt } from '../lib/api'
 import { renderMd } from './Chat'
 
@@ -13,9 +13,12 @@ const PAGES = [
   { id: 'p-tasks', label: 'задачи', icon: CheckSquare, to: '/tasks', get kbd() { return kbAlt('2') } },
   { id: 'p-cal', label: 'календарь', icon: CalendarDays, to: '/calendar', get kbd() { return kbAlt('3') } },
   { id: 'p-fin', label: 'финансы', icon: Wallet, to: '/finance', get kbd() { return kbAlt('4') } },
-  { id: 'p-mind', label: 'мозг', icon: Brain, to: '/mind', get kbd() { return kbAlt('5') } },
-  { id: 'p-mem', label: 'память', icon: History, to: '/memory', get kbd() { return kbAlt('6') } },
-  { id: 'p-set', label: 'настройки', icon: Settings, to: '/settings', get kbd() { return kbAlt('7') } },
+  { id: 'p-orders', label: 'заказы', icon: Briefcase, to: '/orders', get kbd() { return kbAlt('5') } },
+  { id: 'p-mind', label: 'мозг', icon: Brain, to: '/mind', get kbd() { return kbAlt('6') } },
+  { id: 'p-people', label: 'люди', icon: Users, to: '/people', get kbd() { return kbAlt('9') } },
+  { id: 'p-graph', label: 'граф связей', icon: Share2, to: '/mind?tab=graph' },
+  { id: 'p-mem', label: 'память', icon: History, to: '/memory', get kbd() { return kbAlt('7') } },
+  { id: 'p-set', label: 'настройки', icon: Settings, to: '/settings', get kbd() { return kbAlt('8') } },
 ]
 const ACTIONS = [
   { id: 'a-chat', get label() { return `написать ${dat()}…` }, hint: 'чат', icon: MessageCircle, get kbd() { return kb('J') }, run: (c) => c.openChat() },
@@ -23,6 +26,12 @@ const ACTIONS = [
   { id: 'a-task', label: 'новая задача', hint: 'задачи', icon: Plus, run: (c) => c.chat('задача: ') },
   { id: 'a-ev', label: 'новая встреча', hint: 'календарь', icon: Plus, run: (c) => c.chat('встреча ') },
   { id: 'a-note', label: 'записать мысль', hint: 'мозг', icon: Plus, run: (c) => c.chat('мысль: ') },
+  { id: 'a-order', label: 'новый заказ', hint: 'заказы', icon: Plus, freelance: true, run: (c) => c.chat('заказ: ') },
+  { id: 'a-pomo', label: 'таймер 25 минут', hint: 'помодоро', icon: Timer, freelance: true, run: (c) => c.send('таймер') },
+  { id: 'a-pomo-stop', label: 'остановить таймер', hint: 'помодоро', icon: Timer, freelance: true, run: (c) => c.send('стоп') },
+  { id: 'a-goal', label: 'новая цель / конверт', hint: 'финансы', icon: Target, run: (c) => c.chat('цель: ') },
+  { id: 'a-503020', label: '50 / 30 / 20 за месяц', hint: 'спросить', icon: BarChart3, run: (c) => c.send('50/30/20') },
+  { id: 'a-cmp', label: 'сравнить с прошлым месяцем', hint: 'спросить', icon: BarChart3, run: (c) => c.send('сравни с прошлым месяцем') },
   { id: 'a-fc', label: 'прогноз денег на месяц', hint: 'спросить', icon: BarChart3, run: (c) => c.send('прогноз') },
   { id: 'a-subs', label: 'найти подписки', hint: 'спросить', icon: Coins, run: (c) => c.send('подписки') },
   { id: 'a-streak', label: 'мой стрик', hint: 'спросить', icon: Flame, run: (c) => c.send('стрик') },
@@ -73,7 +82,8 @@ export default function Palette({ open, onClose, openChat, setTheme }) {
     theme: (m) => { setTheme(m); onClose() },
   }), [onClose, openChat, setTheme])
 
-  const all = useMemo(() => [...PAGES.map((p) => ({ ...p, kind: 'page', hint: 'страница' })), ...ACTIONS.map((a) => ({ ...a, label: a.label, kind: 'action' }))], [])
+  const fl = localStorage.getItem('freelance.on') !== '0'   // режим фрилансера выключен — заказы и таймер не предлагаем
+  const all = useMemo(() => [...PAGES.filter((p) => fl || p.to !== '/orders').map((p) => ({ ...p, kind: 'page', hint: 'страница' })), ...ACTIONS.filter((a) => fl || !a.freelance).map((a) => ({ ...a, label: a.label, kind: 'action' }))], [fl])
   const items = useMemo(() => {
     const qq = q.trim()
     let out = []
@@ -114,7 +124,7 @@ export default function Palette({ open, onClose, openChat, setTheme }) {
   if (!open) return null
   let lastGroup = null
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-start justify-center px-3 pt-[10vh] sm:pt-[14vh]" onMouseDown={(e) => e.target === e.currentTarget && onClose()} style={{ background: 'rgba(10,10,12,.32)', animation: 'fade .16s ease-out' }}>
+    <div className="fixed inset-0 z-[90] flex items-start justify-center px-3 pt-[calc(10vh/var(--ui-zoom))] sm:pt-[calc(14vh/var(--ui-zoom))]" onMouseDown={(e) => e.target === e.currentTarget && onClose()} style={{ background: 'rgba(10,10,12,.32)', animation: 'fade .16s ease-out' }}>
       <div className="elevated w-full max-w-[600px] overflow-hidden" style={{ animation: 'rise .22s var(--ease-out)' }} role="dialog" aria-label="Командная палитра">
         <div className="flex items-center gap-3 border-b hair px-4">
           <Search size={16} className="faint shrink-0" />
@@ -127,7 +137,7 @@ export default function Palette({ open, onClose, openChat, setTheme }) {
               : <div className="md whitespace-pre-wrap">{renderMd(String(answer).replace(/\s*(⚡|🧠|☁️)\s*$/u, ''))}</div>}
           </div>
         )}
-        <div ref={list} className="scroll-thin max-h-[50vh] overflow-y-auto py-1.5">
+        <div ref={list} className="scroll-thin max-h-[calc(50vh/var(--ui-zoom))] overflow-y-auto py-1.5">
           {items.map((it, i) => {
             const I = it.icon
             const head = it.group !== lastGroup ? (lastGroup = it.group, GROUP[it.group]) : null

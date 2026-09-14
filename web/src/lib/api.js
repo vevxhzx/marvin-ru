@@ -7,7 +7,13 @@ async function req(method, path, body) {
     body: body ? JSON.stringify(body) : undefined,
   })
   if (r.status === 401) {
-    const e = new Error('Нет доступа с этого устройства. Откройте сайт по QR из ⚙ Настроек → «с телефона» на компьютере.'); e.status = 401; throw e
+    const { tg } = await import('./tg')
+    const msg = tg.active
+      ? (tg.error ? `Telegram не подтвердил вход: ${tg.error}. Закройте приложение и откройте снова.` : 'Сессия Telegram истекла — закройте приложение и откройте снова.')
+      : 'Нет доступа с этого устройства. Откройте сайт по QR из ⚙ Настроек → «с телефона» на компьютере.'
+    const e = new Error(msg); e.status = 401
+    window.dispatchEvent(new CustomEvent('assistant:denied', { detail: { msg, tg: tg.active, tgError: tg.error } }))
+    throw e
   }
   if (!r.ok) {
     let msg = `${method} ${path} → ${r.status}`
@@ -29,7 +35,7 @@ export const api = {
   chat: (text) => req('POST', '/api/chat', { text, channel: 'web' }),
   chatHistory: (limit = 40) => req('GET', `/api/chat/history?limit=${limit}`),
 
-  events: (start, end) => req('GET', `/api/events?${start ? `start=${start}` : ''}${end ? `&end=${end}` : ''}`),
+  events: (start, end, tasksToo = false) => req('GET', `/api/events?${start ? `start=${start}` : ''}${end ? `&end=${end}` : ''}${tasksToo ? '&tasks_too=true' : ''}`),
   addEvent: (e) => req('POST', '/api/events', e),
   updateEvent: (id, e) => req('PUT', `/api/events/${id}`, e),
   delEvent: (id) => req('DELETE', `/api/events/${id}`),
@@ -72,6 +78,7 @@ export const api = {
     return r.json()
   },
   delNote: (id) => req('DELETE', `/api/notes/${id}`),
+  editNote: (id, patch) => req('PUT', `/api/notes/${id}`, patch),
   links: (q) => req('GET', `/api/links${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   addLink: (url, comment) => req('POST', '/api/links', { url, comment }),
   delLink: (id) => req('DELETE', `/api/links/${id}`),
@@ -88,6 +95,40 @@ export const api = {
   backupNow: () => req('POST', '/api/backup'),
   semantic: (q, limit = 12) => req('GET', `/api/search/semantic?q=${encodeURIComponent(q)}&limit=${limit}`),
   reindex: () => req('POST', '/api/search/reindex'),
+  // заказы / фриланс
+  orders: (all = false) => req('GET', `/api/orders${all ? '?all=true' : ''}`),
+  order: (id) => req('GET', `/api/orders/${id}`),
+  addOrder: (o) => req('POST', '/api/orders', o),
+  updateOrder: (id, p) => req('PUT', `/api/orders/${id}`, p),
+  delOrder: (id) => req('DELETE', `/api/orders/${id}`),
+  payOrder: (id, amount, extra = {}) => req('POST', `/api/orders/${id}/payments`, { amount, ...extra }),
+  orderStats: (months = 6) => req('GET', `/api/orders/stats?months=${months}`),
+  // люди и граф связей
+  people: () => req('GET', '/api/people'),
+  peopleToday: () => req('GET', '/api/people/today'),
+  person: (id) => req('GET', `/api/people/${id}`),
+  addPerson: (p) => req('POST', '/api/people', p),
+  updatePerson: (id, p) => req('PUT', `/api/people/${id}`, p),
+  graph: (focus = null, days = 365) => req('GET', `/api/graph?days=${days}${focus ? `&focus=${encodeURIComponent(focus)}` : ''}`),
+  backlinks: (kind, id) => req('GET', `/api/graph/backlinks/${kind}/${id}`),
+  clients: () => req('GET', '/api/orders/clients'),
+  updateClient: (id, c) => req('PUT', `/api/orders/clients/${id}`, c),
+  delClient: (id) => req('DELETE', `/api/orders/clients/${id}`),
+  timer: () => req('GET', '/api/orders/timer'),
+  startTimer: (order_id = null, minutes = null, kind = 'focus') => req('POST', '/api/orders/timer', { order_id, minutes, kind }),   // minutes=null → из настроек помодоро
+  pomodoro: () => req('GET', '/api/orders/pomodoro'),
+  freelance: () => req('GET', '/api/orders/freelance'),
+  saveFreelance: (p) => req('PUT', '/api/orders/freelance', p),
+  pulse: () => req('GET', '/api/orders/pulse'),
+  savePomodoro: (p) => req('PUT', '/api/orders/pomodoro', p),
+  stopTimer: () => req('DELETE', '/api/orders/timer'),
+  // цели / техники
+  goals: (all = false) => req('GET', `/api/finance/goals${all ? '?all=true' : ''}`),
+  addGoal: (g) => req('POST', '/api/finance/goals', g),
+  updateGoal: (id, p) => req('PUT', `/api/finance/goals/${id}`, p),
+  delGoal: (id) => req('DELETE', `/api/finance/goals/${id}`),
+  putGoal: (id, amount, extra = {}) => req('POST', `/api/finance/goals/${id}/put`, { amount, ...extra }),
+  techniques: () => req('GET', '/api/finance/techniques'),
   memory: (days = 30, kind, q) => req('GET', `/api/memory?days=${days}${kind ? `&kind=${kind}` : ''}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
 }
 

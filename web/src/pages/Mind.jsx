@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { Search, Trash2, ExternalLink, Link2, StickyNote, ArrowUp, Sparkles, Quote, ImagePlus, X, Camera } from 'lucide-react'
+import { useSearchParams } from 'react-router-dom'
+import Graph from '../components/Graph'
+import { Search, Trash2, ExternalLink, Link2, StickyNote, ArrowUp, Sparkles, Quote, ImagePlus, X, Camera, Pencil, Check } from 'lucide-react'
 import { api, relTime } from '../lib/api'
 import { Card, Section, Empty, Seg, Pills, useToast, Toast, Skeleton, PageHead, useLeave, Swipe } from '../components/ui'
 import { useRefresh } from '../App'
@@ -7,8 +9,10 @@ import { useRefresh } from '../App'
 const URL_RE = /https?:\/\/[^\s]+/
 
 export default function Mind() {
-  const [tab, setTab] = useState('all')
-  const [q, setQ] = useState('')
+  const [params, setParams] = useSearchParams()
+  const [tab, setTab] = useState(() => (params.get('tab') === 'graph' ? 'graph' : 'all'))
+  const [q, setQ] = useState(() => params.get('q') || '')
+  useEffect(() => { if (params.get('tab') === 'graph') { setTab('graph'); setParams({}, { replace: true }) } else if (params.get('q')) { setQ(params.get('q')); setTab('all'); setParams({}, { replace: true }) } }, [params])
   const [notes, setNotes] = useState(null)
   const [links, setLinks] = useState(null)
   const [text, setText] = useState('')
@@ -70,7 +74,15 @@ export default function Mind() {
   return (
     <div className="space-y-8">
       <PageHead kicker="второй мозг" title="мозг" idx={items.length}
-        right={<Pills value={tab} onChange={setTab} options={[['all', 'всё'], ['note', 'мысли'], ['photo', 'фото'], ['link', 'ссылки']]} />} />
+        right={<Pills value={tab} onChange={setTab} options={[['all', 'всё'], ['note', 'мысли'], ['photo', 'фото'], ['link', 'ссылки'], ['graph', 'граф']]} />} />
+
+      {tab === 'graph' && (
+        <div className="animate-rise space-y-3">
+          <Graph height={Math.max(420, window.innerHeight - 300)} />
+          <div className="faint text-[12.5px]">Связи собираются сами: имена людей, #теги, [[ссылки на мысли]] и похожие по смыслу записи. Клик — фокус на окрестности, двойной клик — открыть, колесо — масштаб, перетаскивание — двигать.</div>
+        </div>
+      )}
+      {tab !== 'graph' && <>
 
       <form onSubmit={submit} className="animate-rise">
         <Card className="!p-2 !rounded-4xl">
@@ -84,8 +96,8 @@ export default function Mind() {
             <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => { pickImg(e.target.files?.[0]); e.target.value = '' }} />
             <button type="button" title="Добавить фото (или вставьте Ctrl+V / перетащите)" onClick={() => fileRef.current?.click()} className="btn-icon mb-1 shrink-0"><ImagePlus size={16} /></button>
             <textarea value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') submit(e) }}
-              rows={text.split('\n').length > 2 ? 4 : 2} className="input !bg-transparent !border-0 !shadow-none resize-none !px-2" placeholder={img ? 'Подпись к фото (можно без неё)' : 'Мысль, идея, ссылка или фото — как есть, редактор причешет (Ctrl+Enter)'} />
-            <button disabled={(!text.trim() && !img) || busy} className="mb-1 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-white transition active:scale-95 disabled:opacity-40">{busy ? <Sparkles size={16} className="animate-pulse" /> : <ArrowUp size={18} />}</button>
+              rows={text.split('\n').length > 2 ? 4 : 2} className="input !bg-transparent !border-0 !shadow-none resize-none !px-2" placeholder={img ? 'Подпись к фото (можно без неё)' : (window.matchMedia('(max-width: 639px)').matches ? 'Мысль, идея, ссылка или фото…' : 'Мысль, идея, ссылка или фото — как есть, редактор причешет (Ctrl+Enter)')} />
+            <button disabled={(!text.trim() && !img) || busy} className="mb-1 grid h-10 w-10 shrink-0 place-items-center rounded-full bg-accent text-accent-ink transition active:scale-95 disabled:opacity-40">{busy ? <Sparkles size={16} className="animate-pulse" /> : <ArrowUp size={18} />}</button>
           </div>
         </Card>
       </form>
@@ -104,12 +116,13 @@ export default function Mind() {
               const del = () => leave(k, 'card', async () => { if (x._t === 'link') await api.delLink(x.id); else await api.delNote(x.id); show('Удалено'); await load() })
               return (
                 <Swipe key={k} className="swipe-card" onLeft={del}>
-                  {x._t === 'link' ? <LinkCard l={x} onTag={setQ} extra={leaveCls(k)} onDel={del} /> : <NoteCard n={x} onTag={setQ} extra={leaveCls(k)} onDel={del} onZoom={setZoom} />}
+                  {x._t === 'link' ? <LinkCard l={x} onTag={setQ} extra={leaveCls(k)} onDel={del} /> : <NoteCard n={x} onTag={setQ} extra={leaveCls(k)} onDel={del} onZoom={setZoom} onSaved={() => { show('Сохранено'); load() }} />}
                 </Swipe>
               )
             })}
           </div>
         )}
+      </>}
       {zoom && (
         <div className="fixed inset-0 z-[110] grid place-items-center p-3" style={{ background: 'rgba(0,0,0,.86)', animation: 'fade .18s ease-out' }} onClick={() => setZoom(null)}>
           <img src={zoom} alt="" className="max-h-full max-w-full rounded-2xl object-contain" style={{ animation: 'rise .3s var(--ease-out)' }} />
@@ -120,13 +133,35 @@ export default function Mind() {
   )
 }
 
-function NoteCard({ n, onDel, onTag, onZoom, extra = '' }) {
+function NoteCard({ n, onDel, onTag, onZoom, onSaved, extra = '' }) {
   const [showRaw, setShowRaw] = useState(false)
   const [related, setRelated] = useState(null)   // null — не запрашивали, [] — нет
+  const [edit, setEdit] = useState(null)         // null — просмотр; { title, text, tags } — правим
+  const [saving, setSaving] = useState(false)
   const hasRaw = n.raw && n.raw.trim() !== n.text.trim()
   const loadRelated = () => { if (related === null) api.get(`/api/notes/${n.id}/related`).then(setRelated).catch(() => setRelated([])) }
+  const startEdit = () => setEdit({ title: n.title || '', text: n.text, tags: n.tags || '' })
+  const save = async () => {
+    if (!edit.text.trim() || saving) return
+    setSaving(true)
+    try { await api.editNote(n.id, { title: edit.title, text: edit.text, tags: edit.tags.split(',').map((t) => t.trim()).filter(Boolean) }); setEdit(null); onSaved?.() }
+    finally { setSaving(false) }
+  }
+  const onKey = (e) => { if (e.key === 'Escape') setEdit(null); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save() }
+  if (edit) return (
+    <Card className={`animate-rise ${extra}`} style={{ boxShadow: '0 0 0 1.5px var(--accent), var(--shadow-1)' }} onKeyDown={onKey}>
+      <input className="inline-edit h3 mb-1.5 w-full leading-snug" placeholder="заголовок" value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
+      <textarea autoFocus className="inline-edit w-full resize-none text-[15px] leading-relaxed" rows={Math.min(12, Math.max(3, edit.text.split('\n').length + 1))} value={edit.text} onChange={(e) => setEdit({ ...edit, text: e.target.value })} />
+      <input className="inline-edit mt-2 w-full text-[12px]" placeholder="теги через запятую" value={edit.tags} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} />
+      <div className="mt-3 flex items-center gap-2">
+        <span className="faint hidden text-[11px] sm:inline">⌘↵ · Esc</span>
+        <button className="btn-ghost ml-auto !h-8 !px-3 !text-[13px]" onClick={() => setEdit(null)}>отмена</button>
+        <button className="btn-primary !h-8 !px-3 !text-[13px]" disabled={saving || !edit.text.trim()} onClick={save}><Check size={14} /> сохранить</button>
+      </div>
+    </Card>
+  )
   return (
-    <Card lift className={`group animate-rise ${n.image ? '!pt-0 !px-0 overflow-hidden' : ''} ${extra}`} onMouseEnter={loadRelated}>
+    <Card lift className={`group animate-rise ${n.image ? '!pt-0 !px-0 overflow-hidden' : ''} ${extra}`} onMouseEnter={loadRelated} onDoubleClick={startEdit}>
       {n.image && <img src={`/media/${n.image}`} alt="" loading="lazy" className="mb-3 w-full cursor-zoom-in object-cover max-h-72" onClick={() => onZoom?.(`/media/${n.image}`)} />}
       <div className={n.image ? 'px-5' : ''}>
       {n.title && <div className="h3 mb-1.5 leading-snug">{n.title}</div>}
@@ -144,7 +179,8 @@ function NoteCard({ n, onDel, onTag, onZoom, extra = '' }) {
         {n.score != null && n.score < 1 && <span className="label !text-[10px] text-accent">✦ {Math.round(n.score * 100)}%</span>}
         {n.tags && n.tags.split(',').filter(Boolean).map((t) => <button key={t} onClick={() => onTag(t)} className="chip !py-0.5 !text-[11px] hover:text-accent">#{t}</button>)}
         <span className="ml-auto flex items-center gap-1">
-          {hasRaw && <button onClick={() => setShowRaw(!showRaw)} title={showRaw ? 'Показать отредактированный' : 'Показать оригинал'} className={`btn-icon !h-7 !w-7 ${showRaw ? '!bg-accent !text-white' : 'opacity-0 group-hover:opacity-100'} transition`}><Quote size={12} /></button>}
+          {hasRaw && <button onClick={() => setShowRaw(!showRaw)} title={showRaw ? 'Показать отредактированный' : 'Показать оригинал'} className={`btn-icon !h-7 !w-7 ${showRaw ? '!bg-accent !text-accent-ink' : 'opacity-0 group-hover:opacity-100'} transition`}><Quote size={12} /></button>}
+          <button onClick={startEdit} title="Изменить (двойной клик по карточке)" className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 sm:opacity-0 max-sm:opacity-60"><Pencil size={13} /></button>
           <button onClick={onDel} className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100"><Trash2 size={13} /></button>
         </span>
       </div>

@@ -38,7 +38,7 @@ export function Streak({ streak }) {
   const hot = streak.current >= 3
   return (
     <div className="flex items-center gap-3">
-      <div className={`grid h-12 w-12 place-items-center rounded-full ${hot ? 'bg-accent text-white' : 'fill'}`} style={hot ? { animation: 'breathe 2.4s ease-in-out infinite' } : {}}>
+      <div className={`grid h-12 w-12 place-items-center rounded-full ${hot ? 'bg-accent text-accent-ink' : 'fill'}`} style={hot ? { animation: 'breathe 2.4s ease-in-out infinite' } : {}}>
         <Flame size={20} strokeWidth={2.2} />
       </div>
       <div>
