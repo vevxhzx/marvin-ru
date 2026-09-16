@@ -5,7 +5,20 @@ from pathlib import Path
 
 import pytest
 
-os.environ.setdefault("JARVIS_DB", ":memory:")
+os.environ.setdefault("ASSISTANT_TEST", "1")
+
+
+@pytest.fixture(autouse=True)
+def fresh_db(tmp_path, monkeypatch):
+    """Свежая база на каждый тест — чат пишет историю в БД, и тест не должен зависеть от того, кто создал таблицы до него."""
+    from core import db
+    from sqlmodel import create_engine
+    from sqlalchemy import event
+    eng = create_engine(f"sqlite:///{tmp_path / 't.db'}", connect_args={"check_same_thread": False})
+    event.listen(eng, "connect", db._pragmas)
+    monkeypatch.setattr(db, "engine", eng)
+    db.init_db()
+    yield
 
 
 def _mk(root: Path, name: str, age_sec: int = 3600, body: bytes = b"x") -> Path:

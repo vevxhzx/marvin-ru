@@ -479,7 +479,9 @@ def test_proxied_loopback_is_not_local(tg_cfg):
     assert c.get("/api/tasks").status_code == 200                      # реально с ПК — можно
     assert c.get("/api/tasks", headers=fwd).status_code == 401         # через прокси — нет
     assert c.get("/api/health", headers=fwd).status_code == 200        # публичное — да
-    assert c.get("/", headers=fwd).status_code in (200, 404)           # сам сайт без данных — да
+    from core.config import setup_done
+    # сам сайт без данных — да; на чистой машине (мастер не пройден) «/» ведёт в мастер, а мастер через прокси закрыт — 403
+    assert c.get("/", headers=fwd).status_code in ((200, 404) if setup_done() else (403,))
     tok = {"X-Auth-Token": auth.token(), **fwd}
     assert c.get("/api/tasks", headers=tok).status_code == 200         # с ключом — можно
     assert c.get("/api/phone", headers=tok).status_code == 403         # но мастер-ключи/QR — только с ПК
