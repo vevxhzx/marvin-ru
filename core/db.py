@@ -34,6 +34,10 @@ class Event(SQLModel, table=True):
     repeat_until: Optional[datetime] = None
     skip_dates: str = ""               # даты пропущенных повторов "2026-09-10,2026-09-17"
     reminded_for: str = ""             # для повторов: дата последнего напомненного повтора
+    # событие можно «сделать», как задачу: галочка в календаре и в «Делах» — одна запись
+    done: bool = Field(default=False, index=True)
+    done_at: Optional[datetime] = None
+    done_dates: str = ""               # для повторов: какие именно разы отмечены "2026-09-10,2026-09-17"
 
 
 # ---------- Задачи ----------
@@ -128,6 +132,9 @@ class Client(SQLModel, table=True):
     aliases: str = ""                  # другие имена через запятую: «Ваня, Иван Петров, @ivan»
     birthday: Optional[str] = None     # «12.03» или «12.03.1990»
     tags: str = ""                     # через запятую: «монтаж, друг, подрядчик»
+    pay_mode: str = "each"             # как платит: each — за каждый заказ · batch — пачкой раз в pay_every дней · monthly — по числам pay_days
+    pay_every: int = 14                # batch: период в днях (считается от последней оплаты)
+    pay_days: str = ""                 # monthly: числа месяца через запятую («10,25»)
     created_at: datetime = Field(default_factory=now)
 
 
@@ -231,6 +238,52 @@ class ActionLog(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now, index=True)
 
 
+class Lesson(SQLModel, table=True):
+    """Урок из исправления: «сайт 15000» → был записан как трата, хозяин сказал «это заказ». Похожая фраза в следующий раз
+    сразу идёт нужным типом (эмбеддинги локально; без них — по словам). kind="mute" — тема, про которую просили не напоминать."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    text: str                          # исходная фраза хозяина
+    kind: str = Field(index=True)      # что это на самом деле: task / event / expense / income / debt / note / order / mute
+    wrong: str = ""                    # как понял ассистент до исправления
+    vector: str = ""                   # эмбеддинг фразы (JSON), пусто — ещё не посчитан
+    uses: int = 0
+    created_at: datetime = Field(default_factory=now)
+
+
+class Fact(SQLModel, table=True):
+    """Что ассистент знает о хозяине. Слои: short (последние дни: «болит спина», «делаю ролик для Пятёрочки»),
+    long (устойчивое: «кот Барсик», «не любит созвоны утром»), archive (устарело/забыто — не удаляется, в контекст не идёт).
+    Эпизоды живут в Memory, знания — в Note/Link/Relation, разговор — в ChatMessage."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    text: str
+    layer: str = Field(default="short", index=True)     # short / long / archive
+    category: str = Field(default="быт", index=True)    # о человеке / предпочтение / здоровье / работа / быт / отношения / привычка
+    core: bool = False                                  # ядро портрета: всегда в промпте
+    confidence: float = 0.7
+    source_msg: Optional[int] = None                    # ChatMessage.id, откуда взято
+    replaced_by: Optional[int] = None                   # факт устарел — какой его заменил
+    archive_reason: str = ""                            # заменён / забыл по просьбе / не пригодился / устарел
+    vector: str = ""                                    # эмбеддинг (JSON), для подтягивания по смыслу
+    uses: int = 0                                       # сколько раз попадал в контекст
+    last_used: Optional[datetime] = None
+    created_at: datetime = Field(default_factory=now, index=True)
+    updated_at: datetime = Field(default_factory=now)
+
+
+class Relation(SQLModel, table=True):
+    """Смысловая связь между двумя записями («note:12» ↔ «link:7»). Раньше связи считались на лету по эмбеддингам и
+    их нельзя было убрать; теперь связь — запись: auto (предложила нейронка) / yes (человек перешёл по ней) / no (крестик —
+    больше не предлагать). a < b лексикографически, чтобы пара хранилась один раз."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    a: str = Field(index=True)
+    b: str = Field(index=True)
+    score: float = 0.0             # близость эмбеддингов на момент решения
+    status: str = Field(default="auto", index=True)   # auto / yes / no
+    why: str = ""                  # пояснение нейронки одной строкой («оба про сайт для мамы»)
+    via: str = ""                  # кто решил: cloud / ollama / embed (без модели, жёсткий порог)
+    created_at: datetime = Field(default_factory=now)
+
+
 class Embedding(SQLModel, table=True):
     """Векторы для смыслового поиска по заметкам/ссылкам (локальная модель через Ollama)."""
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -301,9 +354,11 @@ def _migrate() -> None:
         "transaction": {"debt_id": "INTEGER", "order_id": "INTEGER", "goal_id": "INTEGER"},
         "category": {"budget": "FLOAT DEFAULT 0", "custom": "BOOLEAN DEFAULT 0", "bucket": "VARCHAR DEFAULT ''"},
         "event": {"repeat": "VARCHAR DEFAULT ''", "repeat_days": "VARCHAR DEFAULT ''", "repeat_until": "DATETIME",
-                  "skip_dates": "VARCHAR DEFAULT ''", "reminded_for": "VARCHAR DEFAULT ''"},
+                  "skip_dates": "VARCHAR DEFAULT ''", "reminded_for": "VARCHAR DEFAULT ''",
+                  "done": "BOOLEAN DEFAULT 0", "done_at": "DATETIME", "done_dates": "VARCHAR DEFAULT ''"},
         "task": {"remind_stage": "INTEGER DEFAULT 0"},
-        "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''"},
+        "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''",
+                   "pay_mode": "VARCHAR DEFAULT 'each'", "pay_every": "INTEGER DEFAULT 14", "pay_days": "VARCHAR DEFAULT ''"},
     }
     with engine.begin() as conn:
         for table, cols in wanted.items():
@@ -332,6 +387,17 @@ def init_db() -> None:
             s.add(Account(name=main, kind="bank", is_main=True))
             s.add(Account(name="Наличные", kind="cash"))
         s.commit()
+        # 0.9.9: раньше любой новый человек заводился как «клиент». Клиент без единого заказа — не клиент:
+        # угадываем тип по имени/подписи (мама → семья, Ваня, друг → друг), иначе просто «человек». Один раз.
+        if not s.exec(select(Setting).where(Setting.key == "migr.people_kinds")).first():
+            from .services.people import guess_kind
+            with_orders = {o.client_id for o in s.exec(select(Order)).all() if o.client_id}
+            for c in s.exec(select(Client).where(Client.kind.in_(("client", "person")))).all():   # type: ignore[attr-defined]
+                if c.id not in with_orders:
+                    g = guess_kind(c.name, c.notes)
+                    if c.kind == "client" or g != "person":   # «человека» повышаем только до семьи/друга/компании, не трогаем зря
+                        c.kind = g; s.add(c)
+            s.add(Setting(key="migr.people_kinds", value="1")); s.commit()
 
 
 @contextmanager

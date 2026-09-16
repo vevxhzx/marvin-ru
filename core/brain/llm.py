@@ -25,7 +25,13 @@ def _local_client(timeout: float) -> httpx.AsyncClient:
 OLLAMA_MODEL = cfg.brain.ollama.model
 # держать модель в видеопамяти между запросами (иначе Ollama выгружает через 5 мин и первый ответ ждёт 5–15 с)
 OLLAMA_KEEP_ALIVE = str(getattr(cfg.brain.ollama, "keep_alive", "2h") or "2h")
-OLLAMA_NUM_CTX = int(getattr(cfg.brain.ollama, "num_ctx", 8192) or 8192)   # 4096 не хватало: схемы инструментов + промпт + история ≈ 4.5–5k токенов → Ollama резала промпт и обрывала ответ
+OLLAMA_NUM_CTX = int(getattr(cfg.brain.ollama, "num_ctx", 8192) or 8192)
+# маленькая модель для мини-задач (судья «трата или заказ?», «оставить или в архив», проактивные фразы): 0.6–1.7B,
+# грузится по требованию и сама выгружается через small_keep_alive — не сидит в видеопамяти рядом с играми/рендером
+SMALL_MODEL = str(getattr(cfg.brain.ollama, "small_model", "") or "").strip()
+SMALL_KEEP_ALIVE = str(getattr(cfg.brain.ollama, "small_keep_alive", "5m") or "5m")
+_SMALL_MISSING: set[str] = set()   # модели, которых нет в Ollama — не долбить каждый раз
+_SMALL_SEEN: set[str] = set()      # чтобы «на месте» написать один раз, а не при каждой проверке   # 4096 не хватало: схемы инструментов + промпт + история ≈ 4.5–5k токенов → Ollama резала промпт и обрывала ответ
 # режим короткого ответа (голос): ограничение длины генерации — для TTS и восприятия на слух
 short_mode: contextvars.ContextVar[bool] = contextvars.ContextVar("short_mode", default=False)
 GEMINI_KEY = (cfg.brain.gemini.api_key or "").strip()
@@ -166,6 +172,17 @@ async def _ollama_probe() -> bool:
             if models and not any(m == want or m.startswith(OLLAMA_MODEL) for m in models):
                 log.warning("Ollama работает, но модели %s нет. Есть: %s. Выполни: ollama pull %s",
                             OLLAMA_MODEL, ", ".join(models), OLLAMA_MODEL)
+            if SMALL_MODEL and models:
+                sw = SMALL_MODEL if ":" in SMALL_MODEL else SMALL_MODEL + ":latest"
+                if not any(m == sw or m.startswith(SMALL_MODEL) for m in models):
+                    if SMALL_MODEL not in _SMALL_MISSING:
+                        log.warning("Малой модели %s нет в Ollama — мини-задачи пойдут на основную. Выполни: ollama pull %s", SMALL_MODEL, SMALL_MODEL)
+                    _SMALL_MISSING.add(SMALL_MODEL)
+                else:
+                    if SMALL_MODEL in _SMALL_MISSING or not _SMALL_SEEN:
+                        log.info("Малая модель %s на месте: судья и подсказки пойдут на неё (в памяти %s после задачи)", SMALL_MODEL, SMALL_KEEP_ALIVE)
+                    _SMALL_SEEN.add(SMALL_MODEL)
+                    _SMALL_MISSING.discard(SMALL_MODEL)
             return True
     except Exception as e:
         log.debug("ollama check failed: %s", e)
@@ -206,6 +223,38 @@ def strip_think(text: str | None) -> str:
         t = paras[-1] if paras else ""
         t = re.sub(r"^(\*\*)?(Option|Вариант|Draft|Черновик)[^:]*:\s*(\*\*)?", "", t, flags=re.I)
     return t.strip()
+
+
+def small_model_active() -> bool:
+    """Малая модель настроена и есть в Ollama (проверяется в ollama_available)."""
+    return bool(SMALL_MODEL) and SMALL_MODEL not in _SMALL_MISSING
+
+
+async def small_chat(system: str, user: str, json_mode: bool = True, num_predict: int = 200) -> str:
+    """Мини-задача на маленькой локальной модели: короткий контекст (2048), без инструментов, выгружается через
+    small_keep_alive. Если малая модель не задана или не скачана — та же задача на основной модели."""
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    if not small_model_active():
+        out = await ollama_chat(messages, temperature=0.1, json_mode=json_mode)
+        return strip_think(out.get("content") or "")
+    est = (len(system) + len(user)) // 3 + 100
+    num_ctx = 2048
+    while est + num_predict > num_ctx and num_ctx < 8192:
+        num_ctx *= 2
+    payload: dict[str, Any] = {"model": SMALL_MODEL, "messages": messages, "stream": False, "keep_alive": SMALL_KEEP_ALIVE,
+                               "options": {"temperature": 0.1, "num_ctx": num_ctx, "num_predict": num_predict}}
+    if json_mode:
+        payload["format"] = "json"
+    if _THINK_RX.search(SMALL_MODEL):
+        payload["think"] = False
+        payload["options"]["stop"] = ["<think>"]
+    t0 = time.monotonic()
+    async with _local_client(90) as c:
+        r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
+        r.raise_for_status()
+        out = strip_think((r.json().get("message") or {}).get("content") or "")
+    log.info("малая модель %s ответила за %.1f с", SMALL_MODEL, time.monotonic() - t0)
+    return out
 
 
 async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, temperature: float = 0.3,
@@ -309,10 +358,31 @@ _PII = [
     (re.compile(r"\b\d{4}\s?\d{4}\s?\d{4}\s?\d{4}\b"), "[карта]"),
     (re.compile(r"\b\d[\d\s]*(?:[.,]\d+)?\s*(?:₽|руб\w*|тыс\w*|к\b|млн)"), "[сумма]"),
     (re.compile(r"\b(?:[А-ЯЁ][а-яё]+\s+)?[А-ЯЁ][а-яё]+(?:ович|евич|овна|евна|ична)\b"), "[имя]"),  # Иван Петрович
+    # секреты: «пароль от вайфая qwerty123», «пин 4821», «код из смс 384712», «cvv 123», ключи API — в облако не уходят никогда
+    (re.compile(r"\b(?:sk|gsk|xai|sk-or|ghp|AIza)[-_][A-Za-z0-9_\-]{16,}"), "[ключ]"),
 ]
+# «пароль от вайфая qwerty123», «пин карты 4821», «код из смс 384712», «password: hunter2» — после ключевого слова
+# скрываем ближайший токен, похожий на секрет (латиница/цифры/символы, не русское слово)
+_SECRET_KEY_RX = re.compile(r"(парол[ьяюе]\w*|pass(?:word|wd)?|пин(?:-код)?|pin|cvv|cvc|код\s+(?:из\s+)?(?:смс|sms|подтверждени\w*|от\s+[а-яё]+|доступа)|секретн?\w*\s+(?:слово|ключ|код)|api[- ]?key|токен\w*|token)\b", re.I)
+# между словом и значением — до трёх русских слов («от вайфая», «карты», «бота в телеге»); значение — не русское слово
+_SECRET_VAL_RX = re.compile(r"[:=—\-]?\s*(?:[а-яё«»\"'\-]+\s+){0,3}[:=—\-]?\s*((?=\S*[A-Za-z0-9])[^\s,;]{3,})")
+
+
+def _hide_secrets(text: str) -> str:
+    out, pos = [], 0
+    for m in _SECRET_KEY_RX.finditer(text):
+        if m.start() < pos:
+            continue
+        v = _SECRET_VAL_RX.match(text, m.end())
+        if not v:
+            continue
+        out.append(text[pos:v.start(1)]); out.append("[скрыто]"); pos = v.end(1)
+    out.append(text[pos:])
+    return "".join(out)
 
 
 def anonymize(text: str) -> str:
+    text = _hide_secrets(text)
     for rx, repl in _PII:
         text = rx.sub(repl, text)
     # имена людей, которые уже фигурируют в твоей базе (события «встреча с Ваней», долги «Ване»)

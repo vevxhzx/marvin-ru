@@ -189,7 +189,7 @@ def agenda(text: str) -> Result | None:
     lines = [f"📅 **{label.capitalize()}**"]
     multi = (end - start).days > 1
     for e in evs:
-        lines.append(f"— **{fmt_dt(e.start) if multi else e.start.strftime('%H:%M')}** {e.title}" + (f" · {e.location}" if e.location else ""))
+        lines.append(f"— **{fmt_dt(e.start) if multi else e.start.strftime('%H:%M')}** {'✓ ' if calendar.is_done(e) else ''}{e.title}" + (f" · {e.location}" if e.location else ""))
     for t in due:
         lines.append(f"— ✅ {t.title} · до {fmt_dt(t.due) if multi else t.due.strftime('%H:%M')}")
     for p in pays:

@@ -59,6 +59,24 @@ class _Text(str):
 
 
 def parse_datetime(text: str, now: datetime | None = None) -> tuple[datetime | None, str]:
+    dt, rest, _ = parse_datetime_ex(text, now)
+    return dt, rest
+
+
+def task_due(dt: datetime | None, time_set: bool) -> datetime | None:
+    """Срок задачи: назван только день («сегодня», «в пятницу», «25.09») — это задача на весь день (23:59),
+    а не «к 10:00». Время названо явно — как сказано."""
+    if dt is None or time_set:
+        return dt
+    return dt.replace(hour=23, minute=59, second=0, microsecond=0)
+
+
+def is_all_day(dt: datetime | None) -> bool:
+    return bool(dt) and dt.hour == 23 and dt.minute == 59
+
+
+def parse_datetime_ex(text: str, now: datetime | None = None) -> tuple[datetime | None, str, bool]:
+    """Как parse_datetime, плюс флаг: было ли во фразе время (а не только день)."""
     now = now or datetime.now()
     t = _Text(" " + text + " ")
     date: datetime | None = None
@@ -83,7 +101,7 @@ def parse_datetime(text: str, now: datetime | None = None) -> tuple[datetime | N
         else:
             date = now + timedelta(**{unit: n})
         t = t.replace(m.group(0), " ")
-        return date.replace(second=0, microsecond=0), t.final()
+        return date.replace(second=0, microsecond=0), t.final(), unit in ("minutes", "hours")
 
     # --- время: 15:00, 15.30, «в 15», «в 3 часа дня», «в пол третьего» (упрощённо) ---
     m = re.search(r"(?:в|на|к)\s+(\d{1,2})[:.](\d{2})", t) or re.search(r"\b(\d{1,2})[:](\d{2})\b", t)
@@ -192,11 +210,38 @@ def parse_datetime(text: str, now: datetime | None = None) -> tuple[datetime | N
         if (hour, minute) <= (now.hour, now.minute):
             date += timedelta(days=1)   # «в 9 утра», а уже 14:00 → завтра
     if date is None:
-        return None, t.final()
+        return None, t.final(), False
     if deadline and not time_set:
         hour, minute = 23, 59
     dt = date.replace(hour=hour, minute=minute, second=0, microsecond=0)
-    return dt, t.final()
+    return dt, t.final(), time_set
+
+
+NIGHT_HOUR_RX = re.compile(r"(?:\b(?:в|на|к)\s+)([0-6])(?:\s*(?:час\w*|ч\b))?(?![\dк:.]|\s*(?:утра|дня|вечера|ночи|минут|тыс|руб|₽|%|-го|го\b|числ|сентябр|октябр|ноябр|декабр|январ|феврал|март|апрел|ма[йя]|июн|июл|август|дн[яей]|недел|мес))", re.I)
+
+
+def ambiguous_night_hour(text: str) -> int | None:
+    """«купить корм в 4» — 4 утра или 16:00? Парсер по умолчанию считает 16:00, но если человек имел в виду ночь,
+    напоминание уедет не туда (так и появилось «купить корм в 04:00»). Возвращает цифру 0–6, если она стоит без
+    «утра/ночи/дня/вечера» и без минут — тогда лучше переспросить, чем гадать."""
+    t = " " + text.lower() + " "
+    if re.search(r"\d{1,2}[:.]\d{2}", t):
+        return None
+    m = NIGHT_HOUR_RX.search(t)
+    return int(m.group(1)) if m else None
+
+
+NIGHT_MARK_RX = re.compile(r"утра|ночи|ночью|утром|рано|подъ[её]м|будильник|разбуди|проснут|рейс|вылет|самол[её]т|поезд|такси|аэропорт|вокзал", re.I)
+
+
+def fix_night_hour(dt: datetime | None, text: str) -> datetime | None:
+    """LLM (или человек в ISO) выдал 01:00–06:00, а в тексте ни «утра», ни «ночью», ни рейса/будильника —
+    почти наверняка имелось в виду 13:00–18:00 (так же трактует «в 4» и наш парсер). Сдвигаем на 12 часов."""
+    if not dt or not (1 <= dt.hour <= 6) or NIGHT_MARK_RX.search(text or ""):
+        return dt
+    if re.search(r"\b0?%d[:.]\d{2}" % dt.hour, text or ""):
+        return dt   # написано явно «04:30» — верим
+    return dt + timedelta(hours=12)
 
 
 def parse_amount(text: str) -> tuple[float | None, str]:

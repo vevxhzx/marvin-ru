@@ -130,6 +130,8 @@ def delete_note(nid: int) -> bool:
             return False
         img = n.image
         s.delete(n); s.commit()
+    from . import relations
+    relations.forget("note", nid)
     if img:
         try:
             (MEDIA_DIR / img).unlink(missing_ok=True)

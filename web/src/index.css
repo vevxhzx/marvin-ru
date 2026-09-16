@@ -524,7 +524,9 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 
 /* ---------- свайпы (телефон) ---------- */
 /* свайп строки, iOS-стиль: слева зелёная «готово», справа красная «удалить». Короткий свайп раскрывает кнопку, длинный — сразу выполняет */
-.swipe { position: relative; overflow: hidden; touch-action: pan-y; margin: 0 -16px; padding: 0 16px; }
+/* overflow прячем только пока тянут/раскрыто — иначе тултипы кнопок внутри строки (таймер, приоритет) режутся по краю */
+.swipe { position: relative; touch-action: pan-y; margin: 0 -16px; padding: 0 16px; }
+.swipe.active, .swipe.open { overflow: hidden; }
 .swipe-fg { position: relative; will-change: transform; background: var(--bg); }
 .swipe-bg { position: absolute; inset: 0; display: flex; align-items: stretch; opacity: 0; transition: opacity .12s, background-color .2s; color: #fff; overflow: hidden; }
 .swipe-bg.right { justify-content: flex-start; background: var(--pos); }

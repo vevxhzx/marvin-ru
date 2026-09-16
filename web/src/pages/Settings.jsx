@@ -585,6 +585,12 @@ function SettingField({ it, value, onChange, providers }) {
   if (it.key === 'brain.mode') {
     return <Field label={it.label}><Seg value={value} onChange={onChange} options={[['local', 'только локально'], ['hybrid', 'гибрид'], ['cloud', 'облако']]} /></Field>
   }
+  if (it.key === 'brain.sorter.where') {
+    return <Field label="Сообщения-списки разбирает" hint="одно сообщение → задачи, встречи, люди, заказы, долги…"><Seg value={value || 'cloud'} onChange={onChange} options={[['cloud', 'облако'], ['auto', 'ПК, при сбое облако'], ['local', 'только ПК']]} /></Field>
+  }
+  if (it.key === 'brain.vision.where') {
+    return <Field label="Картинки смотрит"><Seg value={value || 'auto'} onChange={onChange} options={[['auto', 'ПК, при сбое облако'], ['cloud', 'облако'], ['local', 'только ПК']]} /></Field>
+  }
   return (
     <Field label={it.label} hint={it.secret ? (it.set ? 'сохранён · введите новый, чтобы заменить' : 'не задан') : undefined}>
       <div className="relative">

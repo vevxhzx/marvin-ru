@@ -183,7 +183,7 @@ async def _token() -> str:
 def _body(ev: Event) -> dict:
     end = ev.end or (ev.start + timedelta(hours=1))
     body: dict[str, Any] = {
-        "summary": ev.title,
+        "summary": ("✓ " if ev.done and not ev.repeat else "") + ev.title,
         "start": {"dateTime": ev.start.replace(microsecond=0).isoformat(), "timeZone": TZ},
         "end": {"dateTime": end.replace(microsecond=0).isoformat(), "timeZone": TZ},
         "reminders": {"useDefault": False, "overrides": [{"method": "popup", "minutes": int(ev.remind_minutes or 0)}]},

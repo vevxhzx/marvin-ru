@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, Plus, Trash2, MapPin, Repeat, SkipForward, Check, CheckSquare, Briefcase } from 'lucide-react'
-import { api, hhmm, MONTHS_NOM, MONTHS, isSameDay, toLocalISO, dayLabel, REPEAT_LABELS, WD_SHORT_MON, plural } from '../lib/api'
+import { api, hhmm, MONTHS_NOM, MONTHS, isSameDay, toLocalISO, dayLabel, shortDate, REPEAT_LABELS, WD_SHORT_MON, plural } from '../lib/api'
 import { Card, Section, Empty, Sheet, Field, Seg, useToast, PageHead, Swipe, useLeave } from '../components/ui'
 import { useRefresh } from '../App'
+import DayStrip from '../components/DayStrip'
+import TaskSheet from '../components/TaskSheet'
+import { OrderSheet } from './Orders'
 
 const WD = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 
@@ -12,6 +14,10 @@ export default function Calendar() {
   const [selected, setSelected] = useState(new Date())
   const [events, setEvents] = useState(null)
   const [sheet, setSheet] = useState(null) // null | 'new' | event
+  const [taskSheet, setTaskSheet] = useState(null)   // задача из календаря правится на месте, без перехода
+  const [orderSheet, setOrderSheet] = useState(null) // дедлайн заказа — тоже
+  const openTask = async (e) => { try { setTaskSheet(await api.task(e.task_id)) } catch (er) { show.err(er) } }
+  const openOrder = async (e) => { try { setOrderSheet(await api.order(e.order_id)) } catch (er) { show.err(er) } }
   const [view, setView] = useState('month')
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
@@ -19,22 +25,23 @@ export default function Calendar() {
   const key = (e) => `${e.id}:${e.start}`
   const del = (e) => leave(key(e), 'leaving', async () => { try { await api.delEvent(e.id); show(e.repeat ? 'Повтор удалён' : 'Событие удалено', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
   const skip = (e) => leave(key(e), 'done', async () => { try { await api.skipEvent(e.id, toLocalISO(e.start)); show('Этот раз пропущен', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
-  const nav = useNavigate()
   // задача с дедлайном живёт в календаре как строка с чекбоксом: отметил здесь — закрылась в задачах (одна запись в базе)
   const toggleTask = (e) => leave(key(e), 'done', async () => { try { await (e.done ? api.undoneTask(e.task_id) : api.doneTask(e.task_id)); show(e.done ? 'Вернул в дела' : 'Сделано', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
+  // событие — тоже дело: галочка ставится тут, видна в «Делах» и уходит в Google (✓ в названии). Для повтора — только этот раз
+  const toggleEvent = (e) => leave(key(e), e.done ? 'leaving' : 'done', async () => { try { await api.doneEvent(e.id, !e.done, toLocalISO(e.start)); if (!e.done) show('Сделано', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
   // дедлайн заказа — строка-ссылка в «Заказы» (сдать / отметить — там же)
   const markDone = (e) => leave(key(e), 'done', async () => { try { await api.updateOrder(e.order_id, { status: 'done' }); show('Заказ сдан', '', e.title); await load(); bump() } catch (er) { show.err(er) } })
   const rowOf = (e, compact) => e.kind === 'order' ? (
     <Swipe key={key(e)} onRight={() => markDone(e)} rightLabel="сдан" rightIcon={<Check size={18} strokeWidth={2.6} />}>
-      <OrderRow e={e} onDone={() => markDone(e)} onOpen={() => nav('/orders')} compact={compact} extra={leaveCls(key(e))} />
+      <OrderRow e={e} onDone={() => markDone(e)} onOpen={() => openOrder(e)} compact={compact} extra={leaveCls(key(e))} />
     </Swipe>
   ) : e.kind === 'task' ? (
     <Swipe key={key(e)} onRight={() => toggleTask(e)} rightLabel={e.done ? 'вернуть' : 'сделано'} rightIcon={<Check size={18} strokeWidth={2.6} />}>
-      <TaskRow e={e} onToggle={() => toggleTask(e)} onOpen={() => nav('/tasks')} compact={compact} extra={leaveCls(key(e))} />
+      <TaskRow e={e} onToggle={() => toggleTask(e)} onOpen={() => openTask(e)} compact={compact} extra={leaveCls(key(e))} />
     </Swipe>
   ) : (
-    <Swipe key={key(e)} onLeft={() => del(e)} onRight={e.repeat ? () => skip(e) : undefined} leftLabel={e.repeat ? 'все повторы' : 'удалить'} rightLabel="пропустить" rightIcon={<SkipForward size={18} strokeWidth={2.4} />}>
-      <EventRow e={e} onClick={() => setSheet(e)} compact={compact} extra={leaveCls(key(e))} />
+    <Swipe key={key(e)} onLeft={() => del(e)} onRight={() => toggleEvent(e)} leftLabel={e.repeat ? 'все повторы' : 'удалить'} rightLabel={e.done ? 'вернуть' : 'сделано'} rightIcon={<Check size={18} strokeWidth={2.6} />}>
+      <EventRow e={e} onClick={() => setSheet(e)} onToggle={() => toggleEvent(e)} compact={compact} extra={leaveCls(key(e))} />
     </Swipe>
   )
 
@@ -140,7 +147,7 @@ export default function Calendar() {
                 {upcoming.map((e) => (
                   <button key={key(e)} className="row row-hover w-full text-left" onClick={() => setSelected(new Date(e.start))}>
                     <span className="muted num w-[116px] shrink-0 text-[13px]">{dayLabel(e.start).toLowerCase()}, {hhmm(e.start)}</span>
-                    <span className={`truncate text-[14.5px] font-medium ${e.kind === 'task' && e.done ? 'line-through opacity-50' : ''}`}>{e.title}</span>
+                    <span className={`truncate text-[14.5px] font-medium ${e.done ? 'line-through opacity-50' : ''}`}>{e.title}</span>
                     {e.kind === 'task' && <CheckSquare size={12} className="faint shrink-0" />}
                     {e.kind === 'order' && <Briefcase size={12} className="faint shrink-0" />}
                     {e.repeat && <Repeat size={12} className="faint shrink-0" />}
@@ -158,13 +165,18 @@ export default function Calendar() {
           {events === null ? <div className="fill h-40 animate-pulseSoft rounded-2xl" /> : dayEvents.length === 0 ? (
             <div className="rule"><Empty glyph="calendar" text={isToday ? 'Сегодня свободно' : 'Ничего не запланировано'} sub={isToday ? 'Подозрительно спокойно, сэр' : 'День свободен'} hint={isToday ? 'ужин в 7 вечера' : `встреча ${selected.getDate()} ${MONTHS[selected.getMonth()]} в 15`} /></div>
           ) : (
-            <DayTimeline list={dayEvents} isToday={isToday} rowOf={rowOf} />
+            <>
+              <DayStrip list={dayEvents} isToday={isToday} onPick={(e) => (e.kind === 'task' ? openTask(e) : e.kind === 'order' ? openOrder(e) : setSheet(e))} />
+              <DayTimeline list={dayEvents} isToday={isToday} rowOf={rowOf} />
+            </>
           )}
         </Section>
       </div>
 
       <EventSheet open={!!sheet} ev={sheet === 'new' ? null : sheet} day={selected} onClose={() => setSheet(null)}
         onDone={(msg) => { setSheet(null); show(msg); load(); bump() }} onErr={show.err} />
+      <TaskSheet open={!!taskSheet} task={taskSheet} onClose={() => setTaskSheet(null)} onDone={(msg) => { setTaskSheet(null); show(msg); load(); bump() }} onErr={show.err} />
+      <OrderSheet open={!!orderSheet} order={orderSheet} onClose={() => setOrderSheet(null)} onDone={(msg) => { setOrderSheet(null); show(msg); load(); bump() }} onErr={show.err} />
     </div>
   )
 }
@@ -200,20 +212,26 @@ function NowLine({ now, next, first }) {
   )
 }
 
-function EventRow({ e, onClick, compact, extra = '' }) {
+function EventRow({ e, onClick, onToggle, compact, extra = '' }) {
   const now = new Date()
   const past = e.end && new Date(e.end) < now
-  const live = new Date(e.start) <= now && e.end && new Date(e.end) >= now
+  const live = !e.done && new Date(e.start) <= now && e.end && new Date(e.end) >= now
+  const checked = e.done || extra.includes('leaving-done')
   return (
-    <button onClick={onClick} className={`row row-slide row-hover w-full text-left ${past ? 'opacity-50' : ''} ${compact ? '!py-2 !border-0' : ''} ${extra}`}>
+    <div className={`row row-slide row-hover group ${past || e.done ? 'opacity-50' : ''} ${compact ? '!py-2 !border-0' : ''} ${extra}`}>
       <div className="w-12 shrink-0"><div className="num text-[14.5px] font-semibold">{hhmm(e.start)}</div>{e.end && !compact && <div className="faint num text-[11px]">{hhmm(e.end)}</div>}</div>
-      <div className={`h-8 w-[3px] shrink-0 rounded-full ${live ? 'bg-green' : 'bg-accent'}`} />
-      <div className="min-w-0 flex-1">
-        <div className="flex items-center gap-1.5 truncate text-[14.5px] font-medium">{e.title}{e.repeat && <Repeat size={12} className="faint shrink-0" />}</div>
+      {/* галочка появляется у события, когда до него меньше суток или оно уже идёт/прошло — раньше отмечать нечего */}
+      {(checked || new Date(e.start) - now < 864e5) && onToggle
+        ? <button onClick={onToggle} aria-label={e.done ? 'Вернуть' : 'Сделано'} className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${checked ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={checked ? {} : { borderColor: 'var(--line-2)' }}>
+            {checked ? <Check size={13} strokeWidth={3} className="check-pop" /> : <Check size={12} className="opacity-0 transition group-hover:opacity-40" />}
+          </button>
+        : <div className={`h-8 w-[3px] shrink-0 rounded-full ${live ? 'bg-green' : 'bg-accent'}`} />}
+      <button onClick={onClick} className="min-w-0 flex-1 text-left">
+        <div className={`flex items-center gap-1.5 truncate text-[14.5px] font-medium ${e.done ? 'line-through' : ''}`}>{e.title}{e.repeat && <Repeat size={12} className="faint shrink-0" />}</div>
         {(e.location || e.repeat) && <div className="muted flex items-center gap-1 truncate text-[12px]">{e.location && <><MapPin size={11} />{e.location}</>}{e.repeat && <span className="faint">{e.location ? ' · ' : ''}{e.repeat_label}</span>}</div>}
-      </div>
+      </button>
       {live ? <span className="badge pos">сейчас</span> : <ChevronRight size={15} className="faint" />}
-    </button>
+    </div>
   )
 }
 
@@ -228,7 +246,8 @@ function dayHint(selected, list) {
 }
 
 function OrderRow({ e, onDone, onOpen, compact, extra = '' }) {
-  const overdue = new Date(e.start) < new Date()
+  const past = new Date(e.start) < new Date()
+  const overdue = past && e.status !== 'review'   // на правках после срока — сдано, идут правки: не краснеем
   return (
     <div className={`row row-slide row-hover ${compact ? '!py-2 !border-0' : ''} ${extra}`}>
       <div className="w-12 shrink-0"><div className={`num text-[14.5px] font-semibold ${e.all_day ? 'faint !text-[11px] !font-medium' : ''}`}>{e.all_day ? 'день' : hhmm(e.start)}</div>{!compact && <div className="faint text-[11px]">заказ</div>}</div>
@@ -238,6 +257,7 @@ function OrderRow({ e, onDone, onOpen, compact, extra = '' }) {
       <button onClick={onOpen} className="min-w-0 flex-1 text-left">
         <div className="truncate text-[14.5px] font-medium">{e.title}</div>
         {overdue && <div className="neg text-[12px]">дедлайн прошёл</div>}
+        {past && !overdue && <div className="muted text-[12px]">на правках · срок был {shortDate(e.start).toLowerCase()}</div>}
       </button>
       <ChevronRight size={15} className="faint" />
     </div>
@@ -248,7 +268,7 @@ function TaskRow({ e, onToggle, onOpen, compact, extra = '' }) {
   const overdue = !e.done && new Date(e.start) < new Date()
   return (
     <div className={`row row-slide row-hover ${compact ? '!py-2 !border-0' : ''} ${extra}`}>
-      <div className="w-12 shrink-0"><div className={`num text-[14.5px] font-semibold ${e.all_day ? 'faint !text-[11px] !font-medium' : ''}`}>{e.all_day ? 'день' : hhmm(e.start)}</div>{!compact && <div className="faint text-[11px]">задача</div>}</div>
+      <div className="w-12 shrink-0"><div className={`num text-[14.5px] font-semibold ${e.all_day ? 'faint !text-[11px] !font-medium' : ''}`}>{e.all_day ? 'день' : hhmm(e.start)}</div>{!compact && <div className="faint text-[11px]">{e.all_day || !e.end ? 'задача' : <span className="num">{hhmm(e.end)}</span>}</div>}</div>
       <button onClick={onToggle} aria-label={e.done ? 'Вернуть' : 'Выполнено'} className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${e.done ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={e.done ? {} : { borderColor: e.priority === 1 ? 'var(--neg)' : 'var(--line-2)' }}>
         {e.done && <Check size={13} strokeWidth={3} />}
       </button>
@@ -261,7 +281,7 @@ function TaskRow({ e, onToggle, onOpen, compact, extra = '' }) {
   )
 }
 
-function EventSheet({ open, ev, day, onClose, onDone, onErr }) {
+export function EventSheet({ open, ev, day, onClose, onDone, onErr }) {
   const [f, setF] = useState({})
   useEffect(() => {
     if (!open) return
@@ -307,6 +327,7 @@ function EventSheet({ open, ev, day, onClose, onDone, onErr }) {
         <div className="flex gap-2">
           {ev && <button type="button" className="btn-ghost !px-3.5 neg" title={ev.repeat ? 'Удалить все повторы' : 'Удалить'} onClick={async () => { await api.delEvent(ev.id); onDone(ev.repeat ? 'Повтор удалён' : 'Событие удалено') }}><Trash2 size={15} /></button>}
           {ev && ev.repeat && <button type="button" className="btn-ghost" title="Пропустить только этот раз" onClick={async () => { await api.skipEvent(ev.id, toLocalISO(ev.start)); onDone('Этот раз пропущен') }}>пропустить раз</button>}
+          {ev && <button type="button" className="btn-ghost" onClick={async () => { await api.doneEvent(ev.id, !ev.done, toLocalISO(ev.start)); onDone(ev.done ? 'Снова в планах' : 'Сделано') }}><Check size={14} /> {ev.done ? 'вернуть' : 'сделано'}</button>}
           <button className="btn-primary btn-lg flex-1">{ev ? 'сохранить' : 'добавить'}</button>
         </div>
       </form>

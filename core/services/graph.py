@@ -4,7 +4,7 @@
 • заказ → человек (client_id), оплата → заказ (order_id), долг → человек (по имени)
 • заметка/ссылка/задача/событие → человек (упоминание имени, people.mentions)
 • заметка/ссылка → тег (#тег из полей tags)
-• заметка ↔ заметка (похожие по смыслу, если есть эмбеддинги — semantic.related_pairs)
+• заметка ↔ заметка (смысловые связи из relations: эмбеддинги отобрали, нейронка решила, крестик убрал)
 • заметка → заметка/ссылка по [[двойным скобкам]] в тексте (как в Obsidian): «см. [[идея про кофе]]»
 
 Возвращаем компактный JSON для отрисовки на сайте (force-layout считаем в браузере, без библиотек).
@@ -108,14 +108,11 @@ def build(days: int = 365, max_notes: int = 400, focus: str | None = None) -> di
             if ppl.mentions(e.title, c) or ppl.mentions(e.notes, c):
                 edge(node(f"event:{e.id}", e.title, "event", ref_id=e.id, at=e.start.isoformat()), f"person:{c.id}", "mention", 1.0)
 
-    # похожие по смыслу заметки — если эмбеддинги уже посчитаны (без модели просто нет таких рёбер)
-    try:
-        from . import semantic
-        for a, b, sc in semantic.related_pairs(min_score=0.62, limit=200):
-            if a in nodes and b in nodes:
-                edge(a, b, "similar", round(sc, 2))
-    except Exception:
-        pass
+    # связанные по смыслу записи — только принятые нейронкой/человеком (relations), а не голая близость эмбеддингов
+    from . import relations
+    for a, b, sc, st in relations.pairs(limit=300):
+        if a in nodes and b in nodes:
+            edge(a, b, "similar", round(max(sc, 0.5) + (0.3 if st == "yes" else 0), 2))
 
     # степень узла → размер; одинокие теги не показываем
     deg: dict[str, int] = {}

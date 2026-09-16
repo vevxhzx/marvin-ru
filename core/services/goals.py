@@ -15,7 +15,7 @@ from ..db import Category, Goal, Recurring, Transaction, log_action, remember, s
 from . import finance
 from .finance import money
 
-log = logging.getLogger("jarvis.goals")
+log = logging.getLogger("assistant.goals")
 
 BUCKETS = ("need", "want", "save")
 BUCKET_LABEL = {"need": "обязательное", "want": "хотелки", "save": "накопления", "": "не размечено"}

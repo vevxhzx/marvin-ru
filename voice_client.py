@@ -520,8 +520,11 @@ def _reminder_listener() -> None:
     seen: set[str] = set()
     while _running:
         try:
-            with httpx.Client(timeout=httpx.Timeout(None, connect=5), trust_env=False, headers=API_HEADERS) as c:
-                with c.stream("GET", f"{API}/api/events/stream") as r:
+            # read=70: ядро шлёт «: ping» каждые 25 с; если 70 с тишины — соединение умерло (ядро перезапускалось, ПК спал),
+            # раньше такой поток висел вечно: пульс жив, а команды («разбери стол») до клиента не доходили
+            with httpx.Client(timeout=httpx.Timeout(70, connect=5), trust_env=False, headers=API_HEADERS) as c:
+                with c.stream("GET", f"{API}/api/events/stream", params={"client": "pc"}) as r:
+                    log.info("Поток команд ядра подключён")
                     for line in r.iter_lines():
                         if not _running:
                             return
@@ -551,7 +554,7 @@ def _reminder_listener() -> None:
                             continue     # ночью вслух только напоминания о встречах/дедлайнах, остальное подождёт утра
                         _say_q.put(("Сэр, " if not ev["text"].lower().startswith(("сэр", "напомина")) else "") + ev["text"])
         except Exception as e:
-            log.debug("reminder stream: %s", e)
+            log.info("Поток команд ядра оборвался (%s) — переподключаюсь через 5 с", str(e)[:80] or type(e).__name__)
         time.sleep(5)   # ядро перезапустилось / сеть — переподключаемся
 
 

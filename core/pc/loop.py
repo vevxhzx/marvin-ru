@@ -151,6 +151,10 @@ def run_command(ev: dict, say) -> None:
     action, arg, extra, channel = ev.get("action"), ev.get("arg", ""), ev.get("extra") or {}, ev.get("channel", "voice")
     log.info("ПК-команда: %s %r", action, arg[:60] if isinstance(arg, str) else arg)
     try:
+        _post("/api/pc/ack", {"action": action}, timeout=5)   # ядро видит: команда принята
+    except Exception as e:
+        log.debug("ack: %s", e)
+    try:
         if action == "open_url":
             msg = actions.open_url(arg, API)
         elif action == "open_app":
@@ -171,11 +175,20 @@ def run_command(ev: dict, say) -> None:
                 _post("/api/pc/result", {"text": "🖥 " + msg, "channel": channel, "kind": "status"}, timeout=10)
         elif action == "tidy":
             from . import tidy
-            roots = tidy.roots_for([x for x in (arg or "desktop,downloads").split(",") if x])
-            plan = tidy.make_plan(roots, DATA_DIR)
-            _post("/api/pc/result", {"text": tidy.plan_text(plan), "channel": channel, "kind": "tidy_plan",
-                                     "extra": {"plan_id": plan["id"], "total": plan["total"]}}, timeout=10)
-            msg = tidy.plan_speech(plan) if channel == "voice" else ""
+            wanted = [x for x in (arg or "desktop,downloads").split(",") if x]
+            roots = tidy.roots_for(wanted)
+            log.info("Уборка: %s → %s", wanted, {k: str(v) for k, v in roots.items()} or "папки не найдены")
+            if not roots:
+                msg = "Не нашёл папку " + ("«Рабочий стол»" if "desktop" in wanted else "«Загрузки»") + " на этом компьютере — странно. Проверьте, что она есть в Проводнике."
+                _post("/api/pc/result", {"text": "🧹 " + msg, "channel": channel, "kind": "result"}, timeout=10)
+                if channel != "voice":
+                    msg = ""
+            else:
+                plan = tidy.make_plan(roots, DATA_DIR)
+                log.info("Уборка: план %s — %d файл(ов)", plan["id"], plan["total"])
+                _post("/api/pc/result", {"text": tidy.plan_text(plan), "channel": channel, "kind": "tidy_plan",
+                                         "extra": {"plan_id": plan["id"], "total": plan["total"]}}, timeout=10)
+                msg = tidy.plan_speech(plan) if channel == "voice" else ""
         elif action == "tidy_apply":
             from . import tidy
             plan = tidy.load_plan(DATA_DIR, arg or None)

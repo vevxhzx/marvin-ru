@@ -40,7 +40,9 @@ export const api = {
   updateEvent: (id, e) => req('PUT', `/api/events/${id}`, e),
   delEvent: (id) => req('DELETE', `/api/events/${id}`),
 
-  tasks: (all = false) => req('GET', `/api/tasks?all=${all}`),
+  task: (id) => req('GET', `/api/tasks/${id}`),
+  tasks: (all = false, eventsToo = false) => req('GET', `/api/tasks?all=${all}${eventsToo ? '&events_too=true' : ''}`),
+  doneEvent: (id, done = true, date = null) => req('POST', `/api/events/${id}/done`, { done, date }),
   addTask: (t) => req('POST', '/api/tasks', t),
   doneTask: (id) => req('POST', `/api/tasks/${id}/done`),
   undoneTask: (id) => req('POST', `/api/tasks/${id}/undone`),
@@ -79,9 +81,11 @@ export const api = {
   },
   delNote: (id) => req('DELETE', `/api/notes/${id}`),
   editNote: (id, patch) => req('PUT', `/api/notes/${id}`, patch),
+  setRelation: (id, status) => req('PUT', `/api/relations/${id}`, { status }),
   links: (q) => req('GET', `/api/links${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   addLink: (url, comment) => req('POST', '/api/links', { url, comment }),
   delLink: (id) => req('DELETE', `/api/links/${id}`),
+  editLink: (id, patch) => req('PUT', `/api/links/${id}`, patch),
   patchTask: (id, p) => req('PUT', `/api/tasks/${id}`, p),
   skipEvent: (id, date) => req('POST', `/api/events/${id}/skip`, { date }),
   undo: () => req('POST', '/api/undo'),
@@ -105,6 +109,8 @@ export const api = {
   orderStats: (months = 6) => req('GET', `/api/orders/stats?months=${months}`),
   // люди и граф связей
   people: () => req('GET', '/api/people'),
+  peopleKinds: () => req('GET', '/api/people/kinds'),
+  delPeopleKind: (k) => req('DELETE', `/api/people/kinds/${encodeURIComponent(k)}`),
   peopleToday: () => req('GET', '/api/people/today'),
   person: (id) => req('GET', `/api/people/${id}`),
   addPerson: (p) => req('POST', '/api/people', p),
@@ -129,6 +135,17 @@ export const api = {
   delGoal: (id) => req('DELETE', `/api/finance/goals/${id}`),
   putGoal: (id, amount, extra = {}) => req('POST', `/api/finance/goals/${id}/put`, { amount, ...extra }),
   techniques: () => req('GET', '/api/finance/techniques'),
+  facts: (layer) => req('GET', `/api/facts${layer ? `?layer=${layer}` : ''}`),
+  addFact: (b) => req('POST', '/api/facts', b),
+  updateFact: (id, b) => req('PUT', `/api/facts/${id}`, b),
+  forgetFact: (id) => req('POST', `/api/facts/${id}/forget`),
+  restoreFact: (id) => req('POST', `/api/facts/${id}/restore`),
+  rebuildPortrait: () => req('POST', '/api/facts/portrait'),
+  memoryTidy: () => req('POST', '/api/facts/nightly'),
+  rebuildStyle: () => req('POST', '/api/facts/style'),
+  setStyle: (text) => req('PUT', '/api/facts/style', { text }),
+  lessons: () => req('GET', '/api/lessons'),
+  delLesson: (id) => req('DELETE', `/api/lessons/${id}`),
   memory: (days = 30, kind, q) => req('GET', `/api/memory?days=${days}${kind ? `&kind=${kind}` : ''}${q ? `&q=${encodeURIComponent(q)}` : ''}`),
 }
 
@@ -183,6 +200,7 @@ export const MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апр
 export const d = (s) => (s instanceof Date ? s : new Date(s))
 export const isSameDay = (a, b) => d(a).toDateString() === d(b).toDateString()
 export const hhmm = (s) => d(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+export const isAllDay = (s) => { const x = d(s); return x.getHours() === 23 && x.getMinutes() === 59 }   // задача «на день» хранится как 23:59
 export const dayLabel = (s) => {
   const x = d(s), now = new Date()
   const t = new Date(now); t.setDate(now.getDate() + 1)

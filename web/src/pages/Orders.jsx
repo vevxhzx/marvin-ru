@@ -53,7 +53,7 @@ export default function Orders() {
     return all
   }, [orders, view])
   const openN = all.filter((o) => ['new', 'work', 'review'].includes(o.status)).length
-  const unpaid = all.filter((o) => o.status !== 'cancelled' && o.status !== 'new').reduce((s, o) => s + o.left, 0)
+  const unpaid = all.filter((o) => ['work', 'review', 'done'].includes(o.status)).reduce((s, o) => s + o.left, 0)
   const overdue = all.filter((o) => o.overdue).length
 
   const addQuick = async (e) => {
@@ -61,7 +61,10 @@ export default function Orders() {
     try { await api.chat(`заказ: ${quick.trim()}`); setQuick(''); load(); bump() } catch (err) { show.err(err) }
   }
   const [leaveCls, leave] = useLeave()
-  const setStatus = async (o, status) => { try { await api.updateOrder(o.id, { status }); load(); bump(); if (status === 'paid') show('Заказ оплачен', '', o.title) } catch (e) { show.err(e) } }
+  const setStatus = async (o, status) => {
+    if (status === 'paid' && o.left > 0) return setPay(o)   // деньги не записаны — сначала оплата, полная сумма сама закроет заказ
+    try { await api.updateOrder(o.id, { status }); load(); bump(); if (status === 'paid') show('Заказ оплачен', '', o.title) } catch (e) { show.err(e) }
+  }
   const remove = (o) => leave(o.id, 'leaving', async () => { await api.delOrder(o.id); show('Заказ удалён', '', o.title); load(); bump() })
   const start = async (o, minutes = null) => { try { await api.startTimer(o?.id || null, minutes); load() } catch (e) { show.err(e) } }
   const stop = async () => { try { await api.stopTimer(); load() } catch (e) { show.err(e) } }
@@ -82,7 +85,7 @@ export default function Orders() {
       <div className="grid grid-cols-1 gap-8 sm:grid-cols-[auto_1fr] sm:items-start sm:gap-12">
         <TimerCard timer={timer} left={left} onStart={() => start(null)} onStop={stop} onBreak={() => api.startTimer(timer?.order_id || null, null, 'break').then(load).catch(show.err)} />
         <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
-          <Stat label="ждут оплаты" value={<Num value={unpaid} fmt={money} />} tone={unpaid ? 'accent' : ''} />
+          <button type="button" className="text-left" onClick={() => setView('unpaid')} data-tip={unpaid ? 'показать, кто не заплатил' : undefined}><Stat label="ждут оплаты" value={<Num value={unpaid} fmt={money} />} tone={unpaid ? 'accent' : ''} /></button>
           <Stat label="за этот месяц" value={stats ? <Num value={stats.months.at(-1)?.income || 0} fmt={money} /> : '—'} sub={stats?.months.at(-2) ? `прошлый · ${money(stats.months.at(-2).income)}` : undefined} />
           <Stat label="ставка в час" value={stats?.rate ? money(stats.rate) : '—'} sub={stats?.total_hours ? `${hours(stats.total_hours)} по таймеру` : 'запускайте таймер по заказу'} />
           <Stat label="средний чек" value={stats?.avg_check ? money(stats.avg_check) : '—'} sub={stats?.avg_lead_days ? `~${stats.avg_lead_days} дн. на заказ` : undefined} />
@@ -115,10 +118,10 @@ export default function Orders() {
         </Section>
       )}
 
-      {stats && (stats.clients.length > 0 || stats.months.some((m) => m.income)) && <StatsBlock stats={stats} />}
+      {stats && (stats.clients.length > 0 || stats.months.some((m) => m.income)) && <StatsBlock stats={stats} onUnpaid={() => { setView('unpaid'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
 
       <OrderSheet open={!!sheet} order={sheet && sheet !== 'new' ? sheet : null} onClose={() => setSheet(null)} onDone={(msg) => { setSheet(null); show(msg); load(); bump() }} onErr={show.err} />
-      <PaySheet order={pay} onClose={() => setPay(null)} onDone={(r) => { setPay(null); show(r.order.status === 'paid' ? 'Заказ закрыт как оплаченный' : 'Оплата записана в доходы', '', r.order.title); load(); bump() }} onErr={show.err} />
+      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show('Заказ закрыт', 'без записи в доходы', o.title); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(r.order.status === 'paid' ? 'Заказ закрыт как оплаченный' : 'Оплата записана в доходы', '', r.order.title); load(); bump() }} onErr={show.err} />
       <Confirm open={!!del} title="Удалить заказ?" text={del ? `«${del.title}». Полученные оплаты останутся в доходах, время по таймеру — тоже.` : ''} danger onOk={() => { remove(del); setDel(null) }} onClose={() => setDel(null)} />
     </div>
   )
@@ -140,7 +143,7 @@ function TimerCard({ timer, left, onStart, onStop, onBreak }) {
       </div>
       <div className="min-w-0">
         <div className="label">{active ? (timer.kind === 'break' ? 'перерыв' : 'фокус') : 'помодоро'}</div>
-        <div className="mt-1 truncate text-[15px] font-medium">{active ? (timer.order || 'без заказа') : `сегодня ${timer?.today_min || 0} мин · ${timer?.today_sessions || 0} 🍅`}</div>
+        <div className="mt-1 truncate text-[15px] font-medium">{active ? (timer.order || 'без заказа') : (timer?.today_sessions ? `сегодня ${timer.today_min || 0} мин · ${timer.today_sessions} ${plural(timer.today_sessions, 'помидор', 'помидора', 'помидоров')}` : 'сегодня ещё не садились')}</div>
         <div className="mt-2 flex items-center gap-1.5">
           {active ? (
             <>
@@ -162,18 +165,19 @@ function TimerCard({ timer, left, onStart, onStop, onBreak }) {
 function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, extra = '' }) {
   const closed = ['paid', 'cancelled'].includes(o.status)
   const running = timer?.active && timer.order_id === o.id && timer.kind === 'focus'
-  const dl = o.deadline ? (o.overdue ? `просрочен · ${dayLabel(o.deadline).toLowerCase()}` : o.days_left === 0 ? 'сегодня' : o.days_left === 1 ? 'завтра' : `до ${shortDate(o.deadline).toLowerCase()}`) : null
+  const dl = o.deadline ? (o.overdue ? `просрочен · ${dayLabel(o.deadline).toLowerCase()}` : o.past_due ? `срок был ${shortDate(o.deadline).toLowerCase()}` : o.days_left === 0 ? 'сегодня' : o.days_left === 1 ? 'завтра' : `до ${shortDate(o.deadline).toLowerCase()}`) : null
   return (
     <Swipe onLeft={!closed ? onDel : undefined} onRight={!closed && NEXT[o.status] ? () => onStatus(o, NEXT[o.status]) : undefined} rightLabel={NEXT_LABEL[o.status] || 'готово'}>
       <div className={`row-slide done-fade ${extra} ${closed ? 'opacity-55' : ''}`}>
         <div className="row group cursor-pointer" onClick={onOpen}>
-          <span className={`badge shrink-0 ${STATUS_TONE[o.status]}`}>{STATUS[o.status]}</span>
+          <span className={`badge !hidden shrink-0 sm:!inline-flex ${STATUS_TONE[o.status]}`}>{STATUS[o.status]}</span>
+          <span className="h-2 w-2 shrink-0 rounded-full sm:hidden" style={{ background: o.status === 'review' ? 'var(--warn)' : o.status === 'done' || o.status === 'paid' ? 'var(--pos)' : o.status === 'work' ? 'var(--accent)' : 'var(--ink-3)' }} aria-label={STATUS[o.status]} />
           <div className="min-w-0 flex-1">
-            <div className="flex items-baseline gap-2">
-              <div className="truncate text-[15px] font-medium">{o.title}</div>
-              {o.client && <div className="muted shrink-0 truncate text-[13px]">{o.client}</div>}
+            <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
+              <div className="min-w-0 truncate text-[15px] font-medium">{o.title}</div>
+              {o.client && <div className="muted min-w-0 truncate text-[12.5px] sm:shrink-0 sm:text-[13px]">{o.client}</div>}
             </div>
-            <div className={`flex flex-wrap items-center gap-x-1.5 text-[12px] ${o.overdue ? 'neg' : (o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
+            <div className={`flex flex-wrap items-center gap-x-1.5 text-[12px] ${o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
               {dl && <span className="flex items-center gap-1"><Clock size={11} /> {dl}</span>}
               {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{dl ? '· ' : ''}{hours(o.hours)}{o.pulse?.estimate_h ? ` из ${hours(o.pulse.estimate_h)}` : ''}{o.rate ? ` · ${money(o.rate)}/ч` : ''}</span>}
               {running && <span className="accent">{dl || o.hours ? '· ' : ''}идёт таймер</span>}
@@ -184,7 +188,7 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, 
             {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">осталось {money(o.left)}</div>}
             {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">не оплачен</div>}
           </div>
-          {!closed && <button className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100" data-tip={running ? 'таймер идёт' : `таймер ${timer?.focus_min || 25} мин`} onClick={(e) => { e.stopPropagation(); if (!running) onStart() }} aria-label="Таймер">{running ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : <Play size={13} />}</button>}
+          {!closed && <button className="btn-icon !hidden !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100 sm:!inline-flex" data-tip={running ? 'таймер идёт' : `таймер ${timer?.focus_min || 25} мин`} onClick={(e) => { e.stopPropagation(); if (!running) onStart() }} aria-label="Таймер">{running ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : <Play size={13} />}</button>}
           <span className="btn-icon !h-7 !w-7 faint">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
         </div>
         {open && <Details o={o} onEdit={onEdit} onPay={onPay} onDel={onDel} onStatus={onStatus} onStart={onStart} closed={closed} />}
@@ -223,7 +227,7 @@ function Details({ o, onEdit, onPay, onDel, onStatus, onStart, closed }) {
   )
 }
 
-function StatsBlock({ stats }) {
+function StatsBlock({ stats, onUnpaid }) {
   const [more, setMore] = useState(false)
   const max = Math.max(1, ...stats.months.map((m) => m.income))
   const maxF = Math.max(1, ...stats.focus_days.map((d) => d.min))
@@ -261,8 +265,11 @@ function StatsBlock({ stats }) {
             <div className="rule mt-2 animate-rise">
               {stats.clients.map((c) => (
                 <div key={c.client} className="row">
-                  <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-[12px]">{c.orders} {plural(c.orders, 'заказ', 'заказа', 'заказов')}{c.open ? ` · ${c.open} в работе` : ''}{c.hours ? ` · ${hours(c.hours)}` : ''}{c.rate ? ` · ${money(c.rate)}/ч` : ''}</div></div>
-                  <div className="num text-right"><div className="text-[14px] font-medium">{money(c.paid)}</div>{c.unpaid > 0 && <div className="warn text-[11.5px]">ждём {money(c.unpaid)}</div>}</div>
+                  <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-[12px]">{c.orders} {plural(c.orders, 'заказ', 'заказа', 'заказов')}{c.total ? ` на ${money(c.total)}` : ''}{c.open ? ` · ${c.open} в работе` : ''}{c.hours ? ` · ${hours(c.hours)}` : ''}{c.rate ? ` · ${money(c.rate)}/ч` : ''}</div></div>
+                  <div className="num text-right">
+                    {c.paid > 0 ? <div className="text-[14px] font-medium">{money(c.paid)} <span className="faint text-[11px] font-normal">получено</span></div> : <div className="faint text-[12.5px]">оплат не записано</div>}
+                    {c.unpaid > 0 && <button type="button" className="warn text-[11.5px]" onClick={onUnpaid}>ждём {money(c.unpaid)}</button>}
+                  </div>
                 </div>
               ))}
             </div>
@@ -274,7 +281,7 @@ function StatsBlock({ stats }) {
 }
 
 const blank = { title: '', price: '', client: '', deadline: '', notes: '', estimate_h: '', status: 'work' }
-function OrderSheet({ open, order, onClose, onDone, onErr }) {
+export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   const [f, setF] = useState(blank)
   const [clients, setClients] = useState([])
   useEffect(() => {
@@ -300,7 +307,7 @@ function OrderSheet({ open, order, onClose, onDone, onErr }) {
           <Field label="дедлайн"><input type="datetime-local" className="input" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
           <Field label="план по времени" hint="часов"><input type="number" min="0" step="0.5" className="input num" value={f.estimate_h} onChange={(e) => setF({ ...f, estimate_h: e.target.value })} placeholder="8" /></Field>
         </div>
-        {order && <Field label="статус"><Pills value={f.status} onChange={(s) => setF({ ...f, status: s })} options={Object.entries(STATUS)} /></Field>}
+        <Field label="статус" hint={order ? undefined : 'старый заказ — сразу «сдан», оплату запишете после'}><Pills value={f.status} onChange={(s) => setF({ ...f, status: s })} options={Object.entries(STATUS).filter(([k]) => order || !['paid', 'cancelled'].includes(k))} /></Field>
         <Field label="заметки"><textarea className="input min-h-[72px]" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="ТЗ, ссылки на исходники, договорённости" /></Field>
         <button className="btn-primary btn-lg w-full">{order ? 'сохранить' : 'добавить'}</button>
       </form>
@@ -308,17 +315,19 @@ function OrderSheet({ open, order, onClose, onDone, onErr }) {
   )
 }
 
-function PaySheet({ order, onClose, onDone, onErr }) {
+function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [accounts, setAccounts] = useState([])
   const [account, setAccount] = useState('')
-  useEffect(() => { if (order) { setAmount(order.left ? String(order.left) : ''); setNote(''); api.accounts().then((a) => { setAccounts(a); setAccount(a.find((x) => x.is_main)?.name || a[0]?.name || '') }).catch(() => {}) } }, [order])
+  const [date, setDate] = useState('')
+  useEffect(() => { if (order) { setAmount(order.left ? String(order.left) : ''); setNote(''); setDate(toLocalISO(new Date()).slice(0, 10)); api.accounts().then((a) => { setAccounts(a); setAccount(a.find((x) => x.is_main)?.name || a[0]?.name || '') }).catch(() => {}) } }, [order])
   const submit = async (e) => {
     e.preventDefault()
     const n = Number(String(amount).replace(/\s/g, '').replace(',', '.'))
     if (!n || n <= 0) return onErr(new Error('Сумма должна быть больше нуля'))
-    try { onDone(await api.payOrder(order.id, n, { note: note || null, account: account || null })) } catch (err) { onErr(err) }
+    const today = toLocalISO(new Date()).slice(0, 10)
+    try { onDone(await api.payOrder(order.id, n, { note: note || null, account: account || null, date: date && date !== today ? `${date}T12:00:00` : null })) } catch (err) { onErr(err) }
   }
   return (
     <Sheet open={!!order} onClose={onClose} title="оплата по заказу" sub={order ? `«${order.title}»${order.left ? ` · осталось ${money(order.left)}` : ''}` : ''}>
@@ -330,9 +339,11 @@ function PaySheet({ order, onClose, onDone, onErr }) {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="на счёт"><select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>{accounts.filter((a) => a.kind !== 'debt_only').map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}</select></Field>
           <Field label="комментарий"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="аванс / остаток" /></Field>
+          <Field label="дата" hint="когда пришли деньги"><input type="date" className="input" value={date} max={toLocalISO(new Date()).slice(0, 10)} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
-        <div className="muted text-[12.5px]">Запишется как доход «Фриланс» с привязкой к заказу. Полная сумма закроет заказ как оплаченный.</div>
+        <div className="muted text-[12.5px]">Запишется как доход «Фриланс» с привязкой к заказу в выбранный день. Полная сумма закроет заказ как оплаченный.</div>
         <button className="btn-primary btn-lg w-full">записать</button>
+        {onJustClose && <button type="button" className="btn-ghost btn-sm w-full" onClick={() => onJustClose(order)}>деньги уже учтены — просто закрыть заказ</button>}
       </form>
     </Sheet>
   )

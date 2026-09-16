@@ -160,19 +160,17 @@ def upcoming_birthdays(days: int = 7) -> list[dict]:
 
 
 # ---------------------------------------------------------------- связи между заметками
-async def related_notes(note_id: int, limit: int = 3) -> list[dict]:
-    """Похожие по смыслу заметки (эмбеддинги), исключая саму заметку."""
-    from . import semantic
-    with session() as s:
-        n = s.get(Note, note_id)
-    if not n:
-        return []
-    try:
-        res = await semantic.search(n.title or n.text[:200], limit + 3)
-    except Exception:
-        return []
-    items = [i for i in res["items"] if not (i.get("kind") == "note" and i.get("id") == note_id) and i.get("score", 0) >= 0.55]
-    return items[:limit]
+async def related_notes(note_id: int, limit: int = 4) -> list[dict]:
+    """Связи заметки из таблицы Relation (эмбеддинги отобрали кандидатов, нейронка решила, крестик — убрал).
+    Если для заметки ещё не считали — считаем сейчас (одна заметка = один запрос к модели)."""
+    from . import relations
+    key = f"note:{note_id}"
+    if relations.enabled() and key in relations.pending(10_000):
+        try:
+            await relations.compute(key)
+        except Exception as e:
+            log.warning("related_notes(%s): %s", note_id, e)
+    return relations.related(key, limit)
 
 
 # ---------------------------------------------------------------- еженедельный дайджест мыслей

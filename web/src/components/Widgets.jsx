@@ -54,7 +54,9 @@ const plural = (n) => { const a = n % 100, b = n % 10; return a > 10 && a < 20 ?
 export function Forecast({ f, compact = false }) {
   if (!f?.points?.length) return null
   const pts = f.points
-  const W = 600, H = compact ? 90 : 140, P = 6
+  // svg растягивается на всю ширину контейнера (preserveAspectRatio="none"), поэтому координаты X — в процентах,
+  // а не в пикселях viewBox: раньше при широком окне график сжимался в середину, а курсор/подсказка считались по всему блоку
+  const W = 1000, H = compact ? 90 : 160, P = 6
   const min = Math.min(0, ...pts.map((p) => p.balance)), max = Math.max(1, ...pts.map((p) => p.balance))
   const x = (i) => P + (i / (pts.length - 1)) * (W - 2 * P)
   const y = (v) => P + (1 - (v - min) / (max - min || 1)) * (H - 2 * P)
@@ -63,32 +65,49 @@ export function Forecast({ f, compact = false }) {
   const [hover, setHover] = useState(null)
   const ev = pts.map((p, i) => ({ ...p, i })).filter((p) => p.events.length)
   const lowIdx = pts.findIndex((p) => p.date === f.low_date)
+  const cur = hover != null ? pts[hover] : null
+  const dm = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}`
+  // подсказка живёт в отдельной строке над графиком и никогда его не закрывает
+  const first = pts[0]
   return (
     <div>
-      <div className="relative">
-        <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ height: H }} onMouseLeave={() => setHover(null)}
-          onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover(Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1))) }}>
-          <defs><linearGradient id="fcg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".22" /><stop offset="1" stopColor="var(--accent)" stopOpacity="0" /></linearGradient></defs>
-          {min < 0 && <line x1={P} x2={W - P} y1={zero} y2={zero} stroke="var(--neg)" strokeDasharray="3 4" strokeWidth="1" />}
-          <path d={`${d} L${x(pts.length - 1)},${H - P} L${x(0)},${H - P} Z`} fill="url(#fcg)" />
-          <path d={d} fill="none" stroke={f.ok ? 'var(--accent)' : 'var(--neg)'} strokeWidth="2" strokeLinejoin="round" style={{ strokeDasharray: 2000, strokeDashoffset: 2000, animation: 'draw 1.4s cubic-bezier(.2,.8,.2,1) forwards' }} />
-          {ev.map((p) => <circle key={p.i} cx={x(p.i)} cy={y(p.balance)} r="3.5" fill={p.events.some((e) => e.amount > 0) ? 'var(--green, #30d158)' : 'var(--ink)'} stroke="var(--bg)" strokeWidth="1.5" />)}
-          {lowIdx >= 0 && !f.ok && <circle cx={x(lowIdx)} cy={y(pts[lowIdx].balance)} r="4" fill="var(--neg)" />}
-          {hover != null && <line x1={x(hover)} x2={x(hover)} y1={P} y2={H - P} stroke="var(--ink-3)" strokeWidth="1" />}
-        </svg>
-        {hover != null && pts[hover] && (
-          <div className="panel pointer-events-none absolute top-0 !px-2.5 !py-1.5 text-[12px] shadow-md" style={{ left: `${(hover / (pts.length - 1)) * 100}%`, transform: `translateX(${hover > pts.length / 2 ? '-105%' : '5%'})` }}>
-            <div className="muted">{pts[hover].date.slice(8, 10)}.{pts[hover].date.slice(5, 7)}</div>
-            <div className={`num font-medium ${pts[hover].balance < 0 ? 'neg' : ''}`}>{money(pts[hover].balance)}</div>
-            {pts[hover].events.map((e, i) => <div key={i} className="muted truncate">{e.amount > 0 ? '+' : '−'}{money(Math.abs(e.amount))} {e.title}</div>)}
-          </div>
+      <div className={`flex items-baseline gap-x-3 text-[12.5px] ${compact ? 'h-5' : 'h-6'}`} aria-live="polite">
+        {cur ? (
+          <>
+            <span className="muted num">{dm(cur.date)}</span>
+            <span className={`num font-medium ${cur.balance < 0 ? 'neg' : ''}`}>{money(cur.balance)}</span>
+            {cur.events.slice(0, 3).map((e, i) => <span key={i} className={`truncate ${e.amount > 0 ? 'pos' : 'muted'}`}>{e.amount > 0 ? '+' : '−'}{money(Math.abs(e.amount))} {e.title}</span>)}
+          </>
+        ) : (
+          <>
+            <span className="muted num">сегодня</span>
+            <span className="num font-medium">{money(first.balance)}</span>
+            <span className="faint">наведите на график — покажу день</span>
+          </>
         )}
       </div>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="mt-1 block w-full cursor-crosshair" style={{ height: H }} onMouseLeave={() => setHover(null)}
+        onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1))))) }}
+        onTouchStart={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = e.touches[0]; setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((t.clientX - r.left) / r.width) * (pts.length - 1))))) }}
+        onTouchMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = e.touches[0]; setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((t.clientX - r.left) / r.width) * (pts.length - 1))))) }}>
+        <defs><linearGradient id="fcg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".22" /><stop offset="1" stopColor="var(--accent)" stopOpacity="0" /></linearGradient></defs>
+        {min < 0 && <line x1={P} x2={W - P} y1={zero} y2={zero} stroke="var(--neg)" strokeDasharray="3 4" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
+        <path d={`${d} L${x(pts.length - 1)},${H - P} L${x(0)},${H - P} Z`} fill="url(#fcg)" />
+        <path d={d} fill="none" stroke={f.ok ? 'var(--accent)' : 'var(--neg)'} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ strokeDasharray: 3000, strokeDashoffset: 3000, animation: 'draw 1.4s cubic-bezier(.2,.8,.2,1) forwards' }} />
+        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={P} y2={H - P} stroke="var(--ink-3)" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
+      </svg>
+      {/* точки — отдельным слоем поверх растянутого svg, иначе круги превращаются в овалы */}
+      <div className="pointer-events-none relative" style={{ height: 0 }}>
+        {ev.map((p) => <span key={p.i} className="absolute h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-[var(--bg)]" style={{ left: `${(x(p.i) / W) * 100}%`, top: `${y(p.balance) - H}px`, background: p.events.some((e) => e.amount > 0) ? 'var(--green, #30d158)' : 'var(--ink)' }} />)}
+        {lowIdx >= 0 && !f.ok && <span className="absolute h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${(x(lowIdx) / W) * 100}%`, top: `${y(pts[lowIdx].balance) - H}px`, background: 'var(--neg)' }} />}
+        {cur && <span className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]" style={{ left: `${(x(hover) / W) * 100}%`, top: `${y(cur.balance) - H}px`, background: cur.balance < 0 ? 'var(--neg)' : 'var(--accent)' }} />}
+      </div>
+      <div className="faint mt-1 flex justify-between text-[11px] num"><span>{dm(pts[0].date)}</span><span>{dm(pts[Math.floor((pts.length - 1) / 2)].date)}</span><span>{dm(pts[pts.length - 1].date)}</span></div>
       {!compact && (
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
           <span className="muted">в среднем <b className="num" style={{ color: 'var(--ink)' }}>{money(f.per_day)}</b>/день</span>
           {f.safe_per_day != null && <span className="muted">безопасно <b className="num accent">{money(f.safe_per_day)}</b>/день до дохода ({f.days_to_income} дн)</span>}
-          <span className={f.ok ? 'muted' : 'neg font-medium'}>{f.ok ? `минимум ${money(f.low)}` : `минус ${money(f.low)} к ${f.low_date.slice(8, 10)}.${f.low_date.slice(5, 7)}`}</span>
+          <span className={f.ok ? 'muted' : 'neg font-medium'}>{f.ok ? `минимум ${money(f.low)}` : `минус ${money(f.low)} к ${dm(f.low_date)}`}</span>
         </div>
       )}
     </div>

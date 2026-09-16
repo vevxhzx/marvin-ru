@@ -27,6 +27,20 @@ def fmt_dt(dt: datetime) -> str:
     return f"{day} в {dt.strftime('%H:%M')}"
 
 
+def fmt_day(dt: datetime) -> str:
+    """Только день: «сегодня», «завтра», «пт 19.09», «03.10.2026»."""
+    return fmt_dt(dt).rsplit(" в ", 1)[0]
+
+
+def fmt_due(dt: datetime | None) -> str:
+    """Хвост ответа про срок задачи: «На сегодня.» для задачи на весь день, «Дедлайн завтра в 15:00.» с временем."""
+    if not dt:
+        return ""
+    if dt.hour == 23 and dt.minute == 59:
+        return f" На {fmt_day(dt)}." if fmt_day(dt) in ("сегодня", "завтра") else f" До конца дня {fmt_day(dt)}."
+    return f" Дедлайн {fmt_dt(dt)}."
+
+
 def fmt_repeat(ev: Event) -> str:
     if not ev.repeat:
         return ""
@@ -106,14 +120,23 @@ def _occurrences(ev: Event, start: datetime, end: datetime) -> list[datetime]:
     return out
 
 
+def is_done(ev: Event, when: datetime | None = None) -> bool:
+    """Сделано ли событие: обычное — флаг, повтор — отмечен ли именно этот раз."""
+    if not ev.repeat:
+        return bool(ev.done)
+    d = (when or ev.start).date().isoformat()
+    return d in set(filter(None, (ev.done_dates or "").split(",")))
+
+
 def _instance(ev: Event, when: datetime) -> Event:
     """Копия события, сдвинутая на конкретную дату повтора (для отображения)."""
-    if when == ev.start:
+    if when == ev.start and not ev.repeat:
         return ev
     dur = (ev.end - ev.start) if ev.end else timedelta(hours=1)
     inst = Event(**ev.model_dump())
     inst.start = when
     inst.end = when + dur
+    inst.done = is_done(ev, when)
     object.__setattr__(inst, "_anchor", ev.start)   # исходная дата правила (нужна сайту при правке времени)
     return inst
 
@@ -210,6 +233,28 @@ def skip_occurrence(event_id: int, date: datetime) -> Event | None:
     return ev
 
 
+def set_done(event_id: int, done: bool = True, when: datetime | None = None) -> Event | None:
+    """Отметить событие сделанным (или снять отметку). Для повтора — только конкретный раз (when).
+    Та же галочка видна в календаре, в «Делах» и в Google (✓ в названии)."""
+    with session() as s:
+        ev = s.get(Event, event_id)
+        if not ev:
+            return None
+        if ev.repeat:
+            dates = set(filter(None, (ev.done_dates or "").split(",")))
+            key = (when or ev.start).date().isoformat()
+            dates.add(key) if done else dates.discard(key)
+            ev.done_dates = ",".join(sorted(dates))
+        else:
+            ev.done, ev.done_at = done, (datetime.now() if done else None)
+        s.add(ev)
+        remember(s, "event", f"{'Сделано' if done else 'Снова в планах'}: «{ev.title}» {fmt_dt(when or ev.start)}", "event", ev.id)
+        s.commit(); s.refresh(ev)
+    if not ev.repeat:
+        _gcal_push(ev.id)
+    return ev
+
+
 def list_events(start: datetime | None = None, end: datetime | None = None, limit: int = 20) -> list[Event]:
     start = start or datetime.now().replace(hour=0, minute=0, second=0)
     end = end or (start + timedelta(days=60))
@@ -291,7 +336,7 @@ def due_reminders() -> list[Event]:
     now = datetime.now()
     due: list[Event] = []
     with session() as s:
-        evs = s.exec(select(Event).where(Event.reminded == False, Event.repeat == "", Event.start > now - timedelta(minutes=5))).all()  # noqa: E712
+        evs = s.exec(select(Event).where(Event.reminded == False, Event.done == False, Event.repeat == "", Event.start > now - timedelta(minutes=5))).all()  # noqa: E712
         for e in evs:
             if e.start - timedelta(minutes=e.remind_minutes) <= now:
                 e.reminded = True
@@ -302,7 +347,7 @@ def due_reminders() -> list[Event]:
             occ = _occurrences(e, now - timedelta(minutes=5), now + timedelta(days=2))
             for when in occ:
                 key = when.strftime("%Y-%m-%dT%H:%M")
-                if when - timedelta(minutes=e.remind_minutes) <= now and e.reminded_for != key and when > now - timedelta(minutes=5):
+                if when - timedelta(minutes=e.remind_minutes) <= now and e.reminded_for != key and when > now - timedelta(minutes=5) and not is_done(e, when):
                     e.reminded_for = key
                     s.add(e)
                     due.append(_instance(e, when))

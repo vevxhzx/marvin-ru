@@ -19,7 +19,7 @@ from ..brain import agent
 from ..config import ROOT
 from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring, get_setting, set_setting
 from .. import identity
-from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, pulse, tasks
+from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, people, pulse, relations, tasks
 from ..services.scheduler import morning_digest_text
 
 log = logging.getLogger("assistant.api")
@@ -54,10 +54,18 @@ def broadcast(kind: str, payload: dict | None = None) -> None:
 agent.on_change = broadcast
 
 
+_pc_streams: set[int] = set()
+
+
 @app.get("/api/events/stream")
-async def stream():
+async def stream(client: str = ""):
+    """Живые события. `?client=pc` — так подключается voice.bat: по этим подключениям ядро знает, слушает ли кто-то ПК-команды."""
+    from ..services import pc as _pc
     q: _asyncio.Queue = _asyncio.Queue()
     _subscribers.add(q)
+    if client == "pc":
+        _pc_streams.add(id(q)); _pc.SSE_CLIENTS = len(_pc_streams)
+
 
     async def gen():
         try:
@@ -70,6 +78,8 @@ async def stream():
                     yield ": ping\n\n"
         finally:
             _subscribers.discard(q)
+            if client == "pc":
+                _pc_streams.discard(id(q)); _pc.SSE_CLIENTS = len(_pc_streams)
     return StreamingResponse(gen(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
@@ -152,6 +162,18 @@ def pc_ping(p: PcPing):
     pc.seen({"mode": p.mode, "text": p.text})
     if was != p.mode:
         broadcast("pc_state", {"mode": p.mode, "text": p.text})
+    return {"ok": True}
+
+
+class PcAck(BaseModel):
+    action: str = ""
+
+
+@app.post("/api/pc/ack")
+def pc_ack(a: PcAck):
+    """ПК подтверждает: команду из SSE получил и выполняет (чтобы «Смотрю, что лежит…» не оставалось без продолжения)."""
+    from ..services import pc
+    pc.seen(); pc.ack(a.action)
     return {"ok": True}
 
 
@@ -280,6 +302,27 @@ async def note_related(nid: int):
     return await insights.related_notes(nid)
 
 
+@app.get("/api/links/{lid}/related")
+async def link_related(lid: int):
+    key = f"link:{lid}"
+    if relations.enabled() and key in relations.pending(10_000):
+        await relations.compute(key)
+    return relations.related(key)
+
+
+class RelationIn(BaseModel):
+    status: str      # yes — подтвердить / no — убрать (крестик) / auto — вернуть
+
+
+@app.put("/api/relations/{rid}")
+def relation_set(rid: int, p: RelationIn):
+    """Крестик на связи: status=no — пара больше никогда не предлагается. Переход по связи — status=yes."""
+    r = relations.set_status(rid, p.status)
+    if not r:
+        raise HTTPException(404)
+    return r
+
+
 @app.get("/api/insights/weekly")
 async def insights_weekly():
     from ..services import insights
@@ -306,7 +349,7 @@ async def dashboard():
     pulse.auto_enable_if_used()
     fl = pulse.freelance_settings()
     return {
-        "today": [e.model_dump() for e in calendar.events_today()],
+        "today": [_ev_out(e) for e in calendar.events_today()],
         "week": [e.model_dump() for e in calendar.list_events(start, start + timedelta(days=7))],
         "tasks": [t.model_dump() for t in tasks.list_tasks(limit=10)],
         "finance": s,
@@ -320,7 +363,7 @@ async def dashboard():
         "pc": {"alive": pc.alive(), **pc.STATE},
         "timer": orders.timer_state(),
         "orders": {"open": [o for o in orders.list_orders() if o["status"] in ("new", "work", "review")][:5],
-                   "unpaid": sum(o["left"] for o in orders.list_orders() if o["status"] != "new"),
+                   "unpaid": sum(o["left"] for o in orders.list_orders() if o["status"] not in ("new", "paid", "cancelled")),
                    "expected": orders.expected_income(30),
                    "late": pulse.late_payments()[:3] if fl["enabled"] and fl["late_nudge"] else []},
         "freelance": fl["enabled"],
@@ -347,15 +390,19 @@ def _ev_out(e: Event) -> dict:
     d = e.model_dump()
     d["repeat_label"] = calendar.fmt_repeat(e)
     d["repeat_anchor"] = getattr(e, "_anchor", e.start)
+    d["done"] = calendar.is_done(e) if e.repeat else bool(e.done)
     return d
 
 
 def _task_as_event(t: Task) -> dict:
     """Задача с дедлайном в календаре: тот же формат, что событие, + kind='task'. Записи в БД не дублируются —
     отметил в календаре → закрылась задача, перенёс задачу → сдвинулась в календаре."""
-    return {"id": -t.id, "task_id": t.id, "kind": "task", "title": t.title, "start": t.due, "end": t.due, "duration_min": 0,
+    all_day = t.due.hour == 23 and t.due.minute == 59
+    # задача с конкретным временем занимает в календаре полчаса — видно, куда её подвинуть; «до конца дня» — без длительности
+    end = t.due if all_day else t.due + timedelta(minutes=30)
+    return {"id": -t.id, "task_id": t.id, "kind": "task", "title": t.title, "start": t.due, "end": end, "duration_min": 0 if all_day else 30,
             "location": None, "notes": None, "repeat": "", "repeat_label": "", "repeat_anchor": t.due, "done": t.done,
-            "priority": t.priority, "all_day": t.due.hour == 23 and t.due.minute == 59}
+            "priority": t.priority, "all_day": all_day}
 
 
 @app.get("/api/events")
@@ -374,7 +421,7 @@ def events(start: Optional[datetime] = None, end: Optional[datetime] = None, tas
         # дедлайны заказов — тоже в календаре (kind='order'), закрытые не показываем
         for o in orders.list_orders():
             if o["deadline"] and o["status"] in ("new", "work", "review") and (not start or o["deadline"] >= start) and (not end or o["deadline"] <= end):
-                out.append({"id": -100000 - o["id"], "order_id": o["id"], "kind": "order", "title": f"Сдать: {o['title']}" + (f" · {o['client']}" if o["client"] else ""),
+                out.append({"id": -100000 - o["id"], "order_id": o["id"], "kind": "order", "status": o["status"], "title": f"Сдать: {o['title']}" + (f" · {o['client']}" if o["client"] else ""),
                             "start": o["deadline"], "end": o["deadline"], "duration_min": 0, "location": None, "notes": None, "repeat": "", "repeat_label": "",
                             "repeat_anchor": o["deadline"], "done": False, "priority": 2 if (o["days_left"] or 0) <= 2 else 1,
                             "all_day": o["deadline"].hour == 23 and o["deadline"].minute == 59})
@@ -398,6 +445,23 @@ def update_event(event_id: int, e: EventIn):
 
 class SkipIn(BaseModel):
     date: datetime
+
+
+class EventDoneIn(BaseModel):
+    done: bool = True
+    date: Optional[datetime] = None     # для повторов: какой именно раз
+
+
+@app.post("/api/events/{event_id}/done")
+def done_event(event_id: int, p: EventDoneIn):
+    """Галочка на событии — как на задаче. Одна запись: видна и в календаре, и в «Делах», и в Google (✓ в названии)."""
+    ev = calendar.set_done(event_id, p.done, p.date)
+    if not ev:
+        raise HTTPException(404)
+    d = _ev_out(ev)
+    if ev.repeat and p.date:
+        d["done"] = calendar.is_done(ev, p.date)
+    return d
 
 
 @app.post("/api/events/{event_id}/skip")
@@ -424,9 +488,33 @@ class TaskIn(BaseModel):
     project: Optional[str] = None
 
 
+def _event_as_task(e: Event) -> dict:
+    """Событие календаря в списке дел: тот же формат, что задача, + kind='event'. Отметил в делах → сделано и в календаре."""
+    return {"id": -e.id, "event_id": e.id, "kind": "event", "title": e.title, "done": calendar.is_done(e), "priority": 2, "due": e.start,
+            "end": e.end, "project": None, "source": e.source, "created_at": e.created_at, "done_at": e.done_at if not e.repeat else None,
+            "repeat": e.repeat, "location": e.location}
+
+
 @app.get("/api/tasks")
-def get_tasks(all: bool = False):
-    return tasks.list_tasks(include_done=all, limit=500)
+def get_tasks(all: bool = False, events_too: bool = False):
+    out = [t.model_dump() for t in tasks.list_tasks(include_done=all, limit=500)]
+    if events_too:
+        # «сегодня по календарю»: события сегодняшнего дня (и вчерашние несделанные — чтобы не потерялись)
+        d0 = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        for e in calendar.list_events(d0 - timedelta(days=1), d0 + timedelta(days=1), limit=200):
+            if e.start < d0 and calendar.is_done(e):
+                continue
+            out.append(_event_as_task(e))
+    return out
+
+
+@app.get("/api/tasks/{task_id}")
+def get_task(task_id: int):
+    with session() as s:
+        t = s.get(Task, task_id)
+    if not t:
+        raise HTTPException(404)
+    return t
 
 
 @app.post("/api/tasks")
@@ -768,6 +856,7 @@ class PaymentIn(BaseModel):
     amount: float
     note: Optional[str] = None
     account: Optional[str] = None
+    date: Optional[datetime] = None   # когда пришли деньги (старые заказы задним числом)
 
 
 class TimerIn(BaseModel):
@@ -822,6 +911,29 @@ class PersonIn(BaseModel):
     aliases: Optional[str] = None
     birthday: Optional[str] = None
     tags: Optional[str] = None
+    pay_mode: Optional[str] = None     # each / batch / monthly — как клиент платит
+    pay_every: Optional[int] = None
+    pay_days: Optional[str] = None
+
+
+@app.get("/api/people/batch-hints")
+def people_batch_hints():
+    """Клиенты, у которых 2+ заказа оплачены одним днём, а режим ещё «за каждый» — предложить «пачкой»."""
+    from ..services import pulse
+    return pulse.guess_batch_clients()
+
+
+@app.get("/api/people/kinds")
+def people_kinds():
+    """Типы «кто это»: встроенные + свои (people.kinds)."""
+    return people.all_kinds()
+
+
+@app.delete("/api/people/kinds/{kind}")
+def people_kind_delete(kind: str):
+    n = people.remove_custom_kind(kind)
+    broadcast("people")
+    return {"ok": True, "reassigned": n}
 
 
 @app.get("/api/people")
@@ -835,7 +947,7 @@ def people_add(p: PersonIn):
     from ..services import people
     if not (p.name or "").strip():
         raise HTTPException(400, "Нужно имя")
-    c = people.add_person(p.name, p.kind or "person", p.contact, p.notes, p.aliases, p.birthday, p.tags)
+    c = people.add_person(p.name, p.kind or None, p.contact, p.notes, p.aliases, p.birthday, p.tags)
     broadcast("chat", {"channel": "web", "actions": ["add_person"]})
     return people.card(c)
 
@@ -1007,7 +1119,7 @@ def orders_del(oid: int):
 def orders_pay(oid: int, p: PaymentIn):
     _order_or_404(oid)
     try:
-        t = orders.add_payment(oid, p.amount, p.note, p.account, source="web")
+        t = orders.add_payment(oid, p.amount, p.note, p.account, source="web", date=p.date)
     except (orders.OrderError, finance.FinanceError) as e:
         raise HTTPException(400, str(e))
     broadcast("order", {"id": oid, "action": "pay"})
@@ -1169,6 +1281,7 @@ def note_del(nid: int):
         if not n:
             raise HTTPException(404)
         s.delete(n); s.commit()
+    relations.forget("note", nid)
     return {"ok": True}
 
 
@@ -1182,6 +1295,30 @@ async def link_add(l: LinkIn):
     return await brain_notes.add_link(l.url, l.comment, l.tags, "web")
 
 
+class LinkEdit(BaseModel):
+    title: Optional[str] = None
+    comment: Optional[str] = None
+    tags: Optional[list[str]] = None
+
+
+@app.put("/api/links/{lid}")
+def link_edit(lid: int, e: LinkEdit):
+    """Правка ссылки руками: заголовок, комментарий, теги. Адрес и превью не трогаем."""
+    with session() as s:
+        l = s.get(Link, lid)
+        if not l:
+            raise HTTPException(404)
+        if e.title is not None:
+            l.title = e.title.strip() or l.title
+        if e.comment is not None:
+            l.comment = e.comment.strip() or None
+        if e.tags is not None:
+            l.tags = ",".join(t.strip().lstrip("#") for t in e.tags if t.strip())
+        s.add(l); s.commit(); s.refresh(l)
+    broadcast("note", {"id": lid, "action": "edit_link"})
+    return l
+
+
 @app.delete("/api/links/{lid}")
 def link_del(lid: int):
     with session() as s:
@@ -1189,7 +1326,114 @@ def link_del(lid: int):
         if not l:
             raise HTTPException(404)
         s.delete(l); s.commit()
+    relations.forget("link", lid)
     return {"ok": True}
+
+
+# ---------------- память о хозяине (факты, слои, портрет) ----------------
+class FactIn(BaseModel):
+    text: str
+    layer: str = "long"
+    category: str = "быт"
+    core: bool = False
+
+
+class FactPatch(BaseModel):
+    text: Optional[str] = None
+    layer: Optional[str] = None
+    category: Optional[str] = None
+    core: Optional[bool] = None
+
+
+@app.get("/api/facts")
+def facts_list(layer: Optional[str] = None):
+    from ..services import memory as mem
+    rows = [f.model_dump(exclude={"vector"}) for f in mem.list_facts(layer)]
+    return {"items": rows, "stats": mem.stats(), "enabled": mem.enabled(), "categories": list(mem.CATEGORIES)}
+
+
+@app.post("/api/facts")
+async def facts_add(p: FactIn):
+    from ..services import memory as mem
+    f = await mem.add_fact(p.text, p.layer, p.category, p.core, confidence=1.0)
+    if not f:
+        raise HTTPException(400, "Пусто или похоже на пароль/код — такое не запоминаю")
+    return f.model_dump(exclude={"vector"})
+
+
+@app.put("/api/facts/{fid}")
+async def facts_patch(fid: int, p: FactPatch):
+    from ..services import memory as mem
+    f = await mem.update_fact(fid, p.text, p.layer, p.category, p.core, reason="поправлено вручную")
+    if not f:
+        raise HTTPException(404)
+    return f.model_dump(exclude={"vector"})
+
+
+@app.post("/api/facts/{fid}/forget")
+def facts_forget(fid: int):
+    from ..services import memory as mem
+    f = mem.forget(fid)
+    if not f:
+        raise HTTPException(404)
+    return f.model_dump(exclude={"vector"})
+
+
+@app.post("/api/facts/{fid}/restore")
+def facts_restore(fid: int):
+    from ..services import memory as mem
+    f = mem.restore(fid)
+    if not f:
+        raise HTTPException(404)
+    return f.model_dump(exclude={"vector"})
+
+
+@app.post("/api/facts/portrait")
+async def facts_portrait():
+    from ..services import memory as mem
+    text = await mem.rebuild_portrait(force=True)
+    return {"portrait": text or "", "stats": mem.stats()}
+
+
+@app.post("/api/facts/style")
+async def facts_style():
+    from ..services import memory as mem
+    text = await mem.rebuild_style(force=True)
+    return {"style": text or "", "stats": mem.stats()}
+
+
+class StyleIn(BaseModel):
+    text: str
+
+
+@app.put("/api/facts/style")
+def facts_style_set(p: StyleIn):
+    """Поправить описание стиля руками (или стереть — пустая строка)."""
+    from ..db import set_setting
+    from ..services import memory as mem
+    set_setting(mem.STYLE_KEY, p.text.strip()[:800] or None)
+    return {"style": p.text.strip()[:800], "stats": mem.stats()}
+
+
+@app.get("/api/lessons")
+def lessons_list():
+    from ..services import judge
+    return [l.model_dump(exclude={"vector"}) for l in judge.list_lessons()]
+
+
+@app.delete("/api/lessons/{lid}")
+def lessons_del(lid: int):
+    from ..services import judge
+    if not judge.forget_lesson(lid):
+        raise HTTPException(404)
+    return {"ok": True}
+
+
+@app.post("/api/facts/nightly")
+async def facts_nightly():
+    """Кнопка «убраться сейчас» — то же, что ночная уборка."""
+    from ..services import memory as mem
+    return await mem.nightly()
 
 
 @app.get("/api/memory")
@@ -1241,7 +1485,7 @@ def settings_put(p: SettingsIn):
     from ..config import write_settings
     changed = write_settings(p.changes)
     # облако применяем на лету — перезапуск не нужен
-    if any(k.startswith(("brain.cloud.", "brain.gemini.", "brain.mode", "brain.vision.")) for k in changed):
+    if any(k.startswith(("brain.cloud.", "brain.gemini.", "brain.mode", "brain.vision.", "brain.sorter.")) for k in changed):
         from ..brain import llm
         llm.reload_cloud_settings()
     if any(k.startswith("google.") for k in changed):
@@ -1289,7 +1533,8 @@ async def status():
         "pc": {"alive": pc.alive(), **pc.STATE},
         "vision": llm.vision_status(),
         "ollama": {"ok": ollama, "model": llm.OLLAMA_MODEL, "url": llm.OLLAMA_URL, "diag": diag, "gpu": llm.GPU_NOTE,
-                   "embed": await llm.embed_available(), "embed_model": llm.EMBED_MODEL},
+                   "embed": await llm.embed_available(), "embed_model": llm.EMBED_MODEL,
+                   "small_model": llm.SMALL_MODEL, "small_ok": llm.small_model_active()},
         "gemini": {"enabled": llm.cloud_enabled(), "provider": llm.CLOUD_PROVIDER or "gemini", "title": llm.cloud_title(),
                    "model": (llm._cloud_model() if llm.CLOUD_PROVIDER not in ("", "gemini") else (llm._RESOLVED_MODEL or llm.GEMINI_MODEL)),
                    "auto": llm.GEMINI_AUTO, "mode": llm.MODE,

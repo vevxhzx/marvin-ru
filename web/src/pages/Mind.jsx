@@ -116,7 +116,7 @@ export default function Mind() {
               const del = () => leave(k, 'card', async () => { if (x._t === 'link') await api.delLink(x.id); else await api.delNote(x.id); show('Удалено'); await load() })
               return (
                 <Swipe key={k} className="swipe-card" onLeft={del}>
-                  {x._t === 'link' ? <LinkCard l={x} onTag={setQ} extra={leaveCls(k)} onDel={del} /> : <NoteCard n={x} onTag={setQ} extra={leaveCls(k)} onDel={del} onZoom={setZoom} onSaved={() => { show('Сохранено'); load() }} />}
+                  {x._t === 'link' ? <LinkCard l={x} onTag={setQ} extra={leaveCls(k)} onDel={del} onSaved={() => { show('Сохранено'); load() }} /> : <NoteCard n={x} onTag={setQ} extra={leaveCls(k)} onDel={del} onZoom={setZoom} onSaved={() => { show('Сохранено'); load() }} />}
                 </Swipe>
               )
             })}
@@ -169,7 +169,18 @@ function NoteCard({ n, onDel, onTag, onZoom, onSaved, extra = '' }) {
       {related?.length > 0 && (
         <div className="mt-2.5 flex flex-wrap items-center gap-1.5 animate-rise">
           <span className="faint text-[11px]">связано:</span>
-          {related.map((r) => <button key={`${r.kind}${r.id}`} onClick={() => onTag(r.title || (r.text || '').slice(0, 30))} className="chip !py-0.5 max-w-[200px] truncate !text-[11px] hover:text-accent" title={r.text || r.title}>{r.kind === 'link' ? '🔗 ' : ''}{r.title || (r.text || '').slice(0, 40)}</button>)}
+          {related.map((r) => (
+            <span key={`${r.kind}${r.id}`} className="group/rel relative inline-flex max-w-[220px]">
+              {/* переход по связи = подтверждение (yes); крестик = «не связано» (no) — пара больше не предлагается */}
+              <button onClick={() => { if (r.status !== 'yes') api.setRelation(r.relation_id, 'yes').catch(() => {}); onTag(r.title || (r.text || '').slice(0, 30)) }}
+                className={`chip !py-0.5 !pr-5 truncate !text-[11px] hover:text-accent ${r.status === 'yes' ? '!border-[var(--accent)]' : ''}`}
+                title={`${r.why || 'похоже по словам'}${r.via === 'embed' ? ' (без нейронки)' : ''}\n${r.text || r.title || ''}`}>
+                {r.kind === 'link' ? '🔗 ' : ''}{r.title || (r.text || '').slice(0, 40)}
+              </button>
+              <button aria-label="не связано" data-tip="не связано — больше не предлагать" className="absolute right-1 top-1/2 -translate-y-1/2 faint text-[12px] leading-none opacity-0 transition group-hover/rel:opacity-100 hover:!text-neg focus:opacity-100"
+                onClick={(e) => { e.stopPropagation(); api.setRelation(r.relation_id, 'no').then(() => setRelated(related.filter((x) => x.relation_id !== r.relation_id))).catch(() => {}) }}>×</button>
+            </span>
+          ))}
         </div>
       )}
       {!n.polished && <div className="mt-2 flex items-center gap-1.5 text-[11px] text-orange"><Sparkles size={11} /> ждёт редактора</div>}
@@ -189,8 +200,31 @@ function NoteCard({ n, onDel, onTag, onZoom, onSaved, extra = '' }) {
   )
 }
 
-function LinkCard({ l, onDel, onTag, extra = '' }) {
+function LinkCard({ l, onDel, onTag, onSaved, extra = '' }) {
   const [imgOk, setImgOk] = useState(!!l.image)
+  const [edit, setEdit] = useState(null)   // { title, comment, tags } — правим заголовок/комментарий/теги, адрес не трогаем
+  const [saving, setSaving] = useState(false)
+  const startEdit = () => setEdit({ title: l.title || '', comment: l.comment || '', tags: l.tags || '' })
+  const save = async () => {
+    if (saving) return
+    setSaving(true)
+    try { await api.editLink(l.id, { title: edit.title, comment: edit.comment, tags: edit.tags.split(',').map((t) => t.trim()).filter(Boolean) }); setEdit(null); onSaved?.() }
+    finally { setSaving(false) }
+  }
+  const onKey = (e) => { if (e.key === 'Escape') setEdit(null); if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) save() }
+  if (edit) return (
+    <Card className={`animate-rise ${extra}`} style={{ boxShadow: '0 0 0 1.5px var(--accent), var(--shadow-1)' }} onKeyDown={onKey}>
+      <div className="faint mb-1 flex items-center gap-1.5 truncate text-[12px]"><Link2 size={12} />{l.domain} · {l.url}</div>
+      <input autoFocus className="inline-edit w-full text-[15px] font-semibold leading-snug" placeholder="заголовок" value={edit.title} onChange={(e) => setEdit({ ...edit, title: e.target.value })} />
+      <textarea className="inline-edit mt-2 w-full resize-none text-[13px] leading-relaxed" rows={3} placeholder="комментарий: зачем сохранил" value={edit.comment} onChange={(e) => setEdit({ ...edit, comment: e.target.value })} />
+      <input className="inline-edit mt-2 w-full text-[12px]" placeholder="теги через запятую" value={edit.tags} onChange={(e) => setEdit({ ...edit, tags: e.target.value })} />
+      <div className="mt-3 flex items-center gap-2">
+        <span className="faint hidden text-[11px] sm:inline">⌘↵ · Esc</span>
+        <button className="btn-ghost ml-auto !h-8 !px-3 !text-[13px]" onClick={() => setEdit(null)}>отмена</button>
+        <button className="btn-primary !h-8 !px-3 !text-[13px]" disabled={saving} onClick={save}><Check size={14} /> сохранить</button>
+      </div>
+    </Card>
+  )
   return (
     <Card lift className={`group animate-rise !p-0 overflow-hidden ${extra}`}>
       <a href={l.url} target="_blank" rel="noreferrer" className="block">
@@ -208,6 +242,7 @@ function LinkCard({ l, onDel, onTag, extra = '' }) {
         {l.score != null && l.score < 1 && <span className="label !text-[10px] text-accent">✦ {Math.round(l.score * 100)}%</span>}
         {l.tags && l.tags.split(',').filter(Boolean).map((t) => <button key={t} onClick={() => onTag(t)} className="chip !py-0.5 !text-[11px] hover:text-accent">#{t}</button>)}
         <a href={l.url} target="_blank" rel="noreferrer" className="btn-icon !h-7 !w-7 ml-auto"><ExternalLink size={13} /></a>
+        <button onClick={startEdit} title="Изменить" className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 max-sm:opacity-60"><Pencil size={13} /></button>
         <button onClick={onDel} className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100"><Trash2 size={13} /></button>
       </div>
     </Card>

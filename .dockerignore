@@ -1,0 +1,10 @@
+.venv
+data
+web/node_modules
+**/__pycache__
+*.pyc
+.git
+.pytest_cache
+config.yaml
+docs
+*.md

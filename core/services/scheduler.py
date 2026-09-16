@@ -198,11 +198,23 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             await _notify(text, [("✅ Сделал", f"task:{t.id}:done"), ("⏰ +1 час", f"task:{t.id}:hour"), ("📅 Завтра", f"task:{t.id}:tomorrow")], urgent=True)
 
     async def semantic_job():
-        from . import semantic
+        from . import relations, semantic
         try:
             await semantic.index_pending()
         except Exception as e:  # pragma: no cover
             log.warning("semantic index failed: %s", e)
+        try:
+            from . import judge, memory
+            await memory.index_pending()
+            await judge.index_pending()
+        except Exception as e:  # pragma: no cover
+            log.warning("memory index failed: %s", e)
+        try:
+            # связи — по 3 записи за проход (раз в 10 минут): новая заметка получает «связано:» в пределах четверти часа,
+            # старые пересчитываются постепенно, не упираясь в лимиты облака
+            await relations.job(3)
+        except Exception as e:  # pragma: no cover
+            log.warning("relations job failed: %s", e)
 
     async def gcal_flush():
         from . import gcal
@@ -385,7 +397,29 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     sch.add_job(semantic_job, "interval", minutes=10, id="semantic", next_run_time=_soon(90))
     sch.add_job(polish_job, "interval", minutes=5, id="polish", next_run_time=_soon(40))
     sch.add_job(recurring, "interval", hours=1, id="recurring", next_run_time=_soon(20))
+    async def memory_nightly():
+        from . import memory
+        try:
+            res = await memory.nightly()
+            if res:
+                log.info("память: уборка %s", res)
+        except Exception as e:  # pragma: no cover
+            log.warning("memory nightly failed: %s", e)
+
+    async def proactive_tick():
+        """Раз в час: один повод из proactive.candidates — не в тихие часы, не больше лимита в день."""
+        from . import proactive
+        try:
+            c = await proactive.tick(quiet=_quiet_now())
+        except Exception as e:  # pragma: no cover
+            log.warning("proactive failed: %s", e); return
+        if c:
+            ping("reminder", text=c["text"], id="pro-" + c["key"])
+            await _notify("💡 " + c["text"], c.get("buttons"))
+
     sch.add_job(backup, CronTrigger(hour=3, minute=0), id="backup")
+    sch.add_job(memory_nightly, CronTrigger(hour=4, minute=0), id="memory_nightly")
+    sch.add_job(proactive_tick, "interval", hours=1, id="proactive", next_run_time=_soon(300))
     sch.add_job(gcal_flush, "interval", minutes=3, id="gcal_flush", next_run_time=_soon(60))
     md = cfg.telegram.morning_digest
     if md:

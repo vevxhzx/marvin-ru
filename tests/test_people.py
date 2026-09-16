@@ -151,7 +151,7 @@ def test_people_rules_add_and_card():
     r = _people_rules("человек: Лена, сестра, др 12.03", "web")
     assert r and "add_person" in r.actions
     lena = people.find_person("Лена")
-    assert lena is not None and lena.kind == "person"
+    assert lena is not None and lena.kind == "family"   # «сестра» → семья
     r2 = _people_rules("кто такая Лена", "web")
     assert r2 and "person_card" in r2.actions and "Лена" in r2.text
     assert _people_rules("кто такой Гриша", "web") is None or "не знаю" in (_people_rules("кто такой Гриша", "web").text.lower())
@@ -204,3 +204,47 @@ def test_people_api_roundtrip():
     assert {"nodes", "edges", "stats"} <= set(g)
     assert c.get("/api/graph/backlinks/bogus/1").status_code == 400
     assert isinstance(_j(c.get("/api/people/today")), list)
+
+
+def test_company_kind_saved_and_editable():
+    client = _client()
+    r = client.post("/api/people", json={"name": "ООО Ромашка", "kind": "company"})
+    assert _j(r)["kind"] == "company"
+    cid = r.json()["id"]
+    assert _j(client.put(f"/api/people/{cid}", json={"kind": "client"}))["kind"] == "client"
+    assert _j(client.put(f"/api/people/{cid}", json={"kind": "company"}))["kind"] == "company"
+    assert _j(client.put(f"/api/people/{cid}", json={"kind": "alien"}))["kind"] == "alien"   # неизвестное слово — свой тип (заводится сам)
+    assert _j(client.put(f"/api/people/{cid}", json={"kind": "x" * 40}))["kind"] == "alien"   # слишком длинное — игнорируется
+    from core.services import people as _ppl; _ppl.remove_custom_kind("alien")
+    from core.brain.agent import _people_rules
+    rep = _people_rules("компания: Пятёрочка, сеть магазинов", "web")
+    assert rep and "Компания" in rep.text
+    from core.services import people
+    assert people.find_person("Пятёрочка").kind == "company"
+
+
+def test_people_kinds_guess_custom_and_orders():
+    """Типы «кто это»: угадываются по подписи, заказ делает клиентом только «человека без типа», свои типы живут в настройке."""
+    from core.services import people, orders
+    assert people.add_person("Мама").kind == "family"
+    assert people.add_person("Ваня", notes="друг, сосед").kind == "friend"
+    assert people.add_person("ООО Ромашка").kind == "company"
+    p = people.add_person("Петров")
+    assert p.kind == "person"
+    # заказ на «человека без типа» → клиент; на маму — семья остаётся
+    orders.add_order("Ролик", 1000, "Петров"); orders.add_order("Сайт", 1000, "Мама")
+    assert people.find_person("Петров").kind == "client" and people.find_person("Мама").kind == "family"
+    # свой тип: заводится сам, виден в списке, удаляется с переназначением
+    d = people.add_person("Доктор Айболит", kind="врач")
+    assert d.kind == "врач" and any(k["id"] == "врач" and k["custom"] for k in people.all_kinds())
+    assert people.normalize_kind("Семья") == "family" and people.normalize_kind("заказчик") == "client"
+    assert people.remove_custom_kind("врач") == 1 and people.find_person("Айболит").kind == "person"
+    # повторный add_person без типа не сбрасывает уже выбранный
+    people.update_person(p.id, kind="friend")
+    assert people.add_person("Петров").kind == "friend"
+    from fastapi.testclient import TestClient
+    from core.api.app import app
+    c = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5555))
+    assert any(k["id"] == "family" for k in c.get("/api/people/kinds").json())
+    r = c.post("/api/people", json={"name": "Сосед Коля", "kind": "сосед"}).json()
+    assert r["kind"] == "сосед" and r["kind_label"] == "сосед"

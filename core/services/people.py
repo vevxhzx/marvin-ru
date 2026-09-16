@@ -111,9 +111,15 @@ def people_in_text(text: str) -> list[Client]:
 # ---------------------------------------------------------------- карточка
 def _order_row(o: Order, paid: float) -> dict:
     from .orders import STATUS_LABEL, OPEN, UNPAID
-    return {"id": o.id, "title": o.title, "price": o.price, "paid": paid, "left": max(0.0, o.price - paid), "status": o.status,
+    return {"id": o.id, "title": o.title, "price": o.price, "paid": paid, "left": max(0.0, o.price - paid) if o.status in UNPAID else 0.0, "status": o.status,
             "status_label": STATUS_LABEL.get(o.status, o.status), "deadline": o.deadline, "created_at": o.created_at,
             "open": o.status in OPEN, "unpaid": o.status in UNPAID and o.price - paid > 0}
+
+
+def _next_payday(c: Client):
+    from . import pulse
+    d = pulse.next_payday(c)
+    return d.isoformat() if d else None
 
 
 def card(c: Client, limit: int = 8) -> dict:
@@ -140,7 +146,8 @@ def card(c: Client, limit: int = 8) -> dict:
     ] if x]
     total_paid = sum(paid.values())
     return {
-        "id": c.id, "name": c.name, "kind": c.kind, "contact": c.contact, "about": c.notes, "aliases": c.aliases, "birthday": c.birthday,
+        "id": c.id, "name": c.name, "kind": c.kind, "kind_label": KIND_LABEL.get(c.kind, c.kind), "contact": c.contact, "about": c.notes, "aliases": c.aliases, "birthday": c.birthday,
+        "pay_mode": c.pay_mode or "each", "pay_every": c.pay_every or 14, "pay_days": c.pay_days or "", "next_payday": _next_payday(c),
         "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
         "orders": rows[:limit], "orders_total": len(rows),
         "money": {"paid": round(total_paid), "unpaid": round(sum(r["left"] for r in rows if r["unpaid"])), "open": sum(1 for r in rows if r["open"])},
@@ -168,7 +175,7 @@ def list_people() -> list[dict]:
     out = []
     for c in people:
         mine = [o for o in orders if o.client_id == c.id]
-        out.append({"id": c.id, "name": c.name, "kind": c.kind, "contact": c.contact, "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
+        out.append({"id": c.id, "name": c.name, "kind": c.kind, "kind_label": KIND_LABEL.get(c.kind, c.kind), "contact": c.contact, "tags": [t.strip() for t in (c.tags or "").split(",") if t.strip()],
                     "birthday": c.birthday, "aliases": c.aliases,
                     "orders": len(mine), "open": sum(1 for o in mine if o.status in OPEN),
                     "unpaid": round(sum(max(0.0, o.price - paid.get(o.id, 0.0)) for o in mine if o.status in UNPAID)),
@@ -177,15 +184,98 @@ def list_people() -> list[dict]:
     return out
 
 
-def add_person(name: str, kind: str = "person", contact: str | None = None, notes: str | None = None,
+# Кто это. Встроенные типы + свои (хранятся в настройке people.kinds через запятую: «врач, сосед»).
+# person — «просто человек», тип не определён. Раньше все создавались как client — отсюда «все клиенты».
+KINDS = ("person", "family", "friend", "client", "company")
+KIND_LABEL = {"person": "человек", "family": "семья", "friend": "друг", "client": "клиент", "company": "компания"}
+FAMILY_WORDS = {"мама", "мам", "мать", "папа", "пап", "отец", "батя", "брат", "братик", "сестра", "сестрёнка", "сестренка", "жена", "муж",
+                "бабушка", "бабуля", "дедушка", "дед", "деда", "сын", "дочь", "дочка", "тётя", "тетя", "дядя", "племянник", "племянница",
+                "тёща", "теща", "тесть", "свекровь", "свёкор", "свекор", "кузен", "кузина", "родители", "семья", "родственник", "родственница"}
+FRIEND_WORDS = {"друг", "подруга", "друган", "кореш", "бро", "приятель", "приятельница", "лучший друг", "лучшая подруга", "однокурсник", "одноклассник", "сосед", "соседка"}
+COMPANY_WORDS = ("ооо", "оао", "зао", "ип ", "компания", "фирма", "студия", "агентство", "бюро", "продакшн", "продакшен", "prod", "production", "studio", "agency", "llc", "inc", "media", "медиа")
+
+
+def custom_kinds() -> list[str]:
+    from ..db import get_setting
+    return [k.strip().lower() for k in (get_setting("people.kinds") or "").split(",") if k.strip()]
+
+
+def all_kinds() -> list[dict]:
+    """Для сайта/палитры: встроенные + свои, с подписями."""
+    return [{"id": k, "label": KIND_LABEL[k], "custom": False} for k in KINDS] + [{"id": k, "label": k, "custom": True} for k in custom_kinds()]
+
+
+def normalize_kind(kind: str | None) -> str | None:
+    """Принять тип: встроенный id, русская подпись («семья»), или свой (заводится сам, до 30 символов). None — не менять."""
+    k = (kind or "").strip().lower()
+    if not k:
+        return None
+    if k in KINDS:
+        return k
+    for kid, lab in KIND_LABEL.items():
+        if k == lab:
+            return kid
+    if k in ("родня", "родственник", "родственники", "семейный", "свои"):
+        return "family"
+    if k in ("друзья", "подруга", "приятель"):
+        return "friend"
+    if k in ("заказчик", "заказчица", "клиентка"):
+        return "client"
+    if k in ("фирма", "организация", "ооо", "студия", "агентство"):
+        return "company"
+    if len(k) > 30:
+        return None
+    if k not in custom_kinds():
+        from ..db import set_setting
+        set_setting("people.kinds", ", ".join(custom_kinds() + [k]))
+    return k
+
+
+def remove_custom_kind(kind: str) -> int:
+    """Убрать свой тип: людям с ним — «человек». Возвращает, скольких переназначили."""
+    from ..db import set_setting
+    k = (kind or "").strip().lower()
+    if not k or k in KINDS:
+        return 0
+    set_setting("people.kinds", ", ".join(x for x in custom_kinds() if x != k))
+    with session() as s:
+        rows = s.exec(select(Client).where(Client.kind == k)).all()
+        for c in rows:
+            c.kind = "person"; s.add(c)
+        s.commit()
+        return len(rows)
+
+
+def guess_kind(name: str, notes: str | None = None) -> str:
+    """Тип по имени и подписи, когда явно не сказали: «мама» → семья, «Ваня, друг» → друг, «ООО Ромашка» → компания.
+    Ни на что не похоже — «человек» (не клиент: клиентом делает только заказ)."""
+    low = f"{name} {notes or ''}".lower()
+    words = set(re.findall(r"[а-яёa-z]+", low))
+    if words & FAMILY_WORDS:
+        return "family"
+    if words & FRIEND_WORDS or any(w in low for w in ("друг", "подруг")):
+        return "friend"
+    if any(w in name.lower() for w in COMPANY_WORDS) or any(w in low for w in ("компания", "фирма", "ооо ")):
+        return "company"
+    if any(w in low for w in ("клиент", "заказчик")):
+        return "client"
+    return "person"
+
+
+def add_person(name: str, kind: str | None = "person", contact: str | None = None, notes: str | None = None,
                aliases: str | None = None, birthday: str | None = None, tags: str | None = None) -> Client:
+    """kind=None или "person" при создании — угадать по имени/подписи; у существующего человека «person» тип не сбрасывает."""
     from .orders import get_or_create_client
-    c = get_or_create_client(name)
+    existed = find_person(name) is not None
+    c = get_or_create_client(name, kind="person")
     assert c is not None
     with session() as s:
         row = s.get(Client, c.id)
-        if kind in ("client", "person"):
-            row.kind = kind
+        k = normalize_kind(kind)
+        if k and k != "person":
+            row.kind = k
+        elif not existed or row.kind == "person":
+            row.kind = guess_kind(name, notes)
         for k, v in (("contact", contact), ("notes", notes), ("aliases", aliases), ("birthday", birthday), ("tags", tags)):
             if v is not None:
                 setattr(row, k, str(v).strip() or ("" if k in ("aliases", "tags") else None))
@@ -203,12 +293,25 @@ def update_person(cid: int, **fields) -> Client | None:
                 continue
             if k == "name":
                 c.name = str(v).strip() or c.name
-            elif k == "kind" and v in ("client", "person"):
-                c.kind = v
+            elif k == "kind":
+                nk = normalize_kind(v)
+                if nk:
+                    c.kind = nk
             elif k in ("contact", "notes", "birthday"):
                 setattr(c, k, str(v).strip() or None)
             elif k in ("aliases", "tags"):
                 setattr(c, k, ", ".join(x.strip() for x in str(v).split(",") if x.strip()))
+            elif k == "pay_mode":
+                if v in ("each", "batch", "monthly"):
+                    c.pay_mode = v
+            elif k == "pay_every":
+                try:
+                    c.pay_every = max(1, min(120, int(v)))
+                except (TypeError, ValueError):
+                    pass
+            elif k == "pay_days":
+                import re as _re
+                c.pay_days = ",".join(sorted({x for x in _re.findall(r"\d{1,2}", str(v)) if 1 <= int(x) <= 31}, key=int))
         s.add(c); s.commit(); s.refresh(c)
         return c
 
@@ -226,6 +329,12 @@ def card_text(d: dict, short: bool = False) -> str:
             s += f", **ждёт оплаты {money(m['unpaid'])}**"
         if m["open"]:
             s += f", в работе {m['open']}"
+        npd = f", ближайшая выплата {fmt_dt(datetime.fromisoformat(d['next_payday'])).split(' в ')[0]}" if d.get("next_payday") else ""
+        if d.get("pay_mode") == "batch":
+            s += f"; платит пачкой раз в {d['pay_every']} дн.{npd}"
+        elif d.get("pay_mode") == "monthly":
+            days = (d["pay_days"] or "1").split(",")
+            s += f"; платит {(', '.join(days[:-1]) + ' и ' + days[-1]) if len(days) > 1 else days[0]} числа{npd}"
         lines.append(s + ".")
         for o in d["orders"][:3 if short else 6]:
             tail = (" — " + fmt_dt(o["deadline"])) if o["deadline"] and o["open"] else ""

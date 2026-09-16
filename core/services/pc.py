@@ -16,6 +16,8 @@ log = logging.getLogger("assistant.pc")
 LAST_SEEN: float = 0.0
 STATE: dict = {"mode": "offline", "text": ""}
 _pending_results: list[dict] = []   # результаты команд (поиск файлов), которые ещё не показали
+SSE_CLIENTS = 0                     # сколько открытых /api/events/stream (ставит app.py) — по нему видно, слушает ли кто-то команды
+_sent: dict[str, float] = {}        # action → когда отправили ПК (для «команда ушла, а ответа нет»)
 
 
 def alive() -> bool:
@@ -166,7 +168,26 @@ def dispatch(cmd: PcCommand, channel: str) -> str:
         return "ПК-клиент не на связи, сэр: запустите voice.bat на компьютере — тогда смогу открывать программы и файлы."
     if agent.on_change:
         agent.on_change("pc", {"action": cmd.action, "arg": cmd.arg, "extra": cmd.extra, "channel": channel})
+    _sent[cmd.action] = time.time()
+    log.info("ПК ← %s %r (канал %s; слушателей SSE: %d, пульс %.0f с назад)", cmd.action, cmd.arg[:60], channel, SSE_CLIENTS, time.time() - LAST_SEEN)
+    if SSE_CLIENTS <= 0:
+        # пульс ходит, а поток событий не открыт — voice.bat отвалился от /api/events/stream (переподключится сам за ~5 с),
+        # либо это старый voice.bat без слушателя. Команда никем не принята — лучше честно, чем «Смотрю…» и тишина.
+        log.warning("ПК-команда %s никем не принята: нет ни одного подключения к /api/events/stream", cmd.action)
+        return ("Команду отправил, но голосовой клиент её не принял — он не подключён к потоку событий ядра. "
+                "Повторите через 10 секунд; если снова так — перезапустите voice.bat.")
     return cmd.say or "Выполняю."
+
+
+def ack(action: str) -> None:
+    """ПК подтвердил, что взял команду в работу (POST /api/pc/ack)."""
+    _sent.pop(action, None)
+
+
+def unanswered(max_age: float = 60) -> list[str]:
+    """Команды, ушедшие ПК больше max_age секунд назад без подтверждения приёма."""
+    now = time.time()
+    return [a for a, t in _sent.items() if now - t > max_age]
 
 
 def push_result(text: str, channel: str = "voice") -> None:

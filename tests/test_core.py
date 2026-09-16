@@ -612,7 +612,7 @@ def test_batch_sorter_splits_and_undoes(monkeypatch):
         return [{"kind": "task", "title": "Доделать матрицу", "when": today, "priority": 2},
                 {"kind": "task", "title": "купить очки", "when": today},
                 {"kind": "event", "title": "Врач", "when": f"{today}T15:00"},
-                {"kind": "note", "title": "Попробовать рисовать"}]
+                {"kind": "note", "title": "Попробовать рисовать"}], "gemini"
 
     async def no_ollama(force=False):
         return False

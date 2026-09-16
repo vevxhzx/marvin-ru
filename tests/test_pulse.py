@@ -216,3 +216,115 @@ def test_api_freelance_and_pulse():
     assert p == {"enabled": False, "late": [], "tax": None}
     d = _j(c.get("/api/dashboard"))
     assert d["freelance"] is False and d["orders"]["late"] == []
+
+
+# ---------------------------------------------------------------- клиент платит пачкой / по числам
+
+def _set_pay(name, **fields):
+    from core.services import people
+    from sqlmodel import select
+    with db.session() as s:
+        c = s.exec(select(db.Client).where(db.Client.name == name)).first()
+    return people.update_person(c.id, **fields)
+
+
+def test_next_payday_monthly_and_batch():
+    from core.services import pulse
+    c = db.Client(name="кот", pay_mode="monthly", pay_days="10, 25", created_at=datetime(2026, 1, 1))
+    assert pulse.next_payday(c, datetime(2026, 9, 16)).date() == datetime(2026, 9, 25).date()
+    assert pulse.next_payday(c, datetime(2026, 9, 26)).date() == datetime(2026, 10, 10).date()
+    c31 = db.Client(name="кот", pay_mode="monthly", pay_days="31", created_at=datetime(2026, 1, 1))
+    assert pulse.next_payday(c31, datetime(2026, 9, 1)).date() == datetime(2026, 9, 30).date()  # в сентябре 30 дней
+    each = db.Client(name="лена", pay_mode="each")
+    assert pulse.next_payday(each) is None
+    # пачкой: раз в 14 дней от даты создания (оплат ещё не было) → не раньше сегодня
+    with db.session() as s:
+        b = db.Client(name="студия", kind="client", pay_mode="batch", pay_every=14, created_at=datetime.now() - timedelta(days=20))
+        s.add(b); s.commit(); s.refresh(b)
+    d = pulse.next_payday(b)
+    assert d.date() == (datetime.now() - timedelta(days=20) + timedelta(days=28)).date()
+
+
+def test_expected_income_groups_batch_client_into_one_point():
+    from core.services import orders
+    _on()
+    _done_order("логотип", 5000, "кот прод", days_ago=3)
+    _done_order("баннер", 3000, "кот прод", days_ago=1)
+    _done_order("сайт", 7000, "лена", days_ago=2)
+    items_each = orders.expected_income()
+    assert len(items_each) == 3
+    _set_pay("кот прод", pay_mode="monthly", pay_days="10,25")
+    items = orders.expected_income()
+    titles = [i["title"] for i in items]
+    assert any(t.startswith("кот прод, 2 заказа") for t in titles), titles
+    grp = next(i for i in items if i["title"].startswith("кот прод"))
+    assert grp["amount"] == 8000
+    assert grp["date"].day in (10, 25)
+    assert any(i["client"] == "лена" and i["amount"] == 7000 for i in items)
+
+
+def test_late_payments_batch_counts_from_payday_not_done():
+    from core.services import pulse
+    _on(late_days=3)
+    _done_order("логотип", 5000, "кот прод", days_ago=10)
+    assert pulse.late_payments(), "за каждый заказ: 10 дней после сдачи — задержка"
+    # клиент платит раз в 60 дней, создан вчера → день выплат ещё не наступил → не задерживает
+    c = _set_pay("кот прод", pay_mode="batch", pay_every=60)
+    with db.session() as s:
+        row = s.get(db.Client, c.id); row.created_at = datetime.now() - timedelta(days=1); s.add(row); s.commit()
+    assert pulse.late_payments() == []
+    # по числам: платит 1-го; заказ сдан 10 дней назад — если после сдачи день выплат ещё не был, задержки нет
+    c = _set_pay("кот прод", pay_mode="monthly", pay_days="1")
+    prev = pulse._prev_payday(c, datetime.now())
+    late = pulse.late_payments()
+    days_since_payday = (datetime.now() - prev).days
+    if prev < datetime.now() - timedelta(days=10) or days_since_payday < 3:
+        assert late == []
+    else:
+        assert late and late[0]["days"] == days_since_payday
+    # заказ сдан 40 дней назад → день выплат точно прошёл → задержка считается от него, а не от сдачи
+    _done_order("старый баннер", 2000, "кот прод", days_ago=40)
+    late = pulse.late_payments()
+    if days_since_payday >= 3:
+        assert late and max(l["days"] for l in late) == days_since_payday
+    else:
+        assert late == []
+
+
+def test_update_person_pay_fields_are_sanitised():
+    from core.services import people
+    c = people.add_person("кот прод", kind="client")
+    c = people.update_person(c.id, pay_mode="weird", pay_every=9999, pay_days="0, 5, 40, 25, 25")
+    assert c.pay_mode == "each" and c.pay_every == 120 and c.pay_days == "5,25"
+    card = people.card(c)
+    assert card["pay_mode"] == "each" and card["next_payday"] is None
+    c = people.update_person(c.id, pay_mode="monthly")
+    assert people.card(c)["next_payday"]
+    from core.services import orders
+    orders.add_order("лого", price=1000, client="кот прод")
+    txt = people.card_text(people.card(c))
+    assert "платит 5 и 25 числа" in txt and "ближайшая выплата" in txt and " в " not in txt.split("ближайшая выплата")[1].split("\n")[0]
+
+
+def test_guess_batch_clients_and_api():
+    from core.services import pulse, orders
+    _on()
+    for t in ("а", "б"):
+        o = orders.add_order(t, price=1000, client="кот прод"); orders.update_order(o.id, status="done")
+        orders.add_payment(o.id, 1000)
+    o = orders.add_order("в", price=1000, client="лена"); orders.update_order(o.id, status="done"); orders.add_payment(o.id, 1000)
+    hints = pulse.guess_batch_clients()
+    assert [h["name"] for h in hints] == ["кот прод"]
+    r = _j(_client().get("/api/people/batch-hints"))
+    assert r and r[0]["name"] == "кот прод"
+    _set_pay("кот прод", pay_mode="batch")
+    assert pulse.guess_batch_clients() == []
+
+
+def test_none_string_is_not_a_note():
+    from core.tools.registry import _coerce
+    from core.brain.sorter import _s
+    assert _s("None") is None and _s("null") is None and _s("норм") == "норм"
+    for v in ("None", "null", " NULL "):
+        assert _coerce("add_order", "notes", {"type": "string"}, v) is None
+    assert _coerce("add_order", "notes", {"type": "string"}, "срочно") == "срочно"

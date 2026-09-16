@@ -63,6 +63,17 @@ function useThemeState() {
   return [mode, setMode]
 }
 
+function NotFound() {
+  const nav = useNavigate()
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center gap-3 text-center">
+      <div className="label">такой страницы нет</div>
+      <div className="h1-sm">{window.location.pathname}</div>
+      <button className="btn-soft btn-sm mt-2" onClick={() => nav('/')}>на главную</button>
+    </div>
+  )
+}
+
 // глобальный refresh: после действий в чате обновляем страницы
 const RefreshCtx = createContext({ tick: 0, bump: () => {} })
 export const useRefresh = () => useContext(RefreshCtx)
@@ -168,7 +179,7 @@ function SideTimer({ min }) {
       <button className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[12.5px] transition hover:bg-[var(--fill)]" onClick={() => run(() => api.startTimer(null, null))} data-tip="запустить помодоро">
         {ring}
         <span className="num font-medium tabular-nums">{String(t?.focus_min || 25).padStart(2, '0')}:00</span>
-        <span className="muted truncate">{t?.today_sessions ? `сегодня ${t.today_sessions} 🍅` : 'помодоро'}</span>
+        <span className="muted truncate">{t?.today_sessions ? `сегодня ${t.today_sessions} ${t.today_sessions === 1 ? "помидор" : t.today_sessions < 5 ? "помидора" : "помидоров"}` : 'помодоро'}</span>
       </button>
     )
   }
@@ -414,6 +425,7 @@ function Shell({ inbox }) {
             <Route path="/people" element={<People />} />
             <Route path="/memory" element={<Memory />} />
             <Route path="/settings" element={<Settings health={health} />} />
+            <Route path="*" element={<NotFound />} />
           </Routes>
           </PageTransition>
         </main>

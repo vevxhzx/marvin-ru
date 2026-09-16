@@ -385,6 +385,25 @@ async def cb_reminder(cq: CallbackQuery):
         await cq.message.answer(msg)
 
 
+@router.callback_query(F.data.regexp(r"^pro:(task|mute|ok):\d+:[a-z]+$"))
+async def cb_proactive(cq: CallbackQuery):
+    """Кнопки под инициативным сообщением: поставить задачу / не надо про это / норм."""
+    from core.services import proactive
+    _, action, sid, why = cq.data.split(":")
+    try:
+        msg = proactive.act(action, int(sid), why)
+        if agent.on_change and action == "task":
+            agent.on_change("chat", {"channel": "tg", "actions": ["add_task"]})
+    except Exception as ex:
+        log.warning("proactive callback failed: %s", ex)
+        msg = f"Не получилось: {ex}"
+    await cq.answer(msg[:180])
+    try:
+        await cq.message.edit_text((cq.message.html_text or cq.message.text or "") + f"\n\n<i>{msg}</i>", reply_markup=None)
+    except Exception:
+        await cq.message.answer(msg)
+
+
 @router.callback_query(F.data.regexp(r"^pomo:\d+:(\d{1,3}|break|stop)$"))
 async def cb_pomo(cq: CallbackQuery):
     """Кнопки под «помодоро готово»: ещё 25 / перерыв 5 / хватит."""

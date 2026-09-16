@@ -10,7 +10,6 @@ import logging
 import threading
 from pathlib import Path
 
-from .. import identity
 from ..config import cfg
 
 log = logging.getLogger("assistant.voice")
@@ -56,7 +55,7 @@ def _transcribe_cloud(pcm_or_path) -> str | None:
             fname = "a.wav"; data = buf.getvalue()
         r = httpx.post("https://api.groq.com/openai/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"},
                        files={"file": (fname, data)}, data={"model": "whisper-large-v3-turbo", "language": "ru", "temperature": "0",
-                                                            "prompt": f"{identity.title()}, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00."},
+                                                            "prompt": "Джарвис, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00."},
                        timeout=20)
         r.raise_for_status()
         global LAST_CONFIDENCE, LAST_VIA
@@ -73,8 +72,21 @@ _HALLUCINATIONS = {"субтитры", "продолжение следует", 
                    "субтитры сделал dimatorzok", "субтитры подогнал", "с вами был", "подписывайтесь"}
 
 
+def _cached_locally(name: str) -> bool:
+    """Есть ли модель faster-whisper уже на диске (кэш HuggingFace) — чтобы не пугать «качается» при каждом старте."""
+    import os
+    from pathlib import Path
+    base = Path(os.environ.get("HF_HOME") or (Path.home() / ".cache" / "huggingface")) / "hub"
+    if not base.exists():
+        return False
+    for d in base.glob(f"models--*faster-whisper-{name}*"):
+        if any((d / "snapshots").glob("*/model.bin")):
+            return True
+    return False
+
+
 def _add_cuda_dlls() -> None:
-    """Windows: ctranslate2 ищет cublas/cudnn DLL в PATH. install_voice.bat ставит их pip-пакетами nvidia-* — подключаем их папки."""
+    """Windows: ctranslate2 ищет cublas/cudnn DLL в PATH. gpu.bat ставит их pip-пакетами nvidia-* — подключаем их папки."""
     import os
     try:
         import importlib.util
@@ -94,7 +106,7 @@ def _add_cuda_dlls() -> None:
 
 
 def cuda_ok() -> bool:
-    """Видит ли ctranslate2 видеокарту (после install_voice.bat)."""
+    """Видит ли ctranslate2 видеокарту (после gpu.bat)."""
     try:
         _add_cuda_dlls()
         import ctranslate2
@@ -114,19 +126,23 @@ def _load():
         try:
             from faster_whisper import WhisperModel
         except ImportError:
-            LAST_ERROR = "Пакет faster-whisper не установлен — запустите install_voice.bat."
+            LAST_ERROR = "Пакет faster-whisper не установлен — запустите update.bat."
             raise RuntimeError(LAST_ERROR)
         if STT_DEVICE != "cpu":
             _add_cuda_dlls()
         compute = "int8" if STT_DEVICE == "cpu" else "int8_float16"
-        log.info("Загружаю модель распознавания whisper-%s (%s)… первый раз качается, это долго", STT_MODEL, STT_DEVICE)
+        if _cached_locally(STT_MODEL):
+            log.info("Поднимаю модель распознавания whisper-%s (%s) с диска в память — 5–15 с, чат уже работает", STT_MODEL, STT_DEVICE)
+        else:
+            log.info("Скачиваю модель распознавания whisper-%s (%s) — один раз, ~%s, потом будет читаться с диска",
+                     STT_MODEL, STT_DEVICE, {"tiny": "75 МБ", "base": "150 МБ", "small": "500 МБ", "medium": "1.5 ГБ"}.get(STT_MODEL, "до 3 ГБ"))
         try:
             import os as _os
             threads = max(2, min(8, (_os.cpu_count() or 4) - 2))   # многоядерный CPU: whisper параллелится хорошо
             _model = WhisperModel(STT_MODEL, device=STT_DEVICE, compute_type=compute, cpu_threads=threads)
         except Exception as e:
             if STT_DEVICE != "cpu":
-                log.warning("whisper на %s не завёлся (%s) — работаю на CPU. Для GPU: install_voice.bat", STT_DEVICE, str(e)[:120])
+                log.warning("whisper на %s не завёлся (%s) — работаю на CPU. Для GPU: gpu.bat", STT_DEVICE, str(e)[:120])
                 _model = WhisperModel(STT_MODEL, device="cpu", compute_type="int8")
             else:
                 LAST_ERROR = f"Не удалось загрузить whisper-{STT_MODEL}: {e}"
@@ -168,11 +184,11 @@ def _transcribe_sync(path) -> str:
             return "" if (not txt or low in _HALLUCINATIONS) else txt
     LAST_VIA = "local"
     model = _load()
-    # подсказка словаря: Whisper точнее слышит частые команды ассистента
-    hint = (f"{identity.title()}, что у меня сегодня? Потратил 700 рублей на такси. Задача: сдать отчёт. Встреча в среду в 15:00. "
+    # подсказка словаря: Whisper точнее слышит частые команды Джарвиса
+    hint = ("Джарвис, что у меня сегодня? Потратил 700 рублей на такси. Задача: сдать отчёт. Встреча в среду в 15:00. "
             "Долг Сберу. Баланс Т-Банк. Напомни завтра. Мысль: идея для проекта. Отмени последнюю.")
     if STT_FAST:
-        hint = f"{identity.title()}, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00. Долг Сберу, Т-Банк."   # короче подсказка — быстрее декодер
+        hint = "Джарвис, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00. Долг Сберу, Т-Банк."   # короче подсказка — быстрее декодер
         segments, info = model.transcribe(path, language="ru", beam_size=1, best_of=1, temperature=0.0,
                                           vad_filter=True, initial_prompt=hint,
                                           vad_parameters={"min_silence_duration_ms": 300},

@@ -184,7 +184,7 @@ export function Swipe({ children, onLeft, onRight, leftLabel = 'удалить',
   const dragging = !!st.current
   const trans = dragging ? 'none' : flying ? 'transform .2s var(--ease-io)' : 'transform .34s var(--ease-spring)'
   return (
-    <div ref={box} className={`swipe ${openSide ? 'open' : ''} ${className}`} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onTouchCancel={onEnd}>
+    <div ref={box} className={`swipe ${openSide ? 'open' : ''} ${dx !== 0 || flying ? 'active' : ''} ${className}`} onTouchStart={onStart} onTouchMove={onMove} onTouchEnd={onEnd} onTouchCancel={onEnd}>
       {onRight && (
         <div className={`swipe-bg right ${dx > 0 ? 'show' : ''} ${armed && dx > 0 ? 'armed' : ''}`}>
           <button type="button" tabIndex={-1} className="swipe-act" onClick={(e) => { e.stopPropagation(); go('right') }} style={{ width: Math.max(BTN, reveal) }}>

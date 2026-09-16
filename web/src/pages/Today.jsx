@@ -2,10 +2,13 @@ import { useEffect, useRef, useState } from 'react'
 import { dat } from '../lib/name'
 import { Link } from 'react-router-dom'
 import { Check, ArrowUp, ArrowUpRight, ChevronDown, ChevronUp, SlidersHorizontal, GripVertical, RotateCcw, X, Eye, EyeOff } from 'lucide-react'
-import { api, money, hhmm, dayLabel, shortDate, MONTHS, isSameDay, relTime, plural, chatStream, kb } from '../lib/api'
+import { api, money, hhmm, dayLabel, shortDate, MONTHS, isSameDay, isAllDay, relTime, plural, chatStream, kb } from '../lib/api'
 import { Section, Empty, Num, useLeave, Swipe, ListSkeleton, Sheet, Switch } from '../components/ui'
 import { renderMd, ACT } from '../components/Chat'
 import { useRefresh } from '../App'
+import DayStrip from '../components/DayStrip'
+import TaskSheet from '../components/TaskSheet'
+import { EventSheet } from './Calendar'
 import { Forecast, Birthdays, useOrder, Draggable } from '../components/Widgets'
 import { usePrefs, prefs as PREFS, DEFAULTS } from '../lib/prefs'
 
@@ -27,9 +30,9 @@ const BLOCK_IDS = BLOCKS.map((b) => b.id)
 
 /* Одна короткая фраза контекста — только самое важное, не перечисление всего. */
 function contextLine(d, now) {
-  const live = d.today.find((e) => new Date(e.start) <= now && e.end && new Date(e.end) >= now)
+  const live = d.today.find((e) => !e.done && new Date(e.start) <= now && e.end && new Date(e.end) >= now)
   if (live) return `сейчас — «${live.title}»`
-  const next = d.today.find((e) => new Date(e.start) > now)
+  const next = d.today.find((e) => !e.done && new Date(e.start) > now)
   if (next) { const m = Math.round((new Date(next.start) - now) / 60000); return m < 60 ? `через ${m} мин — «${next.title}»` : `ближайшее в ${hhmm(next.start)} — «${next.title}»` }
   const overdue = d.tasks.filter((t) => t.due && new Date(t.due) < now).length
   if (overdue) return `${overdue} ${plural(overdue, 'задача просрочена', 'задачи просрочены', 'задач просрочено')}`
@@ -54,10 +57,16 @@ export default function Today({ openChat, address = 'сэр' }) {
   const [leaveCls, leave] = useLeave()
   const done = (id) => leave(id, 'done', async () => { await api.doneTask(id); await load(); bump() })
   const delTask = (id) => leave(id, 'leaving', async () => { await api.delTask(id); await load(); bump() })
+  // событие дня — тоже дело: та же галочка, что в календаре и в «Делах»
+  const doneEvent = (e) => leave(`ev${e.id}${e.start}`, e.done ? 'leaving' : 'done', async () => { await api.doneEvent(e.id, !e.done, e.start); await load(); bump() })
+  // правка прямо с главной: задача — общая форма задачи, событие — форма календаря; после сохранения блок обновится
+  const [editTask, setEditTask] = useState(null)
+  const [editEvent, setEditEvent] = useState(null)
+  const edited = () => { setEditTask(null); setEditEvent(null); load(); bump() }
 
   const blocks = {
-    tasks: <TasksBlock d={d} now={now} done={done} delTask={delTask} leaveCls={leaveCls} calm={prefs.density === 'calm'} />,
-    events: <EventsBlock d={d} now={now} calm={prefs.density === 'calm'} />,
+    tasks: <TasksBlock d={d} now={now} done={done} delTask={delTask} onEdit={setEditTask} leaveCls={leaveCls} calm={prefs.density === 'calm'} />,
+    events: <EventsBlock d={d} now={now} calm={prefs.density === 'calm'} onToggle={doneEvent} onEdit={setEditEvent} onEditTask={(id) => api.task(id).then(setEditTask).catch(() => {})} leaveCls={leaveCls} />,
     orders: <OrdersBlock d={d} />,
     people: <PeopleBlock tick={tick} />,
     upcoming: <UpcomingBlock d={d} />,
@@ -100,6 +109,8 @@ export default function Today({ openChat, address = 'сэр' }) {
         </>
       )}
 
+      <TaskSheet open={!!editTask} task={editTask} onClose={() => setEditTask(null)} onDone={edited} />
+      <EventSheet open={!!editEvent} ev={editEvent} day={now} onClose={() => setEditEvent(null)} onDone={edited} />
       <Customize open={custom} onClose={() => setCustom(false)} prefs={prefs} setPrefs={setPrefs} order={order} move={move} address={address}
         onReset={() => { resetOrder(); setPrefs({ hiddenBlocks: DEFAULTS.hiddenBlocks, showGreeting: true, showContext: true, showQuick: true, density: 'calm' }) }} onDrag={() => { setCustom(false); setEditing(true) }} />
     </div>
@@ -207,7 +218,7 @@ function Composer({ onOpenChat, quick }) {
   )
 }
 
-function TasksBlock({ d, now, done, delTask, leaveCls, calm }) {
+function TasksBlock({ d, now, done, delTask, onEdit, leaveCls, calm }) {
   const list = [...d.tasks].sort((a, b) => (a.due ? new Date(a.due) : 9e15) - (b.due ? new Date(b.due) : 9e15) || a.priority - b.priority)
   const overdue = list.filter((t) => t.due && new Date(t.due) < now).length
   const shown = list.slice(0, calm ? 3 : 6)
@@ -224,8 +235,8 @@ function TasksBlock({ d, now, done, delTask, leaveCls, calm }) {
                     <button onClick={() => done(t.id)} aria-label="Выполнено" className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${leaveCls(t.id) ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={leaveCls(t.id) ? {} : { borderColor: t.priority === 1 ? 'var(--neg)' : 'var(--line-2)' }}>
                       {leaveCls(t.id) ? <Check size={12} strokeWidth={3} className="check-pop" /> : <Check size={12} className="opacity-0 transition group-hover:opacity-40" />}
                     </button>
-                    <div className="min-w-0 flex-1 truncate text-[14.5px] font-medium">{t.title}</div>
-                    {t.due && <span className={`shrink-0 text-[12px] ${od ? 'neg' : 'faint'}`}>{od ? 'просрочено' : isSameDay(t.due, now) ? hhmm(t.due) : dayLabel(t.due).toLowerCase()}</span>}
+                    <button type="button" className="min-w-0 flex-1 truncate text-left text-[14.5px] font-medium" onClick={() => onEdit(t)} aria-label="Изменить">{t.title}</button>
+                    {t.due && <span className={`shrink-0 text-[12px] ${od ? 'neg' : 'faint'}`}>{od ? 'просрочено' : isSameDay(t.due, now) ? (isAllDay(t.due) ? 'сегодня' : hhmm(t.due)) : dayLabel(t.due).toLowerCase()}</span>}
                   </div>
                 </Swipe>
               )
@@ -238,12 +249,15 @@ function TasksBlock({ d, now, done, delTask, leaveCls, calm }) {
   )
 }
 
-function EventsBlock({ d, now, calm }) {
+function EventsBlock({ d, now, calm, onToggle, onEdit, onEditTask, leaveCls }) {
   const upcomingWeek = d.week.filter((e) => !isSameDay(e.start, now)).slice(0, calm ? 2 : 4)
+  // лента: события дня + задачи с точным временем на сегодня — одна линия, видно промежутки
+  const strip = [...d.today, ...(d.tasks || []).filter((t) => !t.done && t.due && isSameDay(t.due, now) && !isAllDay(t.due)).map((t) => ({ id: `t${t.id}`, task_id: t.id, kind: 'task', title: t.title, start: t.due, end: null, priority: t.priority, done: false }))]
   return (
     <Section title="сегодня" idx={d.today.length} action={<Link to="/calendar" className="btn-ghost btn-sm">календарь <ArrowUpRight size={13} /></Link>}>
+      {strip.length > 1 && <DayStrip list={strip} isToday onPick={(e) => (e.kind === 'task' ? onEditTask(e.task_id) : onEdit(e))} />}
       <div className="rule">
-        {d.today.length === 0 ? <Empty glyph="calendar" text="Встреч нет" hint="созвон завтра в 15" compact /> : <div className="stagger">{d.today.slice(0, calm ? 4 : 8).map((e) => <EventRow key={e.id + e.start} e={e} now={now} />)}</div>}
+        {d.today.length === 0 ? <Empty glyph="calendar" text="Встреч нет" hint="созвон завтра в 15" compact /> : <div className="stagger">{d.today.slice(0, calm ? 4 : 8).map((e) => <EventRow key={e.id + e.start} e={e} now={now} onToggle={() => onToggle(e)} onOpen={() => onEdit(e)} extra={leaveCls(`ev${e.id}${e.start}`)} />)}</div>}
       </div>
       {upcomingWeek.length > 0 && (
         <div className="mt-4 border-t border-dashed border-[var(--line)] pt-3">
@@ -285,7 +299,7 @@ function OrdersBlock({ d }) {
           <div key={x.id} className="row group !py-2.5">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[14.5px] font-medium">{x.title}{x.client ? <span className="muted font-normal"> · {x.client}</span> : ''}</div>
-              <div className={`text-[12px] ${x.overdue ? 'neg' : x.days_left != null && x.days_left <= 2 ? 'warn' : 'muted'}`}>{x.deadline ? (x.overdue ? 'дедлайн прошёл' : x.days_left === 0 ? 'сдать сегодня' : x.days_left === 1 ? 'сдать завтра' : `до ${shortDate(x.deadline).toLowerCase()}`) : 'без срока'}{x.left > 0 && x.paid > 0 ? ` · осталось ${money(x.left)}` : ''}</div>
+              <div className={`text-[12px] ${x.overdue ? 'neg' : !x.past_due && x.days_left != null && x.days_left <= 2 ? 'warn' : 'muted'}`}>{x.deadline ? (x.overdue ? 'дедлайн прошёл' : x.past_due ? 'на правках' : x.days_left === 0 ? 'сдать сегодня' : x.days_left === 1 ? 'сдать завтра' : `до ${shortDate(x.deadline).toLowerCase()}`) : 'без срока'}{x.left > 0 && x.paid > 0 ? ` · осталось ${money(x.left)}` : ''}</div>
             </div>
             {!(t?.active && t.order_id === x.id) && <button className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100" data-tip="таймер 25 мин" onClick={() => start(x.id)}>▶</button>}
             <div className="num text-right text-[14.5px] font-medium">{x.price ? money(x.price) : ''}</div>
@@ -401,16 +415,21 @@ function Tile({ label, value, tone }) {
 const KIND_COLOR = { event: 'var(--accent)', task: 'var(--pos)', finance: 'var(--warn)', note: '#7c3aed', link: '#0891b2', chat: 'var(--ink-3)', system: 'var(--ink-3)' }
 export function KindDot({ kind }) { return <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: KIND_COLOR[kind] || 'var(--ink-3)' }} /> }
 
-function EventRow({ e, now }) {
+function EventRow({ e, now, onToggle, onOpen, extra = '' }) {
   const start = new Date(e.start), end = e.end ? new Date(e.end) : null
-  const live = start <= now && end && end >= now
+  const live = !e.done && start <= now && end && end >= now
   const past = end && end < now
+  const checked = e.done || extra.includes('leaving-done')
   return (
-    <div className={`row ${past ? 'opacity-50' : ''}`}>
-      <div className="num w-12 shrink-0 text-[14.5px] font-semibold">{hhmm(e.start)}</div>
-      <div className={`h-7 w-[3px] shrink-0 rounded-full ${live ? 'bg-green' : 'bg-accent'}`} />
-      <div className="min-w-0 flex-1 truncate text-[14.5px] font-medium">{e.title}</div>
-      {live && <span className="badge pos">сейчас</span>}
-    </div>
+    <Swipe onRight={onToggle} rightLabel={e.done ? 'вернуть' : 'сделано'}>
+      <div className={`row row-slide group ${past || e.done ? 'opacity-50' : ''} ${extra}`}>
+        <div className="num w-12 shrink-0 text-[14.5px] font-semibold">{hhmm(e.start)}</div>
+        <button onClick={onToggle} aria-label={e.done ? 'Вернуть' : 'Сделано'} className={`grid h-[22px] w-[22px] shrink-0 place-items-center rounded-full border transition-all duration-300 hover:scale-110 active:scale-90 ${checked ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={checked ? {} : { borderColor: live ? 'var(--pos)' : 'var(--line-2)' }}>
+          {checked ? <Check size={12} strokeWidth={3} className="check-pop" /> : <Check size={12} className="opacity-0 transition group-hover:opacity-40" />}
+        </button>
+        <button type="button" className={`min-w-0 flex-1 truncate text-left text-[14.5px] font-medium ${e.done ? 'line-through' : ''}`} onClick={onOpen} aria-label="Изменить">{e.title}</button>
+        {live && <span className="badge pos">сейчас</span>}
+      </div>
+    </Swipe>
   )
 }

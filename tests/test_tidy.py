@@ -67,7 +67,7 @@ def test_tidy_chat_flow_plan_then_yes():
     agent.on_change = lambda kind, payload: sent.append((kind, payload)) if kind == "pc" else None
     try:
         c = TestClient(app, base_url="http://localhost", client=("127.0.0.1", 5555))
-        pc.seen({"mode": "idle"})
+        pc.seen({"mode": "idle"}); pc.SSE_CLIENTS = 1
         r = c.post("/api/chat", json={"text": "разбери рабочий стол", "channel": "web"}).json()
         assert r["actions"] == ["pc_tidy"] and "план" in r["text"].lower()
         assert sent[-1][0] == "pc" and sent[-1][1]["action"] == "tidy" and sent[-1][1]["arg"] == "desktop"
@@ -90,8 +90,17 @@ def test_tidy_chat_flow_plan_then_yes():
         # ПК не на связи — понятная подсказка
         pc.LAST_SEEN = 0
         assert "voice.bat" in c.post("/api/chat", json={"text": "прибери в загрузках", "channel": "web"}).json()["text"]
+        # пульс есть, а поток событий не открыт — команду никто не примет: честно говорим, а не «Смотрю…» и тишина
+        pc.seen({"mode": "idle"}); pc.SSE_CLIENTS = 0
+        assert "не принял" in c.post("/api/chat", json={"text": "разбери рабочий стол", "channel": "web"}).json()["text"]
+        # ack снимает команду со счётчика «без ответа»
+        pc.SSE_CLIENTS = 1; c.post("/api/chat", json={"text": "разбери рабочий стол", "channel": "web"})
+        assert "tidy" in pc.unanswered(max_age=-1)
+        c.post("/api/pc/ack", json={"action": "tidy"})
+        assert "tidy" not in pc.unanswered(max_age=-1)
     finally:
         agent.on_change = prev
+        pc.SSE_CLIENTS = 0
 
 
 def test_nightly_tidy_only_old_downloads(tmp_path: Path, monkeypatch):

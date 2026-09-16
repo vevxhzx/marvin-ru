@@ -6,9 +6,9 @@ import re
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from ..brain.dates import parse_datetime
+from ..brain.dates import fix_night_hour, parse_datetime, parse_datetime_ex, task_due
 from ..services import brain_notes, calendar, finance, tasks
-from ..services.calendar import fmt_dt
+from ..services.calendar import fmt_dt, fmt_due
 from ..services.finance import money
 
 TOOLS: dict[str, dict[str, Any]] = {}
@@ -29,13 +29,19 @@ def tool(name: str, description: str, params: dict[str, Any], required: list[str
 
 def _dt(value: str | None) -> datetime | None:
     """ISO-строка или русская фраза → datetime."""
+    return _dt_ex(value)[0]
+
+
+def _dt_ex(value: str | None) -> tuple[datetime | None, bool]:
+    """То же + было ли названо время: «2026-09-16T15:00» / «завтра в 15» — да; «2026-09-16» / «сегодня» — нет."""
     if not value:
-        return None
+        return None, False
     try:
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
+        return dt, len(value.strip()) > 10
     except ValueError:
-        dt, _ = parse_datetime(value)
-        return dt
+        dt, _, time_set = parse_datetime_ex(value)
+        return dt, time_set
 
 
 # ---------------- Календарь ----------------
@@ -48,7 +54,7 @@ def _dt(value: str | None) -> datetime | None:
        "repeat_days": {"type": "array", "items": {"type": "integer"}, "description": "Для weekly: дни недели 0=пн … 6=вс"}}, ["title", "start"])
 def add_event(title: str, start: str, duration_min: int = 60, location: str | None = None, repeat: str = "",
               repeat_days: list[int] | None = None, _channel: str = "tg") -> str:
-    dt = _dt(start)
+    dt = fix_night_hour(_dt(start), f"{title} {start}")
     if not dt:
         return "Не понял дату/время."
     ev = calendar.add_event(title, dt, duration_min or 60, location, source=_channel, repeat=repeat or "", repeat_days=repeat_days)
@@ -82,7 +88,7 @@ def list_events(days: int = 7, **_) -> str:
     evs = calendar.list_events(start, start + timedelta(days=days or 7))
     if not evs:
         return "Событий нет."
-    return f"📅 **Ближайшие {days or 7} дн.**\n" + "\n".join(f"— **{fmt_dt(e.start)}** {e.title}" + (f" · {e.location}" if e.location else "") for e in evs)
+    return f"📅 **Ближайшие {days or 7} дн.**\n" + "\n".join(f"— **{fmt_dt(e.start)}** {'✓ ' if calendar.is_done(e) else ''}{e.title}" + (f" · {e.location}" if e.location else "") for e in evs)
 
 
 @tool("delete_event", "Удалить/отменить событие по id или названию.",
@@ -99,11 +105,24 @@ def delete_event(query: str, **_) -> str:
 
 # ---------------- Задачи ----------------
 @tool("add_task", "Добавить задачу в список дел.",
-      {"title": {"type": "string"}, "due": {"type": "string", "description": "Дедлайн ISO 8601 (необязательно)"},
+      {"title": {"type": "string"}, "due": {"type": "string", "description": "Срок (необязательно): ISO 8601 или словами («сегодня», «завтра в 15:00»). Только дата без времени = задача на весь день"},
        "priority": {"type": "integer", "description": "1 высокий, 2 обычный, 3 низкий"}}, ["title"])
 def add_task(title: str, due: str | None = None, priority: int = 2, _channel: str = "tg") -> str:
-    t = tasks.add_task(title, _dt(due), priority or 2, source=_channel)
-    return f"Задача #{t.id} «{t.title}» добавлена" + (f", дедлайн {fmt_dt(t.due)}" if t.due else "")
+    d, time_set = _dt_ex(due)
+    d = task_due(fix_night_hour(d, f"{title} {due or ''}"), time_set)   # только день («сегодня», «2026-09-16») — задача на весь день
+    t = tasks.add_task(title, d, priority or 2, source=_channel)
+    tail = fmt_due(t.due).strip()            # «На сегодня.» / «Дедлайн завтра в 15:00.» / «»
+    return f"Задача #{t.id} «{t.title}» добавлена" + (f" — {tail[0].lower()}{tail[1:-1]}" if tail else "")
+
+
+@tool("remember_fact", "Запомнить факт о хозяине надолго (семья, питомцы, вкусы, здоровье, привычки). НЕ для задач, событий, трат и не для паролей.",
+      {"text": {"type": "string", "description": "Факт одной фразой в третьем лице: «У него кот Барсик»"}}, ["text"])
+def remember_fact(text: str, **_) -> str:
+    from ..services import memory
+    if not memory.enabled():
+        return "Память о хозяине выключена в настройках."
+    f = memory.add_fact_sync(text, layer="long", confidence=0.9)
+    return f"Запомнил: «{f.text}»" if f else "Это не запоминаю (пусто или похоже на пароль/код)."
 
 
 @tool("list_tasks", "Показать открытые задачи.", {})
@@ -120,7 +139,13 @@ def list_tasks(**_) -> str:
       {"query": {"type": "string"}}, ["query"])
 def complete_task(query: str, **_) -> str:
     t = tasks.complete_task(query)
-    return f"Выполнено: «{t.title}»" if t else "Не нашёл такую задачу."
+    if t:
+        return f"Выполнено: «{t.title}»"
+    ev = calendar.find_event(query)
+    if ev and ev.start <= datetime.now() + timedelta(hours=12) and not calendar.is_done(ev):
+        calendar.set_done(ev.id, True, ev.start)
+        return f"Выполнено: «{ev.title}» (событие в календаре)"
+    return "Не нашёл такую задачу."
 
 
 # ---------------- Финансы ----------------
@@ -211,7 +236,7 @@ def agenda(date: str, days: int = 1, **_) -> str:
     pays = [r for r in finance.list_recurring() if start <= r.next_date < end]
     if not evs and not due and not pays:
         return f"{start:%d.%m}: ничего не запланировано"
-    out = [f"{fmt_dt(e.start)} — {e.title}" for e in evs] + [f"задача «{t.title}» до {fmt_dt(t.due)}" for t in due] + \
+    out = [f"{fmt_dt(e.start)} — {'✓ ' if calendar.is_done(e) else ''}{e.title}" for e in evs] + [f"задача «{t.title}» до {fmt_dt(t.due)}" for t in due] + \
           [f"платёж {p.title} {money(p.amount)} {p.next_date:%d.%m}" for p in pays]
     return "; ".join(out)
 
@@ -424,11 +449,12 @@ def person_card(name: str, **_) -> str:
       "Вызывай на «человек: Лена, сестра», «запомни человека …», «добавь контакт …». Для клиентов по заказам — add_order с client.",
       {"name": {"type": "string"}, "notes": {"type": "string", "description": "Кто это / чем важен"},
        "contact": {"type": "string", "description": "Телега, телефон, почта"}, "aliases": {"type": "string", "description": "Другие имена через запятую"},
-       "birthday": {"type": "string", "description": "День рождения «12.03»"}, "tags": {"type": "string", "description": "Теги через запятую"}}, ["name"])
+       "birthday": {"type": "string", "description": "День рождения «12.03»"}, "tags": {"type": "string", "description": "Теги через запятую"},
+       "kind": {"type": "string", "description": "Кто это: family (родня), friend (друг), client, company или своё слово («врач»). Не знаешь — не указывай"}}, ["name"])
 def add_person(name: str, notes: str | None = None, contact: str | None = None, aliases: str | None = None,
-               birthday: str | None = None, tags: str | None = None, **_) -> str:
+               birthday: str | None = None, tags: str | None = None, kind: str | None = None, **_) -> str:
     from ..services import people
-    c = people.add_person(name, "person", contact, notes, aliases, birthday, tags)
+    c = people.add_person(name, kind, contact, notes, aliases, birthday, tags)
     return f"Карточка «{c.name}» заведена. Всё, где всплывёт это имя — задачи, встречи, заметки, долги — теперь собирается в одном месте."
 
 
@@ -636,6 +662,8 @@ def _coerce(name: str, key: str, spec: dict, val: Any) -> Any:
         if not isinstance(val, str):
             val = str(val)
         val = val.strip()
+        if val.lower() in ("none", "null", "nil", "undefined", "n/a"):
+            return None   # модель пишет «None» вместо пустого поля — в заметках заказа появлялось слово None
         if key in _TITLE_KEYS:
             if len(val) > MAX_TITLE:
                 val = val[:MAX_TITLE].rstrip()

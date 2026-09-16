@@ -1,0 +1,18 @@
+# личное — никогда не коммитить
+config.yaml
+data/
+*.db
+*.db-shm
+*.db-wal
+.env
+
+# окружение и сборка
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+web/node_modules/
+web/dist/
+*.log
+.DS_Store
+Thumbs.db

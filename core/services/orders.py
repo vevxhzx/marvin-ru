@@ -18,7 +18,7 @@ from . import finance
 from .finance import money
 from .match import same
 
-log = logging.getLogger("jarvis.orders")
+log = logging.getLogger("assistant.orders")
 
 STATUSES = ("new", "work", "review", "done", "paid", "cancelled")
 STATUS_LABEL = {"new": "обсуждение", "work": "в работе", "review": "на правках", "done": "сдан", "paid": "оплачен", "cancelled": "отменён"}
@@ -37,15 +37,20 @@ def list_clients() -> list[Client]:
         return list(s.exec(select(Client).order_by(Client.name)))
 
 
-def get_or_create_client(name: str | None) -> Client | None:
+def get_or_create_client(name: str | None, kind: str = "client") -> Client | None:
+    """Найти человека по имени/псевдониму или завести. Из заказа — «клиент» (и «человек» без типа становится клиентом:
+    раз есть заказ — значит заказчик; семью/друзей не трогаем). Из people.add_person — kind="person"."""
     name = (name or "").strip(" «»\"'")
     if not name:
         return None
     with session() as s:
         for c in s.exec(select(Client)).all():
-            if c.name.lower() == name.lower() or same(c.name, name):
+            names = [c.name] + [a.strip() for a in (c.aliases or "").split(",") if a.strip()]
+            if any(n.lower() == name.lower() or same(n, name) for n in names):
+                if kind == "client" and c.kind == "person":
+                    c.kind = "client"; s.add(c); s.commit(); s.refresh(c)
                 return c
-        c = Client(name=name)
+        c = Client(name=name, kind=kind)
         s.add(c); s.commit(); s.refresh(c)
         return c
 
@@ -173,8 +178,10 @@ def paid_for(oid: int) -> float:
         return sum(t.amount for t in s.exec(select(Transaction).where(Transaction.order_id == oid, Transaction.kind == "income")))
 
 
-def add_payment(oid: int, amount: float, note: str | None = None, account: str | None = None, source: str = "web") -> Transaction:
-    """Аванс/оплата по заказу — доход в категории «Фриланс» с привязкой. Полная оплата закрывает заказ в «оплачен»."""
+def add_payment(oid: int, amount: float, note: str | None = None, account: str | None = None, source: str = "web",
+                date: datetime | None = None) -> Transaction:
+    """Аванс/оплата по заказу — доход в категории «Фриланс» с привязкой. Полная оплата закрывает заказ в «оплачен».
+    `date` — когда пришли деньги (старый заказ задним числом); по умолчанию сейчас."""
     o = get_order(oid)
     if not o:
         raise OrderError("Заказ не найден")
@@ -183,10 +190,15 @@ def add_payment(oid: int, amount: float, note: str | None = None, account: str |
     with session() as s:
         cname = s.get(Client, o.client_id).name if o.client_id else None
     t = finance.add_transaction(amount, "income", INCOME_CATEGORY, note or (f"{o.title}" + (f" · {cname}" if cname else "")),
-                                account, source=source, order_id=oid)
+                                account, date=date, source=source, order_id=oid)
     total = paid_for(oid)
     if o.price and total >= o.price - 0.5 and o.status in UNPAID:
         update_order(oid, status="paid")
+        if date and date < datetime.now() - timedelta(days=1):   # задним числом — сдан и оплачен тогда же, а не сегодня
+            with session() as s:
+                oo = s.get(Order, oid)
+                if oo:
+                    oo.paid_at = date; oo.done_at = min(oo.done_at or date, date); s.add(oo); s.commit()
     return t
 
 
@@ -219,11 +231,15 @@ def order_view(o: Order, clients: dict[int, str] | None = None) -> dict:
     paid = paid_for(o.id)
     hours = hours_for(o.id)
     d = o.model_dump()
-    d.update({"client": clients.get(o.client_id), "paid": paid, "left": max(0.0, o.price - paid), "hours": hours,
+    # закрытый заказ ничего не «ждёт», даже если оплату не записывали (старый заказ закрыт статусом вручную)
+    left = 0.0 if o.status in ("paid", "cancelled") else max(0.0, o.price - paid)
+    d.update({"client": clients.get(o.client_id), "paid": paid, "left": left, "hours": hours,
               "rate": round(o.price / hours) if hours >= 0.25 and o.price else None,
               "status_label": STATUS_LABEL.get(o.status, o.status),
               "days_left": (o.deadline.date() - datetime.now().date()).days if o.deadline and o.status in OPEN else None,
-              "overdue": bool(o.deadline and o.status in OPEN and o.deadline < datetime.now())})
+              # «на правках» после срока — не просрочка: первая версия сдана, идут правки; срок показываем, но не краснеем
+              "overdue": bool(o.deadline and o.status in ("new", "work") and o.deadline < datetime.now()),
+              "past_due": bool(o.deadline and o.status == "review" and o.deadline < datetime.now())})
     from . import pulse
     d["pulse"] = pulse.rate_check(d)
     return d
@@ -248,15 +264,31 @@ def expected_income(days: int = 30) -> list[dict]:
     """Ожидаемые поступления: остаток по незакрытым заказам. Дата — дедлайн (или +7 дней, если его нет)."""
     from . import pulse
     habits = pulse.client_pay_habits() if pulse.enabled() else {}
+    with session() as s:
+        clients = {c.id: c for c in s.exec(select(Client))}
     out = []
+    batched: dict[tuple[int, object], dict] = {}   # клиент-«пачкой»: все его сданные заказы — одна точка на день выплат
+    horizon = (datetime.now() + timedelta(days=days)).date()
     for d in list_orders():
         if d["status"] in UNPAID and d["left"] > 0 and d["status"] != "new":
             when = d["deadline"] or (datetime.now() + timedelta(days=7))
+            c = clients.get(d.get("client_id") or -1)
             if d["status"] == "done":
-                # сдан — деньги ждём «на днях»; в режиме фрилансера — когда этот клиент обычно платит
-                when = pulse.expected_date_for(d.get("done_at"), d.get("client_id"), max(when, datetime.now()), habits) if habits or pulse.enabled() else max(when, datetime.now())
-            if when.date() <= (datetime.now() + timedelta(days=days)).date():
+                # сдан — деньги ждём «на днях»; в режиме фрилансера — когда этот клиент обычно платит / в его день выплат
+                when = pulse.expected_date_for(d.get("done_at"), d.get("client_id"), max(when, datetime.now()), habits, client=c) if habits or pulse.enabled() else max(when, datetime.now())
+                if c and c.pay_mode in ("batch", "monthly"):
+                    key = (c.id, when.date())
+                    b = batched.get(key)
+                    if b:
+                        b["amount"] += d["left"]; b["n"] += 1
+                        b["title"] = f"{c.name}, {b['n']} заказа" if b["n"] < 5 else f"{c.name}, {b['n']} заказов"
+                    else:
+                        batched[key] = {"title": f"{c.name}: {d['title']}", "client": d["client"], "amount": d["left"], "date": when, "order_id": d["id"], "n": 1}
+                    continue
+            if when.date() <= horizon:
                 out.append({"title": d["title"], "client": d["client"], "amount": d["left"], "date": when, "order_id": d["id"]})
+    out.extend(b for b in batched.values() if b["date"].date() <= horizon)
+    out.sort(key=lambda x: x["date"])
     return out
 
 
@@ -437,19 +469,24 @@ def stats(months: int = 6) -> dict:
         cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
     by_client: dict[int | None, dict] = {}
     for o in orders:
-        paid = sum(t.amount for t in txs if t.order_id == o.id)
+        paid_period = sum(t.amount for t in txs if t.order_id == o.id)   # за окно статистики — для ставки
+        paid_all = paid_for(o.id)                                         # за всё время — «сколько получено от клиента»
         hrs = sum(_session_min(w) for w in sessions if w.order_id == o.id) / 60
         b = by_client.setdefault(o.client_id, {"client": clients[o.client_id].name if o.client_id in clients else "без клиента",
-                                                "client_id": o.client_id, "orders": 0, "paid": 0.0, "hours": 0.0, "open": 0, "unpaid": 0.0})
-        b["orders"] += 1; b["paid"] += paid; b["hours"] += hrs
+                                                "client_id": o.client_id, "orders": 0, "paid": 0.0, "_paid_period": 0.0, "total": 0.0,
+                                                "hours": 0.0, "open": 0, "unpaid": 0.0})
+        b["orders"] += 1; b["paid"] += paid_all; b["_paid_period"] += paid_period; b["hours"] += hrs
+        if o.status != "cancelled":
+            b["total"] += o.price                                         # на какую сумму заказов всего
         if o.status in OPEN:
             b["open"] += 1
         if o.status in UNPAID:
-            b["unpaid"] += max(0.0, o.price - paid_for(o.id))
+            b["unpaid"] += max(0.0, o.price - paid_all)
     top = sorted(by_client.values(), key=lambda b: -b["paid"])
     for b in top:
-        b["paid"] = round(b["paid"]); b["hours"] = round(b["hours"], 1); b["unpaid"] = round(b["unpaid"])
-        b["rate"] = round(b["paid"] / b["hours"]) if b["hours"] >= 1 else None
+        b["rate"] = round(b["_paid_period"] / b["hours"]) if b["hours"] >= 1 else None
+        del b["_paid_period"]
+        b["paid"] = round(b["paid"]); b["total"] = round(b["total"]); b["hours"] = round(b["hours"], 1); b["unpaid"] = round(b["unpaid"])
     done = [o for o in orders if o.status in ("done", "paid") and o.done_at]
     lead = [max(0, (o.done_at - o.created_at).days) for o in done]
     total_h = sum(_session_min(w) for w in sessions) / 60
@@ -481,6 +518,8 @@ def deadline_nudges() -> list[str]:
             continue
         if d["overdue"]:
             out.append(f"🔴 «{d['title']}»{' · ' + d['client'] if d['client'] else ''} — дедлайн прошёл {d['deadline']:%d.%m}, статус «{d['status_label']}».")
+        elif d["past_due"]:
+            continue   # на правках после срока — сдано, идут правки; не горит
         elif d["days_left"] is not None and d["days_left"] <= 2:
             when = "сегодня" if d["days_left"] == 0 else "завтра" if d["days_left"] == 1 else "послезавтра"
             hrs = f", наработано {d['hours']} ч" if d["hours"] else ", сессий по нему ещё не было" if d["status"] == "work" else ""
@@ -498,7 +537,7 @@ def summary_text() -> str:
     for d in rows[:8]:
         dl = ""
         if d["deadline"]:
-            dl = " · 🔴 просрочен" if d["overdue"] else f" · до {d['deadline']:%d.%m}" + (f" ({d['days_left']} дн.)" if d["days_left"] is not None and 0 < d["days_left"] <= 7 else " (сегодня)" if d["days_left"] == 0 else "")
+            dl = " · 🔴 просрочен" if d["overdue"] else f" · срок был {d['deadline']:%d.%m}" if d["past_due"] else f" · до {d['deadline']:%d.%m}" + (f" ({d['days_left']} дн.)" if d["days_left"] is not None and 0 < d["days_left"] <= 7 else " (сегодня)" if d["days_left"] == 0 else "")
         pay = f" · осталось {money(d['left'])}" if d["left"] and d["paid"] else f" · {money(d['price'])}" if d["price"] else ""
         lines.append(f"• #{d['id']} {d['title']}{' — ' + d['client'] if d['client'] else ''} · {d['status_label']}{pay}{dl}" + (f" · {d['hours']} ч" if d["hours"] else ""))
     from . import pulse

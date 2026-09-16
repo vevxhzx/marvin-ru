@@ -10,7 +10,7 @@ from . import finance
 
 _TABLES = {"event": Event, "task": Task, "transaction": Transaction, "debt": Debt, "recurring": Recurring, "note": Note, "link": Link, "order": Order, "goal": Goal}
 _LABEL = {"add_event": "событие", "add_task": "задачу", "add_expense": "трату", "add_income": "доход", "pay_debt": "платёж по долгу",
-          "add_debt": "долг", "add_recurring": "регулярный платёж", "add_note": "заметку", "add_link": "ссылку", "bulk_delete": "удаление", "add_order": "заказ", "add_goal": "цель"}
+          "add_debt": "долг", "add_recurring": "регулярный платёж", "add_note": "заметку", "add_link": "ссылку", "bulk_delete": "удаление", "add_order": "заказ", "add_goal": "цель", "add_fact": "факт о вас"}
 
 
 def last_action(channel: str | None = None, max_age_min: int = 24 * 60) -> ActionLog | None:
@@ -52,10 +52,19 @@ def undo_last(channel: str | None = None) -> str | None:
     return f"Отменил {label} «{a.title}». Как будто и не было."
 
 
+def undo_one(a: ActionLog) -> bool:
+    """Откатить конкретное действие (не обязательно последнее) — для «это задача» после неверной записи."""
+    return _undo_one(a)
+
+
 def _undo_one(a: ActionLog) -> bool:
     """Удалить запись, на которую ссылается действие, и пометить действие отменённым. False — записи уже нет."""
     if a.ref_table == "transaction":
         ok = finance.delete_transaction(a.ref_id)   # вернёт баланс/остаток долга
+    elif a.ref_table == "fact":
+        from . import memory
+        f = memory.forget(a.ref_id, reason="отменено")   # память не стирается — факт уходит в архив
+        ok = f is not None
     else:
         model = _TABLES.get(a.ref_table)
         with session() as s:

@@ -5,12 +5,14 @@
 Всё под «режимом фрилансера» (freelance_settings) — каждая ручка отдельно, выключенное не показывается нигде."""
 from __future__ import annotations
 
+import calendar as calendar_mod
 import json
+import re
 from datetime import datetime, timedelta
 
 from sqlmodel import select
 
-from ..db import Order, Transaction, session, get_setting, set_setting
+from ..db import Client, Order, Transaction, session, get_setting, set_setting
 
 # ---------------------------------------------------------------- настройки режима
 FREELANCE_DEFAULTS = {
@@ -104,12 +106,22 @@ def late_payments(now: datetime | None = None) -> list[dict]:
     names = {c.id: c.name for c in list_clients()}
     with session() as s:
         rows = s.exec(select(Order).where(Order.status == "done", Order.done_at != None, Order.done_at <= cut)).all()  # noqa: E711
+        clients = {c.id: c for c in s.exec(select(Client))}
     out = []
     for o in rows:
         left = max(0.0, o.price - paid.get(o.id, 0.0))
         if left <= 0:
             continue
-        days = (now - o.done_at).days
+        c = clients.get(o.client_id or -1)
+        if c and c.pay_mode in ("batch", "monthly"):
+            # платит пачкой/по числам: пока не прошёл его день выплат — это не задержка
+            pd = next_payday(c, now)
+            prev = _prev_payday(c, now)
+            if not prev or prev < o.done_at or (now - prev).days < st["late_days"]:
+                continue
+            days = (now - prev).days
+        else:
+            days = (now - o.done_at).days
         h = habits.get(o.client_id or -1)
         out.append({"order_id": o.id, "title": o.title, "client": names.get(o.client_id), "client_id": o.client_id,
                     "left": round(left), "days": days, "done_at": o.done_at,
@@ -150,14 +162,100 @@ def late_text() -> str:
     return "\n".join(lines)
 
 
-def expected_date_for(o_done_at: datetime | None, client_id: int | None, fallback: datetime, habits: dict | None = None) -> datetime:
-    """Когда ждать деньги по сданному заказу: дата сдачи + как обычно платит клиент (не раньше сегодня)."""
+PAY_MODES = ("each", "batch", "monthly")
+
+
+def last_payment_from(client_id: int) -> datetime | None:
+    """Дата последней оплаты от клиента (по транзакциям, привязанным к его заказам)."""
+    with session() as s:
+        ids = [o.id for o in s.exec(select(Order).where(Order.client_id == client_id))]
+        if not ids:
+            return None
+        rows = s.exec(select(Transaction).where(Transaction.order_id.in_(ids), Transaction.kind == "income").order_by(Transaction.date.desc())).first()
+    return rows.date if rows else None
+
+
+def next_payday(client: Client | None, now: datetime | None = None) -> datetime | None:
+    """Ближайшая дата выплаты у клиента, который платит пачкой (batch) или по числам (monthly). None — платит за каждый заказ."""
+    now = now or datetime.now()
+    if not client or client.pay_mode not in ("batch", "monthly"):
+        return None
+    if client.pay_mode == "monthly":
+        days = sorted({int(x) for x in re.findall(r"\d{1,2}", client.pay_days or "") if 1 <= int(x) <= 31}) or [1]
+        for add_month in range(0, 3):
+            y, m = now.year, now.month + add_month
+            y, m = y + (m - 1) // 12, (m - 1) % 12 + 1
+            last = calendar_mod.monthrange(y, m)[1]
+            for d in days:
+                cand = datetime(y, m, min(d, last), 12, 0)
+                if cand.date() >= now.date():
+                    return cand
+        return None
+    every = max(1, int(client.pay_every or 14))
+    base = last_payment_from(client.id) or client.created_at
+    cand = base
+    while cand.date() < now.date():
+        cand += timedelta(days=every)
+    return cand.replace(hour=12, minute=0, second=0, microsecond=0)
+
+
+def expected_date_for(o_done_at: datetime | None, client_id: int | None, fallback: datetime, habits: dict | None = None,
+                      client: Client | None = None) -> datetime:
+    """Когда ждать деньги по сданному заказу: у клиента-«пачкой» — ближайший день выплат; иначе дата сдачи + как обычно
+    платит клиент (не раньше сегодня)."""
     if o_done_at is None:
         return fallback
+    if client is None and client_id:
+        with session() as s:
+            client = s.get(Client, client_id)
+    pd = next_payday(client)
+    if pd:
+        return pd
     habits = habits if habits is not None else client_pay_habits()
     h = habits.get(client_id or -1)
     when = o_done_at + timedelta(days=(h["typical_days"] if h else freelance_settings()["late_days"]))
     return max(when, datetime.now())
+
+
+def _prev_payday(client: Client, now: datetime) -> datetime | None:
+    """Последний прошедший день выплат клиента (для «задерживает с …»)."""
+    if client.pay_mode == "monthly":
+        days = sorted({int(x) for x in re.findall(r"\d{1,2}", client.pay_days or "") if 1 <= int(x) <= 31}) or [1]
+        for back in range(0, 3):
+            y, m = now.year, now.month - back
+            y, m = y + (m - 1) // 12, (m - 1) % 12 + 1
+            last = calendar_mod.monthrange(y, m)[1]
+            for d in reversed(days):
+                cand = datetime(y, m, min(d, last), 12, 0)
+                if cand.date() <= now.date():
+                    return cand
+        return None
+    every = max(1, int(client.pay_every or 14))
+    base = last_payment_from(client.id)
+    if not base:
+        return None
+    cand = base
+    while cand + timedelta(days=every) <= now:
+        cand += timedelta(days=every)
+    return cand
+
+
+def guess_batch_clients() -> list[dict]:
+    """Подсказка: у кого 2+ заказа оплачены одним днём, а режим ещё «за каждый» → предложить «пачкой»."""
+    out = []
+    with session() as s:
+        clients = list(s.exec(select(Client).where(Client.pay_mode == "each")))
+        for c in clients:
+            ids = [o.id for o in s.exec(select(Order).where(Order.client_id == c.id))]
+            if len(ids) < 2:
+                continue
+            rows = s.exec(select(Transaction).where(Transaction.order_id.in_(ids), Transaction.kind == "income")).all()
+            by_day: dict = {}
+            for t in rows:
+                by_day.setdefault(t.date.date(), set()).add(t.order_id)
+            if any(len(v) >= 2 for v in by_day.values()):
+                out.append({"client_id": c.id, "name": c.name})
+    return out
 
 
 # ---------------------------------------------------------------- ставка: факт против плана
