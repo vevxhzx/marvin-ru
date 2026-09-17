@@ -631,3 +631,28 @@ def test_batch_sorter_splits_and_undoes(monkeypatch):
     r = asyncio.run(agent.handle("отмени", ch))
     assert "всю пачку" in r.text and "4" in r.text
     assert not tasks.list_tasks() and not brain_notes.list_notes(10)
+
+
+def test_game_mode_unloads_then_warms_and_blocks_embeddings(monkeypatch):
+    """«Иду играть» → модель выгружена, эмбеддинги в игре не трогают видеокарту; «игра окончена» → прогрев запускается
+    сразу (в фоне), а не при первой команде."""
+    import asyncio
+    from core.brain import llm
+    calls = []
+
+    async def fake_unload():
+        calls.append("unload"); return True
+
+    async def fake_warm():
+        calls.append("warm"); return True
+    monkeypatch.setattr(llm, "unload_ollama", fake_unload)
+    monkeypatch.setattr(llm, "warm_ollama", fake_warm)
+
+    async def run():
+        await llm.set_game_mode(True)
+        assert llm.GAME_MODE and calls == ["unload"]
+        assert await llm.embed(["x"]) is None and await llm.embed_available() is False
+        msg = await llm.set_game_mode(False)
+        await asyncio.sleep(0)   # фоновой задаче прогрева дать выполниться
+        assert not llm.GAME_MODE and calls == ["unload", "warm"] and "прогревается" in msg
+    asyncio.run(run())

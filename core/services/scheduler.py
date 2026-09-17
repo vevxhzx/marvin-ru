@@ -13,6 +13,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
 from ..config import DB_PATH, ROOT, cfg
+from ..brain.dates import is_all_day
 from ..services import calendar, finance, tasks
 from ..services.finance import money
 from ..db import get_setting, set_setting
@@ -38,6 +39,10 @@ def morning_digest_text() -> str:
     if ts:
         today = [t for t in ts if t.due and t.due.date() <= d.date()]
         lines.append(f"✅ Задач: {len(ts)}" + (f", с дедлайном сегодня — {len(today)}." if today else "."))
+        # дела «на день» (без времени) — по именам: отдельных напоминаний по ним не будет, это единственное место утром
+        day = [t for t in today if is_all_day(t.due)]
+        if day:
+            lines.append("📋 На сегодня: " + ", ".join(t.title for t in day[:5]) + (f" и ещё {len(day) - 5}" if len(day) > 5 else "") + ".")
     pays = finance.upcoming_payments(3)
     if pays:
         lines.append(f"💳 Платежей на днях: {len(pays)} на {money(sum(p.amount for p in pays))}.")
@@ -281,11 +286,16 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             await _notify(text)
 
     async def weekly():
-        from . import insights
+        from . import insights, trace
         try:
             txt = await insights.weekly_digest()
         except Exception as e:  # pragma: no cover
             log.warning("weekly digest failed: %s", e); return
+        try:
+            # раз в неделю ассистент сам докладывает, где тупил (молчит, если неделя была спокойной)
+            txt = (txt or "") + "\n".join(trace.weekly_block())
+        except Exception as e:  # pragma: no cover
+            log.warning("trace weekly block failed: %s", e)
         if txt:
             await notify(txt)
 
@@ -398,13 +408,19 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     sch.add_job(polish_job, "interval", minutes=5, id="polish", next_run_time=_soon(40))
     sch.add_job(recurring, "interval", hours=1, id="recurring", next_run_time=_soon(20))
     async def memory_nightly():
-        from . import memory
+        from . import memory, trace
         try:
             res = await memory.nightly()
             if res:
                 log.info("память: уборка %s", res)
         except Exception as e:  # pragma: no cover
             log.warning("memory nightly failed: %s", e)
+        try:
+            n = trace.cleanup()
+            if n:
+                log.info("журнал работы: удалено %d старых строк", n)
+        except Exception as e:  # pragma: no cover
+            log.warning("trace cleanup failed: %s", e)
 
     async def proactive_tick():
         """Раз в час: один повод из proactive.candidates — не в тихие часы, не больше лимита в день."""

@@ -111,10 +111,20 @@ def candidates(now: datetime | None = None) -> list[dict]:
                     "text": f"«{t.title}» висит без срока уже {days} дн. Поставить дедлайн, сделать или отпустить?",
                     "buttons": [("📅 Завтра", f"task:{t.id}:tomorrow"), ("✅ Сделал", f"task:{t.id}:done"), ("🔕 Не надо", f"pro:mute:{t.id}:stale")]})
     today_noon = now.replace(hour=12, minute=0, second=0, microsecond=0)
-    for t in [t for t in open_tasks if t.due and t.due.date() == now.date() and t.due.hour == 23 and t.due.minute == 59 and now < today_noon]:
+    # утренний дайджест уже перечислил дела на день — повторять их отдельным сообщением незачем; повод остаётся только
+    # для тех, у кого дайджест выключен
+    digest_on = bool((getattr(cfg.telegram, "morning_digest", "") or "").strip())
+    day_tasks = [] if digest_on else [t for t in open_tasks if t.due and t.due.date() == now.date() and t.due.hour == 23 and t.due.minute == 59 and now < today_noon]
+    if len(day_tasks) == 1:
+        t = day_tasks[0]
         out.append({"key": f"today:{t.id}:{now:%Y%m%d}", "topic": t.title,
                     "text": f"Сегодня дедлайн «{t.title}», а времени в нём нет — не потеряйте среди дня.",
                     "buttons": [("✅ Сделал", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow"), ("🔕 Не надо", f"pro:mute:{t.id}:today")]})
+    elif day_tasks:
+        # несколько дел на день — одно сообщение списком (а не по сообщению в час на каждое); ключ — на день, темы — все названия
+        titles = ", ".join(f"«{t.title}»" for t in day_tasks[:5]) + (f" и ещё {len(day_tasks) - 5}" if len(day_tasks) > 5 else "")
+        out.append({"key": f"today:0:{now:%Y%m%d}", "topic": " ".join(t.title for t in day_tasks),
+                    "text": f"На сегодня без времени: {titles}. Не потеряйте среди дня.", "buttons": []})
     # 3. факты «сейчас»: самочувствие и планы без задачи
     with session() as s:
         short = list(s.exec(select(Fact).where(Fact.layer == "short")))

@@ -640,3 +640,15 @@ html { zoom: var(--ui-zoom); }
 html.in-telegram .safe-t { padding-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px)); }
 html.in-telegram .tabbar { padding-bottom: max(env(safe-area-inset-bottom, 0px), var(--tg-safe-area-inset-bottom, 0px), 12px); }
 html.in-telegram body { overscroll-behavior-y: none; }
+
+/* Телефон: страница — монолит. iOS приближает страницу при фокусе на поле с шрифтом меньше 16px — поэтому на тач-экранах
+   все поля ввода 16px (визуально почти то же, что 15). Двойной тап и щипок не масштабируют, тап не подсвечивается серым,
+   резинового скролла всей страницы нет, текст в кнопках и строках не выделяется случайно. */
+@media (pointer: coarse) {
+  html { touch-action: manipulation; overscroll-behavior: none; }
+  body { -webkit-tap-highlight-color: transparent; overscroll-behavior: none; }
+  .input, textarea.input, select.input, .composer input, .composer textarea, input[type="text"], input[type="search"], input[type="number"],
+  input[type="datetime-local"], input[type="date"], input[type="time"], textarea, select { font-size: 16px !important; }
+  button, .row, .nav-item, .tabbar, .pill, .chip, .seg, .label, .h1, .btn { -webkit-user-select: none; user-select: none; }
+  input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
+}

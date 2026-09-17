@@ -77,6 +77,11 @@ def add_lesson(text: str, kind: str, wrong: str = "") -> Lesson | None:
     text = _norm(text)
     if not text or kind not in KINDS + ("mute",):
         return None
+    if kind != "mute":
+        # «это заказ, а не трата» — то же самое, что «отмени»: ход был неверным. Фразу знаем точно —
+        # передаём её, иначе пометка уедет на соседнюю невинную строку. mute — не ошибка, а просьба молчать.
+        from . import trace
+        trace.mark_corrected(text=text)
     with session() as s:
         for l in s.exec(select(Lesson).where(Lesson.kind == kind)):
             if l.text.lower() == text.lower():

@@ -186,3 +186,79 @@ def test_edit_in_place_endpoints_task_and_link():
     r = _j(c.put(f"/api/links/{l.id}", json={"title": "Пример", "comment": "  ", "tags": ["#дизайн", "ref", " "]}))
     assert r["title"] == "Пример" and r["comment"] is None and r["tags"] == "дизайн,ref" and r["url"] == "https://example.com/x"
     assert c.put("/api/links/999999", json={"title": "x"}).status_code == 404
+
+
+def test_day_tasks_not_pushed_one_by_one_and_tomorrow_keeps_all_day(monkeypatch):
+    """Четыре задачи «на день» (23:59) не должны в 9:00 приходить четырьмя сообщениями «до 23:59» — их показывает
+    утренний дайджест, а вечером спрашивает обзор. Задача со временем напоминает, как раньше. Кнопка «Завтра»
+    у задачи на день оставляет её задачей на день (не «завтра в 10:00»). Несколько дел на день — один инициативный
+    повод списком, а не по одному в час."""
+    import asyncio
+    from core.services import tasks, proactive, scheduler
+    from core.brain import llm
+    monkeypatch.setattr(llm, "cloud_enabled", lambda: False)
+    async def _no():
+        return False
+    monkeypatch.setattr(llm, "ollama_available", _no)
+    day = datetime.now().replace(hour=23, minute=59, second=0, microsecond=0)
+    for title in ("Убраться на кухне", "Сделать ролик", "Заезд в Сбер", "Взять свидетельство"):
+        tasks.add_task(title, day, source="test")
+    timed = tasks.add_task("Созвон с Пашей", datetime.now() + timedelta(minutes=30), source="test")
+    rem = tasks.due_task_reminders()
+    assert [t.id for t, _ in rem] == [timed.id]
+    # «📅 Завтра» по задаче на день — завтра, но по-прежнему на весь день
+    moved = tasks.postpone_to_tomorrow(next(t for t in tasks.list_tasks() if t.title == "Сделать ролик").id)
+    assert moved.due.date() == (datetime.now() + timedelta(days=1)).date() and (moved.due.hour, moved.due.minute) == (23, 59)
+    moved = tasks.postpone_to_tomorrow(timed.id)
+    assert (moved.due.hour, moved.due.minute) == (10, 0)
+    # утренний дайджест называет дела на день по именам
+    digest = scheduler.morning_digest_text()
+    assert "На сегодня:" in digest and "Убраться на кухне" in digest and "Заезд в Сбер" in digest
+    # дайджест включён → проактивность про «сегодня без времени» молчит (уже сказано утром)
+    noon_less = datetime.now().replace(hour=9, minute=30)
+    monkeypatch.setattr(proactive.cfg.telegram, "morning_digest", "08:30", raising=False)
+    assert not [c for c in proactive.candidates(noon_less) if c["key"].startswith("today:")]
+    # дайджест выключен → три оставшихся дела на день — один повод списком, не три
+    monkeypatch.setattr(proactive.cfg.telegram, "morning_digest", "", raising=False)
+    today = [c for c in proactive.candidates(noon_less) if c["key"].startswith("today:")]
+    assert len(today) == 1 and today[0]["key"] == f"today:0:{noon_less:%Y%m%d}" and "Заезд в Сбер" in today[0]["text"] and "Сделать ролик" not in today[0]["text"]
+
+
+def test_glued_amount_is_personal_and_parsed():
+    """«128рублей самокат» без пробела — это сумма, фраза личная (не уходит в облако как «общий вопрос»)."""
+    from core.brain import agent
+    from core.brain.dates import parse_amount
+    assert parse_amount("128рублей самокат") == (128.0, "самокат")
+    assert parse_amount("700р такси") == (700.0, "такси")
+    assert parse_amount("купить 2кг яблок")[0] is None
+    assert agent.is_personal("128рублей самокат") and agent.is_personal("2500руб продукты")
+    assert not agent.is_personal("как дела")
+
+
+def test_memory_block_goes_to_user_turn_not_system(monkeypatch):
+    """Кэш промпта Ollama: системное сообщение (характер + правила + инструменты) не меняется от фразы к фразе,
+    блок памяти едет вместе с репликой пользователя."""
+    import asyncio
+    from core.brain import agent, llm
+    from core.services import memory
+    seen = {}
+
+    async def fake_chat(messages, tools=None, **kw):
+        seen["messages"] = messages
+        return {"content": "Ок.", "tool_calls": []}
+
+    async def _up():
+        return True
+
+    async def fake_ctx(text):
+        return "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ:\n— Есть кот Барсик\n"
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+    monkeypatch.setattr(llm, "ollama_available", _up)
+    monkeypatch.setattr(llm, "MODE", "hybrid")
+    monkeypatch.setattr(llm, "cloud_enabled", lambda: False)
+    monkeypatch.setattr(memory, "context", fake_ctx)
+    monkeypatch.setattr(agent, "_history", lambda *a, **k: [])
+    asyncio.run(agent.via_ollama("как назвать кота?", "web"))
+    sys_msg, user_msg = seen["messages"][0]["content"], seen["messages"][-1]["content"]
+    assert "Барсик" not in sys_msg and "инструменты" in sys_msg
+    assert "Барсик" in user_msg and "как назвать кота?" in user_msg

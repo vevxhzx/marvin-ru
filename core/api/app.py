@@ -1604,6 +1604,22 @@ async def phone_access(request: Request):
             "note": "Ссылка содержит ключ доступа — не публикуйте её. Отозвать все старые ссылки: кнопка «новый ключ»."}
 
 
+@app.get("/api/runs")
+def runs(limit: int = 50, channel: str | None = None, only_bad: bool = False):
+    """Журнал работы: последние ходы — путь, инструменты, время, где переспросил и где его поправили."""
+    from ..services import trace
+    return {"items": trace.recent(limit, channel, only_bad), "enabled": trace.enabled()}
+
+
+@app.get("/api/runs/report")
+def runs_report(days: int = 7):
+    """Сводка «как я работал» за период + текст для чата."""
+    from ..services import trace
+    return {**trace.report(days), "text": trace.report_text(days)}
+
+
+
+
 @app.post("/api/phone/rotate")
 def phone_rotate(request: Request):
     """Новый ключ доступа: все телефоны, где сайт был открыт по старой ссылке, потеряют доступ до нового QR."""

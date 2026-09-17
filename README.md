@@ -93,6 +93,6 @@
 - [Мозг: режимы, модели под видеокарту, облачные провайдеры](docs/brain.md)
 - [Если что-то не так + горячие клавиши](docs/troubleshooting.md)
 - [Разработка и структура проекта](docs/development.md) · [Архитектура](ARCHITECTURE.md) · [Дизайн-система сайта](web/DESIGN.md)
-- [История изменений](CHANGELOG.md) · [Что нового в 0.9.13](RELEASE-0.9.13.md) · [Планы](ROADMAP.md)
+- [История изменений](CHANGELOG.md) · [Что нового в 0.9.13–0.9.14](RELEASE-0.9.13.md) · [Планы](ROADMAP.md)
 
 Стек: Python 3.11+ · FastAPI · SQLite · aiogram 3 · Ollama · faster-whisper · Vosk · Silero / edge-tts · React + Vite + Tailwind. Лицензия — [MIT](LICENSE). Нашли ошибку — [issue](../../issues/new/choose); pull request'ы приветствуются, особенно новые фразы-шаблоны в `core/brain/quick.py` с тестами.

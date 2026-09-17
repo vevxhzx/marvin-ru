@@ -19,7 +19,7 @@ from sqlmodel import select
 
 from ..db import ChatMessage, get_setting, session, set_setting
 from .. import identity
-from ..services import brain_notes, calendar, finance, judge, memory, tasks, undo
+from ..services import brain_notes, calendar, finance, judge, memory, tasks, trace, undo
 from ..services.calendar import fmt_dt, fmt_due, fmt_repeat
 from ..services.finance import money
 from ..tools import registry
@@ -125,7 +125,8 @@ def is_personal(text: str) -> bool:
     """Нужны ли для ответа личные данные / действие в базе. Если нет — это разговор, его ведёт облако."""
     if SMALLTALK_RX.match(text):
         return False
-    return bool(PERSONAL_RX.search(text)) or bool(re.search(r"\d{1,2}[:.]\d{2}|\b\d{2,}\b", text))
+    # число из 2+ цифр — почти всегда сумма/время/дата; слитное «128рублей» тоже (между «8» и «р» нет \b, поэтому не \b)
+    return bool(PERSONAL_RX.search(text)) or bool(re.search(r"\d{1,2}[:.]\d{2}|(?<!\d)\d{2,}(?!\d)", text))
 
 
 def _days_word(n: int) -> str:
@@ -1172,6 +1173,42 @@ def _looks_like_question(text: str) -> bool:
 HISTORY_MAX_AGE_H = 12   # вчерашний разговор — не контекст: модель начинает «продолжать» тему, которой уже нет
 
 
+_FAIL_WHY = {"add_event": "не разобрал дату и время", "add_task": "не понял, что за дело",
+             "add_expense": "не понял сумму", "add_income": "не понял сумму", "add_order": "не хватило данных о заказе"}
+
+
+def _destructive_question(name: str, args: dict) -> str:
+    what = {"delete_event": "удалить событие", "stop_recurring": "остановить регулярный платёж"}.get(name, f"выполнить {name}")
+    target = (args or {}).get("query") or (args or {}).get("title") or ""
+    return f"Точно {what}" + (f" «{target}»" if target else "") + "? Это не отменить одной кнопкой — скажите «да» или «нет», сэр."
+
+
+def _truth_gate(answer: str, results: list["registry.ToolResult"]) -> str:
+    """Последняя проверка перед тем, как отдать ответ человеку.
+
+    Модель видит результат инструмента и всё равно склонна закончить бодрым «Готово, сэр» — особенно маленькая.
+    Здесь сверяемся не с её словами, а с тем, что реально легло в базу (registry.call проверил это чтением).
+    Ничего не записалось, а ответ обещает обратное — заменяем ответ. Записалось частично — дописываем, что именно не вышло.
+    """
+    # провал, который модель тут же исправила повторным вызовом того же инструмента, — не провал:
+    # «не разобрал дату» → модель прислала ISO → записано. Человеку про первую попытку знать незачем.
+    failed = [r for r in results if not r.ok and not any(s.ok and s.name == r.name for s in results)]
+    if not failed:
+        return answer
+    why = "; ".join(_FAIL_WHY.get(r.name, "не выполнено") for r in failed[:2])
+    failed_writes = [r for r in failed if r.risk != "read"]
+    if not failed_writes:
+        # сломался только читающий инструмент — остальной ответ мог быть полезным, не затираем его
+        return answer.rstrip() + "\n\n⚠️ Часть данных поднять не удалось — цифры могут быть неполными."
+    if any(r.wrote for r in results):
+        return answer.rstrip() + f"\n\n⚠️ Но не всё: {why}. Остальное записано."
+    # ни одной успешной записи, а инструмент записи провалился: что бы модель ни написала, это неправда.
+    # Не полагаемся на то, распознали ли мы её формулировку как «обещание» — заменяем ответ целиком.
+    hint = ("Скажите иначе — например, «встреча завтра в 15:00 с Димой»."
+            if any(r.name == "add_event" for r in failed_writes) else "Повторите фразу поточнее — запишу.")
+    return f"Не записал, сэр: {why}. {hint}"
+
+
 def _history(channel: str, limit: int = 6, max_chars: int = 600) -> list[dict]:
     """Последние реплики для контекста (все каналы: чат сайта и Telegram — один разговор).
     Длинные сообщения режем, старше HISTORY_MAX_AGE_H часов — не берём: история не должна съедать окно модели
@@ -1256,8 +1293,11 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
             log.exception("%s failed: %s", "cloud tools" if cloud_tools else "ollama", e)
             return None
     voice_hint = "\nОТВЕТ ГОЛОСОМ: максимум 1–2 коротких предложения, без списков, без markdown и без эмодзи.\n" if channel.endswith("voice") else ""
+    # Блок памяти («что ты знаешь о хозяине») меняется от фразы к фразе, поэтому он идёт НЕ в системное сообщение,
+    # а перед репликой пользователя: системный промпт + схемы 40 инструментов тогда неизменны от запроса к запросу,
+    # и Ollama берёт их из кэша вместо того, чтобы каждый раз заново читать ~6k токенов (на 6 ГБ карте это 15–25 с).
     mem_ctx = await memory.context(text)
-    messages = [{"role": "system", "content": system_prompt() + voice_hint + mem_ctx +
+    messages = [{"role": "system", "content": system_prompt() + voice_hint +
                  "\nУ тебя есть инструменты — это ЕДИНСТВЕННЫЙ способ что-то сохранить. Правила:\n"
                  "• Просят записать/добавить/запомнить/сохранить/напомнить/показать — ВЫЗОВИ инструмент. "
                  "Отвечать «записал» без вызова инструмента ЗАПРЕЩЕНО — это ложь.\n"
@@ -1285,26 +1325,38 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                  "Даты передавай в ISO 8601. После результата инструмента — короткий ответ в характере."}]
     for h in _history(channel):
         messages.append({"role": h["role"], "content": h["text"]})
-    messages.append({"role": "user", "content": text + "\n" + now_line()})
+    messages.append({"role": "user", "content": (mem_ctx + "\n" if mem_ctx else "") + text + "\n" + now_line()})
     actions: list[str] = []
     done_results: list[str] = []   # что уже реально сделано — на случай падения модели после вызова инструментов
-    seen_calls: set[tuple[str, str]] = set()
+    results: list[registry.ToolResult] = []   # чем на самом деле кончился каждый вызов (проверено по базе)
+    seen_calls: dict[tuple[str, str], bool] = {}   # подпись вызова → прошёл ли он (для стража дублей)
     allow_cloud = llm.cloud_enabled() and llm.GEMINI_AUTO
     try:
         for _ in range(4):  # максимум 4 вызова инструментов подряд
             out = await _chat(messages, registry.tools_schema(with_cloud=allow_cloud and not cloud_tools))
+            trace.step(llm._cloud_model() if cloud_tools else llm.OLLAMA_MODEL)
             if not out["tool_calls"] and not actions:
                 forced = _forced_tool(text)
                 if forced:
                     # вопрос о данных, а модель инструмент не вызвала (и, скорее всего, сочинила цифры) — вызываем сами
                     name, args = forced
                     log.info("[%s] модель ответила без инструмента на вопрос о данных → %s", channel, name)
-                    res = registry.run_tool(name, args, channel)
-                    actions.append(name)
-                    return Reply(res, actions, via)
+                    tr = registry.call(name, args, channel)
+                    results.append(tr)
+                    if tr.ok:
+                        actions.append(name)
+                        return Reply(tr.text, actions, via)
+                    # инструмент, который мы позвали за модель, тоже может упасть — тогда не выдаём сырую ошибку
+                    log.warning("[%s] принудительный %s не выполнен: %s", channel, name, tr.error)
+                    return Reply(_truth_gate(out.get("content") or "", results) or
+                                 "Не смог поднять цифры, сэр — данные не отдались. Попробуйте ещё раз.", actions, via)
             if not out["tool_calls"]:
                 content = (await _russian_only(messages, out)) or "…"
-                if not actions and _claims_saved(content) and not _looks_like_question(text) and not _is_analysis(text) and not _too_long_for_rules(text):
+                content = _truth_gate(content, results)
+                # модель не вызвала НИ ОДНОГО инструмента, но пишет «записал» — старый путь: сохраняем сами.
+                # Если инструмент вызывался и провалился, сюда не идём: _truth_gate уже сказал правду,
+                # а угадывать запись за упавшим инструментом — как раз способ записать не то.
+                if not actions and not results and _claims_saved(content) and not _looks_like_question(text) and not _is_analysis(text) and not _too_long_for_rules(text):
                     # модель соврала, что сохранила — сохраняем сами: время → событие, глагол дела → задача, иначе заметка
                     dt, rest = parse_datetime(text)
                     if dt and rest:
@@ -1339,11 +1391,17 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
             for c in out["tool_calls"]:
                 sig = (c["name"], json.dumps(c["arguments"] or {}, sort_keys=True, ensure_ascii=False))
                 if sig in seen_calls and c["name"].startswith(("add_", "pay_", "transfer", "set_", "complete_", "delete_", "move_", "stop_")):
-                    # модель повторила уже выполненный вызов (частая привычка маленьких моделей) — второй раз не записываем
-                    log.info("[%s] повторный вызов %s пропущен", channel, c["name"])
-                    messages.append({"role": "tool", "content": "Уже выполнено выше — второй раз делать не нужно. Ответь пользователю."})
+                    # модель повторила тот же вызов (частая привычка маленьких моделей). Если он прошёл — второй раз
+                    # не записываем. Если провалился — повторять с теми же аргументами бессмысленно, но и говорить
+                    # «уже выполнено» нельзя: модель поверит и отчитается об успехе, которого не было.
+                    ok_before = seen_calls[sig]
+                    log.info("[%s] повторный вызов %s пропущен (первый %s)", channel, c["name"], "прошёл" if ok_before else "провалился")
+                    messages.append({"role": "tool", "content":
+                                     "Уже выполнено выше — второй раз делать не нужно. Ответь пользователю." if ok_before else
+                                     f"Тот же вызов {c['name']} с теми же аргументами уже не прошёл. Повтор ничего не изменит: "
+                                     "либо измени аргументы, либо честно скажи пользователю, что не получилось."})
                     continue
-                seen_calls.add(sig)
+                seen_calls[sig] = False
                 if c["name"] in ("add_note", "add_event", "add_task") and (_looks_like_question(text) or _is_analysis(text)):
                     res = "Это вопрос, возражение или просьба разобраться, а не команда сохранить — НЕ сохранено. Ответь по существу; если нужны данные — вызови finance_summary / list_debts / agenda."
                     log.info("[%s] модель хотела записать вопрос в заметки — отклонено", channel)
@@ -1358,13 +1416,31 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                     log.info("[%s] %s на %.0f — жду подтверждения", channel, c["name"], big)
                     # что уже успели сделать в этом ходу — сообщаем, чтобы не потерялось
                     return Reply("\n".join(done_results + [_confirm_question(c["name"], args_ok, big)]), actions + ["clarify"], via)
+                elif registry.risk_of(c["name"]) == "destructive":
+                    # удаление/остановка — только по «да». Раньше подтверждения требовали лишь крупные суммы,
+                    # а «удали встречу» модель могла выполнить по своей трактовке фразы.
+                    try:
+                        args_ok = registry.validate_args(c["name"], c["arguments"] or {})
+                    except registry.ToolArgError as e:
+                        messages.append({"role": "tool", "content": f"Инструмент {c['name']} не выполнен: {e}"})
+                        continue
+                    _pending_set(channel, "confirm|" + json.dumps({"name": c["name"], "args": args_ok}, ensure_ascii=False))
+                    log.info("[%s] %s — необратимое действие, жду подтверждения", channel, c["name"])
+                    return Reply("\n".join(done_results + [_destructive_question(c["name"], args_ok)]), actions + ["clarify"], via)
                 else:
-                    res = registry.run_tool(c["name"], c["arguments"], channel)
-                    actions.append(c["name"])
-                    done_results.append(res)
+                    tr = registry.call(c["name"], c["arguments"], channel)
+                    results.append(tr)
+                    seen_calls[sig] = tr.ok
+                    res = tr.for_model()
+                    if tr.ok:
+                        actions.append(c["name"])
+                        done_results.append(tr.text)
+                    else:
+                        log.warning("[%s] инструмент %s НЕ выполнен: %s", channel, tr.name, tr.error)
                 messages.append({"role": "tool", "content": res})
         out = await _chat(messages)
-        return Reply((await _russian_only(messages, out)) or "Готово.", actions, via)
+        content = (await _russian_only(messages, out)) or ("Готово." if any(r.ok for r in results) else "Не получилось, сэр.")
+        return Reply(_truth_gate(content, results), actions, via)
     except Exception as e:
         log.exception("%s failed: %s", "cloud tools" if cloud_tools else "ollama", e)
         if actions:
@@ -1481,6 +1557,13 @@ def _change_voice(name: str | None) -> str:
     return f"Теперь говорю голосом «{_VOICE_TITLE[vid]}», сэр. Не нравится — «поменяй голос» ещё раз или выберите в настройках."
 
 
+# журнал работы: «как ты работал», «отчёт о себе», «где ты ошибался», «где ты тупил»
+SELFREPORT_RX = re.compile(r"^\s*(?:[а-яё]+,\s*)?(?:как\s+ты\s+(?:работал\w*|справля\w*|себя\s+вёл)|"
+                           r"отч[её]т\s+о\s+(?:себе|работе|своей\s+работе)|сам\w*\s+отч[её]т|"
+                           r"где\s+ты\s+(?:ошиб\w*|тупил\w*|косячил\w*|подвёл|облажал\w*)|"
+                           r"журнал\s+работы|тво[яи]\s+статистик\w*|как\s+часто\s+ты\s+ошиб\w*)"
+                           r"(?:\s+(?:за\s+)?(?:сегодня|вчера|день|неделю|месяц|эту\s+неделю|этот\s+месяц|последн\w+\s+[а-яё]+))?\s*[?.!]*\s*$", re.I)
+
 GAME_ON_RX = re.compile(r"^(игров(ой|ый) режим|иду играть|пошёл играть|пошел играть|играю|game mode|игра)\W*(вкл\w*|on)?\W*$", re.I)
 GAME_OFF_RX = re.compile(r"^(игра окончена|наигрался|отыграл|поиграл|конец игры|игров(ой|ый) режим (выкл\w*|off)|game over|game mode off)\W*$", re.I)
 
@@ -1507,10 +1590,14 @@ async def handle(text: str, channel: str = "tg") -> Reply:
         return Reply("Я вас слушаю, сэр.")
     if len(text) > 8000:
         text = text[:8000]
+    trace.start(text, channel)   # журнал работы: строка в базе на каждый ход (services/trace.py)
     try:
-        return await _handle(text, channel)
+        r = await _handle(text, channel)
+        trace.finish(r.via, r.actions, ok=r.via != "none")
+        return r
     except Exception as e:  # noqa: BLE001 — последний рубеж: каналы (TG/сайт/голос) не должны падать из-за одной фразы
         log.exception("handle(%s) failed: %s", channel, e)
+        trace.finish("none", [], ok=False, error=f"{type(e).__name__}: {e}")
         r = Reply("Что-то пошло не так на моей стороне, сэр. Ничего не записал — попробуйте ещё раз или загляните в лог.", [], "none")
         _log_chat("assistant", r.text, channel)
         return r
@@ -1528,6 +1615,15 @@ async def _handle(text: str, channel: str) -> Reply:
         info = llm.reload_cloud_settings()
         res = await llm.cloud_check()
         r = Reply((f"☁️ {info}\n" + (f"Отвечает ✅ ({res.get('model')})" if res.get("ok") else f"Не отвечает ❌\n{res.get('detail')}")), [], "none")
+        _log_chat("assistant", r.text, channel)
+        return r
+
+    # «как ты работал», «отчёт о себе», «где ты ошибался» — журнал работы словами (services/trace.py)
+    ms = SELFREPORT_RX.match(text)
+    if ms:
+        days = 30 if re.search(r"месяц", text, re.I) else 1 if re.search(r"сегодня|за день", text, re.I) else 7
+        txt = trace.report_text(days)
+        r = Reply(txt or f"За {days} дн. обращений ко мне не было, сэр — докладывать не о чем.", ["self_report"], "rules")
         _log_chat("assistant", r.text, channel)
         return r
 

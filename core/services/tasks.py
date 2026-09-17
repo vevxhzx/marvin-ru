@@ -64,12 +64,15 @@ def update_task(task_id: int, **fields) -> Task | None:
 
 
 def due_task_reminders() -> list[tuple[Task, str]]:
-    """Напоминания по дедлайнам: утром в день дедлайна (stage 1) и за час до него (stage 2)."""
+    """Напоминания по дедлайнам со временем: утром в день дедлайна (stage 1) и за час до него (stage 2).
+    Задачи «на весь день» (23:59) сюда не попадают: их и так показывает утренний дайджест, а вечером спрашивает обзор —
+    иначе в 9:00 прилетает по отдельному «до 23:59» на каждую (так и было)."""
+    from ..brain.dates import is_all_day
     nw = now()
     out: list[tuple[Task, str]] = []
     with session() as s:
         for t in s.exec(select(Task).where(Task.done == False, Task.due != None)).all():  # noqa: E711,E712
-            if t.due < nw - timedelta(hours=2):
+            if t.due < nw - timedelta(hours=2) or is_all_day(t.due):
                 continue
             same_day = t.due.date() == nw.date()
             if t.remind_stage < 1 and same_day and nw.hour >= 9:
@@ -137,5 +140,11 @@ def evening_review() -> list[Task]:
 
 
 def postpone_to_tomorrow(task_id: int, hour: int = 10) -> Task | None:
-    tmr = (now() + timedelta(days=1)).replace(hour=hour, minute=0, second=0, microsecond=0)
+    """Кнопка «📅 Завтра»: задача со временем → завтра в hour:00; задача «на день» (23:59) остаётся задачей на день, только завтра."""
+    from ..brain.dates import is_all_day
+    t = find_task(task_id)
+    if t is None:
+        return None
+    tmr = now() + timedelta(days=1)
+    tmr = tmr.replace(hour=23, minute=59, second=0, microsecond=0) if is_all_day(t.due) else tmr.replace(hour=hour, minute=0, second=0, microsecond=0)
     return update_task(task_id, due=tmr)

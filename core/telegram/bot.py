@@ -364,8 +364,9 @@ async def cb_reminder(cq: CallbackQuery):
                 with_due = datetime.now() + timedelta(hours=1)
                 t = tsk.update_task(oid, due=with_due); msg = f"⏰ Напомню про «{t.title}» в {with_due:%H:%M}." if t else "Задача не найдена."
             else:
-                tmr = (datetime.now() + timedelta(days=1)).replace(hour=10, minute=0, second=0, microsecond=0)
-                t = tsk.update_task(oid, due=tmr); msg = f"📅 «{t.title}» — перенёс на завтра, 10:00." if t else "Задача не найдена."
+                from core.brain.dates import is_all_day
+                t = tsk.postpone_to_tomorrow(oid)
+                msg = (f"📅 «{t.title}» — перенёс на завтра" + ("." if is_all_day(t.due) else f", {t.due:%H:%M}.")) if t else "Задача не найдена."
         else:
             if act == "ok":
                 msg = "Принято, сэр. Не опаздывайте."

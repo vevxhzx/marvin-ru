@@ -99,7 +99,11 @@ async def set_game_mode(on: bool) -> str:
         return ("Игровой режим: локальная модель выгружена из видеопамяти, до отмены отвечаю только через облако "
                 "(команды-шаблоны работают как обычно). «Игра окончена» — вернуть.") if freed else \
                "Игровой режим включён (Ollama не отвечала — выгружать нечего). Всё в облако, сэр."
-    return "Игровой режим выключен, локальный мозг снова в деле. Как сыграли, сэр?"
+    # выход из игры: модель грузим обратно СЕЙЧАС, в фоне (3–4 ГБ с диска в видеокарту — 5–15 с), а не при первой команде,
+    # иначе первый ответ после катки ждал бы загрузку целиком
+    import asyncio
+    asyncio.get_running_loop().create_task(warm_ollama())
+    return "Игровой режим выключен, локальный мозг прогревается — через несколько секунд в строю. Как сыграли, сэр?"
 EMBED_MODEL = getattr(cfg.brain.ollama, "embed_model", None) or "nomic-embed-text"
 
 # Куда отдавать токены по мере генерации (ставит /api/chat/stream или TG-бот). None — не стримим.
@@ -257,6 +261,17 @@ async def small_chat(system: str, user: str, json_mode: bool = True, num_predict
     return out
 
 
+def _log_ollama_stats(d: dict, with_tools: bool) -> None:
+    """Одна строка: куда ушло время. Ollama отдаёт наносекунды: загрузка модели / чтение промпта / генерация.
+    Если prompt_eval_count каждый раз ≈ полный промпт — кэш не работает (промпт меняется в начале); если маленький — работает."""
+    if not d or "total_duration" not in d:
+        return
+    ns = 1e9
+    log.info("Ollama %s: всего %.1f с · загрузка %.1f с · промпт %d ток. за %.1f с · ответ %d ток. за %.1f с",
+             "с инструментами" if with_tools else "без инструментов", d.get("total_duration", 0) / ns, d.get("load_duration", 0) / ns,
+             d.get("prompt_eval_count", 0), d.get("prompt_eval_duration", 0) / ns, d.get("eval_count", 0), d.get("eval_duration", 0) / ns)
+
+
 async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, temperature: float = 0.3,
                       json_mode: bool = False) -> dict:
     """Возвращает {'content': str, 'tool_calls': [{'name','arguments'}]}."""
@@ -281,11 +296,14 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
     if _THINK_RX.search(OLLAMA_MODEL):
         payload["think"] = False      # qwen3/gemma4/deepseek-r1: без «размышлений» — ответ за секунды, а не за минуту
         payload["options"]["stop"] = ["<think>"]   # на случай, если модель всё равно попробует «подумать» в тексте
+    stats: dict = {}
     async with _local_client(180) as c:
         if not stream:
             r = await c.post(f"{OLLAMA_URL}/api/chat", json=payload)
             r.raise_for_status()
-            msg = r.json().get("message", {})
+            data = r.json()
+            msg = data.get("message", {})
+            stats = data
         else:
             # потоковый режим: текст отдаём по кусочкам, tool_calls собираем целиком
             msg = {"content": "", "tool_calls": []}
@@ -310,7 +328,9 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
                             except Exception:  # pragma: no cover
                                 pass
                     if chunk.get("done"):
+                        stats = chunk
                         break
+    _log_ollama_stats(stats, bool(tools))
     calls = []
     for tc in msg.get("tool_calls", []) or []:
         f = tc.get("function", {})
@@ -325,9 +345,12 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
 
 
 async def embed(texts: list[str]) -> list[list[float]] | None:
-    """Локальные эмбеддинги через Ollama (модель EMBED_MODEL). None — если модели/Ollama нет."""
+    """Локальные эмбеддинги через Ollama (модель EMBED_MODEL). None — если модели/Ollama нет.
+    В игровом режиме — тоже None: иначе фоновая индексация памяти подгрузит модель эмбеддингов в видеокарту прямо во время игры."""
     if not texts:
         return []
+    if GAME_MODE:
+        return None
     try:
         async with _local_client(120) as c:
             r = await c.post(f"{OLLAMA_URL}/api/embed", json={"model": EMBED_MODEL, "input": texts})
@@ -341,6 +364,8 @@ async def embed(texts: list[str]) -> list[list[float]] | None:
 
 
 async def embed_available() -> bool:
+    if GAME_MODE:
+        return False
     try:
         async with _local_client(5) as c:
             r = await c.get(f"{OLLAMA_URL}/api/tags")
@@ -694,6 +719,14 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             _VOICE_MODEL_BAD.add(model)
             body["model"] = main_model
             r = await _cloud_post("/chat/completions", body, headers)
+        if r.status_code == 413 and history:
+            # «Request Entity Too Large» на запросе в пару тысяч токенов — это не лимит модели, а шлюз/прокси по дороге.
+            # Пишем, каким маршрутом шли и что ответили, и один раз повторяем напрямую без истории, прежде чем сдаться.
+            log.warning("%s: 413 по маршруту «%s», тело %d байт, ответ: %s — повторяю напрямую без истории", cloud_title(),
+                        (_CLOUD_ROUTE_OK or ("?",))[0], len(json.dumps(body, ensure_ascii=False).encode()), r.text[:200])
+            body["messages"] = [messages[0], messages[-1]]
+            async with _cloud_client(45, None) as c:
+                r = await c.post(f"{_cloud_base_url()}/chat/completions", json=body, headers=headers)
         if True:
             r.raise_for_status()
             data = r.json()

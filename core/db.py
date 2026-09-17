@@ -250,6 +250,26 @@ class Lesson(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now)
 
 
+class Run(SQLModel, table=True):
+    """Журнал работы: один разговорный ход — одна строка. Каким путём пошёл, что вызвал, сколько занял,
+    переспросил ли, исправил ли его хозяин следом. Нужен, чтобы «почему он так решил» и «почему так долго»
+    можно было ответить по базе, а не по текстовому логу процесса (см. services/trace.py)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    text: str = ""                                     # реплика хозяина, обрезанная до trace.TEXT_MAX
+    channel: str = Field(default="tg", index=True)     # tg / web / voice / …
+    route: str = Field(default="none", index=True)     # rules / ollama / gemini(=облако) / none — откуда пришёл ответ
+    model: str = ""                                    # какая модель отвечала (имя из Ollama или облачной)
+    tools: str = ""                                    # инструменты через запятую; упавший помечен «!»: "add_order,spent!"
+    actions: str = ""                                  # Reply.actions — что было сделано (в т.ч. путём правил)
+    steps: int = 0                                     # кругов «модель → инструмент → модель»
+    ms: int = 0                                        # сколько заняло всё вместе
+    ok: bool = Field(default=True, index=True)         # ответ получен (не «не понял» и не сбой)
+    asked: bool = False                                # переспросил вместо того, чтобы сделать
+    corrected: bool = Field(default=False, index=True) # хозяин следом отменил или поправил тип записи
+    error: str = ""                                    # причина сбоя, если был
+    created_at: datetime = Field(default_factory=now, index=True)
+
+
 class Fact(SQLModel, table=True):
     """Что ассистент знает о хозяине. Слои: short (последние дни: «болит спина», «делаю ролик для Пятёрочки»),
     long (устойчивое: «кот Барсик», «не любит созвоны утром»), archive (устарело/забыто — не удаляется, в контекст не идёт).

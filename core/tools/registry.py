@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
@@ -13,6 +14,318 @@ from ..services.finance import money
 
 TOOLS: dict[str, dict[str, Any]] = {}
 FUNCS: dict[str, Callable] = {}
+
+# --------------------------------------------------------------------------- контракт инструмента
+# Инструменты возвращают строку для модели. Беда в том, что у строки нет признака «получилось»:
+# add_event с непонятой датой возвращает «Не понял дату/время.» — и это неотличимо от «Событие добавлено».
+# Поэтому модель спокойно отвечает «Записал, сэр», когда в базе пусто.
+#
+# call() чинит это: вокруг того же вызова он ставит проверку по базе. Каждая запись и так попадает в ActionLog
+# (это источник правды для «отмени»), значит верификация — «появилась ли новая строка в ActionLog» — уже есть
+# в проекте, её не надо изобретать. Для не-создающих инструментов («закрой задачу», «удали событие») можно задать
+# свою проверку в VERIFY. Результат — ToolResult: ok/verified/что именно записано/можно ли повторить.
+#
+# run_tool() остался прежним (возвращает строку) — все старые вызовы работают как раньше.
+
+CREATES = {"add_event", "add_task", "add_expense", "add_income", "add_debt", "add_recurring", "add_note",
+           "add_order", "add_goal", "transfer", "pay_debt", "order_payment", "save_to_goal", "remember_fact"}
+MONEY = {"add_expense", "add_income", "transfer", "pay_debt", "set_balance", "order_payment", "save_to_goal"}
+DESTRUCTIVE = {"delete_event", "stop_recurring"}
+_WRITE_PREFIX = ("add_", "edit_", "move_", "set_", "complete_", "update_", "save_", "order_", "pomodoro", "remember_")
+
+# сообщения СУБД и сети, при которых повтор осмыслен (в отличие от «неверный аргумент» — там повтор даст то же самое)
+_TRANSIENT_RX = re.compile(r"database is locked|disk i/?o|timed? ?out|timeout|connection|temporarily", re.I)
+
+
+def risk_of(name: str) -> str:
+    """read — только читает; write — меняет данные; money — двигает деньги; destructive — удаляет/останавливает.
+    Считается по имени, чтобы новый инструмент получал разумный уровень сам; исключения — в множествах выше."""
+    if name in DESTRUCTIVE:
+        return "destructive"
+    if name in MONEY:
+        return "money"
+    return "write" if name.startswith(_WRITE_PREFIX) else "read"
+
+
+def _last_action_id() -> int:
+    from sqlmodel import select as _select
+    from ..db import ActionLog, session
+    with session() as s:
+        row = s.exec(_select(ActionLog).order_by(ActionLog.id.desc())).first()
+    return row.id if row else 0
+
+
+def _action_after(after_id: int):
+    from sqlmodel import select as _select
+    from ..db import ActionLog, session
+    with session() as s:
+        return s.exec(_select(ActionLog).where(ActionLog.id > after_id).order_by(ActionLog.id.desc())).first()
+
+
+def _probe_open_tasks(_args: dict) -> Any:
+    from sqlmodel import select as _select
+    from ..db import Task, session
+    with session() as s:
+        return len(list(s.exec(_select(Task).where(Task.done == False))))  # noqa: E712
+
+
+def _probe_events(_args: dict) -> Any:
+    from sqlmodel import select as _select
+    from ..db import Event, session
+    with session() as s:
+        return len(list(s.exec(_select(Event))))
+
+
+def _probe_active_recurring(_args: dict) -> Any:
+    from sqlmodel import select as _select
+    from ..db import Recurring, session
+    with session() as s:
+        return len(list(s.exec(_select(Recurring).where(Recurring.active == True))))  # noqa: E712
+
+
+def _probe_category_id(args: dict) -> Any:
+    from ..services import finance as _fin
+    c = _fin.category_by_word(args.get("category") or "")
+    return c.id if c else None
+
+
+def _probe_note_id(args: dict) -> Any:
+    from ..services import brain_notes as _bn
+    n = _bn.find_note(args.get("query") or "")
+    return n.id if n else None
+
+
+def _probe_event_id(args: dict) -> Any:
+    from ..services import calendar as _cal
+    ev = _cal.find_event(args.get("query") or "")
+    return ev.id if ev else None
+
+
+def _probe_order_id(args: dict) -> Any:
+    from ..services import orders as _ord
+    o = _ord.find_order(args.get("query") or "")
+    return o.id if o else None
+
+
+def _probe_route_only(_args: dict) -> Any:
+    """Плейсхолдер для инструментов, у которых нет осмысленного состояния «до» (create-по-факту через
+    get_or_create) — нужен только чтобы включить проверку AFTER_CHECK, которая сверяет уже ПОСЛЕ вызова."""
+    return True
+
+
+# Инструменты, которые не создают запись, а меняют существующую: ActionLog о них молчит, поэтому проверяем
+# снимком «до/после». Для complete_task/delete_event/stop_recurring снимок — число строк (сравниваем, изменилось
+# ли); для остальных пяти — id самой цели, снятый ДО вызова (чтобы переименование не помешало найти её заново),
+# и после вызова конкретные поля сверяются с тем, что просили (AFTER_CHECK ниже) — это не ломается на идемпотентных
+# вызовах («поставь лимит, который и так уже стоит»), потому что сверяем итоговое состояние, а не факт изменения.
+PROBES: dict[str, Callable[[dict], Any]] = {
+    "complete_task": _probe_open_tasks,
+    "delete_event": _probe_events,
+    "stop_recurring": _probe_active_recurring,
+    "set_budget": _probe_category_id,
+    "edit_note": _probe_note_id,
+    "move_event": _probe_event_id,
+    "update_order": _probe_order_id,
+    "add_person": _probe_route_only,
+}
+
+# set_balance и pomodoro сюда сознательно не попали:
+#   set_balance — finance.set_balance() создаёт счёт, если его не было, поэтому у него нет осмысленного «не нашёл»;
+#     к тому же он уже требует подтверждения «да» на крупных суммах (agent._CONFIRM_TOOLS) — второй уровень защиты есть.
+#   pomodoro — «заказ не нашёл» там не ошибка, а уточняющий вопрос («запустить без заказа?») в тексте самого
+#     инструмента; пометить это провалом значило бы обозвать законный вопрос ложью.
+
+
+def _safe_probe(probe: Callable[[dict], Any] | None, args: dict) -> Any:
+    """Сломанная проверка не должна выглядеть как провал инструмента — тогда verified остаётся None."""
+    if probe is None:
+        return None
+    try:
+        return probe(args)
+    except Exception:  # pragma: no cover
+        return None
+
+
+def _after_check(name: str, before_probe: Any, args: dict) -> bool | None:
+    """Сверка полей после вызова. None — сверять нечего (инструмент не в AFTER_CHECK): используем старое
+    сравнение «счётчик изменился». False — цель не нашлась ДО вызова или её поля не совпали с запрошенными."""
+    fn = AFTER_CHECK.get(name)
+    if fn is None:
+        return None
+    try:
+        return fn(before_probe, args)
+    except Exception:  # pragma: no cover — сломанная сверка не должна выглядеть как провал инструмента
+        return None
+
+
+def _fields_match_category(cat_id: int | None, args: dict) -> bool | None:
+    if cat_id is None:
+        return False
+    from ..db import Category, session
+    with session() as s:
+        c = s.get(Category, cat_id)
+    if not c:
+        return False
+    want = args.get("amount")
+    try:
+        return want is None or abs((c.budget or 0) - float(want)) < 0.01
+    except (TypeError, ValueError):
+        return None   # аргумент не число — не наша забота, это поймает validate_args раньше
+
+
+def _fields_match_note(note_id: int | None, args: dict) -> bool | None:
+    if note_id is None:
+        return False
+    from ..db import Note, session
+    with session() as s:
+        n = s.get(Note, note_id)
+    if not n:
+        return False
+    if args.get("title") and (n.title or "") != args["title"]:
+        return False
+    if args.get("text") and (n.text or "") != args["text"]:
+        return False
+    if args.get("append") and args["append"].strip() not in (n.text or ""):
+        return False
+    return True
+
+
+def _fields_match_event(event_id: int | None, args: dict) -> bool | None:
+    if event_id is None:
+        return False
+    from ..db import Event, session
+    with session() as s:
+        ev = s.get(Event, event_id)
+    if not ev:
+        return False
+    if args.get("title") and ev.title != args["title"]:
+        return False
+    if args.get("start"):
+        # тот же разбор, что делает сам move_event: если «на когда» не распозналось, дата тихо не поменялась —
+        # без этой проверки «перенеси на непонятное время» отвечал бы «Готово» со старым временем в базе.
+        dt = _dt(args["start"])
+        if dt is None or abs((ev.start - dt).total_seconds()) > 60:
+            return False
+    return True
+
+
+def _fields_match_order(order_id: int | None, args: dict) -> bool | None:
+    if order_id is None:
+        return False
+    from ..db import Order, session
+    with session() as s:
+        o = s.get(Order, order_id)
+    if not o:
+        return False
+    if args.get("status") and o.status != args["status"]:
+        return False
+    if args.get("price") is not None:
+        try:
+            if abs((o.price or 0) - float(args["price"])) > 0.01:
+                return False
+        except (TypeError, ValueError):
+            return None
+    return True
+
+
+def _fields_match_person(_before_id: int | None, args: dict) -> bool | None:
+    # add_person не редактирует существующую карточку по id — она создаёт (get_or_create по имени), поэтому
+    # «до» здесь бессмысленно снимать: человека ещё нет. Резолвим по тому же имени ПОСЛЕ вызова.
+    from ..services import people as _ppl
+    return _ppl.find_person(args.get("name") or "") is not None
+
+
+AFTER_CHECK: dict[str, Callable[[Any, dict], bool | None]] = {
+    "set_budget": _fields_match_category,
+    "edit_note": _fields_match_note,
+    "move_event": _fields_match_event,
+    "update_order": _fields_match_order,
+    "add_person": _fields_match_person,
+}
+
+
+@dataclass
+class ToolResult:
+    """Что на самом деле произошло. text — то же, что раньше возвращал run_tool."""
+    name: str
+    text: str = ""
+    ok: bool = True
+    verified: bool | None = None      # True — проверено по базе · False — проверка не прошла · None — нечего проверять
+    ref_table: str = ""
+    ref_id: int | None = None
+    error: str = ""
+    retryable: bool = False
+    risk: str = "read"
+
+    @property
+    def wrote(self) -> bool:
+        return self.ok and self.ref_id is not None
+
+    def for_model(self) -> str:
+        """Текст, который уходит модели в role=tool. При провале — недвусмысленно, чтобы она не отвечала «готово»."""
+        if self.ok:
+            return self.text
+        tail = ("Исправь аргументы и вызови инструмент ещё раз."
+                if self.retryable else "Скажи пользователю честно, что не получилось, и почему.")
+        return (f"ИНСТРУМЕНТ {self.name} НЕ ВЫПОЛНЕН. В базу ничего не записано.\n"
+                f"Причина: {self.error or self.text or 'неизвестна'}\n"
+                f"Отвечать «записал», «готово», «сохранил» ЗАПРЕЩЕНО — это будет ложью. {tail}")
+
+
+def call(name: str, args: dict[str, Any] | None, channel: str = "tg") -> ToolResult:
+    """Выполнить инструмент и проверить результат по базе. Никогда не бросает исключений."""
+    from ..services import trace
+    risk = risk_of(name)
+    fn = FUNCS.get(name)
+    if not fn:
+        r = ToolResult(name, ok=False, risk=risk, error=f"инструмента {name} не существует")
+        trace.tool(name, ok=False)
+        return r
+    try:
+        args = validate_args(name, args or {})
+    except ToolArgError as e:
+        trace.tool(name, ok=False)
+        return ToolResult(name, ok=False, risk=risk, retryable=True, error=str(e))
+
+    before = _last_action_id() if name in CREATES else 0
+    probe = PROBES.get(name)
+    before_probe = _safe_probe(probe, args)
+    try:
+        try:
+            text = str(fn(**args, _channel=channel))
+        except TypeError:
+            text = str(fn(**args))
+    except Exception as e:  # noqa: BLE001 — падение инструмента не должно ронять ход
+        trace.tool(name, ok=False)
+        return ToolResult(name, ok=False, risk=risk, error=f"{type(e).__name__}: {e}",
+                          retryable=bool(_TRANSIENT_RX.search(str(e))) and risk == "read")
+
+    res = ToolResult(name, text=text, risk=risk)
+    if name in CREATES:
+        # чтение из базы, а не разбор строки: инструмент мог вернуть вежливое «не понял дату» и ничего не записать
+        row = _action_after(before)
+        if row is None:
+            res.ok, res.verified = False, False
+            res.error = text or "инструмент отработал, но в базе ничего не появилось"
+            res.retryable = True   # чаще всего это непонятый аргумент — модель может поправиться
+        else:
+            res.verified, res.ref_table, res.ref_id = True, row.ref_table, row.ref_id
+    elif probe is not None:
+        after_probe = _safe_probe(probe, args)
+        verdict = _after_check(name, before_probe, args)
+        if verdict is not None:
+            res.verified = verdict
+        elif before_probe is None or after_probe is None:
+            res.verified = None          # снимок не снялся — молчим, а не объявляем провал
+        else:
+            res.verified = after_probe != before_probe
+        if res.verified is False:
+            res.ok = False
+            res.error = text or "результат не подтвердился при проверке — похоже, инструмент не нашёл, с чем работать"
+    trace.tool(name, ok=res.ok)
+    return res
+
+
 
 
 def tool(name: str, description: str, params: dict[str, Any], required: list[str] | None = None):
@@ -699,22 +1012,15 @@ def validate_args(name: str, args: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def run_tool(name: str, args: dict[str, Any], channel: str = "tg") -> str:
-    fn = FUNCS.get(name)
-    if not fn:
+    """Старый вход: только текст результата. Им пользуются планировщик, подтверждение и API — поведение прежнее."""
+    r = call(name, args, channel)
+    if r.ok:
+        return r.text
+    if not FUNCS.get(name):
         return f"Неизвестный инструмент {name}"
-    try:
-        args = validate_args(name, args)
-    except ToolArgError as e:
-        return f"Инструмент {name} не выполнен: {e}"
-    try:
-        return str(fn(**args, _channel=channel))
-    except TypeError:
-        try:
-            return str(fn(**args))
-        except Exception as e:  # pragma: no cover
-            return f"Ошибка инструмента: {e}"
-    except Exception as e:
-        return f"Ошибка инструмента: {e}"
+    if r.text:
+        return r.text          # инструмент сам объяснил, почему не вышло («Не понял дату/время.»)
+    return f"Инструмент {name} не выполнен: {r.error}"
 
 
 def tools_schema(with_cloud: bool = False) -> list[dict]:

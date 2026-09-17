@@ -245,15 +245,15 @@ def fix_night_hour(dt: datetime | None, text: str) -> datetime | None:
 
 
 def parse_amount(text: str) -> tuple[float | None, str]:
-    """«700», «1.5к», «120 тыс», «2 500 руб» → сумма и текст без неё."""
+    """«700», «1.5к», «120 тыс», «2 500 руб», слитно «128рублей» / «700р» → сумма и текст без неё."""
     t = text.lower().replace("₽", " руб ")
-    m = re.search(r"(\d[\d\s]*(?:[.,]\d+)?)\s*(к|k|тыс\w*|т\.?р\.?|млн)?(?![а-яёa-z])\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])", t)
+    m = re.search(r"(\d[\d\s]*(?:[.,]\d+)?)\s*(?:(к|k|тыс\w*|т\.?р\.?|млн)(?![а-яёa-z]))?\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])", t)
     if m and re.search(r"\d\s+\d", m.group(1)):
         # «1200 5-го» / «5000 25 сентября» — это два разных числа, а не «1 200»: разряды — строго по 3 цифры
         parts = m.group(1).split()
         if not all(len(x) == 3 and x.isdigit() for x in parts[1:]):
             first = re.match(r"\d+(?:[.,]\d+)?", m.group(1)).group(0)
-            m = re.search(r"(" + re.escape(first) + r")(?!\d)\s*(к|k|тыс\w*|т\.?р\.?|млн)?(?![а-яёa-z])\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])", t)
+            m = re.search(r"(" + re.escape(first) + r")(?!\d)\s*(?:(к|k|тыс\w*|т\.?р\.?|млн)(?![а-яёa-z]))?\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])", t)
     if not m:
         return None, text
     raw = m.group(1).replace(" ", "").replace(",", ".")

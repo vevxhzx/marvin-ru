@@ -37,6 +37,9 @@ def undo_last(channel: str | None = None) -> str | None:
     a = last_action(channel)
     if not a:
         return None
+    # «отмени» = ассистент ошибся ходом раньше. Помечаем тот ход в журнале — из этого потом растёт отчёт «где я тупил».
+    from . import trace
+    trace.mark_corrected(channel)
     label = _LABEL.get(a.kind, a.kind)
     if a.ref_table == "trash":
         from . import bulk
