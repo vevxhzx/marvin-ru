@@ -74,7 +74,27 @@ popd
 git add -A
 git diff --cached --quiet
 if errorlevel 1 (git commit -q -m "v%VER%" || (echo [!] commit failed && pause && exit /b 1)) else (echo No changes to commit - release only.)
-git push -q -u origin %BR% || (echo [!] push failed && pause && exit /b 1)
+git push -q -u origin %BR%
+if not errorlevel 1 goto pushed
+REM --- GitHub has commits this folder does not have (edited on the site, or published from another folder/PC) ---
+echo.
+echo [i] GitHub has changes that are not in this folder. Merging them in (files from this folder win)...
+git fetch -q origin
+git pull -q --no-rebase --no-edit -X ours --allow-unrelated-histories origin %BR%
+if errorlevel 1 goto pushforce
+git push -q -u origin %BR%
+if not errorlevel 1 goto pushed
+:pushforce
+git merge --abort >nul 2>nul
+echo.
+echo [!] Could not merge automatically.
+echo     [1] Overwrite GitHub with this folder (this folder is the source of the release)
+echo     [2] Cancel
+set CH=
+set /p CH=Choice: 
+if not "%CH%"=="1" (echo Cancelled. && pause && exit /b 1)
+git push -q -u --force origin %BR% || (echo [!] push failed && pause && exit /b 1)
+:pushed
 
 git rev-parse -q --verify "refs/tags/v%VER%" >nul 2>nul
 if not errorlevel 1 (
