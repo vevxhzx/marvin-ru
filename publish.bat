@@ -104,11 +104,11 @@ if not errorlevel 1 (
 )
 git tag "v%VER%" && git push -q origin "v%VER%"
 
-REM release notes = the "## %VER%" section of CHANGELOG.md (falls back to the whole file)
+REM release notes = every CHANGELOG section since the previous published tag (several versions may pass between releases)
 set NOTES=%TEMP%\release-notes-%VER%.md
 set PY=.venv\Scripts\python.exe
 if not exist %PY% set PY=python
-%PY% -c "import re,sys;s=open('CHANGELOG.md',encoding='utf-8').read();m=re.search(r'^## '+re.escape(sys.argv[1])+r'\b.*?(?=^## |\Z)',s,re.S|re.M);open(sys.argv[2],'w',encoding='utf-8').write(m.group(0) if m else s)" %VER% "%NOTES%"
+%PY% tools\release_notes.py %VER% "%NOTES%"
 if not exist "%NOTES%" set NOTES=CHANGELOG.md
 set ZIP=%TEMP%\assistant-%VER%.zip
 if exist "%ZIP%" del "%ZIP%"
