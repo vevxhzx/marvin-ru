@@ -354,3 +354,9 @@ def test_impossible_time_does_not_crash_parser():
     assert parse_datetime("встреча в 25:70")[0] is None
     assert parse_datetime("счёт 12:99 в пользу гостей")[0] is None
     assert parse_datetime("зубной в 09:30")[0] is not None
+
+
+def test_title_has_no_space_before_comma_after_date_cut():
+    from core.brain.dates import parse_datetime
+    dt, rest = parse_datetime("встреча с Димой в среду в 15, кофейня на Патриках")
+    assert dt is not None and rest == "встреча с Димой, кофейня на Патриках"

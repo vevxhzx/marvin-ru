@@ -34,9 +34,18 @@ def main() -> None:
               or (low is not None and low < _ver(re.match(r"## (\S+)", b).group(1)) <= cur)]
     if not picked:
         picked = [b for b in bodies if _ver(re.match(r"## (\S+)", b).group(1)) == cur] or [text]
+    # сводка сверху: строки «**Коротко:** …» из каждой секции (в CHANGELOG они идут первой строкой раздела)
+    brief = []
+    for b in picked:
+        v = re.match(r"## (\S+)", b).group(1)
+        m = re.search(r"^\*\*Коротко:\*\*\s*(.+)$", b, re.M)
+        if m:
+            brief.append(f"- **{v}** — {m.group(1).strip()}")
     head = ""
     if prev and len(picked) > 1:
         head = f"_Изменения с v{prev} по v{ver} — {len(picked)} версий._\n\n"
+    if brief:
+        head += "## Что изменилось, коротко\n\n" + "\n".join(brief) + "\n\n---\n\n"
     open(out, "w", encoding="utf-8").write(head + "\n".join(b.rstrip() + "\n" for b in picked))
 
 

@@ -63,7 +63,18 @@ git branch -q -M %BR%
 
 :build
 if not exist web\src goto commit
-if not exist web\node_modules goto commit
+if exist web\node_modules goto buildsite
+REM no Node here: cannot rebuild, so at least make sure web/site is not older than web/src (GitHub check would fail)
+set PY=.venv\Scripts\python.exe
+if not exist %PY% set PY=python
+%PY% tools\site_check.py
+if errorlevel 1 (
+    set CH=
+    set /p CH=Publish anyway? [y/N]: 
+    if /i not "%CH%"=="y" (echo Cancelled. && pause && exit /b 1)
+)
+goto commit
+:buildsite
 echo Building the site...
 pushd web
 call npm run build --silent
