@@ -10,6 +10,8 @@ import DayStrip from '../components/DayStrip'
 import TaskSheet from '../components/TaskSheet'
 import { EventSheet } from './Calendar'
 import { Forecast, Birthdays, useOrder, Draggable } from '../components/Widgets'
+import ScreenTime from '../components/ScreenTime'
+import Focus from '../components/Focus'
 import { usePrefs, prefs as PREFS, DEFAULTS } from '../lib/prefs'
 
 const GREETS = { morning: 'доброе утро', day: 'добрый день', evening: 'добрый вечер', night: 'доброй ночи' }
@@ -18,12 +20,14 @@ const WD = ['воскресенье', 'понедельник', 'вторник'
 
 /* Блоки главной: порядок и видимость настраивает пользователь (localStorage), перетаскивание мышью. */
 const BLOCKS = [
+  { id: 'focus', label: 'фокус дня' },
   { id: 'tasks', label: 'задачи' },
   { id: 'events', label: 'сегодня в календаре' },
   { id: 'orders', label: 'заказы' },
   { id: 'people', label: 'кто сегодня' },
   { id: 'upcoming', label: 'платежи на неделе' },
   { id: 'recent', label: 'недавно в памяти' },
+  { id: 'screen', label: 'время за пк' },
   { id: 'money', label: 'деньги' },
 ]
 const BLOCK_IDS = BLOCKS.map((b) => b.id)
@@ -51,7 +55,20 @@ export default function Today({ openChat, address = 'сэр' }) {
   const [order, move, resetOrder] = useOrder('today.order.v2', BLOCK_IDS)
   const [custom, setCustom] = useState(false)
   const [editing, setEditing] = useState(false)   // режим перетаскивания
-  const visible = order.filter((id) => !prefs.hiddenBlocks.includes(id) && !(id === 'orders' && d && d.freelance === false))
+  const [hasAims, setHasAims] = useState(false)
+  useEffect(() => { api.get('/api/focus').then((f) => setHasAims(!!f?.aims)).catch(() => setHasAims(false)) }, [tick])
+  const visible = order.filter((id) => !prefs.hiddenBlocks.includes(id) && !(id === 'orders' && d && d.freelance === false) && !(id === 'screen' && d && !d.screen_time) && !(id === 'focus' && !hasAims))
+  // блок «время за пк» появился в 0.9.17: если экранное время включено, а блок стоит в конце старого порядка — поднимаем наверх один раз
+  useEffect(() => {
+    if (hasAims && !localStorage.getItem('today.focus.seen') && order.indexOf('focus') > 0) {
+      localStorage.setItem('today.focus.seen', '1'); move('focus', order[0])
+    }
+  }, [hasAims])
+  useEffect(() => {
+    if (d?.screen_time && !localStorage.getItem('today.screen.seen') && order.indexOf('screen') > 1) {
+      localStorage.setItem('today.screen.seen', '1'); move('screen', order[1])
+    }
+  }, [d?.screen_time])
 
   const now = new Date()
   const [leaveCls, leave] = useLeave()
@@ -72,6 +89,8 @@ export default function Today({ openChat, address = 'сэр' }) {
     upcoming: <UpcomingBlock d={d} />,
     recent: <RecentBlock d={d} />,
     money: <MoneyBlock d={d} />,
+    screen: <ScreenTime tick={tick} calm={prefs.density === 'calm'} />,
+    focus: <Focus tick={tick} onDone={() => { load(); bump() }} />,
   }
   const wide = (id) => id === 'money'
 
@@ -119,7 +138,7 @@ export default function Today({ openChat, address = 'сэр' }) {
 
 /* Настройка главной: какие блоки показывать, порядок, плотность, что в шапке */
 function Customize({ open, onClose, prefs, setPrefs, order, move, onReset, onDrag, address }) {
-  const toggle = (id) => setPrefs({ hidden: prefs.hiddenBlocks.includes(id) ? prefs.hiddenBlocks.filter((x) => x !== id) : [...prefs.hiddenBlocks, id] })
+  const toggle = (id) => setPrefs({ hiddenBlocks: prefs.hiddenBlocks.includes(id) ? prefs.hiddenBlocks.filter((x) => x !== id) : [...prefs.hiddenBlocks, id] })
   const up = (id) => { const i = order.indexOf(id); if (i > 0) move(id, order[i - 1]) }
   const down = (id) => { const i = order.indexOf(id); if (i < order.length - 1) move(order[i + 1], id) }
   return (
@@ -133,7 +152,7 @@ function Customize({ open, onClose, prefs, setPrefs, order, move, onReset, onDra
               return (
                 <div key={id} className={`row !py-2.5 ${on ? '' : 'opacity-50'}`}>
                   <button className="btn-icon !h-7 !w-7" onClick={() => toggle(id)} aria-label={on ? 'Скрыть' : 'Показать'}>{on ? <Eye size={14} /> : <EyeOff size={14} />}</button>
-                  <span className="flex-1 text-[14px]">{b.label}</span>
+                  <span className="flex-1 cursor-pointer select-none text-[14px]" onClick={() => toggle(id)}>{b.label}</span>
                   <button className="btn-icon !h-7 !w-7" onClick={() => up(id)} aria-label="Выше"><ChevronUp size={14} /></button>
                   <button className="btn-icon !h-7 !w-7" onClick={() => down(id)} aria-label="Ниже"><ChevronDown size={14} /></button>
                 </div>

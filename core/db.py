@@ -52,6 +52,41 @@ class Task(SQLModel, table=True):
     remind_stage: int = 0              # 0 — не напоминали, 1 — утром в день дедлайна, 2 — за час
     created_at: datetime = Field(default_factory=now)
     done_at: Optional[datetime] = None
+    aim_id: Optional[int] = Field(default=None, index=True)        # 0.10: задача двигает долгосрочную цель (Aim)
+    milestone_id: Optional[int] = Field(default=None, index=True)  # …и конкретную веху в ней
+    blocked_by: str = ""                                            # что мешает («жду исходники от клиента») — пусто = не заблокирована
+
+
+# ---------- Цели (долгосрочные; денежные конверты — Goal ниже) ----------
+class Aim(SQLModel, table=True):
+    """Долгосрочная цель: «устойчивая карьера монтажёра», «переехать», «выучить After Effects».
+    Три уровня, а не семь: цель → веха (Milestone) → задача (Task.milestone_id). Прогресс считается по вехам,
+    а если вех нет — по задачам с aim_id; поле progress — ручная поправка, когда считать не по чему."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    why: str = ""                      # зачем — одна фраза; Марвин напоминает её, когда цель буксует
+    status: str = Field(default="active", index=True)   # active / paused / done / dropped
+    priority: int = 2                  # 1 главная сейчас, 2 обычная, 3 фоновая
+    due: Optional[datetime] = None
+    progress: float = 0.0              # 0..1, ручная (если нет вех/задач)
+    created_at: datetime = Field(default_factory=now)
+    done_at: Optional[datetime] = None
+    last_touch: Optional[datetime] = None   # когда по цели последний раз что-то закрывали (для «давно не возвращался»)
+
+
+class Milestone(SQLModel, table=True):
+    """Веха цели: «шоурил», «горизонтальный бизнес-ролик для портфолио». Это и есть «проект» в терминах ТЗ.
+    Может быть привязана к заказу (order_id) — тогда прогресс заказа двигает цель."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    aim_id: int = Field(index=True)
+    title: str
+    status: str = Field(default="open", index=True)     # open / done / dropped
+    order: int = 0                     # порядок в цели
+    due: Optional[datetime] = None
+    order_id: Optional[int] = Field(default=None, index=True)   # веха = заказ (фриланс)
+    notes: str = ""
+    created_at: datetime = Field(default_factory=now)
+    done_at: Optional[datetime] = None
 
 
 # ---------- Финансы ----------
@@ -270,6 +305,18 @@ class Run(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now, index=True)
 
 
+class ScreenSlot(SQLModel, table=True):
+    """Экранное время: одна строка = непрерывный отрезок в одной программе/сайте (ПК-клиент шлёт пульс раз в 20 с,
+    ядро склеивает соседние пульсы с тем же окном). Только имя программы и сайт/заголовок — никакого содержимого."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    start: datetime = Field(index=True)
+    end: datetime
+    app: str = Field(index=True)       # premiere pro.exe → «Premiere Pro»
+    title: str = ""                    # сайт для браузера (youtube.com) или заголовок окна (обрезан)
+    category: str = "прочее"           # работа / браузер / общение / игра / медиа / прочее
+    idle: bool = False                 # True — отошёл от ПК (простой ≥ idle_min): «сел/ушёл» считаются по этим отрезкам
+
+
 class Fact(SQLModel, table=True):
     """Что ассистент знает о хозяине. Слои: short (последние дни: «болит спина», «делаю ролик для Пятёрочки»),
     long (устойчивое: «кот Барсик», «не любит созвоны утром»), archive (устарело/забыто — не удаляется, в контекст не идёт).
@@ -376,7 +423,7 @@ def _migrate() -> None:
         "event": {"repeat": "VARCHAR DEFAULT ''", "repeat_days": "VARCHAR DEFAULT ''", "repeat_until": "DATETIME",
                   "skip_dates": "VARCHAR DEFAULT ''", "reminded_for": "VARCHAR DEFAULT ''",
                   "done": "BOOLEAN DEFAULT 0", "done_at": "DATETIME", "done_dates": "VARCHAR DEFAULT ''"},
-        "task": {"remind_stage": "INTEGER DEFAULT 0"},
+        "task": {"remind_stage": "INTEGER DEFAULT 0", "aim_id": "INTEGER", "milestone_id": "INTEGER", "blocked_by": "VARCHAR DEFAULT ''"},
         "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''",
                    "pay_mode": "VARCHAR DEFAULT 'each'", "pay_every": "INTEGER DEFAULT 14", "pay_days": "VARCHAR DEFAULT ''"},
     }
@@ -429,6 +476,47 @@ def session() -> Iterator[Session]:
 def remember(s: Session, kind: str, text: str, ref_table: str | None = None,
              ref_id: int | None = None, channel: str = "tg") -> None:
     s.add(Memory(kind=kind, text=text, ref_table=ref_table, ref_id=ref_id, channel=channel))
+
+
+def diff_text(before: dict, after: dict, labels: dict[str, str] | None = None, width: int = 60) -> str:
+    """Что именно поменялось: «текст: «было…» → «стало…»; срок: 17.09 → 18.09». Пусто, если ничего.
+    Нужен журналу: строка «Правка мысли: <заголовок>» без самой правки бесполезна — по ней не понять, что случилось."""
+    labels = labels or {}
+    parts = []
+    for k, a in after.items():
+        b = before.get(k)
+        if (a or None) == (b or None):
+            continue
+        def cut(v):
+            return "«" + (v if len(v) <= width else v[:width - 1] + "…") + "»"
+
+        def fmt(v):
+            if v is None or v == "":
+                return "—"
+            if isinstance(v, datetime):
+                return f"{v:%d.%m %H:%M}"
+            return cut(" ".join(str(v).split()))
+        if isinstance(a, str) and isinstance(b, str) and b and a:
+            # длинный текст: показываем не два одинаковых начала, а сам изменённый кусок
+            an, bn = " ".join(a.split()), " ".join(b.split())
+            if an.startswith(bn):
+                parts.append(f"{labels.get(k, k)}: дописано {cut(an[len(bn):].strip())}")
+                continue
+            i = 0
+            while i < min(len(an), len(bn)) and an[i] == bn[i]:
+                i += 1
+            j = 0
+            while j < min(len(an), len(bn)) - i and an[-1 - j] == bn[-1 - j]:
+                j += 1
+            if i > 12 or j > 12:   # общее начало/конец есть — показываем только середину, где разошлось
+                lo = max(0, i - 8)
+                pre = "…" if lo else ""
+                b_mid = pre + bn[lo:len(bn) - j] + ("…" if j else "")
+                a_mid = pre + an[lo:len(an) - j] + ("…" if j else "")
+                parts.append(f"{labels.get(k, k)}: {cut(b_mid.strip())} → {cut(a_mid.strip())}")
+                continue
+        parts.append(f"{labels.get(k, k)}: {fmt(b)} → {fmt(a)}")
+    return "; ".join(parts)
 
 
 def get_setting(key: str, default: str | None = None) -> str | None:

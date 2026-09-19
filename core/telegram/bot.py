@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 import logging
 
 from aiogram import Bot, Dispatcher, F, Router
@@ -273,7 +274,7 @@ def _record_error(text: str) -> None:
     try:
         from ..api.app import app
         errs = list(getattr(app.state, "errors", []))
-        errs.append({"at": __import__("datetime").datetime.now().isoformat(), "text": text[:300]})
+        errs.append({"at": datetime.now().isoformat(), "text": text[:300]})
         app.state.errors = errs[-30:]
     except Exception:  # pragma: no cover
         pass
@@ -302,9 +303,11 @@ async def voice_msg(m: Message):
         r = await asyncio.wait_for(agent.handle(text, channel="tg-voice"), timeout=HANDLE_TIMEOUT)
         typing.cancel()
         unsure = " <i>(расслышал так себе — если не то, повторите чётче или текстом)</i>" if stt.LAST_CONFIDENCE < 0.45 else ""
-        # сверху — короткая расшифровка (цитатой), снизу — ответ; одно сообщение
-        short = text if len(text) <= 140 else text[:137].rstrip() + "…"
-        await send_long(m, f"<blockquote>🎙 {_html.escape(short)}</blockquote>{unsure}\n\n{r.text or '…'}", raw_prefix=True)
+        # сверху — расшифровка ЦЕЛИКОМ (сворачиваемой цитатой: длинная показывается первыми строками и «развернуть»),
+        # снизу — ответ; одно сообщение. Раньше резали до 140 символов — казалось, что услышал только начало.
+        shown = text if len(text) <= 3000 else text[:2997].rstrip() + "…"   # лимит одного сообщения Telegram — 4096
+        quote = f"<blockquote expandable>🎙 {_html.escape(shown)}</blockquote>" if len(shown) > 140 else f"<blockquote>🎙 {_html.escape(shown)}</blockquote>"
+        await send_long(m, f"{quote}{unsure}\n\n{r.text or '…'}", raw_prefix=True)
         if tts.enabled() and tts.REPLY_VOICE in ("voice", "always"):
             await _reply_voice(m, r.text)
     except asyncio.TimeoutError:
@@ -397,6 +400,27 @@ async def cb_proactive(cq: CallbackQuery):
             agent.on_change("chat", {"channel": "tg", "actions": ["add_task"]})
     except Exception as ex:
         log.warning("proactive callback failed: %s", ex)
+        msg = f"Не получилось: {ex}"
+    await cq.answer(msg[:180])
+    try:
+        await cq.message.edit_text((cq.message.html_text or cq.message.text or "") + f"\n\n<i>{msg}</i>", reply_markup=None)
+    except Exception:
+        await cq.message.answer(msg)
+
+
+@router.callback_query(F.data.regexp(r"^aim:\d+:(pause|drop|done)$"))
+async def cb_aim(cq: CallbackQuery):
+    """Кнопки под «цель стоит»: пауза / снять / достигнута."""
+    from core.services import aims
+    _, sid, act = cq.data.split(":")
+    try:
+        a = aims.close_aim(int(sid), {"pause": "paused", "drop": "dropped", "done": "done"}[act])
+        msg = ("Цель не найдена." if not a else
+               {"pause": f"«{a.title}» — на паузе. Вернёшься — скажи «цель … активна».", "drop": f"«{a.title}» снята. Без драмы.", "done": f"«{a.title}» — закрыта. Красиво."}[act])
+        if agent.on_change:
+            agent.on_change("chat", {"channel": "tg", "actions": ["close_aim"]})
+    except Exception as ex:
+        log.warning("aim callback failed: %s", ex)
         msg = f"Не получилось: {ex}"
     await cq.answer(msg[:180])
     try:
@@ -791,6 +815,30 @@ async def notify(bot: Bot, text: str, buttons=None) -> None:
             await bot.send_message(OWNER_ID, text, parse_mode=None, reply_markup=_kb(buttons))
         except Exception as e:
             log.warning("notify failed: %s", e)
+
+
+async def notify_voice(bot: Bot, text: str, buttons=None) -> bool:
+    """Голосовое владельцу (текст озвучивается TTS) + тот же текст под ним, чтобы можно было прочитать и нажать кнопки.
+    False — озвучить не вышло (вызывающий шлёт текстом)."""
+    from core.voice import tts
+    from aiogram.types import FSInputFile
+    out = VOICE_DIR / f"notify_{int(datetime.now().timestamp())}.ogg"
+    try:
+        VOICE_DIR.mkdir(parents=True, exist_ok=True)
+        await bot.send_chat_action(OWNER_ID, ChatAction.RECORD_VOICE)
+        p = await asyncio.wait_for(tts.speak_to_file(text, out), timeout=60)
+        if not p:
+            return False
+        await bot.send_voice(OWNER_ID, FSInputFile(p), caption=_to_html(text)[:1000], reply_markup=_kb(buttons))
+        return True
+    except Exception as e:
+        log.warning("notify_voice failed: %s", e)
+        return False
+    finally:
+        try:
+            out.unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 async def notify_photo(bot: Bot, path: str, caption: str = "") -> None:

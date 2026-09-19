@@ -302,6 +302,33 @@ def running_processes() -> set[str]:
         return set()
 
 
+def active_window() -> tuple[str, str]:
+    """(имя процесса, заголовок окна) активного окна — для учёта экранного времени. Не Windows / ошибка → ("", "")."""
+    if not IS_WIN:
+        return "", ""
+    try:
+        import ctypes
+        import ctypes.wintypes as wt
+        u32 = ctypes.windll.user32
+        hwnd = u32.GetForegroundWindow()
+        if not hwnd:
+            return "", ""
+        n = u32.GetWindowTextLengthW(hwnd) + 1
+        buf = ctypes.create_unicode_buffer(n)
+        u32.GetWindowTextW(hwnd, buf, n)
+        pid = wt.DWORD()
+        u32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        name = ""
+        try:
+            import psutil
+            name = psutil.Process(pid.value).name()
+        except Exception:
+            pass
+        return name.lower(), buf.value[:200]
+    except Exception:
+        return "", ""
+
+
 def idle_seconds() -> float:
     """Сколько секунд пользователь не трогал мышь/клавиатуру (Windows)."""
     if not IS_WIN:

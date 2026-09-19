@@ -311,11 +311,11 @@ def evening_data() -> dict:
             "tomorrow": tomorrow, "balance": s["total_balance"], "per_day": safe.get("per_day")}
 
 
-def evening_text(data: dict | None = None) -> str:
-    """Короткий вечерний итог — 3–4 строки, без воды."""
+def evening_text(data: dict | None = None, first: str | None = None) -> str:
+    """Короткий вечерний итог — 3–4 строки, без воды. first — живая первая строка от персоны (иначе нейтральная)."""
     d = data or evening_data()
     addr = _address()
-    parts = [f"🌙 Вечер, {addr}."]
+    parts = [f"🌙 {first}" if first else f"🌙 Вечер, {addr}."]
     n_done, n_due = len(d["done"]), len(d["due"])
     if n_done or n_due:
         bits = []
@@ -331,6 +331,13 @@ def evening_text(data: dict | None = None) -> str:
         if d["earned"]:
             m += f", +{money(d['earned'])}"
         parts.append(m + ".")
+    try:
+        from . import screen
+        sl = screen.evening_line(d.get("now"))
+        if sl:
+            parts.append(sl)
+    except Exception:  # pragma: no cover
+        pass
     if d["tomorrow"]:
         e = d["tomorrow"][0]
         more = f" и ещё {len(d['tomorrow']) - 1}" if len(d["tomorrow"]) > 1 else ""

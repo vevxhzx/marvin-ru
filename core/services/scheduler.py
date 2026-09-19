@@ -22,12 +22,27 @@ log = logging.getLogger("assistant.sched")
 Notifier = Callable[[str], Awaitable[None]]
 
 
-def morning_digest_text() -> str:
-    """Короткий утренний текст: подпись к картинке (и запасной вариант, если картинка не собралась)."""
+def morning_facts() -> dict:
+    """Факты утра одним словарём — для живой первой строки (persona.opener). Без сумм и балансов."""
+    from ..brain.dates import is_all_day
+    d = datetime.now()
+    evs = calendar.events_today()
+    ts = tasks.list_tasks(limit=50)
+    today = [t for t in ts if t.due and t.due.date() <= d.date()]
+    return {"when": "утро", "weekday": ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"][d.weekday()],
+            "events": [f"{e.start:%H:%M} {e.title}" for e in evs[:4]],
+            "day_tasks": [t.title for t in today if is_all_day(t.due)][:5],
+            "overdue": [t.title for t in today if t.due.date() < d.date()][:3],
+            "open_tasks": len(ts)}
+
+
+def morning_digest_text(head: str | None = None) -> str:
+    """Короткий утренний текст: подпись к картинке (и запасной вариант, если картинка не собралась).
+    head — живая первая строка от персоны; без неё — нейтральное приветствие."""
     d = datetime.now()
     wd = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"][d.weekday()]
     addr = (getattr(getattr(cfg, "owner", None), "name", None) or "сэр").strip().lower()
-    lines = [f"☀️ Доброе утро, {addr}. {wd.capitalize()}, {d:%d.%m}."]
+    lines = [f"☀️ {head}" if head else f"☀️ Доброе утро, {addr}. {wd.capitalize()}, {d:%d.%m}."]
     evs = calendar.events_today()
     if evs:
         first = evs[0]
@@ -58,6 +73,15 @@ def morning_digest_text() -> str:
                 lines.append(pt["hint"])
     except Exception as e:  # pragma: no cover
         log.debug("orders nudges: %s", e)
+    try:
+        from . import aims
+        f = aims.focus()
+        if f["items"]:
+            lines.append("🎯 Фокус: " + "; ".join(p["title"] for p in f["items"][:2]) + f" — к цели «{f['items'][0]['aim']}».")
+        for a in aims.stale_aims()[:1]:
+            lines.append(f"🎯 «{a.title}» стоит уже давно — либо шаг, либо честно закрыть.")
+    except Exception as e:  # pragma: no cover
+        log.debug("aims focus: %s", e)
     s = finance.summary(1)
     safe = s.get("safe") or {}
     tail = f"💰 Баланс {money(s['total_balance'])}"
@@ -171,18 +195,52 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     _tz = sch.timezone
     _soon = lambda sec: _dtm.now(_tz) + timedelta(seconds=sec)  # noqa: E731
 
-    async def _notify(text: str, buttons=None, urgent: bool = False):
-        """notify может быть старым (только text) — кнопки передаём, если умеет.
-        Тихие часы (notifications.quiet_from..quiet_to, по умолчанию 23–8): инициативные сообщения ассистента
-        (бюджет, подписки, дни рождения, вечерний обзор) ночью не шлём — они догонят днём или не нужны вовсе.
-        urgent=True (напоминание о событии, которое человек сам поставил на это время) — шлём всегда."""
-        if not urgent and _quiet_now():
-            log.info("тихие часы — пропускаю уведомление: %s", text[:60])
-            return
+    async def _send(text: str, buttons=None, channel: str = "text"):
+        from ..brain import persona
+        voice_fn = getattr(notify, "voice", None)
+        if channel == "voice" and voice_fn:
+            try:
+                if await voice_fn(text, buttons):
+                    persona.mark_voice_used()
+                    return
+            except Exception as e:  # pragma: no cover
+                log.debug("voice notify: %s", e)
         try:
             await notify(text, buttons)  # type: ignore[call-arg]
         except TypeError:
             await notify(text)
+
+    async def _notify(text: str, buttons=None, urgent: bool = False, kind: str = "", importance: int = 3, spend: bool = False):
+        """Единая точка «сказать или промолчать» (0.10, attention.decide):
+        · urgent — напоминание, которое человек сам поставил на это время: всегда и сразу;
+        · importance 3 (по умолчанию) — плановые сводки (вечер, неделя, платежи): ночью не шлём, днём — сразу (как раньше);
+        · importance 2 — инициатива (событие, повод, «пока тебя не было»): решает attention — сейчас / отложить до
+          возвращения за ПК / молча, с учётом бюджета в день, занятости (рендер, игра) и того, что человек только сел;
+        · importance 1 — мелочь: только если момент идеальный и бюджет не на исходе.
+        spend=True — списать из дневного бюджета инициатив (proactive.tick списывает сам).
+        kind — повод (evening / stale_task / late_pay …): по нему persona.choose_channel решает, не озвучить ли голосом."""
+        from ..brain import attention, persona
+        if urgent:
+            await _send(text, buttons, persona.choose_channel(kind, text, True) if kind else "text")
+            return
+        if importance >= 3:
+            if _quiet_now():
+                log.info("тихие часы — пропускаю уведомление: %s", text[:60])
+                return
+            await _send(text, buttons, persona.choose_channel(kind, text, False) if kind else "text")
+            return
+        d = attention.decide(kind or "notify", importance, False, text=text)
+        if d.verdict == "silent":
+            log.info("молчу (%s): %s", d.why, text[:60])
+            return
+        if d.verdict == "later":
+            nb = datetime.now() + timedelta(minutes=d.delay_min) if d.delay_min else None
+            attention.defer(kind or "notify", text, importance, buttons, key=kind if importance >= 3 else "", not_before=nb)
+            log.info("отложил (%s): %s", d.why, text[:60])
+            return
+        await _send(text, buttons, d.channel if kind else "text")
+        if spend:
+            attention.spend()
 
     def ping(kind, **payload):
         from ..brain import agent
@@ -193,7 +251,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         for e in calendar.due_reminders():
             mins = max(0, int((e.start - datetime.now()).total_seconds() // 60))
             when = "уже сейчас" if mins == 0 else f"через {mins} мин"
-            text = f"⏰ «{e.title}» — {when} ({e.start:%H:%M})" + (f", {e.location}" if e.location else "") + ". Не подведите меня, сэр."
+            text = f"⏰ «{e.title}» — {when} ({e.start:%H:%M})" + (f", {e.location}" if e.location else "") + "."
             ping("reminder", text=text, id=f"ev{e.id}-{e.start:%Y%m%d%H%M}")
             await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏰ +1 час", f"ev:{e.id}:hour"), ("📅 Завтра", f"ev:{e.id}:tomorrow")], urgent=True)
 
@@ -204,6 +262,9 @@ def build(notify: Notifier) -> AsyncIOScheduler:
 
     async def semantic_job():
         from . import relations, semantic
+        from ..brain import llm
+        if llm.user_recent() and not llm.cloud_enabled():
+            return   # человек в чате, а связи считала бы та же локальная модель — не встаём в очередь перед ним
         try:
             await semantic.index_pending()
         except Exception as e:  # pragma: no cover
@@ -248,7 +309,12 @@ def build(notify: Notifier) -> AsyncIOScheduler:
 
     async def digest():
         from . import cards, insights
-        text = morning_digest_text()
+        from ..brain import persona
+        try:
+            head = await persona.opener(morning_facts(), "")
+        except Exception as e:  # pragma: no cover
+            log.debug("morning opener: %s", e); head = ""
+        text = morning_digest_text(head or None)
         bd = insights.upcoming_birthdays(0)
         if bd:
             text += "\n🎂 Сегодня " + ", ".join(b["title"] for b in bd) + "!"
@@ -266,14 +332,17 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         path = await asyncio.to_thread(cards.report_card, 30)
         await _photo(path, "📊 Итоги месяца, сэр. Цифры не врут — в отличие от ощущений.")
 
+    from . import state as _state
+
+    @_state.tracked("бэкап базы")
     async def backup():
-        try:
-            backup_db()
-        except Exception as e:  # pragma: no cover
-            log.warning("backup failed: %s", e)
+        backup_db()
 
     async def polish_job():
         from . import polish
+        from ..brain import llm
+        if llm.user_recent():
+            return   # уборка заметок идёт на локальной модели — через 5 минут попробует снова
         try:
             await polish.polish_pending()
         except Exception as e:  # pragma: no cover
@@ -323,15 +392,13 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             await _notify(text)
 
     async def self_check():
-        """Тихая самодиагностика раз в день — только в лог и в статус (в Telegram НЕ шлём, по просьбе владельца)."""
-        from ..brain import llm
+        """Самодиагностика (health.diagnose) раз в день: в лог всегда; в чат — только когда состояние ухудшилось
+        (событие health_bad один раз на 6 часов), а не «всё ок» каждое утро."""
+        from . import health
         try:
-            ok_ollama = await llm.ollama_available()
-            cloud = await llm.cloud_check() if llm.cloud_enabled() else {"ok": None}
-            lb = last_backup()
-            log.info("Самопроверка: Ollama %s · облако %s · бэкап %s · ПК-клиент %s",
-                     "ок" if ok_ollama else "нет", "ок" if cloud.get("ok") else ("выкл" if cloud.get("ok") is None else "НЕТ"),
-                     lb.get("last", "не было")[:16] if lb.get("last") else "не было", "на связи" if __import__("core.services.pc", fromlist=["alive"]).alive() else "нет")
+            res = await health.diagnose()
+            log.info("Самопроверка: %s", res["text"].replace("\n", " · "))
+            health.record(res)
         except Exception as e:  # pragma: no cover
             log.warning("self-check failed: %s", e)
 
@@ -350,10 +417,22 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         if not due and not data["done"] and not data["spent"] and not data["earned"]:
             return
         set_setting(key, "1")
-        head = cards.evening_text(data)
+        from ..brain import persona
+        try:
+            facts = {"when": "вечер", "done": [t.title for t in data["done"][:5]], "due_left": [t.title for t in due[:5]],
+                     "spent": bool(data["spent"]), "top_category": (data["top"][0] if data.get("top") else None),
+                     "tomorrow": [f"{e.start:%H:%M} {e.title}" for e in data["tomorrow"][:3]]}
+            first = await persona.opener(facts, "")
+        except Exception as e:  # pragma: no cover
+            log.debug("evening opener: %s", e); first = ""
+        head = cards.evening_text(data, first or None)
         ping("reminder", text=head, id=key)
         path = await asyncio.to_thread(cards.evening_card, None, data)
-        if not await _photo(path, head):
+        if first and persona.choose_channel("evening", head) == "voice":
+            # вечерний итог голосом — как акцент дня; картинка ниже всё равно приходит
+            await _notify(head, kind="evening")
+            await _photo(path, "")
+        elif not await _photo(path, head):
             await _notify(head)
         n = len(due)
         for t in due[:5]:
@@ -407,14 +486,12 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     sch.add_job(semantic_job, "interval", minutes=10, id="semantic", next_run_time=_soon(90))
     sch.add_job(polish_job, "interval", minutes=5, id="polish", next_run_time=_soon(40))
     sch.add_job(recurring, "interval", hours=1, id="recurring", next_run_time=_soon(20))
+    @_state.tracked("ночная уборка памяти")
     async def memory_nightly():
         from . import memory, trace
-        try:
-            res = await memory.nightly()
-            if res:
-                log.info("память: уборка %s", res)
-        except Exception as e:  # pragma: no cover
-            log.warning("memory nightly failed: %s", e)
+        res = await memory.nightly()
+        if res:
+            log.info("память: уборка %s", res)
         try:
             n = trace.cleanup()
             if n:
@@ -431,8 +508,80 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             log.warning("proactive failed: %s", e); return
         if c:
             ping("reminder", text=c["text"], id="pro-" + c["key"])
-            await _notify("💡 " + c["text"], c.get("buttons"))
+            await _notify("💡 " + c["text"], c.get("buttons"), kind=str((c.get("fact") or {}).get("kind") or "proactive"), importance=2)
 
+    async def presence_tick():
+        """Раз в минуту: нет пульса → offline; человек за ПК и «отогрелся» → отдать отложенное (attention.due)."""
+        from . import state
+        from ..brain import attention
+        _loop_box["loop"] = asyncio.get_running_loop()
+        try:
+            state.offline_check()
+            sn = state.snapshot()
+            if sn["presence"] != "active" or (sn.get("session_min") or 0) < 2 or _quiet_now():
+                return
+            items = attention.due()
+            if not items:
+                return
+            if len(items) >= 3:
+                # пачка — одним сообщением, а не очередью пингов
+                body = "\n".join("· " + i["text"].lstrip("💡 ") for i in items)
+                await _notify("Пока тебя не было:\n" + body, None, kind="catchup", importance=3)
+                attention.spend()
+                return
+            for i in items:
+                await _notify(i["text"], i.get("buttons") or None, kind=i.get("kind") or "", importance=i.get("importance", 2), spend=i.get("importance", 2) < 3)
+        except Exception as e:  # pragma: no cover
+            log.warning("presence tick: %s", e)
+
+    _loop_box: dict = {}   # цикл событий планировщика — события (events.emit) прилетают и из потоков API
+
+    def _fire(coro):
+        loop = _loop_box.get("loop")
+        if loop is None:
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                coro.close(); return
+        loop.call_soon_threadsafe(lambda: loop.create_task(coro))
+
+    def _on_event(e):
+        """Реакции на события (events.emit) — что из них вообще стоит озвучивать. Остальное живёт в ленте."""
+        from . import state
+        if (e.kind == "background_done" and e.data.get("announce")) or e.kind == "background_failed":
+            name = e.data.get("job", "работа")
+            txt = (f"«{name}» — готово." if e.kind == "background_done" else f"Фоновая работа «{name}» упала: {e.data.get('error', '')[:120]}")
+            ping("reminder", text=txt, id=f"job-{name}")
+            _fire(_notify(txt, None, kind="job", importance=2, spend=True))
+        elif e.kind == "restart" and e.data.get("gap_min", 0) >= 10:
+            pend = state.snapshot().get("pending")
+            if pend:
+                txt = f"Перезапустился (не было {e.data['gap_min']} мин). Висело без ответа: {pend}. Актуально ещё?"
+                _fire(_notify(txt, None, kind="restart", importance=2, spend=True))
+        elif e.kind == "health_bad":
+            _fire(_notify(e.data.get("text", "Есть проблемы — «проверь себя»."), None, kind="health", importance=2, spend=True))
+        elif e.kind == "milestone_done":
+            txt = f"Веха «{e.data.get('milestone', '')}» закрыта (цель «{e.data.get('aim', '')}»)." + (f" Дальше: «{e.data['next']}»." if e.data.get("next") else " Следующую веху ты пока не ставил.")
+            _fire(_notify(txt, None, kind="goal", importance=2, spend=True))
+        elif e.kind == "aim_ready":
+            txt = f"По цели «{e.data.get('aim', '')}» все вехи закрыты. Она достигнута — или ставим следующую веху? Скажи «цель {e.data.get('aim', '')[:25]} достигнута» или «веха: …»."
+            _fire(_notify(txt, None, kind="goal", importance=2, spend=True))
+        elif e.kind == "long_session":
+            _fire(_notify(f"{e.data.get('hours', 4)} часа за ПК без перерыва. Не нотация — просто встань на пять минут.", None, kind="care", importance=1, spend=True))
+
+    from . import events as _events
+    _events.on("*", _on_event)
+    sch.add_job(presence_tick, "interval", minutes=1, id="presence_tick", next_run_time=_soon(45))
+
+    async def screen_cleanup():
+        from . import screen
+        try:
+            n = screen.cleanup()
+            if n:
+                log.info("Экранное время: удалено %d старых отрезков", n)
+        except Exception as e:  # pragma: no cover
+            log.warning("screen cleanup: %s", e)
+    sch.add_job(screen_cleanup, CronTrigger(hour=3, minute=20), id="screen_cleanup")
     sch.add_job(backup, CronTrigger(hour=3, minute=0), id="backup")
     sch.add_job(memory_nightly, CronTrigger(hour=4, minute=0), id="memory_nightly")
     sch.add_job(proactive_tick, "interval", hours=1, id="proactive", next_run_time=_soon(300))

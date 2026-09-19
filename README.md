@@ -90,9 +90,9 @@
 - [Сайт внутри Telegram (Mini App): Tailscale Funnel, безопасность, подключение](docs/telegram-miniapp.md)
 - [Второй ассистент на том же ПК — для мамы, жены, друга: свой бот, своя память, только облако](docs/second-assistant.md) · [памятка для него без технических слов](docs/for-family.md)
 - [Что умеет — все команды по областям](docs/features.md)
-- [Мозг: режимы, модели под видеокарту, облачные провайдеры](docs/brain.md)
+- [Мозг: режимы, модели под видеокарту, облачные провайдеры](docs/brain.md) · [малая модель для мини-задач](docs/small-model.md)
 - [Если что-то не так + горячие клавиши](docs/troubleshooting.md)
 - [Разработка и структура проекта](docs/development.md) · [Архитектура](ARCHITECTURE.md) · [Дизайн-система сайта](web/DESIGN.md)
-- [История изменений](CHANGELOG.md) · [Что нового в 0.9.13–0.9.14](RELEASE-0.9.13.md) · [Планы](ROADMAP.md)
+- [История изменений](CHANGELOG.md) · [Планы](ROADMAP.md)
 
 Стек: Python 3.11+ · FastAPI · SQLite · aiogram 3 · Ollama · faster-whisper · Vosk · Silero / edge-tts · React + Vite + Tailwind. Лицензия — [MIT](LICENSE). Нашли ошибку — [issue](../../issues/new/choose); pull request'ы приветствуются, особенно новые фразы-шаблоны в `core/brain/quick.py` с тестами.

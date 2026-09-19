@@ -1,4 +1,4 @@
-import { useEffect, useState, createContext, useContext, useCallback, useRef } from 'react'
+import { Component, useEffect, useState, createContext, useContext, useCallback, useRef } from 'react'
 import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { Sun, Moon, Monitor, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, Bell, History, MessageCircle, Briefcase, Square, Play, Users } from 'lucide-react'
 import Settings from './pages/Settings'
@@ -61,6 +61,31 @@ function useThemeState() {
     return () => mq.removeEventListener('change', apply)
   }, [mode])
   return [mode, setMode]
+}
+
+/* Ошибка отрисовки одной страницы не должна гасить весь экран в чёрный: ловим её здесь,
+   показываем, что случилось, и даём уйти на главную. При смене маршрута сбрасывается. */
+class PageGuard extends Component {
+  state = { err: null, key: this.props.pathKey }
+  static getDerivedStateFromError(err) { return { err } }
+  static getDerivedStateFromProps(p, st) { return p.pathKey !== st.key ? { err: null, key: p.pathKey } : null }
+  componentDidCatch(err) { try { console.error('page crashed:', err) } catch {} }
+  render() {
+    if (!this.state.err) return this.props.children
+    const msg = String(this.state.err?.message || this.state.err).slice(0, 200)
+    return (
+      <div className="mx-auto max-w-[520px] py-16 text-center animate-rise">
+        <div className="label mb-2">страница сломалась</div>
+        <h1 className="text-[28px] font-semibold tracking-[-0.03em]">Что-то пошло не так</h1>
+        <p className="muted mt-2 text-[14px]">Ошибка при отрисовке этой страницы. Остальное работает.</p>
+        <pre className="fill mt-4 overflow-x-auto rounded-xl px-3 py-2 text-left text-[12px] leading-relaxed" style={{ whiteSpace: 'pre-wrap' }}>{msg}</pre>
+        <div className="mt-5 flex justify-center gap-2">
+          <button className="btn-ghost" onClick={() => this.setState({ err: null })}>попробовать ещё раз</button>
+          <a className="btn-primary" href="/">на главную</a>
+        </div>
+      </div>
+    )
+  }
 }
 
 function NotFound() {
@@ -210,6 +235,7 @@ export function assistantState(live, busy) {
 
 function Sidebar({ min, setMin, live, busy, mode, cycle, ThemeIcon, hiddenNav = [] }) {
   const st = assistantState(live, busy)
+  const [pop, setPop] = useState(false)
   return (
     <aside className={`sidebar sticky top-0 hidden shrink-0 flex-col border-r hair px-3 py-4 md:flex ${min ? 'min' : ''}`}>
       <NavLink to="/" className={`mb-5 flex items-center gap-2.5 px-2 ${min ? 'justify-center px-0' : ''}`}>
@@ -234,9 +260,12 @@ function Sidebar({ min, setMin, live, busy, mode, cycle, ThemeIcon, hiddenNav = 
       </nav>
       <div className={`mt-4 space-y-2 ${min ? 'flex flex-col items-center' : ''}`}>
         {!hiddenNav.includes('/orders') && <SideTimer min={min} />}
-        <div className={`flex items-center gap-2.5 rounded-xl px-3 py-2 text-[12.5px] ${min ? 'justify-center px-0' : ''}`} style={{ background: 'var(--fill)' }} title={st.text}>
-          <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${st.pulse ? 'dot-live' : ''}`} style={{ background: st.dot, color: st.dot }} />
-          {!min && <span className="muted truncate">{st.text}</span>}
+        <div className="relative">
+          <button type="button" onClick={() => setPop((v) => !v)} className={`flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[12.5px] transition hover:brightness-110 ${min ? 'justify-center px-0' : ''}`} style={{ background: 'var(--fill)' }} title={st.text} aria-label="Состояние ассистента">
+            <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${st.pulse ? 'dot-live' : ''}`} style={{ background: st.dot, color: st.dot }} />
+            {!min && <span className="muted truncate">{st.text}</span>}
+          </button>
+          {pop && <LivePopover live={live} onClose={() => setPop(false)} place="absolute bottom-[calc(100%+8px)] left-0" />}
         </div>
         <div className={`flex items-center ${min ? 'flex-col gap-1' : 'justify-between px-1'}`}>
           <button className="btn-icon !h-8 !w-8" onClick={cycle} data-tip={{ auto: 'тема: как в системе', light: 'тема: светлая', dark: 'тема: тёмная' }[mode]} data-tip-side={min ? 'right' : undefined}><ThemeIcon key={mode} size={14} className="theme-icon" /></button>
@@ -415,6 +444,7 @@ function Shell({ inbox }) {
         {/* content */}
         <main className="relative z-0 mx-auto w-full min-w-0 max-w-[var(--content-max)] flex-1 px-4 pb-28 pt-6 sm:px-8 sm:pt-8 md:pb-16">
           <PageTransition pathKey={loc.pathname}>
+          <PageGuard pathKey={loc.pathname}>
           <Routes location={loc}>
             <Route path="/" element={<Today openChat={() => setChatOpen(true)} state={st} address={address} />} />
             <Route path="/finance" element={<Finance />} />
@@ -427,6 +457,7 @@ function Shell({ inbox }) {
             <Route path="/settings" element={<Settings health={health} />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
+          </PageGuard>
           </PageTransition>
         </main>
 

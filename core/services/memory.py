@@ -346,7 +346,8 @@ async def context(text: str) -> str:
                 if row:
                     row.uses += 1; row.last_used = datetime.now(); s.add(row)
             s.commit()
-    lines = ["ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ (используй, когда уместно, не пересказывай без повода):"]
+    lines = ["ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ (фон, а не материал для шуток: НЕ упоминай эти факты и имена, если реплика не о них — "
+             "кот/семья/привычки в каждом ответе раздражают):"]
     if portrait:
         lines.append(portrait.strip())
     for f in core + rel:

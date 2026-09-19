@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 
 from sqlmodel import select
 
-from ..db import icontains, Task, log_action, now, remember, session
+from ..db import diff_text, icontains, Task, log_action, now, remember, session
 
 
 def add_task(title: str, due: datetime | None = None, priority: int = 2,
@@ -45,6 +45,8 @@ def update_task(task_id: int, **fields) -> Task | None:
         t = s.get(Task, task_id)
         if not t:
             return None
+        before = {"title": t.title, "due": t.due, "priority": t.priority, "project": t.project, "done": t.done,
+                  "blocked_by": t.blocked_by, "aim_id": t.aim_id, "milestone_id": t.milestone_id}
         if fields.get("title") is not None:
             t.title = fields["title"].strip() or t.title
         if "due" in fields:
@@ -57,10 +59,30 @@ def update_task(task_id: int, **fields) -> Task | None:
             t.project = (fields["project"] or "").strip() or None
         if fields.get("done") is not None:
             t.done = bool(fields["done"]); t.done_at = now() if t.done else None
+        if "blocked_by" in fields:
+            t.blocked_by = (fields["blocked_by"] or "").strip()[:200]
+        if "aim_id" in fields:
+            t.aim_id = fields["aim_id"] or None
+        if "milestone_id" in fields:
+            t.milestone_id = fields["milestone_id"] or None
         s.add(t)
-        remember(s, "task", f"Изменена задача: «{t.title}»" + (f" до {t.due:%d.%m %H:%M}" if t.due else ""), "task", t.id)
+        after = {"title": t.title, "due": t.due, "priority": t.priority, "project": t.project, "done": t.done,
+                 "blocked_by": t.blocked_by, "aim_id": t.aim_id, "milestone_id": t.milestone_id}
+        changes = diff_text({k: v for k, v in before.items() if k in ("title", "due", "priority", "project", "done")},
+                            {k: v for k, v in after.items() if k in ("title", "due", "priority", "project", "done")},
+                            {"title": "название", "due": "срок", "priority": "приоритет", "project": "проект", "done": "сделано"})
+        extra = []
+        if before["blocked_by"] != after["blocked_by"]:
+            extra.append(f"блок: {after['blocked_by']}" if after["blocked_by"] else "блок снят")
+        if (before["aim_id"], before["milestone_id"]) != (after["aim_id"], after["milestone_id"]):
+            extra.append("привязка к цели" if after["aim_id"] else "отвязана от цели")
+        changes = ", ".join([c for c in [changes] if c] + extra)
+        if changes:   # пустой PUT (ничего не поменялось) в ленту не пишем
+            remember(s, "task", f"Изменена задача «{t.title}»: {changes}", "task", t.id)
         s.commit(); s.refresh(t)
-        return t
+    if fields.get("done") and not before["done"]:
+        _after_done(t)
+    return t
 
 
 def due_task_reminders() -> list[tuple[Task, str]]:
@@ -78,7 +100,7 @@ def due_task_reminders() -> list[tuple[Task, str]]:
             if t.remind_stage < 1 and same_day and nw.hour >= 9:
                 # если до дедлайна уже меньше часа — второе напоминание («остался час») не нужно
                 t.remind_stage = 2 if t.due - nw <= timedelta(hours=1) else 1; s.add(t)
-                out.append((t, f"📌 Сегодня дедлайн: «{t.title}» — до {t.due:%H:%M}. Сэр, само себя оно не сделает."))
+                out.append((t, f"📌 Сегодня до {t.due:%H:%M} — «{t.title}»."))
             elif t.remind_stage < 2 and timedelta(0) <= t.due - nw <= timedelta(hours=1):
                 t.remind_stage = 2; s.add(t)
                 mins = int((t.due - nw).total_seconds() // 60)
@@ -115,7 +137,40 @@ def complete_task(query: str | int) -> Task | None:
         remember(s, "task", f"Выполнено: «{t.title}»", "task", t.id)
         s.commit()
         s.refresh(t)
-        return t
+    _after_done(t)
+    return t
+
+
+LAST_PROGRESS: dict = {}   # task_id → результат aims.on_task_done (что продвинулось) — агент дописывает это в ответ
+
+
+def progress_tail(task_id: int) -> str:
+    """Хвост к «сделано»: куда это продвинуло цель. Пусто, если задача ни к чему не привязана."""
+    r = LAST_PROGRESS.pop(task_id, None)
+    if not r:
+        return ""
+    if r.get("aim_ready"):
+        return f" Это была последняя веха по «{r['aim']}» — цель достигнута или ставим следующую?"
+    if r.get("milestone_closed"):
+        nxt = r.get("next") or []
+        return f" Веха «{r['milestone']}» закрыта." + (f" Дальше: «{nxt[0]['title']}»." if nxt else " Следующую веху пока не ставил.")
+    nxt = [n for n in (r.get("next") or []) if n.get("task_id") != task_id]
+    return f" Шаг к «{r['aim']}»." + (f" Следующий: «{nxt[0]['title']}»." if nxt else "")
+
+
+def _after_done(t: Task) -> None:
+    """Закрытая задача — событие и движение цели (0.10). Ошибки здесь не должны мешать самому закрытию."""
+    try:
+        from . import events
+        events.emit("task_done", key=f"task:{t.id}", title=t.title, quiet=True, journal=False)   # в журнале уже есть «Выполнено»
+        if t.aim_id or t.milestone_id:
+            from . import aims
+            r = aims.on_task_done(t)
+            if r:
+                LAST_PROGRESS.clear(); LAST_PROGRESS[t.id] = r
+    except Exception as e:  # pragma: no cover
+        import logging
+        logging.getLogger("marvin.tasks").warning("after task done: %s", e)
 
 
 def delete_task(task_id: int) -> bool:

@@ -33,17 +33,30 @@ export function LiveDot({ live, onClick }) {
 }
 
 /* Всплывающая карточка состояния при клике на точку */
-export function LivePopover({ live, onClose }) {
+export function LivePopover({ live, onClose, place = "absolute left-0 top-[46px]" }) {
   const pc = live.pc
+  const [st, setSt] = useState(null)
+  useEffect(() => { api.get('/api/state').then(setSt).catch(() => setSt(null)) }, [])
+  const PRES = { active: 'за ПК', idle: 'отошли', away: 'давно нет', offline: 'ПК не на связи' }
   return (
-    <div className="elevated absolute left-0 top-[46px] z-[70] w-[280px] !p-3 text-[13px]" style={{ animation: 'rise .2s var(--ease-out)' }} onMouseLeave={onClose}>
+    <div className={`elevated ${place} z-[70] w-[300px] !p-3 text-[13px]`} style={{ animation: 'rise .2s var(--ease-out)' }} onMouseLeave={onClose}>
       <Row ok={live.core === 'ok'} label="ядро" val={live.core === 'ok' ? 'онлайн' : live.core === 'down' ? 'не отвечает' : '…'} />
       <Row ok={live.brain} label="локальный мозг" val={live.brain ? 'онлайн' : 'спит / не запущен'} />
       <Row ok={!!pc?.alive} label="ПК-клиент (voice.bat)" val={pc?.alive ? PC_LABEL[pc.mode] || pc.mode : 'не на связи'} />
       {pc?.alive && pc.text && <div className="muted mt-1 truncate pl-4 text-[12px]">{pc.text}</div>}
+      {st && st.presence !== 'offline' && (
+        <div className="mt-2 border-t pt-2" style={{ borderColor: 'var(--line)' }}>
+          <Row ok={st.presence === 'active'} label="вы" val={`${PRES[st.presence]}${st.presence === 'active' && st.session_min != null ? ` · ${fmtMin(st.session_min)}` : st.presence_min ? ` · ${fmtMin(st.presence_min)}` : ''}`} />
+          {st.presence === 'active' && st.app && <div className="muted truncate pl-4 text-[12px]">{st.cat === 'браузер' ? 'браузер' : st.app}{st.act_min ? ` · ${fmtMin(st.act_min)}` : ''}{st.heavy?.length ? ` · рендер: ${st.heavy.join(', ')}` : ''}</div>}
+          {st.jobs?.length > 0 && <div className="muted truncate pl-4 text-[12px]">фон: {st.jobs.map((j) => `${j.name} ${Math.round((j.progress || 0) * 100)}%`).join(', ')}</div>}
+          {st.pending && <div className="warn truncate pl-4 text-[12px]">{st.pending}</div>}
+          <div className="faint pl-4 text-[11px]">инициатив сегодня осталось {st.budget_left}{st.deferred ? ` · отложено ${st.deferred}` : ''}</div>
+        </div>
+      )}
     </div>
   )
 }
+const fmtMin = (m) => (m < 60 ? `${m} мин` : `${Math.floor(m / 60)} ч ${String(m % 60).padStart(2, '0')}`)
 const Row = ({ ok, label, val }) => (
   <div className="flex items-center gap-2 py-1">
     <span className="h-1.5 w-1.5 rounded-full" style={{ background: ok ? 'var(--accent)' : 'var(--ink-3)' }} />

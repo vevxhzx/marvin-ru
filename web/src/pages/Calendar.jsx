@@ -62,9 +62,10 @@ export default function Calendar() {
   }, [cursor])
 
   const evs = events || []
+  const today = new Date()
+  // «today» объявлена до byDay: иначе для дня с выполненной задачей фильтр падал (ReferenceError → чёрный экран)
   const byDay = (d) => evs.filter((e) => isSameDay(e.start, d) && !(e.kind === 'task' && e.done && !isSameDay(e.start, today))).sort((a, b) => new Date(a.start) - new Date(b.start))
   const dayEvents = byDay(selected)
-  const today = new Date()
   const isToday = isSameDay(selected, today)
   const shift = (n) => { const d = new Date(cursor); d.setMonth(d.getMonth() + n); setCursor(d) }
   const goToday = () => { const d = new Date(); setSelected(d); const c = new Date(d); c.setDate(1); c.setHours(0, 0, 0, 0); setCursor(c) }

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import logging
 import threading
 from pathlib import Path
@@ -207,10 +208,31 @@ def _transcribe_sync(path) -> str:
         LAST_CONFIDENCE = max(0.0, min(1.0, math.exp(lp)))   # avg_logprob −0.2 → 0.82, −0.7 → 0.5, −1.2 → 0.3
     else:
         LAST_CONFIDENCE = 0.0
+    text = strip_credits(text)
     low = text.lower().strip(" .!")
     if not text or low in _HALLUCINATIONS or any(h in low for h in _HALLUCINATIONS if len(low) < 40):
         return ""
     return text
+
+
+# Whisper учился на YouTube и на тишине/шуме в конце записи «дописывает» титры: «Субтитры сделал DimaTorzok»,
+# «Редактор субтитров А. Семкин», «Корректор А. Егорова», «Субтитры субтитров Н. Новикова»… В длинной реплике это
+# попадало в текст целиком — модель потом честно пыталась обыграть «Новикова». Режем такие хвосты и вставки.
+_CREDITS_RX = re.compile(
+    r"(?:^|(?<=[\s.!?,;—-]))(?:"
+    r"(?:редактор|корректор|переводчик|автор)\s+субтитров(?:\s+[А-ЯЁ]\.\s?[А-ЯЁ][а-яё]+)?|"          # «Редактор субтитров А. Семкин»
+    r"(?:редактор|корректор|переводчик)\s+[А-ЯЁ]\.\s?[А-ЯЁ][а-яё]+|"                                 # «Корректор А. Егорова»
+    r"субтитры\s+(?:сделал\w*|подогнал\w*|перев[её]л|подготовил\w*|by)\s+\S+(?:\s+\S+)?|"            # «Субтитры сделал DimaTorzok»
+    r"субтитры\s+субтитров(?:\s+[А-ЯЁ]\.\s?[А-ЯЁ][а-яё]+)?|"                                        # «Субтитры субтитров Н. Новикова»
+    r"субтитры\s+[А-ЯЁ]\.\s?[А-ЯЁ][а-яё]+|"                                                          # «Субтитры А. Иванов»
+    r"продолжение\s+следует|спасибо\s+за\s+просмотр|подписывайтесь\s+на\s+канал|dimatorzok|дима\s+торжок"
+    r")\s*[.!?]*", re.I)
+
+
+def strip_credits(text: str) -> str:
+    out = _CREDITS_RX.sub(" ", text)
+    out = re.sub(r"\s{2,}", " ", out).strip(" ,")
+    return out
 
 
 async def transcribe(path: str | Path) -> str:

@@ -624,7 +624,11 @@ def main() -> None:
     if SPEAK_REMINDERS:
         log.info("Напоминания ядра (встречи, задачи) буду произносить вслух")
     from core.pc import loop as pcloop
-    pcloop.setup(API, DATA_DIR, GAMES_EXTRA, tidy_downloads_days=int(getattr(_PC, "tidy_downloads_days", 0) or 0) if _PC is not None else 0)
+    _st = getattr(_PC, "screen_time", None) if _PC is not None else None
+    pcloop.setup(API, DATA_DIR, GAMES_EXTRA, tidy_downloads_days=int(getattr(_PC, "tidy_downloads_days", 0) or 0) if _PC is not None else 0,
+                 screen_time=bool(getattr(_st, "enabled", False)) if _st is not None else False)
+    if pcloop.SCREEN_TIME:
+        log.info("Экранное время: пишу активную программу и простой (локально, в базу ядра). Выключить — voice.pc.screen_time.enabled: false")
     threading.Thread(target=pcloop.heartbeat_loop, args=(lambda: STATE, lambda: _running), daemon=True, name="heartbeat").start()
     log.info("Управление ПК включено: «открой ютуб», «найди файл …», «что на экране», «пауза», «статус костюма». Игровой режим — автоматически по запущенным играм.")
     stop_watcher = _StopWatcher(wake)

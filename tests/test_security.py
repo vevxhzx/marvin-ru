@@ -665,3 +665,15 @@ def test_past_tense_and_health_go_to_memory_not_calendar():
     from core.brain.dates import parse_datetime
     assert parse_datetime("завтра в 10 к врачу")[0].hour == 10        # «к врачу» — не «10к»
     assert parse_datetime("потратил на 10к")[0] is None
+
+
+def test_upload_size_limits():
+    """Слишком большой файл отклоняется до разбора: фото > 20 МБ, выписка > 25 МБ → 413."""
+    from fastapi.testclient import TestClient
+    from core.api.app import app
+    c = TestClient(app)
+    big = b"x" * (25 * 1024 * 1024 + 1)
+    r = c.post("/api/finance/import", files={"file": ("big.csv", big, "text/csv")})
+    assert r.status_code == 413
+    r = c.post("/api/notes/photo", files={"file": ("big.jpg", b"x" * (20 * 1024 * 1024 + 1), "image/jpeg")}, data={"text": ""})
+    assert r.status_code == 413

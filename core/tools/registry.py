@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
@@ -28,7 +29,7 @@ FUNCS: dict[str, Callable] = {}
 # run_tool() остался прежним (возвращает строку) — все старые вызовы работают как раньше.
 
 CREATES = {"add_event", "add_task", "add_expense", "add_income", "add_debt", "add_recurring", "add_note",
-           "add_order", "add_goal", "transfer", "pay_debt", "order_payment", "save_to_goal", "remember_fact"}
+           "add_order", "add_goal", "transfer", "pay_debt", "order_payment", "save_to_goal", "remember_fact", "add_aim"}
 MONEY = {"add_expense", "add_income", "transfer", "pay_debt", "set_balance", "order_payment", "save_to_goal"}
 DESTRUCTIVE = {"delete_event", "stop_recurring"}
 _WRITE_PREFIX = ("add_", "edit_", "move_", "set_", "complete_", "update_", "save_", "order_", "pomodoro", "remember_")
@@ -290,15 +291,24 @@ def call(name: str, args: dict[str, Any] | None, channel: str = "tg") -> ToolRes
     before = _last_action_id() if name in CREATES else 0
     probe = PROBES.get(name)
     before_probe = _safe_probe(probe, args)
-    try:
+    text = ""
+    for attempt in range(3):
         try:
-            text = str(fn(**args, _channel=channel))
-        except TypeError:
-            text = str(fn(**args))
-    except Exception as e:  # noqa: BLE001 — падение инструмента не должно ронять ход
-        trace.tool(name, ok=False)
-        return ToolResult(name, ok=False, risk=risk, error=f"{type(e).__name__}: {e}",
-                          retryable=bool(_TRANSIENT_RX.search(str(e))) and risk == "read")
+            try:
+                text = str(fn(**args, _channel=channel))
+            except TypeError:
+                text = str(fn(**args))
+            break
+        except Exception as e:  # noqa: BLE001 — падение инструмента не должно ронять ход
+            transient = bool(_TRANSIENT_RX.search(str(e)))
+            # «database is locked» / таймаут: чтение и обычная запись повторяем сами (до 3 раз, с паузой),
+            # деньги и удаление — нет: повтор может записать дважды; это решает человек
+            if transient and attempt < 2 and risk in ("read", "write") and not (name in CREATES and _action_after(before) is not None):
+                time.sleep(0.3 * (attempt + 1))
+                continue
+            trace.tool(name, ok=False)
+            return ToolResult(name, ok=False, risk=risk, error=f"{type(e).__name__}: {e}",
+                              retryable=transient and risk == "read")
 
     res = ToolResult(name, text=text, risk=risk)
     if name in CREATES:
@@ -428,6 +438,46 @@ def add_task(title: str, due: str | None = None, priority: int = 2, _channel: st
     return f"Задача #{t.id} «{t.title}» добавлена" + (f" — {tail[0].lower()}{tail[1:-1]}" if tail else "")
 
 
+@tool("add_aim", "Поставить долгосрочную цель (месяцы: портфолио, доход, здоровье). НЕ задача и НЕ денежный конверт.",
+      {"title": {"type": "string"}, "why": {"type": "string", "description": "Зачем (необязательно)"},
+       "due": {"type": "string", "description": "Срок словами: «к декабрю», «до конца года», «за полгода» (необязательно)"}}, ["title"])
+def add_aim(title: str, why: str = "", due: str | None = None, _channel: str = "tg") -> str:
+    from ..services import aims
+    d, rest = aims.aim_due(f"{title} {due}".strip()) if due else aims.aim_due(title)
+    a = aims.add_aim((rest or title).strip(), why=why or "", due=d, source=_channel)
+    return f"Цель «{a.title}» поставлена" + (f", к {a.due:%d.%m.%Y}" if a.due else "") + ". Дальше — веха: первый ощутимый рубеж."
+
+
+@tool("list_aims", "Показать долгосрочные цели и прогресс по ним («мои цели», «как дела с целями»).", {})
+def list_aims(**_) -> str:
+    from ..services import aims
+    return aims.text_aims()
+
+
+@tool("focus_today", "Что сегодня делать ради целей: 1–3 шага («что мне сегодня делать», «фокус дня»). Не список всех задач.", {})
+def focus_today(**_) -> str:
+    from ..services import aims
+    return aims.text_focus()
+
+
+@tool("link_task_to_aim", "Привязать задачу к цели или вехе («задача X — это к цели Y»).",
+      {"task": {"type": "string", "description": "название задачи"}, "aim": {"type": "string", "description": "название цели или вехи"}}, ["task", "aim"])
+def link_task_to_aim(task: str, aim: str, **_) -> str:
+    from ..services import aims
+    t = tasks.find_task(task)
+    if not t:
+        return "Не нашёл такую задачу."
+    ms = aims.find_milestone(aim)
+    if ms:
+        aims.link_task(t, milestone=ms)
+        return f"«{t.title}» — к вехе «{ms.title}»."
+    a = aims.find_aim(aim)
+    if not a:
+        return "Не нашёл такую цель или веху."
+    aims.link_task(t, aim=a)
+    return f"«{t.title}» — к цели «{a.title}»."
+
+
 @tool("remember_fact", "Запомнить факт о хозяине надолго (семья, питомцы, вкусы, здоровье, привычки). НЕ для задач, событий, трат и не для паролей.",
       {"text": {"type": "string", "description": "Факт одной фразой в третьем лице: «У него кот Барсик»"}}, ["text"])
 def remember_fact(text: str, **_) -> str:
@@ -453,7 +503,7 @@ def list_tasks(**_) -> str:
 def complete_task(query: str, **_) -> str:
     t = tasks.complete_task(query)
     if t:
-        return f"Выполнено: «{t.title}»"
+        return f"Выполнено: «{t.title}»" + tasks.progress_tail(t.id)
     ev = calendar.find_event(query)
     if ev and ev.start <= datetime.now() + timedelta(hours=12) and not calendar.is_done(ev):
         calendar.set_done(ev.id, True, ev.start)
@@ -1023,8 +1073,43 @@ def run_tool(name: str, args: dict[str, Any], channel: str = "tg") -> str:
     return f"Инструмент {name} не выполнен: {r.error}"
 
 
-def tools_schema(with_cloud: bool = False) -> list[dict]:
-    return [t for n, t in TOOLS.items() if with_cloud or n != CLOUD_TOOL]
+# Группы инструментов для локальной модели. 40 схем — это ~5300 токенов промпта, на 6 ГБ карте их чтение — 30–35 с,
+# и с историей запрос вываливался за num_ctx 8192 (модель перезагружалась). Базовые — всегда; деньги-продвинутые и фриланс —
+# только когда фраза про них (или в облаке, где промпт ничего не стоит). Правила-шаблоны это не задевает: они раньше модели.
+CORE_TOOLS = ("add_event", "move_event", "delete_event", "list_events", "agenda", "add_task", "list_tasks", "complete_task",
+              "add_expense", "add_income", "spent", "finance_summary", "add_note", "edit_note", "search_notes", "remember_fact",
+              "undo_last", "today_briefing")
+MONEY_TOOLS = ("transfer", "stop_recurring", "set_budget", "set_balance", "add_debt", "pay_debt", "list_debts", "add_recurring",
+               "cash_forecast", "find_subscriptions", "add_goal", "save_to_goal", "finance_report")
+AIM_TOOLS = ("add_aim", "list_aims", "focus_today", "link_task_to_aim")
+AIM_RX_T = re.compile(r"цел[ьи]\b|вех\w*|этап\w*|фокус|что\s+(?:мне\s+)?(?:сегодня\s+)?делать|чем\s+заняться|долгосрочн\w*|прогресс", re.I)
+FREELANCE_TOOLS = ("add_order", "person_card", "add_person", "list_orders", "late_payments", "update_order", "order_payment", "pomodoro")
+MONEY_RX = re.compile(r"долг\w*|кредит\w*|ипотек\w*|рассрочк\w*|подписк\w*|регулярн\w*|аренд\w*|коммуналк\w*|перев[её]л|перевод|снял|наличн\w*|"
+                      r"баланс\w*|сч[её]т\w*|лимит\w*|бюджет\w*|цел[ьи]\b|копи\w*|подушк\w*|отлож\w*|накоп\w*|хватит\s+ли|до\s+зарплаты|прогноз\w*|"
+                      r"50/30/20|отч[её]т\w*|должен|должна|верну\w*|занял\w*|одолжил\w*|списани\w*|плат[её]ж\w*|платить|плачу", re.I)
+FREELANCE_RX = re.compile(r"заказ\w*|клиент\w*|проект\w*|аванс\w*|оплат\w*|инвойс\w*|сч[её]т\s+выстав|сдал\w*|правк\w*|монтаж\w*|ролик\w*|"
+                          r"дедлайн\w*|помодоро|таймер\w*|фокус|человек\w*|контакт\w*|карточк\w*|кто\s+(?:это|такой|такая)|"
+                          r"друг\w*|подруг\w*|сестр\w*|брат\w*|мам\w*|пап\w*|жен[аы]|муж\w*|коллег\w*|"
+                          r"\b[А-ЯЁ][а-яё]{2,}(?:а|я|ой|е|у|ю)?\b", re.U)   # имя с большой буквы не в начале — скорее всего человек
+
+
+def tools_schema(with_cloud: bool = False, text: str | None = None) -> list[dict]:
+    """Схемы инструментов для модели. text=None — все (облако, тесты); с текстом — базовые + группы по смыслу фразы."""
+    names = list(TOOLS)
+    if text is not None:
+        t = text.strip()
+        want = set(CORE_TOOLS)
+        if MONEY_RX.search(t):
+            want.update(MONEY_TOOLS)
+        if AIM_RX_T.search(t):
+            want.update(AIM_TOOLS)
+        # имя с большой буквы внутри фразы (не первое слово) — человек/клиент → карточки и заказы
+        inner_name = re.search(r"(?<!^)(?<![.!?]\s)\b[А-ЯЁ][а-яё]{2,}\b", t)
+        if FREELANCE_RX.search(t.lower()) or inner_name:
+            from ..services import pulse
+            want.update(FREELANCE_TOOLS if pulse.enabled() else ("person_card", "add_person"))   # фриланс выключен — только люди
+        names = [n for n in TOOLS if n in want or n == CLOUD_TOOL]
+    return [TOOLS[n] for n in names if with_cloud or n != CLOUD_TOOL]
 
 
 def tools_as_text() -> str:

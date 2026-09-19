@@ -33,10 +33,10 @@ def _load() -> _Node:
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     # переменные окружения перекрывают файл (удобно для тестов и сервера)
-    env_token = os.getenv("ASSISTANT_TG_TOKEN") or os.getenv("JARVIS_TG_TOKEN")
+    env_token = os.getenv("ASSISTANT_TG_TOKEN")
     if env_token:
         raw.setdefault("telegram", {})["token"] = env_token
-    env_owner = os.getenv("ASSISTANT_TG_OWNER") or os.getenv("JARVIS_TG_OWNER")
+    env_owner = os.getenv("ASSISTANT_TG_OWNER")
     if env_owner:
         raw.setdefault("telegram", {})["owner_id"] = int(env_owner)
     env_ollama = os.getenv("OLLAMA_URL")  # docker-compose: http://ollama:11434
@@ -67,6 +67,7 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "notifications.quiet_to": ("int", "Тихие часы: до (час 0–23)", False),
     "notifications.proactive_enabled": ("bool", "Сам напоминает о том, что заметил (просрочка оплаты, дело без срока, самочувствие)", False),
     "notifications.proactive_per_day": ("int", "Не больше стольких инициативных сообщений в день (5)", False),
+    "notifications.proactive_vibe": ("bool", "Просто написать днём (как дела / шутка), если тихо 5+ часов", False),
     "telegram.proxy": ("str", "Прокси для Telegram (если api.telegram.org недоступен)", False),
     "telegram.webapp_url": ("str", "Адрес сайта для приложения в Telegram (https://…ts.net из funnel.bat)", False),
     "brain.mode": ("str", "Режим мозга: local / hybrid / cloud", False),
@@ -114,11 +115,18 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "voice.pc.night_from": ("int", "Ночной режим с (час): тише и без лишних напоминаний вслух", False),
     "voice.pc.night_to": ("int", "Ночной режим до (час)", False),
     "voice.pc.filler_sec": ("str", "Через сколько секунд молчания мозга сказать «Секунду…» (0 — никогда)", False),
+    "voice.pc.screen_time.enabled": ("bool", "Экранное время: сколько и где вы за ПК — карточка на «Сегодня», «сколько сидел за компом», строка в вечернем итоге. Только имя программы и сайт, всё локально. Нужен перезапуск voice.bat", False),
+    "voice.pc.screen_time.idle_min": ("int", "Экранное время: минут без мыши/клавиатуры = «отошёл» (5)", False),
+    "voice.pc.screen_time.nudges": ("bool", "Экранное время: редкие подколы по факту (YouTube час подряд при дедлайне, игра в рабочее время, 6 ч без перерыва)", False),
+    "voice.pc.screen_time.keep_days": ("int", "Экранное время: сколько дней хранить подробности (90)", False),
     "voice.pc.tidy_downloads_days": ("int", "Ночная уборка «Загрузок» (voice.bat): файлы старше N дней — в Загрузки/Разобрано; 0 — выключено. Рабочий стол — только по команде", False),
     "voice.pc.games": ("str", "Свои игры для авто-игрового режима: имена exe через запятую (популярные знаю сам)", False),
     "finance.main_account": ("str", "Основной счёт", False),
     "persona.style": ("str", "Характер: swag (с юмором) / neutral (по делу)", False),
-    "persona.humor_level": ("int", "Уровень юмора 0–10", False),
+    "persona.humor_level": ("int", "Уровень юмора 0–10 (0–2 без шуток, 6–8 сарказм по делу, 9–10 жёстко)", False),
+    "persona.nicknames": ("str", "Как ещё вас звать, через запятую («шеф, босс»)", False),
+    "persona.where": ("str", "Кто формулирует инициативные фразы: cloud / auto / local", False),
+    "persona.voice_accents": ("bool", "Итог дня и подколы иногда голосовым (не чаще раза в день)", False),
     "server.port": ("int", "Порт сайта (нужен перезапуск)", False),
     "google.enabled": ("bool", "Отправлять события в Google Календарь (только ассистент → Google)", False),
     "google.client_id": ("str", "Google OAuth Client ID (…apps.googleusercontent.com) — см. README «Google Календарь»", False),
@@ -222,28 +230,33 @@ def write_settings(changes: dict[str, object]) -> list[str]:
                 comment = m.group(0)
             lines[idx] = rendered + comment
         else:
-            # ключа нет — добавляем в конец нужной секции (или создаём секцию)
-            sec_i = next((n for n, l in enumerate(lines) if l.split(":")[0].strip() == parts[0] and not l.startswith(" ")), -1)
-            if sec_i < 0:
-                lines += ["", f"{parts[0]}:"]
-                sec_i = len(lines) - 1
-            end = sec_i + 1
-            while end < len(lines) and (lines[end].startswith(" ") or not lines[end].strip() or lines[end].startswith("#")):
-                end += 1
-            while end > sec_i + 1 and not lines[end - 1].strip():
-                end -= 1
-            if len(parts) == 3:
-                sub_i = next((n for n in range(sec_i + 1, end) if lines[n].startswith("  ") and not lines[n].startswith("    ") and lines[n].split(":")[0].strip() == parts[1]), -1)
-                if sub_i < 0:
-                    lines.insert(end, f"  {parts[1]}:"); end += 1
-                    lines.insert(end, rendered)
-                else:
-                    e2 = sub_i + 1
-                    while e2 < end and lines[e2].startswith("    "):
-                        e2 += 1
-                    lines.insert(e2, rendered)
-            else:
-                lines.insert(end, rendered)
+            # ключа нет (старый config.yaml без новой настройки) — спускаемся по секциям, недостающие создаём,
+            # значение ставим в конец самой глубокой. Работает на любую глубину: voice.pc.screen_time.enabled — 4 уровня
+            sec_start, sec_end, depth_i = -1, len(lines), 0
+            for depth_i, part in enumerate(parts[:-1]):
+                ind = "  " * depth_i
+                rng = range(sec_start + 1, sec_end)
+                found = next((n for n in rng if lines[n].startswith(ind) and not lines[n].startswith(ind + " ")
+                              and not lines[n].lstrip().startswith("#") and lines[n].split(":")[0].strip() == part), -1)
+                if found < 0:
+                    # создаём секцию в конце родительской (перед пустыми строками-хвостом)
+                    ins = sec_end
+                    while ins > sec_start + 1 and not lines[ins - 1].strip():
+                        ins -= 1
+                    if depth_i == 0 and ins > 0 and lines[ins - 1].strip():
+                        lines.insert(ins, ""); ins += 1
+                    lines.insert(ins, f"{ind}{part}:")
+                    found = ins
+                    sec_end = found + 1
+                # граница секции: до первой непустой строки с отступом ≤ текущего
+                e = found + 1
+                while e < len(lines) and (not lines[e].strip() or lines[e].lstrip().startswith("#") or lines[e].startswith(ind + "  ")):
+                    e += 1
+                sec_start, sec_end = found, e
+            ins = sec_end
+            while ins > sec_start + 1 and not lines[ins - 1].strip():
+                ins -= 1
+            lines.insert(ins, rendered)
         changed.append(key)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return changed

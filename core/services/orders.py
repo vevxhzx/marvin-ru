@@ -147,9 +147,11 @@ def update_order(oid: int, **fields) -> Order | None:
                     o.paid_at = now(); o.done_at = o.done_at or now()
                 o.status = v
             elif k == "price":
+                if float(v or 0) < 0:
+                    raise OrderError("Цена не может быть отрицательной")
                 o.price = float(v or 0)
             elif k == "estimate_h":
-                o.estimate_h = float(v or 0)
+                o.estimate_h = max(0.0, float(v or 0))
             elif k in ("title", "notes"):
                 setattr(o, k, (str(v).strip() or None) if k == "notes" else str(v).strip())
             elif k == "deadline":

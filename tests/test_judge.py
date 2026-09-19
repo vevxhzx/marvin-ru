@@ -225,6 +225,7 @@ def test_proactive_candidates_limit_quiet_and_mute(monkeypatch):
     from datetime import datetime, timedelta
     from core.services import proactive, tasks, memory
     _brain(monkeypatch, "", ollama=False)
+    monkeypatch.setattr(proactive, "vibe_enabled", lambda: False)   # «просто написать» зависит от часа на часах — здесь не о нём
     t = tasks.add_task("Разобрать балкон", None, source="test")
     with db.session() as s:
         row = s.get(db.Task, t.id); row.created_at = datetime.now() - timedelta(days=8); s.add(row); s.commit()
@@ -256,6 +257,7 @@ def test_proactive_task_button(monkeypatch):
     from datetime import datetime, timedelta
     from core.services import proactive, tasks, memory
     _brain(monkeypatch, "", ollama=False)
+    monkeypatch.setattr(proactive, "vibe_enabled", lambda: False)
     memory.add_fact_sync("Хочет на неделе позвонить маме", layer="short")
     with db.session() as s:
         f = s.exec(db.select(db.Fact)).one(); f.created_at = datetime.now() - timedelta(days=2); s.add(f); s.commit()

@@ -265,7 +265,7 @@ def test_task_deadline_reminders():
     t = tasks.add_task("Сдать отчёт (тест напоминаний)", datetime.now() + timedelta(minutes=30))
     rem = tasks.due_task_reminders()
     texts = [txt for tk, txt in rem if tk.id == t.id]
-    assert texts and ("Сегодня дедлайн" in texts[0] or "остался" in texts[0])
+    assert texts and ("Сегодня до" in texts[0] or "остался" in texts[0])
     assert not [1 for tk, _ in tasks.due_task_reminders() if tk.id == t.id]  # повторно не шлём
     tasks.delete_task(t.id)
 
@@ -656,3 +656,38 @@ def test_game_mode_unloads_then_warms_and_blocks_embeddings(monkeypatch):
         await asyncio.sleep(0)   # фоновой задаче прогрева дать выполниться
         assert not llm.GAME_MODE and calls == ["unload", "warm"] and "прогревается" in msg
     asyncio.run(run())
+
+
+def test_journal_shows_what_changed():
+    """Журнал пишет не «Правка мысли: <заголовок>», а что именно поменялось (было → стало), для заметок, задач и событий."""
+    from datetime import datetime, timedelta
+    from sqlmodel import select
+    from core import db
+    from core.services import brain_notes, tasks, calendar
+
+    def last(kind):
+        with db.session() as s:
+            return s.exec(select(db.Memory).where(db.Memory.kind == kind).order_by(db.Memory.id.desc())).first().text
+
+    n = brain_notes.add_note("квартирант съезжает, искать новых")
+    brain_notes.update_note(n.id, text="квартирант съезжает, искать новых до армии")
+    t = last("note")
+    assert "текст: дописано «до армии»" in t
+
+    brain_notes.update_note(n.id, text="квартирант съезжает, искать ХОРОШИХ до армии")
+    t = last("note")
+    assert "→" in t and "ХОРОШИХ" in t and "квартирант съезжает" not in t.split(":", 1)[1]   # только изменённый кусок, не весь текст дважды
+
+    brain_notes.update_note(n.id, text="квартирант съезжает, искать ХОРОШИХ до армии")   # тот же текст ещё раз
+    assert "без изменений" in last("note")
+
+    tk = tasks.add_task("Подать заявление")
+    d = datetime(2026, 9, 18, 23, 59)
+    tasks.update_task(tk.id, due=d)
+    t = last("task")
+    assert "срок: — → 18.09 23:59" in t and "Подать заявление" in t
+
+    ev = calendar.add_event("Зубной", datetime(2026, 9, 20, 9, 0))
+    calendar.update_event(ev.id, start=datetime(2026, 9, 20, 11, 0))
+    t = last("event")
+    assert "начало: 20.09 09:00 → 20.09 11:00" in t

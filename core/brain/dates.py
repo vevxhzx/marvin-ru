@@ -31,7 +31,11 @@ NUM_WORDS = {"один": 1, "одну": 1, "два": 2, "две": 2, "три": 3
 
 
 def _clean(text: str) -> str:
-    return re.sub(r"\s{2,}", " ", text.replace("\x00", " ")).strip(" ,.-—:")
+    t = re.sub(r"\s{2,}", " ", text.replace("\x00", " "))
+    # после вырезания даты остаются висячие предлоги: «напомни ближе к  что надо» → «напомни что надо»
+    t = re.sub(r"\b(?:ближе\s+к|поближе\s+к|где-то\s+к|к|до|на|в|во)\s+(?=(?:что|чтобы|о\s|об\s|про\s|,|$|[а-яё]+(?:ть|ти|чь)\b))", "", t, flags=re.I)
+    t = re.sub(r"\s{2,}", " ", t)
+    return t.strip(" ,.-—:")
 
 
 class _Text(str):
@@ -105,6 +109,8 @@ def parse_datetime_ex(text: str, now: datetime | None = None) -> tuple[datetime 
 
     # --- время: 15:00, 15.30, «в 15», «в 3 часа дня», «в пол третьего» (упрощённо) ---
     m = re.search(r"(?:в|на|к)\s+(\d{1,2})[:.](\d{2})", t) or re.search(r"\b(\d{1,2})[:](\d{2})\b", t)
+    if m and not (0 <= int(m.group(1)) <= 23 and 0 <= int(m.group(2)) <= 59):
+        m = None   # «25:70» — не время (иначе replace(hour=25) роняет весь разбор)
     if m:
         hour, minute, time_set = int(m.group(1)), int(m.group(2)), True
         t = t.replace(m.group(0), " ")
@@ -196,8 +202,17 @@ def parse_datetime_ex(text: str, now: datetime | None = None) -> tuple[datetime 
                     except ValueError:
                         date = None
                 else:
-                    # «25-го», «12 числа», «12-е число» — день этого месяца (или следующего, если уже прошёл)
-                    m = re.search(r"\b(\d{1,2})(?:[- ]?го|[- ]?е)?\s*(?:числа|число)\b", t) or re.search(r"\b(\d{1,2})[- ]?го\b", t)
+                    # «25-го», «12 числа», «12-е число», «к 30 числу сентября», «ближе к 30 числу» — день месяца
+                    # (названного, а без названия — этого или следующего, если уже прошёл)
+                    m = re.search(r"\b(\d{1,2})(?:[- ]?го|[- ]?е|[- ]?му)?\s*(?:числа|число|числу)(?:\s+(янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек)\w*)?\b", t) \
+                        or re.search(r"\b(\d{1,2})[- ]?го\b", t)
+                    if m and m.re.groups >= 2 and m.group(2):
+                        d, mon = int(m.group(1)), MONTHS["ма" if m.group(2) in ("май", "мая") else m.group(2)[:3]]
+                        y = now.year if (mon, d) >= (now.month, now.day) else now.year + 1
+                        last = (datetime(y, mon, 1) + relativedelta(months=1) - timedelta(days=1)).day
+                        date = now.replace(year=y, month=mon, day=min(d, last))
+                        t = t.replace(m.group(0), " ")
+                        m = None
                     if m:
                         d = int(m.group(1))
                         base = now if d >= now.day else now + relativedelta(months=1)

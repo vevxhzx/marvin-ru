@@ -102,8 +102,11 @@ def looks_like_batch(text: str) -> bool:
         return False
     if ONE_CMD_RX.match(t) and not HARD_SPLIT_RX.search(t):
         return False
-    from .agent import ANALYZE_RX, ACTION_VERB_RX, _QUESTION_RX
-    if ANALYZE_RX.search(t) or _QUESTION_RX.match(t.lower()):
+    from .agent import ANALYZE_RX, ACTION_VERB_RX, _QUESTION_RX, OPINION_RX
+    if ANALYZE_RX.search(t) or _QUESTION_RX.match(t.lower()) or OPINION_RX.search(t):
+        return False
+    # вопрос в конце («…как думаешь, что может быть? Субтитры Н.Новикова») — разговор, даже если Whisper дописал хвост
+    if "?" in t[-80:] and not HARD_SPLIT_RX.search(t):
         return False
     hard = [p for p in HARD_SPLIT_RX.split(t) if p and p.strip(" .")]
     if len(hard) >= 2 and (HEAD_RX.match(t) or len(hard) >= 3 or any(TYPED_RX.search(p) or ACTION_VERB_RX.search(p) or INF_RX.search(p) for p in hard)):

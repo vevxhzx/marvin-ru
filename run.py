@@ -100,6 +100,10 @@ async def main(with_tg: bool) -> None:
             await tgbot.notify_photo(bot, path, caption)
         notify.photo = _notify_photo  # type: ignore[attr-defined]
 
+        async def _notify_voice(text: str, buttons=None) -> bool:
+            return await tgbot.notify_voice(bot, text, buttons)
+        notify.voice = _notify_voice  # type: ignore[attr-defined]
+
     async def _null_notify(text: str, buttons=None) -> None:
         log.info("[notify] %s", text)
 
@@ -107,6 +111,11 @@ async def main(with_tg: bool) -> None:
     _agent.notify = notify   # результаты с ПК (план уборки, найденные файлы) для команд из Telegram
     sch = scheduler.build(notify or _null_notify)
     sch.start()
+    # состояние присутствия: восстанавливаем последний снимок (перезапуск ≠ первый запуск), событие restart
+    from core.services import state as _state
+    _st = _state.restore()
+    if not _st["first_run"] and _st["gap_min"] is not None:
+        log.info("Перезапуск: пауза %d мин (до этого: %s)", _st["gap_min"], _st["was"])
 
     # порт занят = ассистент уже запущен (второе окно / автозагрузка). Второй экземпляр отберёт у первого Telegram.
     import socket
@@ -152,6 +161,10 @@ async def main(with_tg: bool) -> None:
     try:
         await asyncio.gather(*tasks)
     finally:
+        try:
+            _state.shutdown()
+        except Exception as e:  # pragma: no cover
+            log.debug("state shutdown: %s", e)
         sch.shutdown(wait=False)
         if bot:
             await bot.session.close()

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, CalendarDays, CheckSquare, Wallet, FileText, Link2, MessageCircle, Cpu, ArrowUpRight, X, Pencil, Check, Star, RotateCcw, Plus } from 'lucide-react'
+import { Search, CalendarDays, CheckSquare, Wallet, FileText, Link2, MessageCircle, Cpu, ArrowUpRight, X, Pencil, Check, Star, RotateCcw, Plus, Monitor, Target, Bot } from 'lucide-react'
 import { api, hhmm, dayLabel, shortDate, plural } from '../lib/api'
 import { Empty, Seg, PageHead, ListSkeleton, Pills, toast } from '../components/ui'
 import { useRefresh } from '../App'
@@ -8,7 +8,7 @@ import { name as aName } from '../lib/name'
 
 /* Память — четыре вкладки: «сейчас» (свежее, живёт неделю), «о вас» (надолго + портрет), «события» (журнал
    всего, что ассистент понял и сделал) и «архив» (забытое и устаревшее — ничего не стирается, всё можно вернуть). */
-const TABS = [['short', 'сейчас'], ['long', 'о вас'], ['journal', 'события'], ['archive', 'архив']]
+const TABS = [['short', 'сейчас'], ['long', 'о вас'], ['timeline', 'лента'], ['journal', 'события'], ['archive', 'архив']]
 
 export default function Memory() {
   const [tab, setTab] = useState('long')
@@ -28,7 +28,7 @@ export default function Memory() {
           </button>
         ))}
       </div>
-      {tab === 'journal' ? <Journal /> : <Facts layer={tab} data={data} reload={load} />}
+      {tab === 'journal' ? <Journal /> : tab === 'timeline' ? <Timeline /> : <Facts layer={tab} data={data} reload={load} />}
     </div>
   )
 }
@@ -228,6 +228,8 @@ const KINDS = [
   { id: 'link', label: 'ссылки', icon: Link2, color: '#0891b2', to: '/mind' },
   { id: 'chat', label: 'разговор', icon: MessageCircle, color: 'var(--ink-3)' },
   { id: 'system', label: 'система', icon: Cpu, color: 'var(--ink-3)' },
+  { id: 'presence', label: 'присутствие', icon: Monitor, color: 'var(--ink-3)' },
+  { id: 'aim', label: 'цели', icon: Target, color: 'var(--accent)', to: '/tasks?view=aims' },
 ]
 const K = Object.fromEntries(KINDS.map((k) => [k.id, k]))
 const CH = { tg: 'telegram', 'tg-voice': 'telegram · голос', voice: 'голос', web: 'сайт', system: 'авто', test: 'тест' }
@@ -317,6 +319,52 @@ function Entry({ m, open, onToggle }) {
         )}
       </div>
       {!open && m.channel && m.channel !== 'web' && <span className="faint hidden shrink-0 text-[11px] sm:block">{CH[m.channel] || m.channel}</span>}
+    </div>
+  )
+}
+
+
+/* Лента дня: человек и ассистент одной хронологией — сессии за ПК (≥15 мин), действия, события присутствия, разговор (счётчик), провалы. */
+const WHO = { 'я': { label: 'вы', color: 'var(--ink)' }, 'марвин': { label: 'ассистент', color: 'var(--accent)', icon: Bot }, 'пк': { label: 'пк', color: 'var(--ink-3)', icon: Monitor } }
+function Timeline() {
+  const [day, setDay] = useState(0)   // 0 сегодня, 1 вчера…
+  const [q, setQ] = useState('')
+  const [items, setItems] = useState(null)
+  const { tick } = useRefresh()
+  const date = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - day); return d }, [day])
+  useEffect(() => {
+    const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
+    api.get(`/api/timeline?day=${iso}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`).then(setItems).catch(() => setItems([]))
+  }, [day, q, tick])
+  return (
+    <div className="space-y-5 animate-rise">
+      <div className="flex flex-wrap items-center gap-2">
+        <Seg value={day} onChange={setDay} options={[[0, 'сегодня'], [1, 'вчера'], [2, 'позавчера']]} />
+        <label className="relative ml-auto block w-full sm:w-64">
+          <Search size={14} className="faint absolute left-3 top-1/2 -translate-y-1/2" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} className="input !h-9 !pl-9 !text-[14px]" placeholder="по слову: проект, Лена…" />
+        </label>
+      </div>
+      {!items ? <ListSkeleton n={6} /> : items.length === 0 ? (
+        <div className="rule"><Empty glyph="memory" text={q ? 'Ничего не нашёл' : 'В ленте пусто'} sub={q ? 'Другое слово?' : 'Сюда попадает всё: за чем сидели, что закрыли, когда отходили, что сделал ассистент'} /></div>
+      ) : (
+        <div className="rule">
+          {items.map((it, i) => {
+            const w = WHO[it.who] || WHO['я']
+            const I = w.icon
+            return (
+              <div key={i} className={`row !items-start ${it.kind === 'fail' ? 'opacity-70' : ''}`}>
+                <span className="faint num mt-[3px] w-11 shrink-0 text-[12px]">{hhmm(it.at)}</span>
+                <span className="mt-[3px] grid h-[18px] w-[18px] shrink-0 place-items-center" style={{ color: w.color }}>{I ? <I size={14} /> : <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--ink-2)' }} />}</span>
+                <div className="min-w-0 flex-1">
+                  <div className={`text-[14.5px] leading-snug ${it.kind === 'screen' ? 'muted' : ''}`}>{clean(it.text)}</div>
+                </div>
+                {it.who !== 'я' && <span className="faint hidden shrink-0 text-[11px] sm:block">{w.label}</span>}
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

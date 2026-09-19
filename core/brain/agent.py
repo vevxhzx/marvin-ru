@@ -19,13 +19,14 @@ from sqlmodel import select
 
 from ..db import ChatMessage, get_setting, session, set_setting
 from .. import identity
-from ..services import brain_notes, calendar, finance, judge, memory, tasks, trace, undo
+from ..services import brain_notes, calendar, finance, judge, memory, tasks, trace, undo, screen
 from ..services.calendar import fmt_dt, fmt_due, fmt_repeat
 from ..services.finance import money
 from ..tools import registry
 from ..services import bulk, insights, pc
 from . import llm, quick, sorter
 from .dates import ambiguous_night_hour, first_occurrence, parse_amount, parse_datetime, parse_datetime_ex, parse_repeat, task_due
+from . import persona
 from .persona import localize, now_line, say, system_prompt
 
 log = logging.getLogger("assistant.agent")
@@ -121,9 +122,24 @@ SMALLTALK_RX = re.compile(r"^\s*(привет|здравствуй\w*|добр\w
                           r"что\s+(?:нового|делаешь|умеешь)|спасибо|благодарю|пока|споки|спокойной\s+ночи|ты\s+кто|кто\s+ты|расскажи\s+о\s+себе)\b[^\n]{0,40}$", re.I)
 
 
+OPINION_RX = re.compile(r"(?:как\s+(?:ты\s+)?(?:думаешь|считаешь|по-твоему)|что\s+(?:посоветуешь|скажешь|выбрать|взять|лучше|бы\s+ты)|посоветуй|"
+                        r"твоё\s+мнение|твое\s+мнение|стоит\s+ли|\b[а-яё]+ть\s+ли\b|как\s+тебе\s+иде\w+|что\s+думаешь|"
+                        r"(?:а\s+)?что\s+если\s+(?:я|мы|мне)\b|(?:а\s+)?если\s+(?:я|мы)\s+(?:возьм|куп|продам|уйд|брос|начн|поед|перейд)\w*)", re.I)
+
+
 def is_personal(text: str) -> bool:
     """Нужны ли для ответа личные данные / действие в базе. Если нет — это разговор, его ведёт облако."""
     if SMALLTALK_RX.match(text):
+        return False
+    # «как думаешь, что взять на завтрак… через 10 минут…» — просьба о мнении, а не команда: цифры внутри не делают её личной.
+    # Если облако решит, что без базы не ответить, оно вернёт local_needed и вопрос уйдёт локальной модели — это уже есть.
+    if OPINION_RX.search(text) and not re.search(r"\b(запиши|запомни|добавь|напомни|поставь|удали|отмени|перенеси)\b", text, re.I):
+        return False
+    # «хлеб, молоко, яйца» — список покупок без глаголов: это дело, а не тема для беседы
+    if re.fullmatch(r"\s*[а-яёa-z0-9 \-]{2,25}(?:\s*,\s*[а-яёa-z0-9 \-]{2,25}){2,}\s*\.?", text, re.I):
+        return True
+    # «сколько будет 15% от 3400», «переведи 100 долларов в рубли» — арифметика, не база
+    if re.match(r"^\s*(сколько\s+будет|посчитай\s+\d|переведи\s+\d|\d[\d\s.,]*\s*[+\-*/×÷]\s*\d)", text, re.I):
         return False
     # число из 2+ цифр — почти всегда сумма/время/дата; слитное «128рублей» тоже (между «8» и «р» нет \b, поэтому не \b)
     return bool(PERSONAL_RX.search(text)) or bool(re.search(r"\d{1,2}[:.]\d{2}|(?<!\d)\d{2,}(?!\d)", text))
@@ -377,7 +393,10 @@ def _disputed(t: str) -> tuple[str, ...] | None:
     n = len(t.split())
     if n > 12 or _looks_like_question(t) or "\n" in t:
         return None
-    has_amount = parse_amount(t)[0] is not None
+    amount, _rest = parse_amount(t)
+    # «3 монтажа подряд», «12 марта», «2 раза» — число меньше 10 без «руб/к» или число, ушедшее в дату, — не сумма
+    has_amount = amount is not None and (amount >= 10 or re.search(r"\d\s*(?:р\b|руб|₽|к\b|тыс)", low)) \
+        and not (parse_datetime(t)[0] is not None and not re.search(r"\d", parse_datetime(t)[1]))
     # «сайт 15000», «логотип для Кати 8к», «пятёрочка 25к» — сумма + слово без глагола: трата, доход или заказ?
     if has_amount and n <= 6 and not EXPENSE_RX.match(t) and not INCOME_RX.match(t) and not DEBT_RX.match(t) and not re.search(r"[:.]\d{2}\b|\b(в|к|до|через)\s+\d", low):
         rest = parse_amount(t)[1]
@@ -390,7 +409,15 @@ def _disputed(t: str) -> tuple[str, ...] | None:
     return None
 
 
+# эмоциональный префикс перед командой: «ты еблан? запиши 510 доставка еды», «блин, запиши…», «слушай, добавь…» — команда начинается после него
+_VENT_PREFIX_RX = re.compile(r"^\s*(?:(?:(?:ты|вы)\s+[а-яё]+\s*[?!.,]+|(?:блин|бля|блять|сука|чёрт|черт|капец|пиздец|слушай|короче|так|ну|окей|ок|ладно|ало|алло|эй)\s*[,!.:—-]*)\s*)+"
+                             r"(?=(?:запиши|запомни|добавь|поставь|напомни|удали|отмени|перенеси|покажи|найди|потратил|купил|заплатил|задача|мысль|встреча)\b)", re.I)
+# «запиши 510 доставка еды», «запиши трату 700 такси» — не заметка, а трата (сумма + категория), решает шаблон траты ниже
+_NOTE_BUT_EXPENSE_RX = re.compile(r"^\s*(?:запиши|добавь|внеси)\s+(?:трату\s+|расход\s+)?(?=\d)", re.I)
+
+
 def rules(text: str, channel: str) -> Reply | None:
+    text = _VENT_PREFIX_RX.sub("", text, count=1) or text
     t = text.strip()
     low = t.lower()
     if FIN_TECH_RX.match(t):   # «хватит ли на платежи» — готовый отчёт, а не анализ моделью
@@ -479,13 +506,16 @@ def rules(text: str, channel: str) -> Reply | None:
             _pending_set(channel, "confirm|" + json.dumps({"pc": cmd.arg}))
             return Reply(("Выключить компьютер" if cmd.arg == "shutdown" else "Перезагрузить компьютер") + "? Несохранённое пропадёт. Скажите «да» или «нет», сэр.", ["clarify"])
         return Reply(pc.dispatch(cmd, channel), [f"pc_{cmd.action}"])
+    st = screen.chat_rule(t)   # «сколько сидел за компом», «на что ушёл день», «сколько ютуба сегодня»
+    if st:
+        return Reply(st, ["screen_time"])
     if low in ("задачи", "мои задачи", "список задач", "что надо сделать", "дела"):
         return Reply(registry.list_tasks(), ["list_tasks"])
     if low in ("календарь", "события", "встречи", "план на неделю", "что на неделе"):
         return Reply(registry.list_events(7), ["list_events"])
     if low in ("финансы", "баланс", "деньги", "сколько денег", "отчет", "отчёт", "сводка", "траты") or FIN_REPORT_RX.match(low):
         return Reply(registry.finance_summary(30), ["finance_summary"])
-    if TASK_REPORT_RX.match(low):
+    if TASK_REPORT_RX.match(low) and not SMALLTALK_RX.match(low):   # «как дела» — приветствие, не «как там мои дела»
         return Reply(registry.list_tasks(), ["list_tasks"])
     if EVENT_REPORT_RX.match(low):
         return Reply(registry.list_events(7), ["list_events"])
@@ -551,8 +581,12 @@ def rules(text: str, channel: str) -> Reply | None:
     if len(t.split()) <= 5 and not _looks_like_question(t) and re.search(r"\d", t):
         amount, rest = parse_amount(t)
         words = [w for w in re.findall(r"[а-яё]+", rest.lower()) if w not in ("вчера", "позавчера", "сегодня", "на", "за", "в", "руб", "рублей")]
-        if amount is not None and 0 < amount < 1_000_000 and words and not re.search(r"[:.]\d{2}\b|\b(в|к|до|через|на)\s+\d", t.lower()) \
-                and not EVENT_NOUN_RX.search(rest.lower()) and not TASK_RX.match(t) and not ACTION_VERB_RX.match(t):
+        # «обед 450», «врач 2500», «510 доставка еды» — слово одновременно событийное и категория трат; без времени и даты
+        # («обед в 14», «врач завтра») это трата: у события всегда есть когда, у траты — сколько
+        has_when = bool(re.search(r"[:.]\d{2}\b|\b(в|к|до|через|на)\s+\d|\b(завтра|послезавтра|сегодня\s+в|утром|вечером|днём|днем|в\s+\d{1,2}\s*(утра|дня|вечера)|"
+                                  r"понедельник|вторник|сред[уа]|четверг|пятниц[уа]|суббот[уа]|воскресень[еа]|пн|вт|ср|чт|пт|сб|вс)\b", t.lower()))
+        if amount is not None and 0 < amount < 1_000_000 and words and not has_when and not TASK_RX.match(t) and not ACTION_VERB_RX.match(t) \
+                and not re.match(r"^\s*(встреч|созвон|звонок)", rest.lower()):
             cat = finance.guess_category(rest, "expense")
             if cat not in ("Другое", "Долги") and not DEBT_RX.match(t):
                 when, rest2 = _past_date(rest)
@@ -592,7 +626,7 @@ def rules(text: str, channel: str) -> Reply | None:
         what = t[m.end():].strip()
         tk = tasks.complete_task(what)
         if tk:
-            return Reply(say("done", title=tk.title), ["complete_task"])
+            return Reply(say("done", title=tk.title) + tasks.progress_tail(tk.id), ["complete_task"])
         ev = calendar.find_event(what)
         if ev and ev.start <= datetime.now() + timedelta(hours=12) and not calendar.is_done(ev):
             # событие календаря — тоже дело: «сделал тренировку» ставит галочку на сегодняшней тренировке
@@ -643,7 +677,8 @@ def rules(text: str, channel: str) -> Reply | None:
                        and not EVENT_NOUN_RX.search(low) and not m and not re.match(r"^\s*напомни", low))
     if dt and not is_deadline and not explicit_task and not action_task and (m or EVENT_NOUN_RX.search(low) or (has_clock and len(rest.split()) <= 8)):
         title = re.sub(r"^(напомни(?:\s+мне)?|у меня|мне)\s+", "", rest, flags=re.I)
-        title = re.sub(r"^(надо\s+бы|надо|нужно|не\s+забыть|не\s+забудь|стоит|пора)\s+(бы\s+)?", "", title, flags=re.I)
+        # «напомни … что надо не забыть вычесть жкх» → «вычесть жкх»
+        title = re.sub(r"^(?:что\s+|чтобы\s+)?(?:(?:мне\s+)?(?:надо|нужно|стоит|пора)\s+(?:бы\s+)?)?(?:не\s+забыть|не\s+забудь)?\s*(?:что\s+)?(?:(?:мне\s+)?(?:надо|нужно)\s+)?", "", title, flags=re.I)
         title = re.sub(r"^(запиши\s+встречу|запланируй|добавь\s+(?:в\s+)?календар\w*|событие)\s*[:\-—]?\s*", "", title, flags=re.I)
         # «поставь событие что я иду на др» → «я иду на др»
         title = re.sub(r"^(поставь|создай|добавь|запиши|сделай)\s+(событие|встречу|напоминание|в\s+календарь)?\s*(,?\s*(что|о\s+том,?\s+что|про\s+то,?\s+что)\s+)?", "", title, flags=re.I)
@@ -665,27 +700,35 @@ def rules(text: str, channel: str) -> Reply | None:
 
     # ---- задача ----
     m = TASK_RX.match(t)
-    if not m and ACTION_VERB_RX.match(t) and len(t.split()) <= 12 and not _looks_like_question(t):
+    # «заказ для Пятёрочки 25к до пятницы» — ACTION_VERB ловит «заказ» как «заказать»; с суммой и клиентом это заказ (модель/add_order), не задача
+    _order_like = bool(re.match(r"^\s*(?:новый\s+)?(?:заказ|проект)\b", t, re.I) and parse_amount(t)[0] is not None)
+    if not m and ACTION_VERB_RX.match(t) and len(t.split()) <= 12 and not _looks_like_question(t) and not _order_like:
         m = re.match(r"^\s*(?:надо бы|стоит|пора)?\s*", t, re.I)  # «починить полку» / «позвонить маме завтра»
     if m:
         body = t[m.end():].strip()
         due, body, time_set = parse_datetime_ex(body)
         due = task_due(due, time_set)   # «сегодня» / «через 3 дня» без времени = задача на весь день
         if body:
+            from ..services import aims
+            body, link = aims.split_link(body)
             tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel)
-            hint = ""
+            hint = aims.attach_hint(tk, link)
             if due and (nh := ambiguous_night_hour(t)) is not None and due.hour == nh + 12:
-                hint = f" «В {nh}» понял как {due:%H:%M}; если имелось в виду {nh:02d}:00 — скажите «в {nh} утра»."
+                hint += f" «В {nh}» понял как {due:%H:%M}; если имелось в виду {nh:02d}:00 — скажите «в {nh} утра»."
             return Reply(say("task", title=tk.title) + fmt_due(due) + hint, ["add_task"])
 
     # ---- заметка ----
     m = NOTE_RX.match(t)
-    if m and t[m.end():].strip():
+    if m and t[m.end():].strip() and not _NOTE_BUT_EXPENSE_RX.match(t):
         brain_notes.add_note(t[m.end():].strip(), source=channel)
         return Reply(say("note"), ["add_note"])
 
     # ---- есть дата/время, но непонятно, что это: спросим, а не будем гадать ----
-    if dt and rest and not _looks_like_question(t) and len(t.split()) <= 12:
+    # «сегодня 3 монтажа сдал, устал», «Вовчик устал сегодня» — дата есть, времени и дела нет: это рассказ, его ведёт модель/память
+    _, _, _time_set = parse_datetime_ex(t)
+    _told = bool(re.search(r"\b[а-яё]{2,}(?:ал|ил|ел|ул|ыл|ял)(?:а|и|о|ась|ись|ся)?\b", rest.lower()))   # «устал», «сдал», «сходила» — уже случилось
+    if dt and rest and not _looks_like_question(t) and len(t.split()) <= 12 and (_time_set or EVENT_NOUN_RX.search(low) or ACTION_VERB_RX.search(rest) or not _told) \
+            and not (re.match(r"^\s*(?:новый\s+)?(?:заказ|проект)\b", t, re.I) and parse_amount(t)[0] is not None):   # заказ с суммой — модели (add_order)
         _pending_set(channel, t)
         return Reply(f"«{rest}» — {fmt_dt(dt)}. Это событие в календарь или задача с дедлайном? Ответьте «календарь» или «задача», сэр.", ["clarify"])
 
@@ -714,7 +757,7 @@ def _edit_note_rule(t: str, channel: str) -> Reply | None:
     return Reply(f"Заметка обновлена: «{n.text[:200]}». Старый вариант сохранён как оригинал.", ["edit_note"])
 
 
-POMO_RX = re.compile(r"^\s*(?:джарвис\W*)?(?:запусти|включи|поставь|начни|стартуй)?\s*(?:таймер|помодоро|помидор\w*|фокус)\s*(?:на\s+(\d{1,3})\s*(?:мин\w*)?)?"
+POMO_RX = re.compile(r"^\s*(?:" + identity.NAME_RX_SRC + r"\W*)?(?:запусти|включи|поставь|начни|стартуй)?\s*(?:таймер|помодоро|помидор\w*|фокус)\s*(?:на\s+(\d{1,3})\s*(?:мин\w*)?)?"
                      r"\s*(?:(?:по|на|над|для)\s+(.+?))?\s*[.!]?\s*$", re.I)
 POMO_STOP_RX = re.compile(r"^\s*(?:стоп|останови|выключи|хватит|заверши|закончи)\s*(?:таймер|помодоро|фокус|работу)?\s*[.!]?\s*$|^\s*(?:таймер|помодоро)\s+(?:стоп|выкл\w*|хватит)\s*[.!]?$", re.I)
 POMO_BREAK_RX = re.compile(r"^\s*(?:перерыв|пауза|отдых)\s*(?:на\s+)?(\d{1,2})?\s*(?:мин\w*)?\s*[.!]?\s*$", re.I)
@@ -1209,13 +1252,17 @@ def _truth_gate(answer: str, results: list["registry.ToolResult"]) -> str:
     return f"Не записал, сэр: {why}. {hint}"
 
 
-def _history(channel: str, limit: int = 6, max_chars: int = 600) -> list[dict]:
+def _history(channel: str, limit: int = 6, max_chars: int = 600, current: str | None = None) -> list[dict]:
     """Последние реплики для контекста (все каналы: чат сайта и Telegram — один разговор).
     Длинные сообщения режем, старше HISTORY_MAX_AGE_H часов — не берём: история не должна съедать окно модели
-    и тянуть в ответ тему трёхдневной давности."""
+    и тянуть в ответ тему трёхдневной давности. current — текущая реплика: она уже записана в чат (_log_chat в начале
+    _handle) и отдельно идёт последним сообщением, поэтому из истории её убираем — иначе модель видит её дважды."""
     since = datetime.now() - timedelta(hours=HISTORY_MAX_AGE_H)
     with session() as s:
-        rows = s.exec(select(ChatMessage).where(ChatMessage.created_at >= since).order_by(ChatMessage.id.desc()).limit(limit)).all()
+        rows = s.exec(select(ChatMessage).where(ChatMessage.created_at >= since).order_by(ChatMessage.id.desc()).limit(limit + 1)).all()
+    if rows and rows[0].role == "user" and (current is None or (rows[0].text or "").strip() == current.strip()):
+        rows = rows[1:]
+    rows = rows[:limit]
     out = []
     for r in reversed(rows):
         t = r.text or ""
@@ -1274,6 +1321,37 @@ async def _chat(messages: list[dict], tools: list[dict] | None = None, **kw) -> 
     return await llm.ollama_chat(messages, tools, **kw)
 
 
+def _no_repeat_block() -> str:
+    """Образы (слова) из последних ответов и проактивных — в промпт чата, чтобы модель не повторяла один и тот же факт из памяти."""
+    used = persona.recent_images()
+    return ("\nНЕДАВНО УПОМЯНУТЫЕ ОБРАЗЫ (не повторяй их в этом ответе): " + ", ".join(used[:20]) + "\n") if used else ""
+
+
+def _fit_budget(messages: list[dict], tools: list[dict], channel: str) -> list[dict]:
+    """Уложить запрос в окно локальной модели БЕЗ смены num_ctx: сначала выкидываем историю (старые реплики), потом блок памяти.
+    Оценка как в llm.ollama_chat (символы/3). Смена окна — это перезагрузка модели (+12 с), а 16384 на 6 ГБ вытесняет
+    часть весов в оперативку, и чтение промпта замедляется в 3–4 раза (7.5k токенов за 35 с в логе пользователя)."""
+    budget = llm.OLLAMA_NUM_CTX - (160 if llm.short_mode.get() else 512) - 250
+    tools_len = len(json.dumps(tools, ensure_ascii=False)) if tools else 0
+
+    def est(msgs: list[dict]) -> int:
+        return (sum(len(str(m.get("content") or "")) for m in msgs) + tools_len) // 3 + 200
+
+    before = est(messages)
+    dropped = 0
+    while est(messages) > budget and len(messages) > 2:
+        messages.pop(1)   # самая старая реплика истории (0 — system, -1 — текущая)
+        dropped += 1
+    if est(messages) > budget and "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ" in (messages[-1].get("content") or ""):
+        body = messages[-1]["content"]
+        messages[-1]["content"] = body[body.rindex("\n", 0, body.rfind("(сейчас ")) + 1:] if "(сейчас " in body else body.splitlines()[-1]
+        dropped += 100
+    if dropped:
+        log.info("[%s] промпт ≈%d ток. > окно %d: убрал %s → ≈%d ток.", channel, before, llm.OLLAMA_NUM_CTX,
+                 (f"{dropped % 100} реплик истории" if dropped % 100 else "") + (" и блок памяти" if dropped >= 100 else ""), est(messages))
+    return messages
+
+
 async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply | None:
     cloud_tools = _cloud_tools_mode()
     if not cloud_tools and (llm.MODE == "cloud" or not await llm.ollama_available()):
@@ -1282,8 +1360,8 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     if not with_tools:
         # болтовня/общий вопрос, облако не ответило: без схем инструментов промпт в 4–5 раз короче → ответ в разы быстрее
         voice_hint = " Отвечай 1–2 короткими предложениями, без списков и эмодзи." if channel.endswith("voice") else ""
-        messages = [{"role": "system", "content": system_prompt() + voice_hint + await memory.context(text)}]
-        for h in _history(channel, 4):
+        messages = [{"role": "system", "content": system_prompt(compact=not cloud_tools) + voice_hint + await memory.context(text) + _no_repeat_block()}]
+        for h in _history(channel, 4, current=text):
             messages.append({"role": h["role"], "content": h["text"]})
         messages.append({"role": "user", "content": text + "\n" + now_line()})
         try:
@@ -1293,11 +1371,12 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
             log.exception("%s failed: %s", "cloud tools" if cloud_tools else "ollama", e)
             return None
     voice_hint = "\nОТВЕТ ГОЛОСОМ: максимум 1–2 коротких предложения, без списков, без markdown и без эмодзи.\n" if channel.endswith("voice") else ""
+    allow_cloud_pre = llm.cloud_enabled() and llm.GEMINI_AUTO
     # Блок памяти («что ты знаешь о хозяине») меняется от фразы к фразе, поэтому он идёт НЕ в системное сообщение,
     # а перед репликой пользователя: системный промпт + схемы 40 инструментов тогда неизменны от запроса к запросу,
     # и Ollama берёт их из кэша вместо того, чтобы каждый раз заново читать ~6k токенов (на 6 ГБ карте это 15–25 с).
     mem_ctx = await memory.context(text)
-    messages = [{"role": "system", "content": system_prompt() + voice_hint +
+    messages = [{"role": "system", "content": system_prompt(compact=not cloud_tools) + voice_hint +
                  "\nУ тебя есть инструменты — это ЕДИНСТВЕННЫЙ способ что-то сохранить. Правила:\n"
                  "• Просят записать/добавить/запомнить/сохранить/напомнить/показать — ВЫЗОВИ инструмент. "
                  "Отвечать «записал» без вызова инструмента ЗАПРЕЩЕНО — это ложь.\n"
@@ -1323,9 +1402,12 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                  "• Пользователь спорит, сомневается или просит перепроверить («откуда взял», «сверься») — это НЕ заметка: "
                  "вызови инструмент заново и ответь по фактам.\n"
                  "Даты передавай в ISO 8601. После результата инструмента — короткий ответ в характере."}]
-    for h in _history(channel):
+    for h in _history(channel, current=text):
         messages.append({"role": h["role"], "content": h["text"]})
-    messages.append({"role": "user", "content": (mem_ctx + "\n" if mem_ctx else "") + text + "\n" + now_line()})
+    messages.append({"role": "user", "content": (mem_ctx + "\n" if mem_ctx else "") + (_no_repeat_block() if mem_ctx else "") + text + "\n" + now_line()})
+    tools_now = registry.tools_schema(with_cloud=allow_cloud_pre and not cloud_tools, text=None if cloud_tools else text)
+    if not cloud_tools:
+        messages = _fit_budget(messages, tools_now, channel)
     actions: list[str] = []
     done_results: list[str] = []   # что уже реально сделано — на случай падения модели после вызова инструментов
     results: list[registry.ToolResult] = []   # чем на самом деле кончился каждый вызов (проверено по базе)
@@ -1333,7 +1415,7 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     allow_cloud = llm.cloud_enabled() and llm.GEMINI_AUTO
     try:
         for _ in range(4):  # максимум 4 вызова инструментов подряд
-            out = await _chat(messages, registry.tools_schema(with_cloud=allow_cloud and not cloud_tools))
+            out = await _chat(messages, tools_now if allow_cloud == allow_cloud_pre else registry.tools_schema(with_cloud=False, text=None if cloud_tools else text))
             trace.step(llm._cloud_model() if cloud_tools else llm.OLLAMA_MODEL)
             if not out["tool_calls"] and not actions:
                 forced = _forced_tool(text)
@@ -1462,10 +1544,10 @@ async def via_gemini(text: str, channel: str, explicit: bool = True) -> Reply | 
         return Reply(hit[1], [], "gemini")
     # историю передаём только при явном обращении (и она тоже проходит анонимайзер)
     voice_hint = " ОТВЕТ ГОЛОСОМ: максимум 1–2 коротких предложения, без списков, markdown и эмодзи." if channel.endswith("voice") else ""
-    ans = await llm.cloud_chat(system_prompt() + voice_hint + await memory.context(text) + "\nТы ведёшь разговор и отвечаешь на общие вопросы. Личных данных пользователя (деньги, календарь, задачи, заметки, файлы) "
+    ans = await llm.cloud_chat(system_prompt() + voice_hint + await memory.context(text) + _no_repeat_block() + "\nТы ведёшь разговор и отвечаешь на общие вопросы. Личных данных пользователя (деньги, календарь, задачи, заметки, файлы) "
                                "у тебя нет — не проси их и не выдумывай (то, что выше в блоке «что ты знаешь о хозяине», — знаешь). Если для ответа НУЖНЫ его личные данные или надо что-то записать/изменить/показать из них — "
                                "ответь ровно одним словом: LOCAL (без пояснений). Во всех остальных случаях отвечай кратко, по-русски, в характере.",
-                               text + "\n" + now_line(), _history(channel, 6) if explicit else None)
+                               text + "\n" + now_line(), _history(channel, 6, current=text) if explicit else None)
     if not ans:
         return None
     if LOCAL_MARK_RX.search(ans) or re.search(r"локальн\w+\s+(модул|модел|мозг)|без\s+обращения\s+к\s+облаку", ans, re.I):
@@ -1583,6 +1665,135 @@ def normalize_spoken(text: str) -> str:
     return t or text
 
 
+_MONEY_MARK_RX = re.compile(r"\d\s*(?:к|k|тыс|руб|р\.?(?:\s|$)|₽|\$|€)", re.I)
+
+
+def _money_like(body: str) -> bool:
+    """«300к», «50 000 руб», «1500» — деньги (конверт goals); «5 кг», «10 клиентов» — нет (это цель aims)."""
+    amount, _ = parse_amount(body)
+    if not amount:
+        return False
+    return bool(_MONEY_MARK_RX.search(body)) or amount >= 1000
+
+
+STOP_JOB_RX = re.compile(r"^\s*(?:стоп|останови(?:сь)?|хватит|прекрати|отмени\s+(?:это|работу|фон\w*))\s*[.!]?\s*$", re.I)
+WHATS_UP_RX = re.compile(r"^\s*(?:что\s+(?:сейчас\s+)?(?:происходит|делаешь)|чем\s+(?:ты\s+)?занят\w*|ты\s+(?:тут|здесь|живой|на месте)|статус)\s*\??\s*$", re.I)
+
+
+async def _presence_rules(text: str, channel: str) -> Reply | None:
+    """Правила 0.10: цели (aims), решения, лента, самопроверка, стоп фоновой работы, «что происходит».
+    Всё без модели — это команды к своим данным, а не разговор."""
+    from ..services import aims, decisions, health, state, timeline
+    t = text.strip()
+    # --- цели --- («цель: подушка 300к к марту» с суммой — это денежный конверт, его берёт GOAL_RX ниже по цепочке)
+    ma = aims.AIM_RX.match(t)
+    if ma and _money_like(ma.group(2)):
+        return None
+    m = aims.AIM_CLOSE_RX.match(t)
+    if m:
+        name = (m.group(1) or m.group(3) or "").strip()
+        aim = aims.find_aim(name)
+        if not aim:
+            return Reply(f"Цели «{name}» не нашёл. «Мои цели» — покажу, какие есть.", [], "rules")
+        drop = bool(m.group(1)) and m.group(2).lower() in ("отбой", "отменяется", "больше не актуальна") or bool(m.group(3)) and re.match(r"^\s*(убери|отмени)", t, re.I)
+        aims.close_aim(aim, "dropped" if drop else "done")
+        return Reply((f"Цель «{aim.title}» снята. Без драмы — не всё, что начал, надо дожимать." if drop else f"Цель «{aim.title}» закрыта. Это не задача из списка — это то, ради чего список был."), ["close_aim"], "rules")
+    m = re.match(r"^\s*цель\s+[«\"]?(.+?)[»\"]?\s+(?:активна|снова в работе|возобновляется|продолжаем)\s*[.!]?\s*$", t, re.I)
+    if m:
+        aim = aims.find_aim(m.group(1), any_status=True)
+        if aim:
+            aims.update_aim(aim.id, status="active")
+            return Reply(f"«{aim.title}» снова в работе.", ["reopen_aim"], "rules")
+    a = aims.detect_aim_phrase(t)
+    if a:
+        existing = aims.find_aim(a["title"])
+        if existing and existing.title.lower() == a["title"].lower():
+            return Reply(f"Такая цель уже есть: «{existing.title}» ({int(aims.progress(existing) * 100)}%).", [], "rules")
+        aim = aims.add_aim(a["title"], why=a["why"], due=a["due"], source=channel)
+        tail = f", к {aim.due:%d.%m.%Y}" if aim.due else ""
+        why = "" if aim.why else " Зачем она тебе — скажи, запишу: через месяц это единственное, что удержит."
+        return Reply(f"Цель поставлена: «{aim.title}»{tail}. Теперь «веха: …» — первый ощутимый рубеж, а задачи к ней я подтяну сам.{why}", ["add_aim"], "rules")
+    m = aims.MS_RX.match(t)
+    if m and not _is_analysis(t):
+        title, aim_q = m.group(1).strip(" .«»\""), (m.group(2) or "").strip()
+        aim = aims.find_aim(aim_q) if aim_q else None
+        if aim is None:
+            active = aims.list_aims()
+            if len(active) == 1:
+                aim = aims.find_aim(active[0]["id"])
+            elif not active:
+                return Reply("Вех без цели не бывает. Сначала «цель: …».", [], "rules")
+            else:
+                return Reply("К какой цели? " + "; ".join(f"«{x['title']}»" for x in active[:4]) + ". Скажи «веха: … к цели <название>».", [], "rules")
+        ms = aims.add_milestone(aim, title)
+        return Reply(f"Веха «{ms.title}» — в цели «{aim.title}». Задачи к ней: «задача: … к вехе {ms.title[:20]}» или просто закрывай дела — я сам спрошу, если похоже.", ["add_milestone"], "rules")
+    if aims.FOCUS_RX.match(t):
+        return Reply(aims.text_focus(), ["focus"], "rules")
+    if aims.AIMS_RX.match(t):
+        # «цели» — и долгосрочные (aims), и денежные конверты (goals) одним ответом: человек не обязан помнить разницу
+        from ..services import goals as _goals
+        parts, acts = [], ["aims"]
+        if aims.list_aims():
+            parts.append(aims.text_aims())
+        if _goals.list_goals():
+            parts.append(_goals.goals_text()); acts.append("list_goals")
+        if not parts:
+            parts.append(aims.text_aims())
+        return Reply("\n\n".join(parts), acts, "rules")
+    m = aims.BLOCK_RX.match(t)
+    if m and len(m.group(2).strip()) >= 3 and not _is_analysis(t):
+        tk = tasks.find_task(m.group(1).strip())
+        if tk:
+            aims.set_blocked(tk.id, m.group(2).strip())
+            return Reply(f"«{tk.title}» — стоит: {m.group(2).strip()}. Из фокуса убрал, в «мешает» добавил. Скажи «разблокирована», когда сдвинется.", ["block_task"], "rules")
+    m = re.match(r"^\s*(?:задача\s+)?[«\"]?(.+?)[»\"]?\s+(?:разблокирован\w*|сдвинулась|пошла|больше не стоит)\s*[.!]?\s*$", t, re.I)
+    if m:
+        tk = tasks.find_task(m.group(1).strip())
+        if tk and tk.blocked_by:
+            aims.set_blocked(tk.id, "")
+            return Reply(f"«{tk.title}» снова в работе.", ["unblock_task"], "rules")
+    # --- рутины ---
+    from ..services import routines
+    rt = routines.chat_rule(t)
+    if rt:
+        return Reply(rt, ["routines"], "rules")
+    # --- решения ---
+    d = decisions.chat_rule(t, channel)
+    if d:
+        return Reply(d, ["decision"], "rules")
+    # --- лента ---
+    tl = timeline.chat_rule(t)
+    if tl:
+        return Reply(tl, ["timeline"], "rules")
+    # --- самопроверка ---
+    if health.SELF_RX.match(t):
+        res = await health.diagnose()
+        health.record(res)
+        return Reply(res["text"], ["diagnose"], "rules")
+    # --- фоновые работы ---
+    if STOP_JOB_RX.match(t):
+        job = state.running_job()
+        if job:
+            state.job_fail(job["name"], "остановлено по команде")
+            return Reply(f"Остановил «{job['name']}».", ["stop_job"], "rules")
+        return None   # обычный «стоп» (например, голосу) — дальше по цепочке
+    if WHATS_UP_RX.match(t):
+        sn = state.snapshot()
+        parts = []
+        line = state.line()
+        if line:
+            parts.append(line)
+        if sn["jobs"]:
+            parts.append("Фон: " + ", ".join(f"{j['name']} {int((j['progress'] or 0) * 100)}%" for j in sn["jobs"]))
+        if sn["pending"]:
+            parts.append("Жду ответа: " + sn["pending"])
+        from . import attention
+        left = attention.budget_left()
+        parts.append(f"Инициатив на сегодня осталось {left}" + (f", отложено {attention.queue_size()}" if attention.queue_size() else "") + ".")
+        return Reply(" ".join(parts) if parts else "Тихо. ПК не на связи, фоновых работ нет, жду.", ["state"], "rules")
+    return None
+
+
 async def handle(text: str, channel: str = "tg") -> Reply:
     """Единственный вход для всех каналов. Никогда не бросает исключений: любая ошибка → понятная реплика + лог."""
     text = (text or "").strip()
@@ -1604,6 +1815,12 @@ async def handle(text: str, channel: str = "tg") -> Reply:
 
 
 async def _handle(text: str, channel: str) -> Reply:
+    llm.mark_user_active()   # фоновые задачи на локальной модели (уборка заметок, связи) уступают дорогу
+    try:
+        from ..services import state as _state
+        _state.mark_conversation()
+    except Exception:  # pragma: no cover
+        pass
     # голос: короткие ответы (1–2 фразы), меньше токенов — быстрее генерация и озвучка
     llm.short_mode.set(channel.endswith("voice"))
     if channel.endswith("voice") or WAKE_RX.match(text):
@@ -1615,6 +1832,12 @@ async def _handle(text: str, channel: str) -> Reply:
         info = llm.reload_cloud_settings()
         res = await llm.cloud_check()
         r = Reply((f"☁️ {info}\n" + (f"Отвечает ✅ ({res.get('model')})" if res.get("ok") else f"Не отвечает ❌\n{res.get('detail')}")), [], "none")
+        _log_chat("assistant", r.text, channel)
+        return r
+
+    # «проверь характер» — пять сценариев через облако/ПК, чтобы подкрутить тон, не дожидаясь настоящего повода
+    if persona.CHARACTER_CHECK_RX.match(text):
+        r = Reply(await persona.character_check(), ["character_check"], "rules")
         _log_chat("assistant", r.text, channel)
         return r
 
@@ -1632,6 +1855,13 @@ async def _handle(text: str, channel: str) -> Reply:
     if mv:
         r = Reply(_change_voice(mv.group(2)), ["voice"], "rules")
         _log_chat("assistant", r.text, channel)
+        return r
+
+    # присутствие/цели/решения/лента/самопроверка (0.10) — правила без модели
+    r = await _presence_rules(text, channel)
+    if r is not None:
+        _log_chat("assistant", r.text, channel)
+        _changed(channel, r.actions)
         return r
 
     # игровой режим: выгрузить модель из видеопамяти, отвечать через облако
@@ -1726,10 +1956,24 @@ async def _handle(text: str, channel: str) -> Reply:
         log.info("[%s] %s: %r", channel, who, text[:60])
         r = await via_ollama(text, channel, with_tools=not cloud_tried)
         log.info("[%s] %s %s за %.1f с", channel, who, "ответил" if r else "недоступен", time.monotonic() - t1)
+    if r is None:
+        # моделей нет (Ollama спит после игры/сна ПК), а вопрос — о своих данных: инструмент отвечает и без модели
+        forced = _forced_tool(text)
+        if forced:
+            tr = registry.call(forced[0], forced[1], channel)
+            if tr.ok:
+                log.info("[%s] модели недоступны → инструмент %s напрямую", channel, forced[0])
+                r = Reply(tr.text, [forced[0]], "rules")
     if r is None and not cloud_tried and llm.cloud_enabled():
         cloud_tried = True
         log.info("[%s] ОБЛАКО: запасной путь → %s", channel, llm.cloud_title())
         r = await via_gemini(text, channel, explicit=True)   # запасной путь: Ollama лежит
+        if r is not None and r.via == "local_needed":
+            # облако честно сказало «это личное», а локальная только что не ответила — раньше тут уходило пустое «…»
+            log.info("[%s] облако отказалось (личное), локальная недоступна — говорю прямо", channel)
+            why = await llm.ollama_diagnose() if not llm.GAME_MODE else "игровой режим"
+            r = Reply(f"Это про ваши данные — облаку их не даю, а локальный мозг сейчас не отвечает ({why[:120]}). "
+                      "Ничего не записал. Повторите через минуту — или скажите шаблоном: «задача: …», «встреча … в …», «что сегодня».", [], "none")
     if r is None and llm.GAME_MODE:
         r = Reply("Игровой режим, сэр: локальный мозг спит, а это личный вопрос — он для локального. "
                   "Команды-шаблоны («потратил 700 на такси», «задача: …») работают; остальное — после «игра окончена».", [], "none")
@@ -1749,6 +1993,8 @@ async def _handle(text: str, channel: str) -> Reply:
     _log_chat("assistant", r.text, channel)
     _changed(channel, r.actions)
     _extract_memory_bg(text, r.actions, channel)
+    if r.via in ("gemini", "ollama"):
+        persona.remember_images(r.text)   # чтобы кот из памяти не всплывал в каждом ответе — общий список с проактивными
     return _mark(r)
 
 

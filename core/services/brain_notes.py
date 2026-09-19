@@ -10,7 +10,7 @@ import httpx
 from sqlmodel import select
 
 from ..config import DATA_DIR
-from ..db import icontains, Link, Memory, Note, remember, session, log_action
+from ..db import diff_text, icontains, Link, Memory, Note, remember, session, log_action
 
 URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
@@ -103,6 +103,7 @@ def update_note(nid: int, text: str | None = None, title: str | None = None, tag
         n = s.get(Note, nid)
         if not n:
             return None
+        before = {"text": n.text, "title": n.title, "tags": n.tags}
         if append:
             n.text = (n.text.rstrip() + "\n" + append.strip()).strip()
         if text is not None and text.strip():
@@ -113,7 +114,9 @@ def update_note(nid: int, text: str | None = None, title: str | None = None, tag
             n.tags = ",".join(t.strip().lstrip("#").lower() for t in tags if t.strip())
         n.polished = True
         s.add(n); s.commit(); s.refresh(n)
-        remember(s, "note", f"Правка мысли: {(n.title or n.text)[:100]}", "note", n.id)
+        changes = diff_text(before, {"text": n.text, "title": n.title, "tags": n.tags},
+                            {"text": "текст", "title": "заголовок", "tags": "теги"})
+        remember(s, "note", f"Правка мысли «{(n.title or n.text)[:40]}»" + (f": {changes}" if changes else " (без изменений)"), "note", n.id)
         s.commit()
     return n   # семантический индекс пересчитается сам: index_pending сравнивает хэш текста
 

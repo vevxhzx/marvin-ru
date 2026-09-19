@@ -12,14 +12,14 @@ from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from sqlmodel import select
 
 from ..brain import agent
 from ..config import ROOT
-from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring, get_setting, set_setting
+from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring, Aim, Milestone, get_setting, set_setting
 from .. import identity
-from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, people, pulse, relations, tasks
+from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, people, pulse, relations, tasks, screen
 from ..services.scheduler import morning_digest_text
 
 log = logging.getLogger("assistant.api")
@@ -86,8 +86,8 @@ async def stream(client: str = ""):
 
 # ---------------- чат ----------------
 class ChatIn(BaseModel):
-    text: str
-    channel: str = "web"
+    text: str = Field(..., max_length=20000)
+    channel: str = Field("web", max_length=20)
 
 
 @app.post("/api/chat")
@@ -149,20 +149,46 @@ def chat_history(limit: int = 40):
 
 # ---------------- ПК-клиент (voice.bat): пульс, состояние, результаты команд, зрение ----------------
 class PcPing(BaseModel):
-    mode: str = "idle"
-    text: str = ""
+    mode: str = Field("idle", max_length=20)
+    text: str = Field("", max_length=500)
     pending_results: bool = False
+    screen: bool = False          # ПК-клиент шлёт активное окно (voice.pc.screen_time.enabled)
+    app: str = Field("", max_length=80)
+    title: str = Field("", max_length=200)
+    idle_sec: int = Field(0, ge=0, le=7 * 24 * 3600)
 
 
 @app.post("/api/pc/ping")
 def pc_ping(p: PcPing):
-    """Голосовой клиент раз в 20 с сообщает, что жив и что делает (idle/listening/thinking/speaking/off)."""
-    from ..services import pc
+    """Голосовой клиент раз в 20 с сообщает, что жив и что делает (idle/listening/thinking/speaking/off).
+    Тот же пульс кормит экранное время (screen) и состояние присутствия (state): сел/отошёл/что открыто/долго ли."""
+    from ..services import pc, state
     was = pc.STATE.get("mode")
     pc.seen({"mode": p.mode, "text": p.text})
     if was != p.mode:
         broadcast("pc_state", {"mode": p.mode, "text": p.text})
+    try:
+        if p.screen:
+            from ..services import screen
+            screen.record(p.app, p.title, p.idle_sec)
+            name, sub, cat = screen.classify(p.app, p.title, screen._GAMES)
+            state.tick(name, sub, cat, p.idle_sec)
+        else:
+            state.tick()
+    except Exception as e:  # pragma: no cover
+        log.warning("pc ping state: %s", e)
     return {"ok": True}
+
+
+@app.get("/api/screen")
+def screen_report(day: str | None = None, days: int = 1):
+    """Экранное время: сводка за день (карточка на «Сегодня») или за несколько дней."""
+    from ..services import screen
+    d = datetime.fromisoformat(day) if day else None
+    r = screen.summary(d, max(1, min(days, 31)))
+    return {**r, "first": r["first"].isoformat() if r["first"] else None, "last": r["last"].isoformat() if r["last"] else None,
+            "sessions": [[a.isoformat(), b.isoformat()] for a, b in r["sessions"]], "idle_min_setting": screen.idle_min(),
+            "pc_alive": pc.alive(), "text": screen.text(d, max(1, min(days, 31)))}
 
 
 class PcAck(BaseModel):
@@ -264,6 +290,8 @@ async def finance_import(request: Request):
     if up is None:
         raise HTTPException(400, "Нет файла")
     data = await up.read()
+    if len(data) > 25 * 1024 * 1024:
+        raise HTTPException(413, "Выписка больше 25 МБ")
     res = bank_import.import_file(up.filename or "", data, (form.get("account") or None))
     if res.added:
         broadcast("chat", {"channel": "web", "actions": ["import"]})
@@ -367,6 +395,7 @@ async def dashboard():
                    "expected": orders.expected_income(30),
                    "late": pulse.late_payments()[:3] if fl["enabled"] and fl["late_nudge"] else []},
         "freelance": fl["enabled"],
+        "screen_time": screen.enabled(),
         "goals": goals.list_goals()[:4],
         "runway": goals.runway(),
         "payments": goals.payment_check(7),
@@ -375,15 +404,28 @@ async def dashboard():
 
 # ---------------- календарь ----------------
 class EventIn(BaseModel):
-    title: str
+    title: str = Field(..., min_length=1, max_length=300)
     start: datetime
-    duration_min: int = 60
-    location: Optional[str] = None
-    notes: Optional[str] = None
-    remind_minutes: int = 30
+    duration_min: int = Field(60, ge=0, le=24 * 60 * 14)
+    location: Optional[str] = Field(None, max_length=300)
+    notes: Optional[str] = Field(None, max_length=4000)
+    remind_minutes: int = Field(30, ge=0, le=60 * 24 * 30)
     repeat: str = ""                       # "" / daily / weekly / monthly / yearly
     repeat_days: list[int] = []            # для weekly: 0=пн … 6=вс
     repeat_until: Optional[datetime] = None
+
+    @field_validator("title")
+    @classmethod
+    def _t(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("пустое название")
+        return v
+
+    @field_validator("repeat_days")
+    @classmethod
+    def _days(cls, v: list[int]) -> list[int]:
+        return sorted({d for d in v if 0 <= d <= 6})
 
 
 def _ev_out(e: Event) -> dict:
@@ -482,10 +524,18 @@ def remove_event(event_id: int):
 
 # ---------------- задачи ----------------
 class TaskIn(BaseModel):
-    title: str
+    title: str = Field(..., min_length=1, max_length=500)
     due: Optional[datetime] = None
-    priority: int = 2
-    project: Optional[str] = None
+    priority: int = Field(2, ge=1, le=3)
+    project: Optional[str] = Field(None, max_length=120)
+
+    @field_validator("title")
+    @classmethod
+    def _t(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("пустое название")
+        return v
 
 
 def _event_as_task(e: Event) -> dict:
@@ -528,6 +578,9 @@ class TaskPatch(BaseModel):
     clear_due: bool = False
     priority: Optional[int] = None
     project: Optional[str] = None
+    blocked_by: Optional[str] = None      # "" — снять блокировку
+    aim_id: Optional[int] = None          # 0 — отвязать
+    milestone_id: Optional[int] = None
 
 
 @app.put("/api/tasks/{task_id}")
@@ -536,6 +589,17 @@ def patch_task(task_id: int, p: TaskPatch):
     fields.pop("clear_due", None)
     if p.clear_due:
         fields["due"] = None
+    if fields.get("milestone_id") or fields.get("aim_id"):
+        # чужой/несуществующий id — 404, а не молчаливая запись в базу
+        from ..services import aims
+        with session() as s:
+            if fields.get("milestone_id") and not s.get(Milestone, fields["milestone_id"]):
+                raise HTTPException(404, "веха не найдена")
+            if fields.get("aim_id") and not s.get(Aim, fields["aim_id"]):
+                raise HTTPException(404, "цель не найдена")
+        if fields.get("milestone_id"):
+            aims.link_task(task_id, milestone=fields.pop("milestone_id"))
+            fields.pop("aim_id", None)
     t = tasks.update_task(task_id, **fields)
     if not t:
         raise HTTPException(404)
@@ -566,6 +630,132 @@ def remove_task(task_id: int):
     if not tasks.delete_task(task_id):
         raise HTTPException(404)
     return {"ok": True}
+
+
+# ---------------- цели (aims): цель → вехи → задачи; фокус дня ----------------
+class AimIn(BaseModel):
+    title: str = Field(..., min_length=2, max_length=120)
+    why: str = Field("", max_length=300)
+    due: Optional[datetime] = None
+    priority: int = Field(2, ge=1, le=3)
+
+
+class AimPatch(BaseModel):
+    title: Optional[str] = Field(None, min_length=2, max_length=120)
+    why: Optional[str] = Field(None, max_length=300)
+    due: Optional[datetime] = None
+    clear_due: bool = False
+    priority: Optional[int] = Field(None, ge=1, le=3)
+    status: Optional[str] = Field(None, pattern="^(active|done|paused|dropped)$")
+
+
+class MilestoneIn(BaseModel):
+    title: str = Field(..., min_length=2, max_length=120)
+    due: Optional[datetime] = None
+    order_id: Optional[int] = None
+    notes: str = Field("", max_length=500)
+
+
+@app.get("/api/aims")
+def get_aims(all: bool = False):
+    from ..services import aims
+    return aims.list_aims(include_closed=all)
+
+
+@app.get("/api/aims/{aim_id}")
+def get_aim(aim_id: int):
+    from ..services import aims
+    v = aims.aim_view(aim_id)
+    if not v:
+        raise HTTPException(404)
+    return v
+
+
+@app.post("/api/aims")
+def create_aim(a: AimIn):
+    from ..services import aims
+    aim = aims.add_aim(a.title, a.why, a.due, a.priority, source="web")
+    return aims.aim_view(aim.id)
+
+
+@app.put("/api/aims/{aim_id}")
+def patch_aim(aim_id: int, p: AimPatch):
+    from ..services import aims
+    fields = p.model_dump(exclude_none=True)
+    fields.pop("clear_due", None)
+    if p.clear_due:
+        fields["due"] = None; fields["clear_due"] = True
+    a = aims.update_aim(aim_id, **fields)
+    if not a:
+        raise HTTPException(404)
+    return aims.aim_view(aim_id)
+
+
+@app.post("/api/aims/{aim_id}/milestones")
+def create_milestone(aim_id: int, m: MilestoneIn):
+    from ..services import aims
+    if not aims.find_aim(aim_id):
+        raise HTTPException(404)
+    ms = aims.add_milestone(aim_id, m.title, m.due, m.order_id, m.notes)
+    return aims.aim_view(ms.aim_id)
+
+
+@app.post("/api/milestones/{mid}/{status}")
+def set_milestone(mid: int, status: str):
+    from ..services import aims
+    if status not in ("done", "open", "dropped"):
+        raise HTTPException(400, "status: done | open | dropped")
+    ms = aims.close_milestone(mid, status)
+    if not ms:
+        raise HTTPException(404)
+    return aims.aim_view(ms.aim_id)
+
+
+@app.get("/api/focus")
+def get_focus():
+    """Фокус дня: 1–3 шага к целям + что мешает. Пусто, если целей нет — карточка на «Сегодня» тогда не рисуется."""
+    from ..services import aims
+    f = aims.focus()
+    for it in f["items"]:
+        if it.get("due"):
+            it["due"] = it["due"].isoformat()
+    return f
+
+
+# ---------------- присутствие / события / лента / самопроверка ----------------
+@app.get("/api/state")
+def get_state():
+    from ..services import state
+    from ..brain import attention
+    sn = state.snapshot()
+    return {**sn, "line": state.line(), "budget_left": attention.budget_left(), "deferred": attention.queue_size(),
+            "pc_alive": pc.alive()}
+
+
+@app.get("/api/presence/events")
+def get_presence_events(limit: int = 30):
+    from ..services import events
+    return [{"kind": e.kind, "key": e.key, "at": e.at.isoformat(), "quiet": e.quiet, "text": e.text, "data": e.data}
+            for e in reversed(events.recent(max(1, min(limit, 200))))]
+
+
+@app.get("/api/timeline")
+def get_timeline(day: str | None = None, q: str | None = None):
+    from ..services import timeline
+    try:
+        d = datetime.fromisoformat(day) if day else None
+    except ValueError:
+        raise HTTPException(422, "day: дата в формате ГГГГ-ММ-ДД")
+    items = timeline.build(d, q)
+    return [{**i, "at": i["at"].isoformat(), "end": i["end"].isoformat() if i.get("end") else None} for i in items]
+
+
+@app.get("/api/diagnose")
+async def diagnose():
+    from ..services import health
+    res = await health.diagnose()
+    health.record(res)
+    return res
 
 
 # ---------------- финансы ----------------
@@ -988,7 +1178,7 @@ def graph_get(days: int = 365, focus: Optional[str] = None):
 @app.get("/api/graph/backlinks/{kind}/{ref_id}")
 def graph_backlinks(kind: str, ref_id: int):
     from ..services import graph
-    if kind not in ("note", "link", "person", "order", "tag"):
+    if kind not in ("note", "link", "person", "order", "tag", "debt", "goal"):
         raise HTTPException(400)
     return graph.backlinks(kind, ref_id)
 
@@ -1198,8 +1388,16 @@ def finance_techniques():
 
 # ---------------- второй мозг ----------------
 class NoteIn(BaseModel):
-    text: str
+    text: str = Field(..., min_length=1, max_length=20000)
     tags: list[str] = []
+
+    @field_validator("text")
+    @classmethod
+    def _t(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("пустая заметка")
+        return v
 
 
 class LinkIn(BaseModel):
@@ -1494,7 +1692,10 @@ def settings_put(p: SettingsIn):
         from ..brain import persona
         persona.reload_persona()
         broadcast("settings", {"keys": changed})
-    needs_restart = any(k.startswith(("telegram.", "brain.ollama", "backup.")) for k in changed)
+    if any(k.startswith("brain.ollama.small_") for k in changed):
+        from ..brain import llm
+        llm.reload_small_settings()
+    needs_restart = any(k.startswith(("telegram.", "backup.")) or (k.startswith("brain.ollama") and not k.startswith("brain.ollama.small_")) for k in changed)
     return {"changed": changed, "restart": needs_restart}
 
 
@@ -1531,10 +1732,13 @@ async def status():
         "game_mode": llm.GAME_MODE,
         "voice": _voice_status(),
         "pc": {"alive": pc.alive(), **pc.STATE},
+        "screen": {"enabled": screen.enabled(), "today_min": screen.summary()["active_min"] if screen.enabled() else 0,
+                   "last": (lambda r: r[-1].end.isoformat() if r else None)(screen.slots())},
         "vision": llm.vision_status(),
         "ollama": {"ok": ollama, "model": llm.OLLAMA_MODEL, "url": llm.OLLAMA_URL, "diag": diag, "gpu": llm.GPU_NOTE,
                    "embed": await llm.embed_available(), "embed_model": llm.EMBED_MODEL,
-                   "small_model": llm.SMALL_MODEL, "small_ok": llm.small_model_active()},
+                   "small_model": llm.SMALL_MODEL, "small_ok": llm.small_model_active(), "small_keep_alive": llm.SMALL_KEEP_ALIVE,
+                   "small_last": llm.SMALL_LAST or None},
         "gemini": {"enabled": llm.cloud_enabled(), "provider": llm.CLOUD_PROVIDER or "gemini", "title": llm.cloud_title(),
                    "model": (llm._cloud_model() if llm.CLOUD_PROVIDER not in ("", "gemini") else (llm._RESOLVED_MODEL or llm.GEMINI_MODEL)),
                    "auto": llm.GEMINI_AUTO, "mode": llm.MODE,
@@ -1771,6 +1975,13 @@ class GameBody(BaseModel):
 async def game_mode(body: GameBody):
     from ..brain import llm
     return {"text": await llm.set_game_mode(body.on), "game_mode": llm.GAME_MODE}
+
+
+@app.post("/api/status/small")
+async def small_check():
+    """«Проверить» у карточки малой модели: есть ли, отвечает ли, за сколько."""
+    from ..brain import llm
+    return await llm.small_check()
 
 
 @app.post("/api/status/gemini")

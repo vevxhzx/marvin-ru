@@ -276,11 +276,31 @@ def add_person(name: str, kind: str | None = "person", contact: str | None = Non
             row.kind = k
         elif not existed or row.kind == "person":
             row.kind = guess_kind(name, notes)
+        birthday = _clean_birthday(birthday)
         for k, v in (("contact", contact), ("notes", notes), ("aliases", aliases), ("birthday", birthday), ("tags", tags)):
             if v is not None:
                 setattr(row, k, str(v).strip() or ("" if k in ("aliases", "tags") else None))
         s.add(row); s.commit(); s.refresh(row)
         return row
+
+
+def _clean_birthday(v) -> str | None:
+    """«12.03», «12.03.1990», «1990-03-12» → «ДД.ММ[.ГГГГ]»; невозможная дата (99.99) — пусто, а не мусор в базе."""
+    import re as _re
+    t = str(v or "").strip()
+    if not t:
+        return None
+    m = _re.fullmatch(r"(\d{1,2})[.\-/](\d{1,2})(?:[.\-/](\d{4}))?", t) or None
+    if m:
+        d, mo, y = int(m.group(1)), int(m.group(2)), m.group(3)
+    else:
+        m = _re.fullmatch(r"(\d{4})-(\d{1,2})-(\d{1,2})", t)
+        if not m:
+            return None
+        y, mo, d = m.group(1), int(m.group(2)), int(m.group(3))
+    if not (1 <= mo <= 12 and 1 <= d <= 31):
+        return None
+    return f"{d:02d}.{mo:02d}" + (f".{y}" if y else "")
 
 
 def update_person(cid: int, **fields) -> Client | None:
@@ -297,7 +317,9 @@ def update_person(cid: int, **fields) -> Client | None:
                 nk = normalize_kind(v)
                 if nk:
                     c.kind = nk
-            elif k in ("contact", "notes", "birthday"):
+            elif k == "birthday":
+                c.birthday = _clean_birthday(v)
+            elif k in ("contact", "notes"):
                 setattr(c, k, str(v).strip() or None)
             elif k in ("aliases", "tags"):
                 setattr(c, k, ", ".join(x.strip() for x in str(v).split(",") if x.strip()))

@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from sqlmodel import select
 
-from ..db import icontains, Event, log_action, remember, session
+from ..db import diff_text, icontains, Event, log_action, remember, session
 
 WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 WD_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
@@ -48,7 +48,7 @@ def fmt_repeat(ev: Event) -> str:
         return "каждый день"
     if ev.repeat == "weekly":
         days = [int(x) for x in ev.repeat_days.split(",") if x.strip().isdigit()] or [ev.start.weekday()]
-        return "каждую неделю: " + ", ".join(WD_SHORT[d] for d in sorted(days))
+        return "каждую неделю: " + ", ".join(WD_SHORT[d] for d in sorted(days) if 0 <= d <= 6)
     if ev.repeat == "monthly":
         return f"каждый месяц {ev.start.day}-го"
     if ev.repeat == "yearly":
@@ -181,6 +181,7 @@ def update_event(event_id: int, **fields) -> Event | None:
         ev = s.get(Event, event_id)
         if not ev:
             return None
+        before = {"title": ev.title, "start": ev.start, "end": ev.end, "location": ev.location, "notes": ev.notes, "repeat": ev.repeat}
         dur = (ev.end - ev.start) if ev.end else timedelta(hours=1)
         if fields.get("title") is not None:
             ev.title = fields["title"].strip() or ev.title
@@ -205,7 +206,9 @@ def update_event(event_id: int, **fields) -> Event | None:
             ru = fields["repeat_until"]
             ev.repeat_until = (ru if isinstance(ru, datetime) else datetime.fromisoformat(str(ru))) if ru else None
         s.add(ev)
-        remember(s, "event", f"Изменено: «{ev.title}» {fmt_dt(ev.start)}", "event", ev.id)
+        after = {"title": ev.title, "start": ev.start, "end": ev.end, "location": ev.location, "notes": ev.notes, "repeat": ev.repeat}
+        changes = diff_text(before, after, {"title": "название", "start": "начало", "end": "конец", "location": "место", "notes": "заметка", "repeat": "повтор"})
+        remember(s, "event", f"Изменено событие «{ev.title}»" + (f": {changes}" if changes else " (без изменений)"), "event", ev.id)
         s.commit(); s.refresh(ev)
     _gcal_push(ev.id)
     return ev

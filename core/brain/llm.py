@@ -147,6 +147,21 @@ MARK_SOURCE = bool(getattr(cfg.brain.gemini, "mark_source", True))
 
 
 # ---------------- Ollama ----------------
+# Ollama обрабатывает запросы по одному: фоновая уборка заметок/связей, влезшая перед репликой пользователя, задерживает его
+# ответ на весь свой прогон (5–20 с). Пользователь в чате → фон ждёт.
+_USER_ACTIVE_AT = 0.0
+
+
+def mark_user_active() -> None:
+    global _USER_ACTIVE_AT
+    _USER_ACTIVE_AT = time.monotonic()
+
+
+def user_recent(seconds: float = 90) -> bool:
+    """Пользователь писал/говорил недавно — фоновым задачам на локальной модели лучше подождать следующего прохода."""
+    return time.monotonic() - _USER_ACTIVE_AT < seconds
+
+
 _AVAIL_CACHE: tuple[float, bool] = (0.0, False)
 AVAIL_TTL = 15.0
 
@@ -258,7 +273,30 @@ async def small_chat(system: str, user: str, json_mode: bool = True, num_predict
         r.raise_for_status()
         out = strip_think((r.json().get("message") or {}).get("content") or "")
     log.info("малая модель %s ответила за %.1f с", SMALL_MODEL, time.monotonic() - t0)
+    SMALL_LAST.update({"at": time.time(), "seconds": round(time.monotonic() - t0, 1), "task": (system[:40] + "…") if len(system) > 40 else system})
     return out
+
+
+SMALL_LAST: dict = {}   # последняя мини-задача на малой модели: когда, сколько секунд, что за задача — для карточки в настройках
+
+
+async def small_check() -> dict:
+    """Живая проверка малой модели для настроек: настроена ли, скачана ли, отвечает ли и за сколько."""
+    if not SMALL_MODEL:
+        return {"configured": False, "ok": False, "detail": "не задана — мини-задачи (судья, подколы) идут на основную модель",
+                "hint": "brain.ollama.small_model: qwen2.5:1.5b  +  в cmd: ollama pull qwen2.5:1.5b"}
+    if not await ollama_available(force=True):
+        return {"configured": True, "model": SMALL_MODEL, "ok": False, "detail": "Ollama не отвечает"}
+    if not small_model_active():
+        return {"configured": True, "model": SMALL_MODEL, "ok": False, "detail": f"в Ollama нет модели {SMALL_MODEL}", "hint": f"в cmd: ollama pull {SMALL_MODEL}"}
+    t0 = time.monotonic()
+    try:
+        out = await small_chat("Ответь строго JSON вида {\"ok\": true}.", "Проверка связи.", json_mode=True, num_predict=20)
+        dt = time.monotonic() - t0
+        return {"configured": True, "model": SMALL_MODEL, "ok": '"ok"' in out or "ok" in out.lower(), "seconds": round(dt, 1),
+                "detail": f"ответила за {dt:.1f} с · живёт в видеопамяти {SMALL_KEEP_ALIVE} после задачи"}
+    except Exception as e:
+        return {"configured": True, "model": SMALL_MODEL, "ok": False, "detail": f"ошибка: {str(e)[:120]}"}
 
 
 def _log_ollama_stats(d: dict, with_tools: bool) -> None:
@@ -285,8 +323,9 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
     while est + num_predict > num_ctx and num_ctx < 32768:
         num_ctx *= 2
     if num_ctx != OLLAMA_NUM_CTX:
-        log.warning("Запрос ≈%d токенов не влезает в num_ctx=%d — на этот раз беру %d (модель перезагрузится, +несколько секунд). "
-                    "Поставьте brain.ollama.num_ctx: %d в настройках, чтобы так было всегда.", est, OLLAMA_NUM_CTX, num_ctx, num_ctx)
+        log.warning("Запрос ≈%d токенов не влезает в num_ctx=%d — на этот раз беру %d (модель перезагрузится, +10–15 с; на 6 ГБ видеокарте "
+                    "часть модели уедет в оперативку и промпт будет читаться в разы дольше). Это аварийный путь: в норме история и память "
+                    "ужимаются заранее — если видите это часто, напишите в чат «отчёт о себе» и пришлите лог.", est, OLLAMA_NUM_CTX, num_ctx)
     payload: dict[str, Any] = {"model": OLLAMA_MODEL, "messages": messages, "stream": stream, "keep_alive": OLLAMA_KEEP_ALIVE,
                                "options": {"temperature": temperature, "num_ctx": num_ctx, "num_predict": num_predict}}
     if tools:
@@ -524,6 +563,18 @@ def _cloud_routes() -> list[tuple[str, str | None]]:
 _CLOUD_ROUTE_OK: tuple[str, str | None] | None = None   # маршрут, который последний раз сработал
 
 
+def reload_small_settings() -> None:
+    """Малая модель меняется с сайта без перезапуска: перечитать имя и keep_alive, сбросить «нет в Ollama»."""
+    global SMALL_MODEL, SMALL_KEEP_ALIVE, _AVAIL_CACHE
+    import importlib
+    from .. import config as _c
+    importlib.reload(_c)
+    SMALL_MODEL = str(getattr(_c.cfg.brain.ollama, "small_model", "") or "").strip()
+    SMALL_KEEP_ALIVE = str(getattr(_c.cfg.brain.ollama, "small_keep_alive", "5m") or "5m")
+    _SMALL_MISSING.clear(); _SMALL_SEEN.clear()
+    _AVAIL_CACHE = (0.0, False)   # следующая проверка Ollama заново посмотрит, есть ли модель
+
+
 def reload_cloud_settings() -> str:
     """Перечитать brain.cloud.* из config.yaml без перезапуска и сбросить кэш (модель/маршрут/ошибку)."""
     global CLOUD_PROVIDER, CLOUD_KEY, CLOUD_MODEL, CLOUD_BASE_URL, CLOUD_PROXY, MODE, GEMINI_AUTO
@@ -558,8 +609,8 @@ def reload_cloud_settings() -> str:
     _OR_AVOID_RUNTIME.clear()
     LAST_CLOUD_ERROR = None
     log.info("Облако перечитано: %s, модель %s, ключ %s, режим %s", cloud_title(), _cloud_model() or "по умолчанию",
-             ("…" + CLOUD_KEY[-4:]) if CLOUD_KEY else "НЕ ЗАДАН", MODE)
-    return f"{cloud_title()} · модель {_cloud_model() or 'по умолчанию'} · ключ {('…' + CLOUD_KEY[-4:]) if CLOUD_KEY else 'не задан'} · режим {MODE}"
+             "задан" if CLOUD_KEY else "НЕ ЗАДАН", MODE)
+    return f"{cloud_title()} · модель {_cloud_model() or 'по умолчанию'} · ключ {'задан' if CLOUD_KEY else 'не задан'} · режим {MODE}"
 
 
 def _cloud_client(timeout: float, proxy: str | None = None) -> httpx.AsyncClient:
@@ -580,6 +631,8 @@ async def _cloud_post(path: str, body: dict, headers: dict, timeout: float = 45)
             body["reasoning_format"] = "hidden"
         if body.get("model", "").startswith("qwen/") and "reasoning_effort" not in body:
             body["reasoning_effort"] = "none"
+        if "gpt-oss" in body.get("model", "") and "reasoning_effort" not in body:
+            body["reasoning_effort"] = "low"   # gpt-oss думает всегда; на «medium» размышления съедают весь max_tokens короткого ответа
         if "tools" in body or body.get("response_format"):
             body.pop("reasoning_format", None)   # с tools/JSON «raw»/«hidden» не дружат — оставляем parsed по умолчанию
     routes = _cloud_routes()
@@ -674,7 +727,8 @@ def _explain_cloud_error(e: Exception, r: "httpx.Response | None") -> str:
     return f"{name}: {type(e).__name__}: {e}"
 
 
-async def cloud_chat(system: str, user_text: str, history: list[dict] | None = None, _force_model: str | None = None) -> str | None:
+async def cloud_chat(system: str, user_text: str, history: list[dict] | None = None, _force_model: str | None = None,
+                     temperature: float = 0.7) -> str | None:
     """Единая точка входа в облако. Провайдер — из настроек; Gemini — частный случай."""
     global LAST_CLOUD_ERROR, _CLOUD_RESOLVED
     history_retry = _force_model is not None
@@ -702,7 +756,9 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             model = CLOUD_VOICE_MODEL
         elif CLOUD_PROVIDER == "groq" and "compound" in model:
             model = "openai/gpt-oss-20b"   # compound ходит в интернет и думает 3–8 с; для голоса — быстрая
-    body = {"model": model, "messages": messages, "temperature": 0.7, "max_tokens": 220 if short_mode.get() else 1024}
+    # reasoning-модели тратят max_tokens и на скрытые размышления: 220 на голосовой ответ для gpt-oss/qwen3 — это пустой content
+    short_max = 700 if _THINK_RX.search(model) else 220
+    body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": short_max if short_mode.get() else 1024}
     r = None
     sink = token_sink.get()
     if sink is not None:
@@ -735,6 +791,18 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             # reasoning-модели (deepseek-r1) иногда кладут ответ в reasoning, а content пустой
             if not text:
                 text = strip_think(msg.get("reasoning") or msg.get("reasoning_content") or "")
+            if not text and body["model"] != main_model:
+                # быстрая голосовая модель промолчала (обычно finish_reason=length: всё ушло в размышления) — один раз основной
+                fin = (data.get("choices") or [{}])[0].get("finish_reason")
+                log.warning("%s: %s вернула пустой ответ (finish_reason=%s) — повторяю основной моделью %s", cloud_title(), body["model"], fin, main_model)
+                body["model"] = main_model
+                body["max_tokens"] = 1024
+                body.pop("reasoning_effort", None)
+                r = await _cloud_post("/chat/completions", body, headers)
+                r.raise_for_status()
+                data = r.json()
+                msg = (data.get("choices") or [{}])[0].get("message") or {}
+                text = strip_think(msg.get("content") or "") or strip_think(msg.get("reasoning") or msg.get("reasoning_content") or "")
             if not text:
                 LAST_CLOUD_ERROR = f"{cloud_title()}: пустой ответ."
                 return None

@@ -52,6 +52,8 @@ const plural = (n) => { const a = n % 100, b = n % 10; return a > 10 && a < 20 ?
 
 /* ---------- Прогноз кассы на 30 дней ---------- */
 export function Forecast({ f, compact = false }) {
+  // хук — до раннего выхода: иначе при появлении данных менялся порядок хуков и React ронял страницу
+  const [hover, setHover] = useState(null)
   if (!f?.points?.length) return null
   const pts = f.points
   // svg растягивается на всю ширину контейнера (preserveAspectRatio="none"), поэтому координаты X — в процентах,
@@ -62,7 +64,6 @@ export function Forecast({ f, compact = false }) {
   const y = (v) => P + (1 - (v - min) / (max - min || 1)) * (H - 2 * P)
   const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.balance).toFixed(1)}`).join(' ')
   const zero = y(0)
-  const [hover, setHover] = useState(null)
   const ev = pts.map((p, i) => ({ ...p, i })).filter((p) => p.events.length)
   const lowIdx = pts.findIndex((p) => p.date === f.low_date)
   const cur = hover != null ? pts[hover] : null

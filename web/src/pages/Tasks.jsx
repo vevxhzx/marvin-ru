@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Check, Plus, Trash2, MessageCircle, CalendarClock, ArrowDownUp, Pencil } from 'lucide-react'
 import { api, dayLabel, hhmm, isSameDay, isAllDay, plural } from '../lib/api'
 import { Section, Empty, Seg, useToast, PriorityDot, PageHead, useLeave, useArrived, useDoneFlash, Swipe, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
+import Aims from '../components/Aims'
 import { usePrefs, prefs as PREFS } from '../lib/prefs'
 
-const VIEWS = [['open', 'открытые'], ['today', 'сегодня'], ['done', 'выполнено']]
+const VIEWS = [['open', 'открытые'], ['today', 'сегодня'], ['done', 'выполнено'], ['aims', 'цели']]
 const SORTS = [['priority', 'по важности'], ['due', 'по сроку'], ['new', 'по новизне']]
 const dueTs = (t) => (t.due ? new Date(t.due).getTime() : 9e15)
 const SORT_FN = {
@@ -19,7 +20,9 @@ const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { d
 
 export default function Tasks() {
   const [tasks, setTasks] = useState(null)
-  const [view, setView] = useState('open')
+  const [params, setParams] = useSearchParams()
+  const view = params.get('view') || 'open'
+  const setView = (v) => setParams(v === 'open' ? {} : { view: v }, { replace: true })
   const [quick, setQuick] = useState('')
   const [sheet, setSheet] = useState(null)   // null | 'new' | задача (правка)
   const [, show] = useToast()
@@ -69,23 +72,24 @@ export default function Tasks() {
   const kicker = groups.overdue.length ? `${groups.overdue.length} ${plural(groups.overdue.length, 'просрочена', 'просрочены', 'просрочено')}` : open.length ? `${open.length} ${plural(open.length, 'открытая', 'открытые', 'открытых')}` : 'всё сделано'
   return (
     <div className="space-y-10">
-      <PageHead kicker={kicker} title="задачи" idx={open.length}
-        right={<><Seg value={view} onChange={setView} options={VIEWS} /><button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> задача</button></>} />
+      <PageHead kicker={view === 'aims' ? 'ради чего всё это' : kicker} title={view === 'aims' ? 'цели' : 'задачи'} idx={view === 'aims' ? undefined : open.length}
+        right={<><Seg value={view} onChange={setView} options={VIEWS} />{view !== 'aims' && <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> задача</button>}</>} />
 
-      <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
+      {view === 'aims' && <Aims tick={tick} bump={() => { load(); bump() }} />}
+      {view !== 'aims' && <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />
         <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder="Быстро, своими словами: «позвонить маме завтра в 18»…" />
         <button className={`btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0 ${quickDone}`} disabled={!quick.trim() && !quickDone} aria-label="Добавить">{quickDone ? <Check size={16} strokeWidth={3} /> : <Plus size={16} />}</button>
-      </form>
+      </form>}
 
-      {view !== 'done' && (
+      {view !== 'done' && view !== 'aims' && (
         <div className="-mt-6 flex items-center justify-end gap-1 text-[12px]">
           <ArrowDownUp size={12} className="faint" />
           {SORTS.map(([v, l]) => <button key={v} type="button" onClick={() => PREFS.set({ tasksSort: v })} className={`rounded-md px-2 py-1 transition-colors ${v === tasksSort ? 'bg-[var(--fill)] text-[var(--ink)]' : 'faint hover:text-[var(--ink)]'}`}>{l}</button>)}
         </div>
       )}
 
-      {!tasks ? <ListSkeleton n={5} /> : view === 'done' ? (
+      {view === 'aims' ? null : !tasks ? <ListSkeleton n={5} /> : view === 'done' ? (
         <Section title="выполнено" idx={done.length}>
           <div className="rule">
             {done.length === 0 ? <Empty glyph="tasks" text="Пока ничего не закрыто" sub="Первая галочка — самая приятная" /> : done.slice(0, 50).map((t) => <Row key={t.id} t={t} onToggle={toggle} onDel={del} onPriority={setPriority} onEdit={() => setSheet(t)} now={now} extra={leaveCls(t.id)} />)}

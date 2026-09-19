@@ -9,7 +9,7 @@
 
 Правила: тихие часы (notifications.quiet_*), лимит notifications.proactive_per_day, каждый повод — один раз
 (ключ в Setting), кнопка «🔕 не надо про это» = Lesson(kind="mute") — тема больше не всплывает.
-Формулировка — малая модель (llm.small_chat) в стиле персоны; без неё — шаблон. Никаких действий без сообщения:
+Формулировка — persona.nudge: факт (JSON) → облако/ПК по persona.where в характере ассистента; без них — шаблон persona.nudge_fallback. Никаких действий без сообщения:
 всё, что предлагает, делается только по кнопке.
 """
 from __future__ import annotations
@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 from sqlmodel import select
 
-from ..brain import llm
+from ..brain import persona
 from ..config import cfg
 from ..db import Fact, Task, get_setting, session, set_setting
 from . import judge
@@ -31,10 +31,6 @@ STALE_TASK_DAYS = 5
 HEALTH_RX = re.compile(r"болe|боле|просту|температур|давлени|самочувств|лечит|таблетк|врач|плохо\s+себя|устал|не\s+спал|бессонниц", re.I)
 PLAN_RX = re.compile(r"\b(надо|нужно|собирается|планирует|хочет|думает)\s+\w+", re.I)
 COUNT_KEY = "proactive.count"   # "YYYY-MM-DD|n"
-
-STYLE_PROMPT = """Ты — личный ассистент с характером (лёгкий свэг, короткие фразы, обращение «сэр»). Перепиши подсказку одной-двумя
-фразами по-русски, дружелюбно и по делу, без markdown и без эмодзи в начале. Не добавляй фактов. Ответ — только текст."""
-
 
 def enabled() -> bool:
     n = getattr(cfg, "notifications", None)
@@ -96,7 +92,9 @@ def candidates(now: datetime | None = None) -> list[dict]:
             for x in pulse.late_payments(now)[:2]:
                 who = x["client"] or f"«{x['title']}»"
                 out.append({"key": f"late:{x['order_id']}:{x['days'] // 7}", "topic": f"оплата {who} {x['title']}",
-                            "text": f"{who} задерживает {money(x['left'])} за «{x['title']}» — уже {x['days']} дн. после сдачи. Напомнить ему?",
+                            "fact": {"kind": "late_pay", "client": who, "title": x["title"], "amount": money(x["left"]), "days": x["days"],
+                                     "urgency": "high" if x["days"] >= 14 else "normal", "question": "напомнить ему?"},
+                            "text": persona.nudge_fallback("late_pay", who=who, money=money(x["left"]), title=x["title"], days=x["days"]),
                             "buttons": [("✍️ Задача: напомнить", f"pro:task:{x['order_id']}:late"), ("🔕 Не надо про это", f"pro:mute:{x['order_id']}:late")]})
     except Exception as e:  # pragma: no cover
         log.debug("late candidates: %s", e)
@@ -108,7 +106,9 @@ def candidates(now: datetime | None = None) -> list[dict]:
     for t in stale[:1]:
         days = (now - t.created_at).days
         out.append({"key": f"stale:{t.id}:{days // 7}", "topic": t.title,
-                    "text": f"«{t.title}» висит без срока уже {days} дн. Поставить дедлайн, сделать или отпустить?",
+                    "fact": {"kind": "stale_task", "title": t.title, "days": days, "deadline": None, "urgency": "low",
+                             "question": "поставить срок, сделать или отпустить?"},
+                    "text": persona.nudge_fallback("stale_task", title=t.title, days=days),
                     "buttons": [("📅 Завтра", f"task:{t.id}:tomorrow"), ("✅ Сделал", f"task:{t.id}:done"), ("🔕 Не надо", f"pro:mute:{t.id}:stale")]})
     today_noon = now.replace(hour=12, minute=0, second=0, microsecond=0)
     # утренний дайджест уже перечислил дела на день — повторять их отдельным сообщением незачем; повод остаётся только
@@ -118,13 +118,31 @@ def candidates(now: datetime | None = None) -> list[dict]:
     if len(day_tasks) == 1:
         t = day_tasks[0]
         out.append({"key": f"today:{t.id}:{now:%Y%m%d}", "topic": t.title,
-                    "text": f"Сегодня дедлайн «{t.title}», а времени в нём нет — не потеряйте среди дня.",
+                    "fact": {"kind": "today_task", "title": t.title, "deadline": "сегодня, без времени", "urgency": "normal"},
+                    "text": persona.nudge_fallback("today_task", title=t.title),
                     "buttons": [("✅ Сделал", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow"), ("🔕 Не надо", f"pro:mute:{t.id}:today")]})
     elif day_tasks:
         # несколько дел на день — одно сообщение списком (а не по сообщению в час на каждое); ключ — на день, темы — все названия
         titles = ", ".join(f"«{t.title}»" for t in day_tasks[:5]) + (f" и ещё {len(day_tasks) - 5}" if len(day_tasks) > 5 else "")
         out.append({"key": f"today:0:{now:%Y%m%d}", "topic": " ".join(t.title for t in day_tasks),
-                    "text": f"На сегодня без времени: {titles}. Не потеряйте среди дня.", "buttons": []})
+                    "fact": {"kind": "today_many", "titles": [t.title for t in day_tasks[:5]], "deadline": "сегодня, без времени", "urgency": "normal"},
+                    "text": persona.nudge_fallback("today_many", titles=titles), "buttons": []})
+    # 2б. цели: стоит без движения (STALE_DAYS) — один повод, редко (ключ на неделю); рутины: ≥2 пропуска подряд
+    try:
+        from . import aims, routines
+        for a in aims.stale_aims()[:1]:
+            days = (now - (a.last_touch or a.created_at)).days
+            out.append({"key": f"aim_stale:{a.id}:{now:%Y%W}", "topic": a.title,
+                        "fact": {"kind": "aim_stale", "title": a.title, "days": days, "why": a.why, "urgency": "low",
+                                 "question": "шаг, пауза или закрыть?"},
+                        "text": f"«{a.title}» стоит {days} дн. без единого шага." + (f" Ты хотел её, потому что {a.why}." if a.why else "") + " Шаг, пауза или закрываем?",
+                        "buttons": [("⏸ Пауза", f"aim:{a.id}:pause"), ("✖ Снять", f"aim:{a.id}:drop"), ("🔕 Не надо", f"pro:mute:{a.id}:aim")]})
+        for r in ([] if muted("рутины: пропуски") else routines.nudges(now)[:1]):
+            out.append({"key": r["key"], "topic": r["title"],
+                        "fact": {"kind": "routine_missed", "title": r["title"], "missed": r["missed"], "urgency": "low", "question": "привычка сломалась?"},
+                        "text": r["text"], "buttons": [("🔕 Не надо", f"pro:mute:0:routine")]})
+    except Exception as e:  # pragma: no cover
+        log.debug("aims/routines candidates: %s", e)
     # 3. факты «сейчас»: самочувствие и планы без задачи
     with session() as s:
         short = list(s.exec(select(Fact).where(Fact.layer == "short")))
@@ -133,29 +151,65 @@ def candidates(now: datetime | None = None) -> list[dict]:
         age = (now - f.created_at).days
         if HEALTH_RX.search(f.text) and 2 <= age <= 7:
             out.append({"key": f"health:{f.id}", "topic": f.text,
-                        "text": f"Пару дней назад вы упоминали: «{f.text}». Как самочувствие, сэр?",
+                        "fact": {"kind": "health", "text": f.text, "days": age, "urgency": "low", "question": "как самочувствие?"},
+                        "text": persona.nudge_fallback("health", text=f.text),
                         "buttons": [("👍 Норм", f"pro:ok:{f.id}:health"), ("🔕 Не надо", f"pro:mute:{f.id}:health")]})
         elif PLAN_RX.search(f.text) and 1 <= age <= 5:
             words = judge._words(f.text)
             if words and not any(w in titles for w in words if len(w) >= 5):
                 out.append({"key": f"plan:{f.id}", "topic": f.text,
-                            "text": f"Вы говорили: «{f.text}». Задачи на это нет — поставить?",
+                            "fact": {"kind": "plan", "text": f.text, "days": age, "urgency": "low", "question": "поставить задачу?"},
+                            "text": persona.nudge_fallback("plan", text=f.text),
                             "buttons": [("✍️ Поставить задачу", f"pro:task:{f.id}:plan"), ("🔕 Не надо", f"pro:mute:{f.id}:plan")]})
+    # 3b. экранное время: YouTube час подряд при дедлайне, игра в рабочее время, 6 ч без перерыва — не чаще раза в 3 часа
+    try:
+        from . import screen
+        last_screen = get_setting("proactive.screen_at", "")
+        if not last_screen or (now - datetime.fromisoformat(last_screen)).total_seconds() >= 3 * 3600:
+            out.extend(screen.nudge_facts(now))
+    except Exception as e:  # pragma: no cover
+        log.debug("screen nudges: %s", e)
+    out = [c for c in out if not _sent(c["key"]) and not muted(c["topic"])]
+    # 4. просто написать: поводов по делам нет, а в чате тихо с утра (VIBE_SILENT_H часов) — спросить как дела / пошутить.
+    # Раз в день, только днём (11–20), только когда есть кому формулировать (без облака/ПК шаблон быстро приестся).
+    if not out and vibe_enabled() and 11 <= now.hour < 20:
+        last = _last_chat_at()
+        silent_h = (now - last).total_seconds() / 3600 if last else 99
+        if silent_h >= VIBE_SILENT_H:
+            out.append({"key": f"vibe:{now:%Y%m%d}", "topic": "просто поболтать",
+                        "fact": {"kind": "vibe", "hours_silent": int(silent_h), "weekday": persona._DAYS.get(now.strftime("%A"), ""),
+                                 "time": f"{now:%H:%M}", "urgency": "low"},
+                        "text": persona.nudge_fallback("vibe"),
+                        "buttons": [("🔕 Не надо так", "pro:mute:0:vibe")]})
     return [c for c in out if not _sent(c["key"]) and not muted(c["topic"])]
 
 
+VIBE_SILENT_H = 5
+
+
+def vibe_enabled() -> bool:
+    n = getattr(cfg, "notifications", None)
+    return bool(getattr(n, "proactive_vibe", True)) if n is not None else True
+
+
+def _last_chat_at() -> datetime | None:
+    from ..db import ChatMessage
+    with session() as s:
+        row = s.exec(select(ChatMessage).order_by(ChatMessage.id.desc())).first()
+    return row.created_at if row else None
+
+
 # ---------------------------------------------------------------- формулировка
-async def phrase(text: str) -> str:
-    """Малая модель придаёт подсказке голос персоны; сбой или пустой ответ — исходный шаблон."""
+async def phrase(c: dict) -> str:
+    """Голос персоны по факту (persona.nudge); сбой, пустой или казённый ответ — шаблон из кандидата."""
+    fact = c.get("fact")
+    if not fact:
+        return c["text"]
     try:
-        if not await llm.ollama_available():
-            return text
-        out = (await llm.small_chat(STYLE_PROMPT, text, json_mode=False, num_predict=120)).strip()
-        if 10 <= len(out) <= 400 and "\n\n" not in out and not out.startswith("{"):
-            return out
+        return await persona.nudge(fact, c["text"])
     except Exception as e:  # pragma: no cover
         log.debug("phrase: %s", e)
-    return text
+        return c["text"]
 
 
 async def tick(now: datetime | None = None, quiet: bool = False) -> dict | None:
@@ -168,8 +222,10 @@ async def tick(now: datetime | None = None, quiet: bool = False) -> dict | None:
     if not cands:
         return None
     c = cands[0]
-    c["text"] = await phrase(c["text"])
+    c["text"] = await phrase(c)
     _mark(c["key"]); _bump()
+    if c["key"].startswith("screen:"):
+        set_setting("proactive.screen_at", (now or datetime.now()).isoformat())
     return c
 
 
@@ -185,6 +241,21 @@ def act(action: str, ref: int, why: str) -> str:
         elif why in ("stale", "today"):
             with session() as s:
                 t = s.get(Task, ref); topic = t.title if t else None
+        elif why == "vibe":
+            # «не надо так» под болтовнёй — выключаем её совсем, не по теме (темы у неё нет)
+            from ..config import save_settings
+            save_settings({"notifications.proactive_vibe": False})
+            return "Понял: без болтовни, только по делу."
+        elif why == "screen":
+            # подколы про экранное время — выключаем все разом (учёт продолжается, карточка и вечерняя строка остаются)
+            from ..config import save_settings
+            save_settings({"voice.pc.screen_time.nudges": False})
+            return "Понял: про время за ПК больше не подкалываю. Считать продолжаю — карточка на «Сегодня» остаётся."
+        elif why == "aim":
+            from . import aims
+            a = aims.find_aim(ref); topic = a.title if a else None
+        elif why == "routine":
+            return "Понял: про пропуски рутин не напоминаю (серии считать продолжаю — «мои рутины»)." if not mute("рутины: пропуски") else "Понял."
         else:
             with session() as s:
                 f = s.get(Fact, ref); topic = f.text if f else None

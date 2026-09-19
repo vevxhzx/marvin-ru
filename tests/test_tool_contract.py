@@ -307,7 +307,7 @@ def test_duplicate_guard_does_not_claim_success_for_a_failed_call(monkeypatch):
     assert r.actions == []
 
 
-def test_note_content_cannot_make_jarvis_delete_without_confirmation(monkeypatch):
+def test_note_content_cannot_make_assistant_delete_without_confirmation(monkeypatch):
     """Инъекция через сохранённый текст: даже если модель решит вызвать удаление, без «да» ничего не удалится."""
     from core.brain import agent
     from core.services import calendar

@@ -29,11 +29,15 @@ _game_on = False
 _game_seen_at = 0.0
 
 
-def setup(api: str, data_dir: Path, games: list[str] | None = None, tidy_downloads_days: int = 0) -> None:
-    global API, DATA_DIR, GAMES, TIDY_DOWNLOADS_DAYS
+SCREEN_TIME = False   # voice.pc.screen_time.enabled — слать активное окно и простой в пульсе (учёт экранного времени)
+
+
+def setup(api: str, data_dir: Path, games: list[str] | None = None, tidy_downloads_days: int = 0, screen_time: bool = False) -> None:
+    global API, DATA_DIR, GAMES, TIDY_DOWNLOADS_DAYS, SCREEN_TIME
     API, DATA_DIR = api, data_dir
     GAMES = {g.lower() for g in (games or [])} | GAME_DEFAULT
     TIDY_DOWNLOADS_DAYS = max(0, int(tidy_downloads_days or 0))
+    SCREEN_TIME = bool(screen_time)
 
 
 def _headers() -> dict:
@@ -58,7 +62,11 @@ def heartbeat_loop(get_state, running) -> None:
     while running():
         try:
             st = get_state()
-            _post("/api/pc/ping", {"mode": st.get("mode", "idle"), "text": st.get("text", "")}, timeout=5)
+            body = {"mode": st.get("mode", "idle"), "text": st.get("text", "")}
+            if SCREEN_TIME:
+                app, title = actions.active_window()
+                body.update({"app": app, "title": title, "idle_sec": int(actions.idle_seconds()), "screen": True})
+            _post("/api/pc/ping", body, timeout=5)
         except Exception as e:
             log.debug("ping: %s", e)
         try:

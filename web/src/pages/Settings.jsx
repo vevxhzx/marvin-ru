@@ -43,7 +43,8 @@ export default function Settings({ health }) {
   const [restart, setRestart] = useState(false)
   const [, show] = useToast()
   const [notif, setNotif] = useState(notifyState())
-  const [gem, setGem] = useState(null)   // результат проверки облака
+  const [gem, setGem] = useState(null)
+  const [small, setSmall] = useState(null)   // результат проверки малой модели
   const [cat, setCat] = useState(() => (location.hash.replace('#', '') || localStorage.getItem('settings.cat') || 'general'))
   const pick = (id) => { setCat(id); localStorage.setItem('settings.cat', id); history.replaceState(null, '', '#' + id); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
@@ -107,6 +108,10 @@ export default function Settings({ health }) {
             <StatusCard ok={status.ollama.ok} warn={status.game_mode} title="локальный мозг" line1={status.game_mode ? 'игровой режим · спит' : status.ollama.model}
               line2={status.game_mode ? 'модель выгружена из видеопамяти, всё идёт в облако' : status.ollama.ok ? (status.ollama.gpu && !status.ollama.gpu.includes('целиком') ? status.ollama.gpu : status.ollama.embed ? `смысловой поиск: да${status.ollama.gpu ? ' · в видеокарте целиком' : ''}` : `поиск по смыслу: нет (ollama pull ${status.ollama.embed_model})`) : status.ollama.diag}
               action={<button className="btn-ghost btn-sm" data-tip="выгрузить модель из видеопамяти на время игры" onClick={() => api.post('/api/game', { on: !status.game_mode }).then(() => load()).catch(show.err)}>{status.game_mode ? 'игра окончена' : 'иду играть'}</button>} />
+            <StatusCard ok={!!status.ollama.small_model && status.ollama.small_ok && small?.ok !== false} warn={!status.ollama.small_model || (status.ollama.small_model && !status.ollama.small_ok)} title="малая модель"
+              line1={!status.ollama.small_model ? 'не задана' : small?.pending ? 'проверяю…' : small ? (small.ok ? `${status.ollama.small_model} · отвечает` : 'не отвечает') : status.ollama.small_ok ? status.ollama.small_model : `${status.ollama.small_model} · нет в Ollama`}
+              line2={small && !small.pending ? (small.detail + (small.hint ? ` · ${small.hint}` : '')) : !status.ollama.small_model ? 'судья и подколы идут на основную модель · задайте в «мозг → малая модель» (qwen2.5:1.5b)' : !status.ollama.small_ok ? `в cmd: ollama pull ${status.ollama.small_model}` : status.ollama.small_last ? `последняя задача ${relTime(new Date(status.ollama.small_last.at * 1000).toISOString())} · ${status.ollama.small_last.seconds} с · в видеопамяти ${status.ollama.small_keep_alive} после задачи` : `ещё не вызывалась · в видеопамяти ${status.ollama.small_keep_alive} после задачи`}
+              action={!!status.ollama.small_model && <button className="btn-ghost btn-sm" onClick={() => { setSmall({ pending: true }); api.post('/api/status/small').then(setSmall).catch((e) => setSmall({ ok: false, detail: e.message })) }}>{small?.pending ? 'проверяю…' : 'проверить'}</button>} />
             <StatusCard ok={status.telegram.running} warn={status.telegram.configured && !status.telegram.running} title="telegram"
               line1={!status.telegram.configured ? 'не настроен' : status.telegram.running ? 'бот на связи' : 'настроен, но не запущен (--no-tg?)'}
               line2={status.telegram.last_message ? `последнее сообщение ${relTime(status.telegram.last_message)}` : 'сообщений ещё не было'} />
@@ -120,6 +125,9 @@ export default function Settings({ health }) {
             {status.voice && <StatusCard ok={status.voice.stt && status.voice.stt_ready && (!status.voice.tts || status.voice.tts_ready)} warn={status.voice.stt && !status.voice.stt_ready} title="голос"
               line1={!status.voice.stt ? 'не установлен' : !status.voice.stt_ready ? (status.voice.stt_error ? 'ошибка' : 'загружается…') : `whisper-${status.voice.stt_model} · ${status.voice.tts ? status.voice.tts_engine : 'без озвучки'}`}
               line2={status.voice.stt_error || status.voice.tts_error || (!status.voice.stt ? 'запустите update.bat — поставит распознавание и голос' : status.voice.stt_ready ? `голосовые в Telegram работают · ответ голосом: ${{ voice: 'на голосовые', always: 'всегда', never: 'никогда' }[status.voice.reply] || status.voice.reply}` : 'первый запуск качает модели (~600 МБ), подождите пару минут')} />}
+            {status.screen && <StatusCard ok={status.screen.enabled && !!status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000} warn={status.screen.enabled} title="экранное время"
+              line1={!status.screen.enabled ? 'выключено' : status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000 ? `пишется · сегодня ${Math.floor(status.screen.today_min / 60)} ч ${String(status.screen.today_min % 60).padStart(2, '0')}` : 'включено, но данных нет'}
+              line2={!status.screen.enabled ? 'включить: голос и пк → «экранное время»; пишется только имя программы и сайт, локально' : status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000 ? 'блок «время за пк» — на главной; в чате «сколько сидел за компом»' : status.pc?.alive ? 'voice.bat запущен, но старой версии или без перезапуска после включения — перезапустите voice.bat' : 'пульс идёт от voice.bat — запустите его (после включения настройки нужен перезапуск)'} />}
             <StatusCard ok={!!status.pc?.alive} warn={!status.pc?.alive} title="пк-клиент" line1={status.pc?.alive ? ({ idle: 'ждёт', listening: 'слушает', thinking: 'думает', speaking: 'говорит', off: 'микрофон выкл' }[status.pc.mode] || status.pc.mode) : 'не запущен'} line2={status.pc?.alive ? 'voice.bat на связи' : 'запустите voice.bat — голос в комнате и управление программами'} />
           </div>
         )}
@@ -587,6 +595,15 @@ function SettingField({ it, value, onChange, providers }) {
   }
   if (it.key === 'brain.sorter.where') {
     return <Field label="Сообщения-списки разбирает" hint="одно сообщение → задачи, встречи, люди, заказы, долги…"><Seg value={value || 'cloud'} onChange={onChange} options={[['cloud', 'облако'], ['auto', 'ПК, при сбое облако'], ['local', 'только ПК']]} /></Field>
+  }
+  if (it.key === 'brain.ollama.small_model') {
+    const presets = [['', 'выкл (основная)'], ['qwen2.5:1.5b', 'qwen2.5:1.5b · 1 ГБ'], ['qwen2.5:3b', 'qwen2.5:3b · 2 ГБ'], ['gemma3:1b', 'gemma3:1b · 0.8 ГБ']]
+    return (
+      <Field label="Малая модель для мини-задач" hint="судья «трата или заказ?», подколы, уборка памяти — не грузят основную. После выбора: в cmd «ollama pull <имя>», статус — в «система → состояние»">
+        <Seg value={presets.some(([v]) => v === (value || '')) ? (value || '') : '__custom'} onChange={(v) => v !== '__custom' && onChange(v)} options={[...presets, ['__custom', 'своя']]} />
+        <input className="input mt-2" value={value ?? ''} onChange={(e) => onChange(e.target.value)} placeholder="имя модели в Ollama" />
+      </Field>
+    )
   }
   if (it.key === 'brain.vision.where') {
     return <Field label="Картинки смотрит"><Seg value={value || 'auto'} onChange={onChange} options={[['auto', 'ПК, при сбое облако'], ['cloud', 'облако'], ['local', 'только ПК']]} /></Field>
