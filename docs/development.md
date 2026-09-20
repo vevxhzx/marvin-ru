@@ -58,4 +58,4 @@ cd web && npm ci && npm run dev                   # фронт с hot reload н�
 
 Стек: Python 3.11+ · FastAPI · SQLite (SQLModel) · aiogram 3 · APScheduler · Ollama · faster-whisper · Vosk · Silero/edge-tts · React + Vite + Tailwind.
 
-Лицензия — [PolyForm Noncommercial 1.0.0](../LICENSE): личное и некоммерческое использование свободно, коммерческое — по договорённости с автором. Pull request'ы приветствуются — особенно новые фразы-шаблоны в `core/brain/quick.py` и тесты к ним.
+Лицензия — [Apache 2.0](../LICENSE): свободное использование и форки, с сохранением авторства (`NOTICE`, ссылка на оригинал) и пометкой изменённых файлов. Pull request'ы приветствуются — особенно новые фразы-шаблоны в `core/brain/quick.py` и тесты к ним.
