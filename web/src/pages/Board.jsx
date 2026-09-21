@@ -254,7 +254,8 @@ function BoardEditor({ id }) {
           {board.kind !== 'script' && <><div className="my-1 w-6 border-t hair" /><button onClick={() => controls.current.addFrameNext()} data-tip="следующий кадр" data-tip-side="right" aria-label="Следующий кадр" className="grid h-9 w-9 place-items-center rounded-xl hover:bg-[var(--fill)]"><Plus size={16} /></button></>}
         </div>
 
-        <div className="min-w-0 flex-1">
+        {/* на md+ dock снизу скрыт; на телефоне — padding, чтобы ручки/объекты не прятались под панелью */}
+        <div className="min-w-0 flex-1 pb-[calc(3.25rem+env(safe-area-inset-bottom,0px))] md:pb-0">
           <BoardCanvas board={board} tool={tool} setTool={setTool} style={style} onDirty={onDirty} onSelectionChange={setSelection} onViewChange={(v) => setZoom(v.k)} controlsRef={controls} />
         </div>
 
@@ -271,8 +272,8 @@ function BoardEditor({ id }) {
         )}
         {!side && board.kind !== 'free' && frames.length > 0 && <button className="btn-soft btn-sm absolute right-3 top-3 z-10 hidden lg:inline-flex" onClick={() => setSide(true)}><Film size={13} /> кадры</button>}
 
-        {/* телефон */}
-        <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-around gap-1 border-t hair px-2 py-1.5 md:hidden" style={{ background: 'var(--surface)' }}>
+        {/* телефон: в потоке absolute, холст выше уже с pb под эту высоту + safe-area */}
+        <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-around gap-1 border-t hair px-2 py-1.5 md:hidden" style={{ background: 'var(--surface)', paddingBottom: 'max(0.375rem, env(safe-area-inset-bottom, 0px))' }}>
           {TOOLS.filter(([t]) => ['hand', 'select', 'sticky', 'text', 'frame', 'pen'].includes(t)).map(([t, I, label]) => <button key={t} onClick={() => pick(t)} aria-label={label} className="grid h-10 w-10 place-items-center rounded-xl" style={tool === t ? { background: 'var(--ink)', color: 'var(--bg)' } : {}}><I size={17} /></button>)}
           <button onClick={() => controls.current.undo()} aria-label="Отменить" className="grid h-10 w-10 place-items-center rounded-xl"><Undo2 size={17} /></button>
           <button onClick={() => controls.current.fit()} aria-label="Показать всё" className="grid h-10 w-10 place-items-center rounded-xl"><Maximize2 size={17} /></button>

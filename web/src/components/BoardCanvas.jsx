@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { StickyNote, Type, Film, Pencil, Trash2, Copy, ArrowUpRight, ChevronDown, Lock } from 'lucide-react'
+import { StickyNote, Type, Film, Pencil, Trash2, Copy, ArrowUpRight, ChevronDown } from 'lucide-react'
 import { api } from '../lib/api'
 import { RATIOS, STICKY, DEFAULT_SIZE, MIN_K, MAX_K, uid, fontSize, fontFamily, frameHeight, frameWindow, captionHeight, itemBox, bbox, inBox, normRect, rectsIntersect, distSeg, anchorPoint, nearestAnchor, arrowPoints, fmtSec, themeColor, stickyInk } from '../lib/board'
 
@@ -136,7 +136,16 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
   const schedule = useCallback((ms = 500) => { if (readOnly) return; cbRef.current.onDirty?.('dirty'); clearTimeout(saveTimer.current); saveTimer.current = setTimeout(() => flushRef.current(), ms) }, [readOnly])
   fn.current.schedule = schedule
   useEffect(() => () => { clearTimeout(saveTimer.current); if (saveTimer.current) flushRef.current() }, [])
-  useEffect(() => { const h = () => { if (saveTimer.current) { clearTimeout(saveTimer.current); flushRef.current() } }; window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h) }, [])
+  useEffect(() => {
+    const h = (e) => {
+      if (saveTimer.current || inflightRef.current || againRef.current) {
+        clearTimeout(saveTimer.current); flushRef.current()
+        // async flush может не успеть — браузерный диалог «уйти?» даёт шанс
+        e.preventDefault(); e.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', h); return () => window.removeEventListener('beforeunload', h)
+  }, [])
   /** «принять чужие изменения»: перезагрузить объекты, свои несохранённые — сверху с новыми id */
   const adoptFresh = useCallback((fresh, keepMine) => {
     if (editingRef.current) { document.activeElement?.blur(); stopEdit() }   // текст из открытого редактора — в объект, до слияния
@@ -345,20 +354,42 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
     window.addEventListener('keydown', down); window.addEventListener('keyup', up); window.addEventListener('blur', blur)
     return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', blur) }
   }, [undo, redo, duplicateSel, deleteSel, zoomAt, fitAll, fitTo, bringTo, snapshot, commit, setSel, setEditing, controlsRef])
-  // вставка: картинка/текст из буфера или наши скопированные объекты
+  // вставка: сначала наши объекты из clipRef (вкладка), иначе картинка/текст из OS-буфера.
+  // Раньше `clipRef && !text` ломал Ctrl+V: OS-буфер почти всегда с текстом → объекты не вставлялись;
+  // duplicateSel по старым id ещё и молчал, если оригинал уже удалили.
   useEffect(() => {
     const onPaste = (e) => {
       if (readOnly) return
       const ae = document.activeElement; if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable)) return
       const el = wrapRef.current, v = viewRef.current; const cx = (el.clientWidth / 2 - v.x) / v.k, cy = (el.clientHeight / 2 - v.y) / v.k
+      if (clipRef.current?.length) {
+        e.preventDefault()
+        snapshot()
+        const src = clipRef.current, map = new Map(), made = []
+        for (const s of src.filter((i) => i.type !== 'arrow')) {
+          const c = clone(s); c.id = uid(); c._key = null; withKey(c); c.z = topZ(); map.set(s.id, c.id)
+          if (c.type === 'ink') c.data.points = (c.data.points || []).map(([x, y]) => [x + 24, y + 24]); else { c.x += 24; c.y += 24 }
+          itemsRef.current.push(c); made.push(c.id)
+        }
+        for (const a of src.filter((i) => i.type === 'arrow')) {
+          const f = a.data.from || {}, t = a.data.to || {}
+          if ((f.item == null || map.has(f.item)) && (t.item == null || map.has(t.item))) {
+            const c = clone(a); c.id = uid(); c._key = null; withKey(c); c.z = topZ()
+            c.data.from = f.item != null ? { ...f, item: map.get(f.item) } : { x: (f.x || 0) + 24, y: (f.y || 0) + 24 }
+            c.data.to = t.item != null ? { ...t, item: map.get(t.item) } : { x: (t.x || 0) + 24, y: (t.y || 0) + 24 }
+            itemsRef.current.push(c); made.push(c.id)
+          }
+        }
+        renumber(); setSel(new Set(made)); commit()
+        return
+      }
       const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/'))
       if (f) { e.preventDefault(); const fr = selected().length === 1 && selected()[0].type === 'frame' ? selected()[0] : null; uploadImage(f, cx, cy, fr?.id); return }
       const t = e.clipboardData?.getData('text/plain')
-      if (clipRef.current?.length && !t) { e.preventDefault(); setSel(new Set(clipRef.current.map((c) => c.id))); duplicateSel(); return }
       if (t && t.trim()) { e.preventDefault(); const it = addItem(t.length > 140 ? 'text' : 'sticky', cx - 100, cy - 100, { text: t.trim() }); if (it) setSel(new Set([it.id])) }
     }
     window.addEventListener('paste', onPaste); return () => window.removeEventListener('paste', onPaste)
-  }, [readOnly, addItem, uploadImage, duplicateSel, setSel])
+  }, [readOnly, addItem, uploadImage, snapshot, commit, setSel])
 
   /* ---------- картинки ---------- */
   const getImg = useCallback((src) => {
@@ -736,7 +767,6 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
         if (a === 'sticky' || a === 'text' || a === 'frame') { const [w, h] = DEFAULT_SIZE[a]; const it = addItem(a, ctx.wx - w / 2, ctx.wy - (h || 180) / 2); if (it) { setSel(new Set([it.id])); if (a !== 'frame') startEdit(it.id) } }
         if (a === 'dup') duplicateSel(); if (a === 'del') deleteSel(); if (a === 'front') bringTo(true); if (a === 'back') bringTo(false)
         if (a === 'edit') { const id = [...selRef.current][0]; if (id) startEdit(id) }
-        if (a === 'lock') setSelData({ locked: !selected()[0]?.data?.locked })
       }} />}
     </div>
   )
