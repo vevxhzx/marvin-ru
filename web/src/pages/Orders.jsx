@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Check, Play, Square, Coffee, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil } from 'lucide-react'
+import { Plus, Check, Play, Square, Coffee, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
 import { api, money, moneyShort, dayLabel, shortDate, hhmm, plural, toLocalISO } from '../lib/api'
 import { Section, Empty, Sheet, Field, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Stat, Num } from '../components/ui'
 import { useRefresh } from '../App'
@@ -220,6 +221,7 @@ function Details({ o, onEdit, onPay, onDel, onStatus, onStart, closed }) {
         {!closed && <button className="btn-ghost btn-sm" onClick={onStart}><Play size={13} /> таймер</button>}
         <button className="btn-ghost btn-sm" onClick={onEdit}><Pencil size={13} /> изменить</button>
         <button className="btn-ghost btn-sm" onClick={() => ask(`по заказу «${o.title}»: `)}><MessageCircle size={13} /> обсудить</button>
+        <BoardButton o={o} />
         {!closed && <button className="btn-ghost btn-sm" onClick={() => onStatus(o, 'cancelled')}>отменить</button>}
         <button className="btn-icon !h-7 !w-7 ml-auto" data-tip="удалить" onClick={onDel}><Trash2 size={13} /></button>
       </div>
@@ -347,4 +349,15 @@ function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
       </form>
     </Sheet>
   )
+}
+
+
+/* Доска заказа: раскадровка/референсы/сценарий. Есть — открыть; нет — создать (пустая раскадровка, привязанная к заказу). */
+function BoardButton({ o }) {
+  const nav = useNavigate()
+  const [, show] = useToast()
+  const go = async () => {
+    try { const b = await api.get(`/api/boards/for-order/${o.id}?create=true`); nav(`/board/${b.id}`) } catch (e) { show.err(e) }
+  }
+  return <button className="btn-ghost btn-sm" onClick={go} data-tip={o.board_id ? 'открыть доску заказа' : 'создать доску заказа'}><Clapperboard size={13} /> {o.board_id ? 'доска' : 'доска +'}</button>
 }

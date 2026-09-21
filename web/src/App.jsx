@@ -1,6 +1,6 @@
 import { Component, useEffect, useState, createContext, useContext, useCallback, useRef } from 'react'
 import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Sun, Moon, Monitor, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, Bell, History, MessageCircle, Briefcase, Square, Play, Users } from 'lucide-react'
+import { Sun, Moon, Monitor, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, Bell, History, MessageCircle, Briefcase, Square, Play, Users, Clapperboard } from 'lucide-react'
 import Settings from './pages/Settings'
 import { notifyFromEvent } from './lib/notify'
 import { chimeFromEvent } from './lib/sound'
@@ -11,6 +11,7 @@ import Tasks from './pages/Tasks'
 import Mind from './pages/Mind'
 import Memory from './pages/Memory'
 import People from './pages/People'
+import BoardPage from './pages/Board'
 import Orders, { useTimer, mmss } from './pages/Orders'
 import Chat from './components/Chat'
 import Palette from './components/Palette'
@@ -30,6 +31,7 @@ export const NAV_GROUPS = [
     { to: '/finance', label: 'финансы', icon: Wallet, key: '4' },
     { to: '/orders', label: 'заказы', icon: Briefcase, key: '5' },
     { to: '/mind', label: 'мозг', icon: Brain, key: '6' },
+    { to: '/board', label: 'доска', icon: Clapperboard, key: '0' },
     { to: '/people', label: 'люди', icon: Users, key: '9' },
   ] },
   { title: 'система', items: [
@@ -349,7 +351,7 @@ function Shell({ inbox }) {
       const mod = e.metaKey || e.ctrlKey
       if (mod && (e.key.toLowerCase() === 'k' || e.key === '/')) { e.preventDefault(); setPalOpen((v) => !v) }
       else if (mod && e.key.toLowerCase() === 'j') { e.preventDefault(); setChatOpen((v) => !v) }
-      else if (e.altKey && !mod && /^[1-9]$/.test(e.key)) { const it = NAV.find((n) => n.key === e.key); if (it) { e.preventDefault(); nav(it.to) } }
+      else if (e.altKey && !mod && /^[0-9]$/.test(e.key)) { const it = NAV.find((n) => n.key === e.key); if (it) { e.preventDefault(); nav(it.to) } }
     }
     window.addEventListener('keydown', h); return () => window.removeEventListener('keydown', h)
   }, [nav])
@@ -452,6 +454,8 @@ function Shell({ inbox }) {
             <Route path="/tasks" element={<Tasks />} />
             <Route path="/orders" element={<Orders />} />
             <Route path="/mind" element={<Mind />} />
+            <Route path="/board" element={<BoardPage />} />
+            <Route path="/board/:id" element={<BoardPage />} />
             <Route path="/people" element={<People />} />
             <Route path="/memory" element={<Memory />} />
             <Route path="/settings" element={<Settings health={health} />} />

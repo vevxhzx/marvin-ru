@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { dat, gen } from '../lib/name'
 import { createPortal } from 'react-dom'
 import { useNavigate } from 'react-router-dom'
-import { Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings, Search, MessageCircle, Plus, Moon, Sun, Monitor, Undo2, Gamepad2, BarChart3, Coins, Flame, History, Link2, FileText, CornerDownLeft, Briefcase, Timer, Target, Users, Share2 } from 'lucide-react'
+import { Clapperboard, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings, Search, MessageCircle, Plus, Moon, Sun, Monitor, Undo2, Gamepad2, BarChart3, Coins, Flame, History, Link2, FileText, CornerDownLeft, Briefcase, Timer, Target, Users, Share2 } from 'lucide-react'
 import { api, kb, kbAlt } from '../lib/api'
 import { renderMd } from './Chat'
 
@@ -17,6 +17,7 @@ const PAGES = [
   { id: 'p-mind', label: 'мозг', icon: Brain, to: '/mind', get kbd() { return kbAlt('6') } },
   { id: 'p-people', label: 'люди', icon: Users, to: '/people', get kbd() { return kbAlt('9') } },
   { id: 'p-graph', label: 'граф связей', icon: Share2, to: '/mind?tab=graph' },
+  { id: 'p-board', label: 'доска', icon: Clapperboard, to: '/board', get kbd() { return kbAlt('0') } },
   { id: 'p-mem', label: 'память', icon: History, to: '/memory', get kbd() { return kbAlt('7') } },
   { id: 'p-set', label: 'настройки', icon: Settings, to: '/settings', get kbd() { return kbAlt('8') } },
 ]
@@ -26,6 +27,8 @@ const ACTIONS = [
   { id: 'a-task', label: 'новая задача', hint: 'задачи', icon: Plus, run: (c) => c.chat('задача: ') },
   { id: 'a-ev', label: 'новая встреча', hint: 'календарь', icon: Plus, run: (c) => c.chat('встреча ') },
   { id: 'a-note', label: 'записать мысль', hint: 'мозг', icon: Plus, run: (c) => c.chat('мысль: ') },
+  { id: 'a-board', label: 'на доску…', hint: 'доска', icon: Plus, run: (c) => c.chat('на доску: ') },
+  { id: 'a-story', label: 'новая раскадровка', hint: 'доска', icon: Plus, run: (c) => c.chat('раскадровка: ') },
   { id: 'a-order', label: 'новый заказ', hint: 'заказы', icon: Plus, freelance: true, run: (c) => c.chat('заказ: ') },
   { id: 'a-pomo', label: 'таймер 25 минут', hint: 'помодоро', icon: Timer, freelance: true, run: (c) => c.send('таймер') },
   { id: 'a-pomo-stop', label: 'остановить таймер', hint: 'помодоро', icon: Timer, freelance: true, run: (c) => c.send('стоп') },

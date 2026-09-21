@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Graph from '../components/Graph'
-import { Search, Trash2, ExternalLink, Link2, StickyNote, ArrowUp, Sparkles, Quote, ImagePlus, X, Camera, Pencil, Check } from 'lucide-react'
+import { Search, Trash2, ExternalLink, Link2, StickyNote, ArrowUp, Sparkles, Quote, ImagePlus, X, Camera, Pencil, Check, Clapperboard } from 'lucide-react'
 import { api, relTime } from '../lib/api'
 import { Card, Section, Empty, Seg, Pills, useToast, Toast, Skeleton, PageHead, useLeave, Swipe } from '../components/ui'
 import { useRefresh } from '../App'
@@ -192,6 +192,7 @@ function NoteCard({ n, onDel, onTag, onZoom, onSaved, extra = '' }) {
         <span className="ml-auto flex items-center gap-1">
           {hasRaw && <button onClick={() => setShowRaw(!showRaw)} title={showRaw ? 'Показать отредактированный' : 'Показать оригинал'} className={`btn-icon !h-7 !w-7 ${showRaw ? '!bg-accent !text-accent-ink' : 'opacity-0 group-hover:opacity-100'} transition`}><Quote size={12} /></button>}
           <button onClick={startEdit} title="Изменить (двойной клик по карточке)" className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 sm:opacity-0 max-sm:opacity-60"><Pencil size={13} /></button>
+          <ToBoard n={n} />
           <button onClick={onDel} className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100"><Trash2 size={13} /></button>
         </span>
       </div>
@@ -246,5 +247,41 @@ function LinkCard({ l, onDel, onTag, onSaved, extra = '' }) {
         <button onClick={onDel} className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100"><Trash2 size={13} /></button>
       </div>
     </Card>
+  )
+}
+
+
+/* Мысль → на доску: стикер (или картинка, если это фото) на последнюю открытую доску; если досок несколько — спросим какую. */
+function ToBoard({ n }) {
+  const [open, setOpen] = useState(false)
+  const [boards, setBoards] = useState(null)
+  const [, show] = useToast()
+  const put = async (b) => {
+    setOpen(false)
+    try {
+      const body = n.image ? { type: 'image', x: 0, y: 0, data: { src: n.image, label: n.title || '' }, note_id: n.id } : { type: 'sticky', x: 0, y: 0, data: { text: [n.title, n.text].filter(Boolean).join('\n').slice(0, 2000) }, note_id: n.id }
+      const items = await api.get(`/api/boards/${b.id}`)
+      const top = (items.items || []).filter((i) => i.type !== 'ink'); const right = top.length ? Math.max(...top.map((i) => i.x + i.w)) + 24 : 0
+      body.x = right; body.y = top.length ? Math.min(...top.map((i) => i.y)) : 0
+      await api.post(`/api/boards/${b.id}/items`, body)
+      show('На доске', '', b.title)
+    } catch (e) { show.err(e) }
+  }
+  const click = async () => {
+    const bs = boards || await api.get('/api/boards').catch(() => [])
+    setBoards(bs)
+    if (!bs.length) { show('Досок нет — заведите на странице «доска»', 'err'); return }
+    if (bs.length === 1) put(bs[0]); else setOpen(true)
+  }
+  return (
+    <span className="relative">
+      <button onClick={click} title="На доску" className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100"><Clapperboard size={13} /></button>
+      {open && boards && (
+        <div className="elevated absolute right-0 top-8 z-[70] w-[220px] !p-1.5 text-[13px]" onMouseLeave={() => setOpen(false)}>
+          <div className="label px-2 py-1">на какую доску</div>
+          {boards.slice(0, 8).map((b) => <button key={b.id} className="block w-full truncate rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill)]" onClick={() => put(b)}>{b.title}</button>)}
+        </div>
+      )}
+    </span>
   )
 }

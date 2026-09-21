@@ -454,6 +454,35 @@ def list_aims(**_) -> str:
     return aims.text_aims()
 
 
+@tool("board_note", "Положить мысль/идею/пункт стикером на доску (раскадровка, сценарий, творческая доска). "
+      "Вызывай на «на доску: …», «кинь на доску ролика …», «запиши в раскадровку …». board — название доски, если названа.",
+      {"text": {"type": "string", "description": "Текст стикера"}, "board": {"type": "string", "description": "Название доски (необязательно)"}}, ["text"])
+def board_note(text: str = "", board: str = "", **_) -> str:
+    from ..services import boards
+    b = boards.find_board(board) if board else None
+    if not b:
+        bs = boards.list_boards()
+        if not bs:
+            raise ValueError("Досок нет. Скажи «доска: название» — заведу.")
+        if board:
+            raise ValueError(f"Доски «{board}» нет. Есть: " + ", ".join(x["title"] for x in bs[:5]))
+        b = boards.find_board(str(bs[0]["id"]))
+    boards.place_sticky(b.id, text.strip())
+    return f"На доске «{b.title}»: «{text.strip()[:80]}»."
+
+
+@tool("board_show", "Что на доске: кадры раскадровки с подписями и хронометражем, стикеры, тексты. "
+      "Вызывай на «что по сториборду …», «покажи доску …», «мои доски».", {"board": {"type": "string", "description": "Название доски; пусто — список досок"}})
+def board_show(board: str = "", **_) -> str:
+    from ..services import boards
+    if not board:
+        return boards.boards_text()
+    b = boards.find_board(board)
+    if not b:
+        return f"Доски «{board}» не нашёл.\n" + boards.boards_text()
+    return boards.board_text(b)
+
+
 @tool("focus_today", "Что сегодня делать ради целей: 1–3 шага («что мне сегодня делать», «фокус дня»). Не список всех задач.", {})
 def focus_today(**_) -> str:
     from ..services import aims
@@ -1082,6 +1111,8 @@ CORE_TOOLS = ("add_event", "move_event", "delete_event", "list_events", "agenda"
 MONEY_TOOLS = ("transfer", "stop_recurring", "set_budget", "set_balance", "add_debt", "pay_debt", "list_debts", "add_recurring",
                "cash_forecast", "find_subscriptions", "add_goal", "save_to_goal", "finance_report")
 AIM_TOOLS = ("add_aim", "list_aims", "focus_today", "link_task_to_aim")
+BOARD_TOOLS = ("board_note", "board_show")
+BOARD_RX_T = re.compile(r"доск\w*|раскадровк\w*|сториборд\w*|storyboard|сценари\w*|кадр\w*", re.I)
 AIM_RX_T = re.compile(r"цел[ьи]\b|вех\w*|этап\w*|фокус|что\s+(?:мне\s+)?(?:сегодня\s+)?делать|чем\s+заняться|долгосрочн\w*|прогресс", re.I)
 FREELANCE_TOOLS = ("add_order", "person_card", "add_person", "list_orders", "late_payments", "update_order", "order_payment", "pomodoro")
 MONEY_RX = re.compile(r"долг\w*|кредит\w*|ипотек\w*|рассрочк\w*|подписк\w*|регулярн\w*|аренд\w*|коммуналк\w*|перев[её]л|перевод|снял|наличн\w*|"
@@ -1103,6 +1134,8 @@ def tools_schema(with_cloud: bool = False, text: str | None = None) -> list[dict
             want.update(MONEY_TOOLS)
         if AIM_RX_T.search(t):
             want.update(AIM_TOOLS)
+        if BOARD_RX_T.search(t):
+            want.update(BOARD_TOOLS)
         # имя с большой буквы внутри фразы (не первое слово) — человек/клиент → карточки и заказы
         inner_name = re.search(r"(?<!^)(?<![.!?]\s)\b[А-ЯЁ][а-яё]{2,}\b", t)
         if FREELANCE_RX.search(t.lower()) or inner_name:

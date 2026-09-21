@@ -226,6 +226,19 @@ def _session_min(w: WorkSession) -> float:
     return max(0.0, (end - w.started_at).total_seconds() / 60)
 
 
+def _boards_by_order() -> dict[int, int]:
+    """Доска заказа (id) по id заказа — одним запросом; кэш на 2 секунды, чтобы список из 300 заказов не делал 300 запросов."""
+    import time as _t
+    from ..db import Board
+    cache = _boards_by_order.__dict__
+    if cache.get("at", 0) + 2 > _t.monotonic():
+        return cache["val"]
+    with session() as s:
+        val = {b.order_id: b.id for b in s.exec(select(Board).where(Board.order_id != None, Board.archived == False)).all()}  # noqa: E711,E712
+    cache["at"], cache["val"] = _t.monotonic(), val
+    return val
+
+
 def order_view(o: Order, clients: dict[int, str] | None = None) -> dict:
     """Заказ + производные: оплачено, остаток, часы, ставка, срочность."""
     if clients is None:
@@ -244,6 +257,7 @@ def order_view(o: Order, clients: dict[int, str] | None = None) -> dict:
               "past_due": bool(o.deadline and o.status == "review" and o.deadline < datetime.now())})
     from . import pulse
     d["pulse"] = pulse.rate_check(d)
+    d["board_id"] = _boards_by_order().get(o.id)
     return d
 
 

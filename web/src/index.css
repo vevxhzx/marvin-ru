@@ -652,3 +652,14 @@ html.in-telegram body { overscroll-behavior-y: none; }
   button, .row, .nav-item, .tabbar, .pill, .chip, .seg, .label, .h1, .btn { -webkit-user-select: none; user-select: none; }
   input, textarea, [contenteditable] { -webkit-user-select: text; user-select: text; }
 }
+
+/* доска: страница без внешнего скролла, холст на всю высоту; на телефоне нижние вкладки не мешают */
+body.board-page { overflow: hidden; }
+body.board-page main { padding-bottom: 0 !important; }
+body.board-page .tabbar { display: none; }
+.board-wrap canvas { display: block; }
+[data-tip-side="right"]::after { left: calc(100% + 10px); bottom: auto; top: 50%; transform: translate(-4px, -50%); }
+[data-tip-side="right"]:hover::after { transform: translate(0, -50%); }
+
+.board-ctx { scrollbar-width: none; }
+.board-ctx::-webkit-scrollbar { display: none; }

@@ -243,6 +243,41 @@ class Link(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now, index=True)
 
 
+class Board(SQLModel, table=True):
+    """Доска: бесконечный лист под раскадровку/сценарий/раскладку мыслей. Объекты — в BoardItem."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    kind: str = "free"                 # free / storyboard / script — только пресет при создании и подсказки UI
+    order_id: Optional[int] = Field(default=None, index=True)   # доска заказа
+    aim_id: Optional[int] = Field(default=None, index=True)     # доска цели
+    revision: int = 0                  # версия содержимого для атомарного сохранения
+    last_sync: str = "{}"              # подтверждение последнего сохранения (повтор запроса не создаёт дубли)
+    view: str = "{}"                   # {x, y, k} — где человек оставил камеру
+    archived: bool = Field(default=False, index=True)
+    created_at: datetime = Field(default_factory=now, index=True)
+    updated_at: datetime = Field(default_factory=now, index=True)
+
+
+class BoardItem(SQLModel, table=True):
+    """Объект на доске. type: sticky / text / frame / image / arrow / ink. Геометрия в координатах холста.
+    data — JSON под тип: sticky {text,color} · text {text,size} · frame {label,ratio,image,seconds,n}
+    · image {src} · arrow {from,to,label} (id объектов или точки) · ink {points:[[x,y,p]…],color,width}."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    board_id: int = Field(index=True)
+    type: str = Field(index=True)
+    x: float = 0
+    y: float = 0
+    w: float = 200
+    h: float = 120
+    z: int = 0
+    rot: float = 0
+    data: str = "{}"
+    note_id: Optional[int] = None      # объект — ссылка на мысль из «мозга» (не копия)
+    link_id: Optional[int] = None
+    created_at: datetime = Field(default_factory=now)
+    updated_at: datetime = Field(default_factory=now)
+
+
 class Memory(SQLModel, table=True):
     """Журнал: всё, что происходило. Лента «second brain»."""
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -416,6 +451,7 @@ def _migrate() -> None:
     from sqlalchemy import inspect, text
     insp = inspect(engine)
     wanted = {
+        "board": {"revision": "INTEGER DEFAULT 0", "last_sync": "VARCHAR DEFAULT '{}'"},
         "note": {"title": "VARCHAR", "raw": "VARCHAR", "polished": "BOOLEAN DEFAULT 0", "image": "VARCHAR"},
         "link": {"polished": "BOOLEAN DEFAULT 0", "summary": "VARCHAR", "excerpt": "VARCHAR"},
         "transaction": {"debt_id": "INTEGER", "order_id": "INTEGER", "goal_id": "INTEGER"},

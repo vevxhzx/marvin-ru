@@ -1757,6 +1757,15 @@ async def _presence_rules(text: str, channel: str) -> Reply | None:
     rt = routines.chat_rule(t)
     if rt:
         return Reply(rt, ["routines"], "rules")
+    # --- доски: «доска: …», «раскадровка: … на 8 кадров», «на доску: мысль», «что по доске …» ---
+    if not _is_analysis(t):
+        from ..services import boards
+        try:
+            br = boards.chat_rule(t, channel)
+        except ValueError as e:
+            return Reply(str(e), [], "rules")
+        if br:
+            return Reply(br[0], br[1], "rules")
     # --- решения ---
     d = decisions.chat_rule(t, channel)
     if d:

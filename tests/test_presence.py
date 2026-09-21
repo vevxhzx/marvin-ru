@@ -119,6 +119,7 @@ def test_deferred_queue_delivered_when_user_back(monkeypatch):
     from core.services import scheduler, state
     monkeypatch.setattr(llm, "user_recent", lambda *_: False)
     monkeypatch.setattr(scheduler, "_quiet_now", lambda: False)
+    monkeypatch.setattr(attention, "quiet_hours", lambda *_: False)   # прогон в 7 утра не должен «молчать» из-за тихих часов
     sent = []
 
     async def notify(text, buttons=None):

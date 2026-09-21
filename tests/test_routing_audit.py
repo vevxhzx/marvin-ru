@@ -75,7 +75,7 @@ def test_story_with_date_is_not_clarify_or_judge():
 # ---------------------------------------------------------------- инструменты по смыслу фразы
 def test_tools_schema_is_sliced_by_topic():
     all_tools = registry.tools_schema(with_cloud=True)
-    assert len(all_tools) == 44
+    assert len(all_tools) == 46   # +board_note, board_show (0.11)
     core = registry.tools_schema(with_cloud=True, text="кот опять сожрал провод")
     assert 15 <= len(core) <= 22 and all(t["function"]["name"] in registry.CORE_TOOLS + (registry.CLOUD_TOOL,) for t in core)
     money = {t["function"]["name"] for t in registry.tools_schema(with_cloud=True, text="сколько я должен Сберу")}

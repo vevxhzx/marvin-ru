@@ -20,7 +20,7 @@ from datetime import datetime, timedelta
 
 from sqlmodel import select
 
-from ..db import Client, Debt, Event, Goal, Link, Note, Order, Task, Transaction, session
+from ..db import Board, Client, Debt, Event, Goal, Link, Note, Order, Task, Transaction, session
 from . import people as ppl
 from .match import same, score, stem, tokens
 
@@ -116,6 +116,16 @@ def build(days: int = 365, max_notes: int = 400, focus: str | None = None) -> di
     def tag_node(t: str) -> str:
         return node(f"tag:{t}", "#" + t, "tag")
 
+    # --- доски: узел «доска», связан с заказом/целью, иначе с #работа (сториборд) или сам по себе
+    with session() as s:
+        for b in s.exec(select(Board).where(Board.archived == False)).all():  # noqa: E712
+            bid = node(f"board:{b.id}", b.title, "board", ref_id=b.id, sub=b.kind)
+            if b.order_id:
+                edge(bid, f"order:{b.order_id}", "board", 0.9)
+            elif b.aim_id:
+                edge(bid, f"aim:{b.aim_id}", "board", 0.9)
+            elif b.kind == "storyboard":
+                edge(bid, tag_node(WORK_TAG), "work", 0.5)
     # --- люди: тип «клиент» → #работа; свои теги
     for c in clients:
         nid = node(f"person:{c.id}", c.name, "person", sub=c.kind, ref_id=c.id)
