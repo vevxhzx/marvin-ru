@@ -2296,9 +2296,32 @@ def google_disconnect():
 
 @app.post("/api/backup")
 def backup_now():
+    """Ручной снимок — даже если ночной бэкап выключен (force)."""
     from ..services.scheduler import backup_db
-    dst = backup_db()
-    return {"ok": dst is not None, "file": str(dst) if dst else None}
+    dst = backup_db(force=True)
+    return {"ok": dst is not None, "file": str(dst) if dst else None, "name": dst.name if dst else None}
+
+
+@app.get("/api/backups")
+def backups_list():
+    from ..services.scheduler import list_backups
+    return list_backups()
+
+
+class BackupRestoreIn(BaseModel):
+    name: str = Field(..., min_length=8, max_length=80)
+
+
+@app.post("/api/backups/restore")
+def backups_restore(body: BackupRestoreIn):
+    """Восстановить data/assistant.db из выбранного backup-*.db. После — перезапуск start.bat."""
+    from ..services.scheduler import restore_backup
+    try:
+        return restore_backup(body.name)
+    except LookupError:
+        raise HTTPException(404, "Такого бэкапа нет")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/export/{what}.{fmt}")

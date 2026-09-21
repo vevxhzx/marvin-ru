@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2 } from 'lucide-react'
 import { playChime } from '../lib/sound'
 import { api, relTime, kb } from '../lib/api'
-import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton } from '../components/ui'
+import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm } from '../components/ui'
 import { enableNotifications, disableNotifications, notifyEnabled, notifyState } from '../lib/notify'
 import { usePrefs, prefs as PREFS, ACCENTS, TINTS, FONT_SIZES, RADII } from '../lib/prefs'
 import { useTheme, NAV_GROUPS, useRefresh } from '../App'
@@ -166,7 +166,7 @@ export default function Settings({ health }) {
     data: (
       <Section key="data" title="данные" hint="Всё лежит в data/assistant.db на вашем компьютере. Экспорт — на всякий случай и для Excel.">
         <Card className="flex flex-wrap items-center gap-2">
-          <button className="btn-ghost" onClick={() => api.backupNow().then((r) => show(r.ok ? 'Копия сделана' : 'Бэкап выключен')).catch(show.err)}><HardDriveDownload size={15} /> бэкап сейчас</button>
+          <button className="btn-ghost" onClick={() => api.backupNow().then((r) => show(r.ok ? `Копия: ${r.name || 'готово'}` : 'Не вышло — нет базы?')).catch(show.err)}><HardDriveDownload size={15} /> бэкап сейчас</button>
           <a className="btn-ghost" href="/api/export/transactions.csv"><Download size={15} /> операции.csv</a>
           <a className="btn-ghost" href="/api/export/events.csv"><Download size={15} /> календарь.csv</a>
           <a className="btn-ghost" href="/api/export/tasks.csv"><Download size={15} /> задачи.csv</a>
@@ -174,6 +174,7 @@ export default function Settings({ health }) {
           <a className="btn-soft" href="/api/export/all.json"><Download size={15} /> всё в json</a>
           <button className="btn-soft" onClick={() => api.reindex().then((r) => show(`Проиндексировано: ${r.indexed}`)).catch(show.err)}><RefreshCw size={15} /> переиндексировать мозг</button>
         </Card>
+        <BackupRestore show={show} />
       </Section>
     ),
   }
@@ -541,6 +542,56 @@ function MiniApp({ current, onUse }) {
   )
 }
 
+
+/* Список backup-*.db + «восстановить» (ROADMAP P1). После restore — перезапуск start.bat. */
+function BackupRestore({ show }) {
+  const [list, setList] = useState(null)
+  const [pick, setPick] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const load = () => api.backups().then(setList).catch(() => setList([]))
+  useEffect(() => { load() }, [])
+  const doRestore = async () => {
+    if (!pick) return
+    setBusy(true)
+    try {
+      const r = await api.restoreBackup(pick.name)
+      setPick(null)
+      show(`База из «${r.restored}». Закройте start.bat и запустите снова.` + (r.safety ? ` Страховка: ${r.safety}` : ''))
+      load()
+    } catch (e) { show.err(e) } finally { setBusy(false) }
+  }
+  const fmtSize = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`)
+  return (
+    <Card className="mt-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="h4">восстановить из бэкапа</div>
+          <div className="muted text-[12.5px]">Текущая база сохранится как backup-pre-restore-…. Картинки в data/media не откатываются. После — перезапуск start.bat.</div>
+        </div>
+        <button className="btn-icon outlined" data-tip="обновить список" onClick={load} aria-label="Обновить"><RefreshCw size={14} /></button>
+      </div>
+      {list === null ? <Skeleton h={72} /> : list.length === 0 ? (
+        <div className="muted text-[13px]">Копий пока нет. «Бэкап сейчас» выше или дождитесь 03:00 (если бэкапы включены).</div>
+      ) : (
+        <ul className="divide-y hair max-h-[280px] overflow-y-auto">
+          {list.map((b) => (
+            <li key={b.name} className="flex items-center gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13.5px] font-medium">{b.pre_restore ? 'страховка перед прошлым restore' : relTime(b.at)} <span className="faint mono text-[11px]">· {b.name.replace(/^backup-(?:pre-restore-)?/, '').replace(/\.db$/, '')}</span></div>
+                <div className="faint text-[12px]">{fmtSize(b.size)}{b.pre_restore ? ' · pre-restore' : ''}</div>
+              </div>
+              <button className="btn-soft btn-sm !h-7" onClick={() => setPick(b)}>восстановить</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Confirm open={!!pick} onClose={() => !busy && setPick(null)} title="Восстановить базу?"
+        text={pick ? `Файл «${pick.name}» (${relTime(pick.at)}) заменит data/assistant.db. Текущая копия уйдёт в backup-pre-restore. После — закройте окно start.bat и запустите снова.` : ''}
+        onOk={doRestore} danger />
+      {busy && <div className="muted text-[12.5px]">копирую…</div>}
+    </Card>
+  )
+}
 
 function StatusCard({ ok, warn, title, line1, line2, action }) {
   const color = ok ? 'var(--pos)' : warn ? 'var(--warn)' : 'var(--neg)'

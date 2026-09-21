@@ -12,6 +12,7 @@ import threading
 from pathlib import Path
 
 from ..config import cfg
+from .. import identity
 
 log = logging.getLogger("assistant.voice")
 
@@ -56,7 +57,7 @@ def _transcribe_cloud(pcm_or_path) -> str | None:
             fname = "a.wav"; data = buf.getvalue()
         r = httpx.post("https://api.groq.com/openai/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"},
                        files={"file": (fname, data)}, data={"model": "whisper-large-v3-turbo", "language": "ru", "temperature": "0",
-                                                            "prompt": "Джарвис, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00."},
+                                                            "prompt": f"{identity.title()}, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00."},
                        timeout=20)
         r.raise_for_status()
         global LAST_CONFIDENCE, LAST_VIA
@@ -185,11 +186,12 @@ def _transcribe_sync(path) -> str:
             return "" if (not txt or low in _HALLUCINATIONS) else txt
     LAST_VIA = "local"
     model = _load()
-    # подсказка словаря: Whisper точнее слышит частые команды Джарвиса
-    hint = ("Джарвис, что у меня сегодня? Потратил 700 рублей на такси. Задача: сдать отчёт. Встреча в среду в 15:00. "
+    # подсказка словаря: Whisper точнее слышит имя ассистента и частые команды
+    _n = identity.title()
+    hint = (f"{_n}, что у меня сегодня? Потратил 700 рублей на такси. Задача: сдать отчёт. Встреча в среду в 15:00. "
             "Долг Сберу. Баланс Т-Банк. Напомни завтра. Мысль: идея для проекта. Отмени последнюю.")
     if STT_FAST:
-        hint = "Джарвис, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00. Долг Сберу, Т-Банк."   # короче подсказка — быстрее декодер
+        hint = f"{_n}, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00. Долг Сберу, Т-Банк."   # короче — быстрее декодер
         segments, info = model.transcribe(path, language="ru", beam_size=1, best_of=1, temperature=0.0,
                                           vad_filter=True, initial_prompt=hint,
                                           vad_parameters={"min_silence_duration_ms": 300},

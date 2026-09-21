@@ -97,6 +97,8 @@ export const api = {
   saveSettings: (changes) => req('PUT', '/api/settings', { changes }),
   status: () => req('GET', '/api/status'),
   backupNow: () => req('POST', '/api/backup'),
+  backups: () => req('GET', '/api/backups'),
+  restoreBackup: (name) => req('POST', '/api/backups/restore', { name }),
   semantic: (q, limit = 12) => req('GET', `/api/search/semantic?q=${encodeURIComponent(q)}&limit=${limit}`),
   reindex: () => req('POST', '/api/search/reindex'),
   // заказы / фриланс

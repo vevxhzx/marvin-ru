@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Диагностика связи Джарвис ↔ Ollama. Запуск:  .venv\\Scripts\\python.exe check_ollama.py"""
+"""Диагностика связи ассистент ↔ Ollama. Запуск:  .venv\\Scripts\\python.exe check_ollama.py"""
 import asyncio, os, sys
 if sys.platform == "win32":
     os.system("chcp 65001 >nul")

@@ -91,10 +91,15 @@ def morning_digest_text(head: str | None = None) -> str:
     return "\n".join(lines)
 
 
-def backup_db() -> Path | None:
-    if not cfg.backup.enabled or not DB_PATH.exists():
+def _backup_dir() -> Path:
+    return (ROOT / cfg.backup.dir).resolve() if not Path(cfg.backup.dir).is_absolute() else Path(cfg.backup.dir)
+
+
+def backup_db(force: bool = False) -> Path | None:
+    """Снимок базы. force=True — кнопка «бэкап сейчас» даже если ночной выключен."""
+    if (not force and not cfg.backup.enabled) or not DB_PATH.exists():
         return None
-    bdir = (ROOT / cfg.backup.dir).resolve() if not Path(cfg.backup.dir).is_absolute() else Path(cfg.backup.dir)
+    bdir = _backup_dir()
     bdir.mkdir(parents=True, exist_ok=True)
     dst = bdir / f"backup-{datetime.now():%Y%m%d-%H%M}.db"
     # безопасная копия SQLite через backup API
@@ -176,13 +181,79 @@ def _quiet_now() -> bool:
 
 def last_backup() -> dict:
     """Когда был последний бэкап и где лежит (для статуса в настройках)."""
-    bdir = (ROOT / cfg.backup.dir).resolve() if not Path(cfg.backup.dir).is_absolute() else Path(cfg.backup.dir)
+    bdir = _backup_dir()
     files = sorted(bdir.glob("backup-*.db"), key=lambda f: f.stat().st_mtime) if bdir.exists() else []
+    # pre-restore — служебные, в «последний» не считаем
+    files = [f for f in files if not f.name.startswith("backup-pre-restore-")]
     if not files:
         return {"enabled": bool(cfg.backup.enabled), "last": None, "dir": str(bdir), "count": 0, "extra_dir": getattr(cfg.backup, "extra_dir", None) or None}
     f = files[-1]
     return {"enabled": bool(cfg.backup.enabled), "last": datetime.fromtimestamp(f.stat().st_mtime).isoformat(), "dir": str(bdir),
             "count": len(files), "size": f.stat().st_size, "extra_dir": getattr(cfg.backup, "extra_dir", None) or None}
+
+
+_BACKUP_NAME_RX = __import__("re").compile(r"^backup-(?:pre-restore-)?\d{8}-\d{4}\.db$")
+
+
+def list_backups(limit: int = 40) -> list[dict]:
+    """Список файлов backup-*.db (новые сверху) — для «восстановить» в настройках."""
+    bdir = _backup_dir()
+    if not bdir.exists():
+        return []
+    out = []
+    for f in sorted(bdir.glob("backup-*.db"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not _BACKUP_NAME_RX.match(f.name):
+            continue
+        st = f.stat()
+        out.append({
+            "name": f.name,
+            "at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+            "size": st.st_size,
+            "pre_restore": f.name.startswith("backup-pre-restore-"),
+        })
+        if len(out) >= limit:
+            break
+    return out
+
+
+def restore_backup(name: str) -> dict:
+    """Подменить data/assistant.db выбранным снимком. Текущая база → backup-pre-restore-… .
+    Картинки (data/media) не откатываются по дате — зеркало media в backups/ актуально «как сейчас».
+    После вызова нужен перезапуск ядра: открытые SQLite-соединения держат старый файл."""
+    name = (name or "").strip()
+    if not _BACKUP_NAME_RX.match(name) or ".." in name or "/" in name or "\\" in name:
+        raise ValueError("Неверное имя бэкапа")
+    bdir = _backup_dir()
+    src = (bdir / name).resolve()
+    if not str(src).startswith(str(bdir.resolve())) or not src.is_file():
+        raise LookupError("Такого бэкапа нет")
+    bdir.mkdir(parents=True, exist_ok=True)
+    safety = None
+    if DB_PATH.exists():
+        safety = bdir / f"backup-pre-restore-{datetime.now():%Y%m%d-%H%M}.db"
+        # безопасная копия через sqlite backup API (на случай WAL)
+        import sqlite3
+        s = sqlite3.connect(DB_PATH)
+        o = sqlite3.connect(safety)
+        with o:
+            s.backup(o)
+        o.close(); s.close()
+    # подмена: сначала во временный, потом replace — атомарнее на одном томе
+    tmp = DB_PATH.with_suffix(".db.restoring")
+    shutil.copy2(src, tmp)
+    tmp.replace(DB_PATH)
+    # рядом лежат -wal/-shm от старой сессии — иначе SQLite может подмешать старый журнал
+    for suf in ("-wal", "-shm"):
+        p = Path(str(DB_PATH) + suf)
+        p.unlink(missing_ok=True)
+    log.info("restore backup %s → %s (safety %s)", name, DB_PATH, safety.name if safety else "—")
+    return {
+        "ok": True,
+        "restored": name,
+        "safety": safety.name if safety else None,
+        "needs_restart": True,
+        "dir": str(bdir),
+    }
 
 
 def build(notify: Notifier) -> AsyncIOScheduler:
