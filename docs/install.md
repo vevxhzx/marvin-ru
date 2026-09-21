@@ -25,54 +25,48 @@
 
 ---
 
-## Установка на macOS (MacBook, ~10 минут)
+## Установка на macOS (MacBook)
 
-То же ядро, что на Windows: сайт, Telegram, финансы, доска, календарь, задачи. Скрипты — `*.command` (двойной клик в Finder открывает Терминал).
+То же ядро: сайт, Telegram, финансы, доска, календарь, задачи.
 
-**1. Python 3.12.** [python.org](https://www.python.org/downloads/) или:
-```bash
-brew install python@3.12
-```
-([Homebrew](https://brew.sh) — если ещё нет: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`.)
+### Как приложение (без чёрных окон) — рекомендуем
 
-**2. Архив.** Code → Download ZIP или [Releases](../../../releases). Распакуйте, например в `~/Assistant`.
+1. **Python 3.12** — [python.org](https://www.python.org/downloads/) или `brew install python@3.12`.
+2. ZIP → распаковать, например `~/Assistant`.
+3. **`Install-Mac.command`** (ПКМ → Открыть, если Gatekeeper). Ставит пакеты и **`~/Applications/Marvin.app`**.
+4. Иконка **в строке меню** (возле часов) → «Открыть сайт». Первый раз — мастер. Можно в Dock и автозагрузку.
 
-**3. Первый запуск скрипта.** macOS блокирует неподписанные `.command` с интернета. Правый клик по **`install.command`** → **Открыть** → «Открыть». Либо в Терминале:
+| Меню иконки | |
+|---|---|
+| Открыть сайт | браузер |
+| Перезапустить | ядро |
+| Папка данных | Finder → `data/` |
+| Выйти | гасит процесс |
+
+Логи: `data/host.log`, `data/core.log`. Подробности: [mac/README.md](../mac/README.md).
+
+### Запасной путь (Терминал)
+
 ```bash
 cd ~/Assistant
-chmod +x *.command
-xattr -cr .          # снять quarantine с ZIP, если «повреждено»
-./install.command
+chmod +x *.command && xattr -cr .
+./install.command && ./start.command   # окно не закрывать
 ```
 
-**4. `./start.command`** (или двойной клик) — мастер в браузере, как на Windows. Вкладку Терминала **не закрывайте**.
-
-| Действие | Файл |
+| | |
 |---|---|
-| Обновить библиотеки после новой версии | `update.command` |
-| Автозапуск при логине | `autostart.command` → LaunchAgent `ru.marvin.assistant` |
-| Голос | `install_voice.command`, затем `voice.command` |
-| Адреса для телефона | `phone.command` + QR в ⚙ Настройки |
-| Пересобрать сайт | `build_web.command` (нужен `brew install node`) |
+| Обновить пакеты | `update.command` |
+| Голос | `brew install portaudio` → `install_voice.command` → `voice.command` |
+| Ollama | [ollama.com/download](https://ollama.com/download) или **cloud** в мастере |
+| Телефон | ⚙ → «с телефона» + [Tailscale](https://tailscale.com) |
 
-**Ollama на Mac:** [ollama.com/download](https://ollama.com/download) (Apple Silicon ок). Без неё — режим **cloud** / **hybrid** в мастере.
+**Слабее Windows:** «открой Premiere», tidy desktop, часть screen time (WinAPI). Остальное — паритет.
 
-**Голос на Mac:**
-```bash
-brew install portaudio    # для sounddevice
-./install_voice.command
-# ядро уже запущено:
-./voice.command
-```
-Система спросит доступ к **Микрофону** для Терминала (или iTerm) — разрешите. Трей-иконка через pystray (меню строки состояния).
-
-**Чего нет / слабее, чем на Windows:** «открой Premiere», разбор рабочего стола, часть PC-actions и экранное время завязаны на WinAPI. Для друга на MacBook обычно хватает: Telegram + сайт + (по желанию) голос + Ollama.
-
-**Типичные ошибки macOS**
-- *«не удаётся открыть, так как Apple не может проверить…»* — ПКМ → Открыть; или `xattr -cr ~/Assistant`.
-- *`python3: command not found`* — поставьте Python / `brew install python@3.12`, новый терминал.
-- *Микрофон тихий / error PortAudio* — `brew install portaudio`, переустановите voice-пакеты.
-- *Порт 8765 занят* — закройте старый `start.command` или смените `server.port` в настройках.
+**Типичные ошибки**
+- Gatekeeper / «повреждено» — ПКМ → Открыть; `xattr -cr ~/Assistant`.
+- Нет Python — python.org или brew.
+- Порт 8765 занят — Выйти из иконки меню или `lsof -i :8765`.
+- Иконки в меню нет — смотри `data/host.log`; нужен pystray (ставит Install-Mac).
 
 ---
 

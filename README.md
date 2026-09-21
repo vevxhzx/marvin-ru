@@ -55,28 +55,21 @@
 
 Окно `start.bat` держите открытым или `autostart.bat`. Голос: `install_voice.bat` → `voice.bat`. Телефон: `phone.bat` + QR в настройках.
 
-### macOS (MacBook, ~10 минут)
+### macOS (MacBook) — как приложение, без терминала
 
-1. [Python 3.12](https://www.python.org/downloads/) **или** `brew install python@3.12` ([Homebrew](https://brew.sh)).
-2. Скачайте ZIP, распакуйте (например `~/Assistant`).
-3. В Finder: правый клик по **`install.command`** → **Открыть** (первый раз Gatekeeper спросит подтверждение). Или в Терминале:
-   ```bash
-   cd ~/Assistant
-   chmod +x *.command
-   ./install.command
-   ./start.command
-   ```
-4. Браузер с мастером — как на Windows. Окно Терминала с `start.command` не закрывайте.
+1. [Python 3.12](https://www.python.org/downloads/) или `brew install python@3.12` ([Homebrew](https://brew.sh)).
+2. ZIP репо → распаковать (например `~/Assistant`).
+3. Дважды **`Install-Mac.command`** (если Gatekeeper — ПКМ → Открыть).
+4. Появится **Marvin** в `~/Applications`: иконка **в строке меню** (справа вверху) → «Открыть сайт». Без чёрных окон. Можно в Dock и в автозагрузку (скрипт спросит).
 
-| | |
-|---|---|
-| Обновить пакеты | `update.command` |
-| Автозапуск при входе | `autostart.command` (LaunchAgent) |
-| Голос (микрофон) | `install_voice.command` → `voice.command` (нужен `brew install portaudio`; доступ к Микрофону для Терминала) |
-| Телефон / QR | `phone.command` + ⚙ Настройки → «с телефона»; с другой сети — [Tailscale](https://tailscale.com) |
-| Управление окнами Mac | ограниченно (Windows-аддон); **сайт, Telegram, деньги, доска, календарь — полностью** |
+Подробнее: [mac/README.md](mac/README.md).
 
-Локальная модель: [Ollama for macOS](https://ollama.com/download) (Apple Silicon — нормально). Без видеокарты/Ollama — режим **cloud** в мастере.
+| Запасной путь (с Терминалом) | `install.command` → `start.command` |
+| Голос | `install_voice.command` → `voice.command` (`brew install portaudio`) |
+| Ollama | [ollama.com/download](https://ollama.com/download) или режим **cloud** в мастере |
+| Телефон | ⚙ → «с телефона» + [Tailscale](https://tailscale.com) |
+
+Сайт, Telegram, деньги, доска, календарь — **полностью**. «Открой Premiere» / разбор стола — Windows-аддон.
 
 ### Linux / Docker
 
