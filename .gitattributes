@@ -1,6 +1,10 @@
 # Windows .bat: CRLF обязателен — cmd.exe ломает goto/метки на LF-only (ZIP с GitHub).
 *.bat text eol=crlf
 
+# macOS/Linux shell (Finder .command, bash)
+*.command text eol=lf
+*.sh text eol=lf
+
 # Скрипты / исходники — LF
 *.py text eol=lf
 *.js text eol=lf
@@ -13,4 +17,3 @@
 *.yml text eol=lf
 *.yaml text eol=lf
 *.json text eol=lf
-*.sh text eol=lf

@@ -275,3 +275,9 @@ P2 из ROADMAP: rate-limit chat off-loopback; pending id binding.
 Продукт для **одного человека на Windows** уже зрелый: onboarding wizard, status, presence, board, freelance stack. Этап 1 (доска) и этап 2 (launch hygiene + backup restore + bat CRLF + brand STT) — **закрыты в коде и документах**. Остальное — polish и ROADMAP P2, не «дырявый MVP».
 
 Дальше по желанию: code-split, tray для ядра, address в empty states. Electron — нет.
+
+---
+
+## 13. macOS (добавлено следом)
+
+Нативные `*.command` рядом с `.bat`: install / start / update / voice / install_voice / phone / autostart / build_web. Ядро то же. PC-actions и часть screen — Windows-only. README + docs/install.md.

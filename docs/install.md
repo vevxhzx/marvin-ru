@@ -25,12 +25,61 @@
 
 ---
 
+## Установка на macOS (MacBook, ~10 минут)
+
+То же ядро, что на Windows: сайт, Telegram, финансы, доска, календарь, задачи. Скрипты — `*.command` (двойной клик в Finder открывает Терминал).
+
+**1. Python 3.12.** [python.org](https://www.python.org/downloads/) или:
+```bash
+brew install python@3.12
+```
+([Homebrew](https://brew.sh) — если ещё нет: `/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"`.)
+
+**2. Архив.** Code → Download ZIP или [Releases](../../../releases). Распакуйте, например в `~/Assistant`.
+
+**3. Первый запуск скрипта.** macOS блокирует неподписанные `.command` с интернета. Правый клик по **`install.command`** → **Открыть** → «Открыть». Либо в Терминале:
+```bash
+cd ~/Assistant
+chmod +x *.command
+xattr -cr .          # снять quarantine с ZIP, если «повреждено»
+./install.command
+```
+
+**4. `./start.command`** (или двойной клик) — мастер в браузере, как на Windows. Вкладку Терминала **не закрывайте**.
+
+| Действие | Файл |
+|---|---|
+| Обновить библиотеки после новой версии | `update.command` |
+| Автозапуск при логине | `autostart.command` → LaunchAgent `ru.marvin.assistant` |
+| Голос | `install_voice.command`, затем `voice.command` |
+| Адреса для телефона | `phone.command` + QR в ⚙ Настройки |
+| Пересобрать сайт | `build_web.command` (нужен `brew install node`) |
+
+**Ollama на Mac:** [ollama.com/download](https://ollama.com/download) (Apple Silicon ок). Без неё — режим **cloud** / **hybrid** в мастере.
+
+**Голос на Mac:**
+```bash
+brew install portaudio    # для sounddevice
+./install_voice.command
+# ядро уже запущено:
+./voice.command
+```
+Система спросит доступ к **Микрофону** для Терминала (или iTerm) — разрешите. Трей-иконка через pystray (меню строки состояния).
+
+**Чего нет / слабее, чем на Windows:** «открой Premiere», разбор рабочего стола, часть PC-actions и экранное время завязаны на WinAPI. Для друга на MacBook обычно хватает: Telegram + сайт + (по желанию) голос + Ollama.
+
+**Типичные ошибки macOS**
+- *«не удаётся открыть, так как Apple не может проверить…»* — ПКМ → Открыть; или `xattr -cr ~/Assistant`.
+- *`python3: command not found`* — поставьте Python / `brew install python@3.12`, новый терминал.
+- *Микрофон тихий / error PortAudio* — `brew install portaudio`, переустановите voice-пакеты.
+- *Порт 8765 занят* — закройте старый `start.command` или смените `server.port` в настройках.
+
 ---
 
 ## Сайт внутри Telegram, без VPN на телефоне
 
 Кнопка в чате с ботом открывает тот же сайт прямо в Telegram — вход подтверждает Telegram, QR и ключи не нужны, Tailscale на
-телефоне включать не надо. На ПК один раз `funnel.bat` (нужен установленный Tailscale) и перезапуск `start.bat`.
+телефоне включать не надо. На Windows: `funnel.bat` (нужен Tailscale) и перезапуск `start.bat`. На Mac: [Tailscale Funnel](https://tailscale.com/kb/1223/funnel) вручную → URL в ⚙ Настройки → telegram → webapp_url.
 Пошагово, с разбором безопасности: [telegram-miniapp.md](telegram-miniapp.md).
 
 Вторая копия на том же ПК для близкого человека (отдельный бот и база, мозг — облако, ему ничего не ставить): [second-assistant.md](second-assistant.md).
@@ -46,7 +95,7 @@ docker compose up -d
 
 Ссылку на мастер с ключом доступа контейнер печатает в лог (`docker compose logs assistant | grep "ключ"`) — из Docker браузер приходит не с localhost, поэтому без ключа API закрыт. Дальше сайт работает по cookie. Ollama поднимается вторым контейнером (`OLLAMA_URL=http://ollama:11434` уже прописан); для NVIDIA раскомментируйте блок `deploy` в `docker-compose.yml`. Без видеокарты выбирайте режим **cloud** и можете убрать сервис `ollama`.
 
-База и картинки — в `./data`, настройки — `./config.yaml`. Голос на ПК в Docker не работает (микрофон) — это отдельный аддон для Windows.
+База и картинки — в `./data`, настройки — `./config.yaml`. Голос (микрофон) в Docker не работает — на хосте: `install_voice.command` / `install_voice.bat`.
 
 ---
 

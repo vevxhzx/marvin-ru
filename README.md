@@ -44,21 +44,50 @@
 
 ---
 
-## Быстрый старт (Windows, ~10 минут)
+## Быстрый старт
+
+### Windows (~10 минут)
 
 1. Поставьте [Python 3.12](https://www.python.org/downloads/release/python-3120/) — при установке отметьте **«Add python.exe to PATH»**.
 2. Скачайте архив (**Code → Download ZIP** или [Releases](../../releases)), распакуйте, например, в `C:\Assistant`.
 3. **`install.bat`** — двойной клик, 2–5 минут.
-4. **`start.bat`** — откроется браузер с мастером: имя → мозг под вашу видеокарту (модель скачается кнопкой) → ключ облака (по желанию) → Telegram-бот от [@BotFather](https://t.me/BotFather).
+4. **`start.bat`** — откроется браузер с мастером: имя → мозг под железо → облако (по желанию) → Telegram от [@BotFather](https://t.me/BotFather).
 
-После «готово» ассистент напишет вам в Telegram. Окно `start.bat` держите открытым или добавьте в автозагрузку (`autostart.bat`).
+Окно `start.bat` держите открытым или `autostart.bat`. Голос: `install_voice.bat` → `voice.bat`. Телефон: `phone.bat` + QR в настройках.
 
-- **С телефона:** `phone.bat` + QR-код в ⚙ Настройки → «с телефона». Откуда угодно — через [Tailscale](https://tailscale.com).
-- **Внутри Telegram (Mini App), без VPN на телефоне:** `funnel.bat` → перезапуск → кнопка «Открыть» в чате с ботом. Вход подтверждает сам Telegram, данные остаются на ПК. Работает, проверено; подробности и разбор безопасности — [docs/telegram-miniapp.md](docs/telegram-miniapp.md).
-- **Голос на ПК:** `install_voice.bat`, затем `voice.bat`.
-- **Docker / Linux / Mac:** `cp config.example.yaml config.yaml && docker compose up -d`.
+### macOS (MacBook, ~10 минут)
 
-Подробно, с картинками и типичными ошибками — [docs/install.md](docs/install.md).
+1. [Python 3.12](https://www.python.org/downloads/) **или** `brew install python@3.12` ([Homebrew](https://brew.sh)).
+2. Скачайте ZIP, распакуйте (например `~/Assistant`).
+3. В Finder: правый клик по **`install.command`** → **Открыть** (первый раз Gatekeeper спросит подтверждение). Или в Терминале:
+   ```bash
+   cd ~/Assistant
+   chmod +x *.command
+   ./install.command
+   ./start.command
+   ```
+4. Браузер с мастером — как на Windows. Окно Терминала с `start.command` не закрывайте.
+
+| | |
+|---|---|
+| Обновить пакеты | `update.command` |
+| Автозапуск при входе | `autostart.command` (LaunchAgent) |
+| Голос (микрофон) | `install_voice.command` → `voice.command` (нужен `brew install portaudio`; доступ к Микрофону для Терминала) |
+| Телефон / QR | `phone.command` + ⚙ Настройки → «с телефона»; с другой сети — [Tailscale](https://tailscale.com) |
+| Управление окнами Mac | ограниченно (Windows-аддон); **сайт, Telegram, деньги, доска, календарь — полностью** |
+
+Локальная модель: [Ollama for macOS](https://ollama.com/download) (Apple Silicon — нормально). Без видеокарты/Ollama — режим **cloud** в мастере.
+
+### Linux / Docker
+
+```bash
+chmod +x *.command && ./install.command && ./start.command
+# или
+cp config.example.yaml config.yaml && docker compose up -d
+```
+
+- **Mini App в Telegram:** [docs/telegram-miniapp.md](docs/telegram-miniapp.md) (`funnel.bat` — Windows; на Mac — Tailscale Funnel вручную).
+- Подробности и ошибки — [docs/install.md](docs/install.md).
 
 ---
 

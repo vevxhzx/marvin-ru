@@ -87,9 +87,14 @@ def main():
         print("        config.yaml уже есть — ок")
 
     print("\n  ================================================")
-    print("    Готово! Запустите start.bat — откроется браузер")
+    if sys.platform == "win32":
+        print("    Готово! Запустите start.bat — откроется браузер")
+    elif sys.platform == "darwin":
+        print("    Готово! Дважды кликните start.command — откроется браузер")
+    else:
+        print("    Готово! Запустите ./start.command — откроется браузер")
     print("    с мастером настройки: имя, мозг под ваше железо, Telegram.")
-    print("    Ollama (если хотите локальную модель): https://ollama.com/download")
+    print("    Ollama (локальная модель): https://ollama.com/download")
     print("  ================================================\n")
     return 0
 
