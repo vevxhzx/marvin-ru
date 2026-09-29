@@ -3,9 +3,14 @@ import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, day
 import { Sheet, Field, useToast } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
+import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 
 const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
 const WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
+
+/* Карточки сетки календаря: порядок и ширина меняются в режиме «настроить» */
+const CAL_CARDS = ['month', 'day', 'week', 'upcoming']
+const CAL_WIDTHS = { month: 8, day: 4, week: 12, upcoming: 12 }
 
 export function EventSheet({ open, ev, day, onClose, onDone }) {
   const isNew = ev === 'new' || !ev?.id
@@ -90,6 +95,25 @@ export default function Calendar() {
   useEffect(() => { load() }, [range, tick])
 
   const today = new Date()
+
+  // Раскладка карточек: порядок и ширина (режим «настроить» в шапке)
+  const wide = useWide()
+  const [cardsEdit, setCardsEdit] = useState(false)
+  const { order: cardOrder, widths: cardWidths, move, cycleWidth } = useCardLayout('calendar', CAL_CARDS, CAL_WIDTHS)
+  /** карточки, которые есть в текущем виде, в сохранённом порядке */
+  const shown = (view === 'month' ? ['month', 'day', 'upcoming'] : ['week', 'upcoming'])
+    .filter((id) => cardOrder.includes(id))
+    .sort((a, b) => cardOrder.indexOf(a) - cardOrder.indexOf(b))
+  const cardSt = (id, extra = {}) => ({
+    order: cardOrder.indexOf(id),
+    ...extra,
+    ...(wide ? { gridColumn: `span ${cardWidths[id] || CAL_WIDTHS[id]}` } : {}),
+  })
+  const cardCtl = (id) => (
+    <CardCtl id={id} order={cardOrder} edit={cardsEdit} wide={wide}
+      onMove={move} onWidth={cycleWidth} width={cardWidths[id] || CAL_WIDTHS[id]}
+      Icon={ChevronLeft} />
+  )
 
   // Ячейки сетки месяца
   const cells = useMemo(() => {
@@ -198,6 +222,10 @@ export default function Calendar() {
             <span onClick={() => shiftTime(1)}>›</span>
           </div>
           <span className="btn" onClick={() => setSheet('new')}>+ событие</span>
+          {shown.length > 1 && (
+            <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
+              title="Переместить или поменять ширину карточек">настроить</span>
+          )}
         </div>
       </div>
 
@@ -206,7 +234,8 @@ export default function Calendar() {
         {/* Вид «Месяц» */}
         {view === 'month' && (
           <>
-            <section className="c s8 r flex flex-col" style={{ '--i': 2, minHeight: '560px' }}>
+            <section className="c s8 r flex flex-col" style={{ '--i': 2, minHeight: '560px', ...cardSt('month') }}>
+              {cardCtl('month')}
               <div className="cal2" id="cal2">
                 <div className="cal2-head">
                   {'пн вт ср чт пт сб вс'.split(' ').map((w) => (
@@ -259,7 +288,8 @@ export default function Calendar() {
               </div>
             </section>
 
-            <section className="c s4 r flex flex-col" style={{ '--i': 3, minHeight: '560px' }}>
+            <section className="c s4 r flex flex-col" style={{ '--i': 3, minHeight: '560px', ...cardSt('day') }}>
+              {cardCtl('day')}
               <div className="hd">
                 <h2>{isSameDay(selected, today) ? 'сегодня' : dayLabel(selected)}</h2>
                 <small>{shortDate(selected)} · {dayEvents.length} {plural(dayEvents.length, 'событие', 'события', 'событий')}</small>
@@ -290,7 +320,8 @@ export default function Calendar() {
 
         {/* Вид «Неделя» */}
         {view === 'week' && (
-          <section className="c s12 r" style={{ '--i': 2 }}>
+          <section className="c s12 r" style={{ '--i': 2, ...cardSt('week') }}>
+            {cardCtl('week')}
             <div className="hd">
               <h2>расписание на неделю</h2>
               <small>кликните на день или событие для просмотра</small>
@@ -348,7 +379,8 @@ export default function Calendar() {
         )}
 
         {/* Карточка: Ближайшие события (s12) */}
-        <section className="c s12 r" style={{ '--i': 4 }}>
+        <section className="c s12 r" style={{ '--i': 4, ...cardSt('upcoming') }}>
+          {cardCtl('upcoming')}
           <div className="hd">
             <h2>ближайшее</h2>
             <small>на 7 дней вперёд · {upcoming.length}</small>
