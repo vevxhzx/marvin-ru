@@ -112,6 +112,8 @@ export const api = {
   saveSettings: (changes) => req('PUT', '/api/settings', { changes }),
   status: () => req('GET', '/api/status'),
   backupNow: () => req('POST', '/api/backup'),
+  backups: () => req('GET', '/api/backups'),
+  restoreBackup: (name) => req('POST', '/api/backups/restore', { name }),
   semantic: (q, limit = 12) => req('GET', `/api/search/semantic?q=${encodeURIComponent(q)}&limit=${limit}`),
   reindex: () => req('POST', '/api/search/reindex'),
   // заказы / фриланс
@@ -121,6 +123,10 @@ export const api = {
   updateOrder: (id, p) => req('PUT', `/api/orders/${id}`, p),
   delOrder: (id) => req('DELETE', `/api/orders/${id}`),
   payOrder: (id, amount, extra = {}) => req('POST', `/api/orders/${id}/payments`, { amount, ...extra }),
+  addOrderTime: (id, minutes, extra = {}) => req('POST', `/api/orders/${id}/time`, { minutes, ...extra }),
+  addOrderScreenTime: (id, item) => req('POST', `/api/orders/${id}/time/from-screen`, item),
+  screen: (days = 1) => req('GET', `/api/screen?days=${days}`),
+  organizePreview: () => req('GET', '/api/pc/organize/preview'),
   orderStats: (months = 6) => req('GET', `/api/orders/stats?months=${months}`),
   // люди и граф связей
   people: () => req('GET', '/api/people'),

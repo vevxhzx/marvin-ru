@@ -261,7 +261,17 @@ function loadState() {
     console.error('[server] state load failed, using defaults:', err)
   }
 }
+// заказы: сумма исторически лежала в `total`, а фронт читает `price` (как в Python) — держим оба поля одинаковыми
+function orderMoney(o: any) {
+  const p = Number(o.price ?? o.total) || 0
+  o.price = p
+  o.total = p
+  o.paid = Number(o.paid) || 0
+  o.left = Math.max(0, p - o.paid)
+  return o
+}
 loadState()
+for (const o of state.orders as any[]) orderMoney(o)
 
 // грязный флаг ставим на любой мутирующий запрос; фоновая запись + запись при выходе
 app.use((req, _res, next) => {
@@ -323,7 +333,8 @@ app.get('/api/events/stream', (req, res) => {
   })
 })
 
-let currentEdition = process.env.EDITION === 'marvin' ? 'marvin' : 'jarvis'
+// По умолчанию — «Марвин»: репозиторий и сайт проекта marvin-ru. Личный профиль «Джарвис» — только по явному EDITION=jarvis.
+let currentEdition = process.env.EDITION === 'jarvis' ? 'jarvis' : 'marvin'
 
 // Health
 app.get('/api/health', (req, res) => {
@@ -1181,12 +1192,91 @@ app.put('/api/orders/freelance', (req, res) => {
 })
 app.get('/api/orders/pulse', (req, res) => res.json({ alive: true, active_hours: 4.8 }))
 app.get('/api/orders/stats', (req, res) => {
+  const n = Math.min(24, Math.max(1, Number(req.query.months) || 6))
+  const now = new Date()
+  const since = new Date(now.getFullYear(), now.getMonth() - (n - 1), 1)
+  const monthKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+  const OPEN = ['new', 'work', 'review']
+  const UNPAID = ['work', 'review', 'done']
+  const orders: any[] = state.orders as any[]
+
+  // доход по месяцам — только деньги, записанные по заказам
+  const byMonth: Record<string, number> = {}
+  for (const o of orders) {
+    const paid = Number(o.paid) || 0
+    if (paid <= 0) continue
+    const d = new Date(o.created_at || now)
+    byMonth[isNaN(d.getTime()) ? monthKey(now) : monthKey(d)] = (byMonth[isNaN(d.getTime()) ? monthKey(now) : monthKey(d)] || 0) + paid
+  }
+  const months: { month: string; income: number }[] = []
+  for (const cur = new Date(since); cur <= now; cur.setMonth(cur.getMonth() + 1)) {
+    const k = monthKey(cur)
+    months.push({ month: k, income: Math.round(byMonth[k] || 0) })
+  }
+
+  const weekAgo = now.getTime() - 7 * 86_400_000
+  const byClient = new Map<string, any>()
+  let totalHours = 0
+  let weekHours = 0
+  let totalPaid = 0
+  for (const o of orders) {
+    const name = o.client || 'без клиента'
+    let b = byClient.get(name)
+    if (!b) { b = { client: name, orders: 0, paid: 0, total: 0, hours: 0, open: 0, unpaid: 0 }; byClient.set(name, b) }
+    const paid = Number(o.paid) || 0
+    const price = Number(o.price ?? o.total) || 0
+    let hours = 0
+    for (const e of (o.time_entries || []) as any[]) {
+      const min = Number(e.duration_min) || 0
+      hours += min / 60
+      const t = new Date(e.date || now).getTime()
+      if (!Number.isNaN(t) && t >= weekAgo) weekHours += min / 60
+    }
+    if (!hours) hours = Number(o.hours) || 0
+    b.orders += 1
+    b.paid += paid
+    if (o.status !== 'cancelled') b.total += price
+    if (OPEN.includes(o.status)) b.open += 1
+    if (UNPAID.includes(o.status)) b.unpaid += Math.max(0, price - paid)
+    b.hours += hours
+    totalHours += hours
+    totalPaid += paid
+  }
+  const clients = [...byClient.values()]
+    .map((b: any) => ({
+      ...b,
+      rate: b.hours >= 1 ? Math.round(b.paid / b.hours) : null,
+      paid: Math.round(b.paid), total: Math.round(b.total), unpaid: Math.round(b.unpaid),
+      hours: Math.round(b.hours * 10) / 10,
+    }))
+    .sort((a: any, b: any) => b.paid - a.paid)
+    .slice(0, 12)
+
+  const done = orders.filter(o => ['done', 'paid'].includes(o.status))
+  const leads = done.map(o => Math.max(0, Math.round((now.getTime() - new Date(o.created_at || now).getTime()) / 86_400_000)))
+  const focus_days: { date: string; min: number }[] = []
+  for (let i = 13; i >= 0; i--) {
+    const iso = dayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i))
+    let min = 0
+    for (const o of orders) for (const e of (o.time_entries || []) as any[]) {
+      if (dayKey(new Date(e.date || now)) === iso) min += Number(e.duration_min) || 0
+    }
+    focus_days.push({ date: iso, min: Math.round(min) })
+  }
+
   res.json({
-    months: [
-      { month: 'Июль', total: 65000 },
-      { month: 'Август', total: 95000 },
-      { month: 'Сентябрь', total: 80000 },
-    ],
+    months,
+    clients,
+    total_income: Math.round(totalPaid),
+    total_hours: Math.round(totalHours * 10) / 10,
+    rate: totalHours >= 1 ? Math.round(totalPaid / totalHours) : null,
+    avg_check: done.length ? Math.round(done.reduce((s, o) => s + (Number(o.price ?? o.total) || 0), 0) / done.length) : null,
+    avg_lead_days: leads.length ? Math.round((leads.reduce((a, b) => a + b, 0) / leads.length) * 10) / 10 : null,
+    open: orders.filter(o => OPEN.includes(o.status)).length,
+    unpaid: Math.round(orders.filter(o => UNPAID.includes(o.status)).reduce((s, o) => s + Math.max(0, (Number(o.price ?? o.total) || 0) - (Number(o.paid) || 0)), 0)),
+    week_load_h: Math.round(weekHours * 10) / 10,
+    focus_days,
   })
 })
 app.get('/api/orders/:id', (req, res) => {
@@ -1196,14 +1286,12 @@ app.get('/api/orders/:id', (req, res) => {
   res.status(404).json({ error: 'Order not found' })
 })
 app.post('/api/orders', (req, res) => {
-  const o = {
-    id: ++nextId,
-    created_at: new Date().toISOString(),
-    status: 'new',
-    paid: 0,
-    left: Number(req.body.total || 0),
-    ...req.body,
-  }
+  const body = { ...req.body }
+  const price = Number(body.price ?? body.total) || 0
+  delete body.price
+  delete body.total
+  const o: any = { id: ++nextId, created_at: new Date().toISOString(), status: 'new', ...body, price, total: price }
+  orderMoney(o)
   state.orders.unshift(o)
   broadcast('orders')
   res.json(o)
@@ -1212,10 +1300,9 @@ app.put('/api/orders/:id', (req, res) => {
   const id = Number(req.params.id)
   const idx = state.orders.findIndex(o => o.id === id)
   if (idx !== -1) {
-    state.orders[idx] = { ...state.orders[idx], ...req.body }
-    if (req.body.total != null || req.body.paid != null) {
-      state.orders[idx].left = Math.max(0, state.orders[idx].total - (state.orders[idx].paid || 0))
-    }
+    const o: any = { ...state.orders[idx], ...req.body }
+    orderMoney(o)
+    state.orders[idx] = o
     broadcast('orders')
     return res.json(state.orders[idx])
   }
@@ -1322,7 +1409,7 @@ app.delete('/api/orders/:id/time/:timeId', (req, res) => {
 // Desktop Client Info
 app.get('/api/client/info', (req, res) => {
   res.json({
-    app_name: 'Джарвис',
+    app_name: currentEdition === 'marvin' ? 'Марвин' : 'Джарвис',
     version: '1.0.0',
     platform: process.platform,
     mode: 'desktop_projection',
@@ -1585,16 +1672,163 @@ app.delete('/api/boards/:id', (req, res) => {
 })
 
 // Settings
-app.get('/api/settings', (req, res) => {
-  res.json({ items: state.settings })
+// Каталог редактируемых ключей — зеркало EDITABLE из core/config.py. Страница настроек строит
+// секции по префиксам ключа и ждёт у каждого пункта {key, type, label, secret, value, set}.
+const SETTING_DEFS: Array<[string, 'str' | 'int' | 'bool', string, boolean]> = [
+  ['assistant.name', 'str', 'Имя ассистента (так он представляется и откликается голосом)', false],
+  ['assistant.name_latin', 'str', 'Имя латиницей (заголовки окон, логи)', false],
+  ['assistant.aliases', 'str', 'Другие варианты имени через запятую', false],
+  ['owner.name', 'str', 'Как к вам обращаться («сэр», «босс», имя; пусто — без обращения)', false],
+  ['owner.city', 'str', 'Ваш город', false],
+  ['owner.timezone', 'str', 'Часовой пояс (Europe/Moscow)', false],
+  ['telegram.token', 'str', 'Токен Telegram-бота (от @BotFather)', true],
+  ['telegram.owner_id', 'int', 'Ваш Telegram ID (от @userinfobot)', false],
+  ['telegram.morning_digest', 'str', 'Утренний дайджест (ЧЧ:ММ, пусто — выключить)', false],
+  ['telegram.proxy', 'str', 'Прокси для Telegram (если api.telegram.org недоступен)', false],
+  ['telegram.webapp_url', 'str', 'Адрес сайта для приложения в Telegram (https://…ts.net из funnel.bat)', false],
+  ['notifications.quiet_from', 'int', 'Тихие часы: с (час 0–23) — ночью ассистент сам не пишет', false],
+  ['notifications.quiet_to', 'int', 'Тихие часы: до (час 0–23)', false],
+  ['notifications.proactive_enabled', 'bool', 'Сам напоминает о том, что заметил (просрочка оплаты, дело без срока, самочувствие)', false],
+  ['notifications.proactive_per_day', 'int', 'Не больше стольких инициативных сообщений в день (5)', false],
+  ['notifications.proactive_vibe', 'bool', 'Просто написать днём (как дела / шутка), если тихо 5+ часов', false],
+  ['brain.mode', 'str', 'Режим мозга: local / hybrid / cloud', false],
+  ['brain.ollama.url', 'str', 'Адрес Ollama', false],
+  ['brain.ollama.model', 'str', 'Модель Ollama', false],
+  ['brain.ollama.embed_model', 'str', 'Модель эмбеддингов (смысловой поиск)', false],
+  ['brain.ollama.small_model', 'str', 'Малая модель для мини-задач (судья «трата или заказ», уборка памяти): qwen2.5:1.5b — пусто = основная', false],
+  ['brain.ollama.small_keep_alive', 'str', 'Сколько малая модель живёт в видеопамяти после задачи (5m; 0 — выгружать сразу)', false],
+  ['brain.ollama.vision_model', 'str', 'Модель зрения (скриншоты, чеки): qwen2.5vl:3b / llava / moondream — пусто, если не ставили', false],
+  ['brain.ollama.num_ctx', 'int', 'Размер контекста локальной модели', false],
+  ['brain.ollama.keep_alive', 'str', 'Держать модель в памяти после ответа (2h / 0)', false],
+  ['brain.vision.where', 'str', 'Где смотреть картинки: auto (ПК, при сбое — облако; чеки только ПК) / cloud (всегда облако, быстро) / local (только ПК)', false],
+  ['brain.vision.allow_cloud', 'bool', 'Скриншоты «что на экране» можно отправлять в облако, если нет локальной модели зрения (чеки — никогда)', false],
+  ['brain.cloud.provider', 'str', 'Провайдер облака', false],
+  ['brain.cloud.api_key', 'str', 'Ключ облака', true],
+  ['brain.cloud.model', 'str', 'Модель облака (пусто — по умолчанию у провайдера)', false],
+  ['brain.cloud.base_url', 'str', 'Адрес API (только для custom)', false],
+  ['brain.cloud.proxy', 'str', 'Прокси для облака (обычно не нужен)', false],
+  ['brain.gemini.auto', 'bool', 'Разговор и общие вопросы — в облако (иначе только по слову «облако, …»)', false],
+  ['brain.gemini.api_key', 'str', 'Ключ Google Gemini (только если провайдер gemini)', true],
+  ['brain.gemini.model', 'str', 'Модель Google Gemini (auto)', false],
+  ['brain.gemini.proxy', 'str', 'Прокси для Google Gemini', false],
+  ['brain.gemini.anonymize', 'bool', 'Обезличивать текст перед отправкой в облако', false],
+  ['brain.gemini.mark_source', 'bool', 'Помечать источник ответа (⚡/🧠/☁️)', false],
+  ['brain.sorter.where', 'str', 'Кто разбирает сообщения-списки на записи: cloud (облако, надёжнее; текст уходит целиком) / local (только ПК) / auto (ПК, при сбое облако)', false],
+  ['brain.sorter.confirm', 'bool', 'Списки: сначала показать, как понял, и ждать «да» (иначе записывать сразу — «отмени» откатит всю пачку)', false],
+  ['brain.memory.enabled', 'bool', 'Память о вас: запоминать факты из разговора, подтягивать нужное в ответы, портрет', false],
+  ['brain.memory.where', 'str', 'Кто извлекает и обобщает факты: cloud (облако, при сбое ПК) / auto (ПК, при сбое облако) / local (только ПК). Поиск по памяти — всегда ПК', false],
+  ['brain.memory.short_days', 'int', 'Сколько дней факт живёт в «сейчас», прежде чем стать постоянным или уйти в архив', false],
+  ['brain.judge.enabled', 'bool', 'Судья: спорную фразу («сайт 15000», «отдал Ване 2000») перед записью решает нейронка, а не шаблон', false],
+  ['brain.judge.where', 'str', 'Кто судит: local (малая/основная модель на ПК; по умолчанию) / cloud (облако, при сбое ПК) / auto (ПК, при сбое облако)', false],
+  ['brain.relations.enabled', 'bool', 'Связи между записями в Мозге («связано:» в карточке, смысловые линии в графе)', false],
+  ['brain.relations.where', 'str', 'Кто решает, связаны ли записи: cloud (облако, при сбое ПК) / auto (ПК, при сбое облако) / local (только ПК). Кандидатов всегда отбирает ПК', false],
+  ['voice.enabled', 'bool', 'Голосовые сообщения в Telegram распознавать', false],
+  ['voice.stt.model', 'str', 'Модель распознавания Whisper: tiny / base / small / medium (точнее, но медленнее)', false],
+  ['voice.stt.cloud', 'bool', 'Распознавать речь через Groq Whisper (~1 с, но голос уходит в облако; нужен провайдер groq)', false],
+  ['voice.stt.device', 'str', 'Устройство Whisper: cpu / cuda', false],
+  ['voice.tts.engine', 'str', 'Голос: silero (офлайн) / edge (онлайн, Microsoft) / off', false],
+  ['voice.tts.speaker', 'str', 'Голос Silero: eugene / aidar (муж.), baya / kseniya / xenia (жен.)', false],
+  ['voice.tts.edge_voice', 'str', 'Голос Microsoft (если engine = edge)', false],
+  ['voice.tts.reply_in_telegram', 'str', 'Голосовые ответы в Telegram: never (только текст) / voice (голосом на голосовые) / always', false],
+  ['voice.pc.hotkey', 'str', 'Голос на ПК: горячая клавиша «слушать» (voice.bat)', false],
+  ['voice.pc.mic', 'str', 'Голос на ПК: микрофон (пусто — по умолчанию; номер из «voice.bat --mics»)', false],
+  ['voice.pc.silence_sec', 'str', 'Голос на ПК: пауза в речи (сек), после которой команда считается сказанной. 0.8 — быстро, 1.5–2 — если обрывает на раздумьях', false],
+  ['voice.pc.max_command_sec', 'int', 'Голос на ПК: максимальная длина одной команды, секунд', false],
+  ['voice.pc.conversation_sec', 'int', 'Голос на ПК: сколько секунд после ответа можно говорить без имени ассистента (0 — только после его вопросов)', false],
+  ['voice.pc.conversation_mode_sec', 'int', 'Голос на ПК: окно в «режиме беседы» («<имя>, режим беседы» / «хватит болтать»), секунд', false],
+  ['voice.pc.morning_report', 'bool', 'Голос на ПК: утренний доклад вслух, когда впервые сели за компьютер', false],
+  ['voice.pc.night_from', 'int', 'Ночной режим с (час): тише и без лишних напоминаний вслух', false],
+  ['voice.pc.night_to', 'int', 'Ночной режим до (час)', false],
+  ['voice.pc.filler_sec', 'str', 'Через сколько секунд молчания мозга сказать «Секунду…» (0 — никогда)', false],
+  ['voice.pc.screen_time.enabled', 'bool', 'Экранное время: сколько и где вы за ПК — карточка на «Сегодня», «сколько сидел за компом», строка в вечернем итоге. Только имя программы и сайт, всё локально. Нужен перезапуск voice.bat', false],
+  ['voice.pc.screen_time.idle_min', 'int', 'Экранное время: минут без мыши/клавиатуры = «отошёл» (5)', false],
+  ['voice.pc.screen_time.nudges', 'bool', 'Экранное время: редкие подколы по факту (YouTube час подряд при дедлайне, игра в рабочее время, 6 ч без перерыва)', false],
+  ['voice.pc.screen_time.keep_days', 'int', 'Экранное время: сколько дней хранить подробности (90)', false],
+  ['voice.pc.tidy_downloads_days', 'int', 'Ночная уборка «Загрузок» (voice.bat): файлы старше N дней — в Загрузки/Разобрано; 0 — выключено. Рабочий стол — только по команде', false],
+  ['voice.pc.games', 'str', 'Свои игры для авто-игрового режима: имена exe через запятую (популярные знаю сам)', false],
+  ['google.enabled', 'bool', 'Отправлять события в Google Календарь (только ассистент → Google)', false],
+  ['google.client_id', 'str', 'Google OAuth Client ID (…apps.googleusercontent.com) — см. README «Google Календарь»', false],
+  ['google.client_secret', 'str', 'Google OAuth Client secret', true],
+  ['google.calendar_id', 'str', 'ID календаря в Google (пусто — основной)', false],
+  ['google.proxy', 'str', 'Прокси для Google (пусто — берётся прокси Telegram, если задан)', false],
+  ['backup.enabled', 'bool', 'Ежедневный бэкап базы', false],
+  ['backup.dir', 'str', 'Папка бэкапов', false],
+  ['backup.extra_dir', 'str', 'Вторая копия (другой диск / папка Яндекс.Диска)', false],
+  ['backup.keep_days', 'int', 'Хранить бэкапы, дней', false],
+  ['finance.main_account', 'str', 'Основной счёт', false],
+  ['persona.style', 'str', 'Характер: swag (с юмором) / neutral (по делу)', false],
+  ['persona.humor_level', 'int', 'Уровень юмора 0–10 (0–2 без шуток, 6–8 сарказм по делу, 9–10 жёстко)', false],
+  ['persona.nicknames', 'str', 'Как ещё вас звать, через запятую («шеф, босс»)', false],
+  ['persona.where', 'str', 'Кто формулирует инициативные фразы: cloud / auto / local', false],
+  ['persona.voice_accents', 'bool', 'Итог дня и подколы иногда голосовым (не чаще раза в день)', false],
+  ['server.port', 'int', 'Порт сайта (нужен перезапуск)', false],
+  ['setup.done', 'bool', 'Мастер первого запуска пройден', false],
+  // демо-ключи, которые раньше лежали прямо в state.settings
+  ['currency', 'str', 'Знак валюты', false],
+  ['freelance.hourly_rate', 'int', 'Ставка в час', false],
+  ['pomodoro.focus_min', 'int', 'Помодоро: фокус, минут', false],
+  ['pomodoro.short_break_min', 'int', 'Помодоро: короткий перерыв, минут', false],
+  ['pomodoro.long_break_min', 'int', 'Помодоро: длинный перерыв, минут', false],
+]
+const SETTING_BY_KEY: Record<string, { type: 'str' | 'int' | 'bool'; secret: boolean }> = {}
+for (const [key, type, , secret] of SETTING_DEFS) SETTING_BY_KEY[key] = { type, secret }
+
+// секрет маскируется при показе — иначе ключ лежал бы открытым в ответе API
+function maskSecret(raw: any): string {
+  const s = String(raw ?? '')
+  if (!s) return ''
+  return s.length > 8 ? s.slice(0, 4) + '…' + s.slice(-3) : '•••'
+}
+
+function settingsItems() {
+  const stored = new Map<string, any>(state.settings.map(s => [s.key, s.value] as [string, any]))
+  const known = new Set<string>()
+  const items: any[] = SETTING_DEFS.map(([key, type, label, secret]) => {
+    known.add(key)
+    const set = stored.has(key) && !!stored.get(key)
+    const raw = stored.has(key) ? stored.get(key) : (type === 'str' ? '' : type === 'int' ? 0 : false)
+    return { key, type, label, secret, value: secret ? maskSecret(raw) : raw, set }
+  })
+  // ключи из сохранённого состояния, которых нет в каталоге — отдаём как есть, чтобы не терять
+  for (const s of state.settings) {
+    if (known.has(s.key)) continue
+    const t = typeof s.value === 'number' ? 'int' : typeof s.value === 'boolean' ? 'bool' : 'str'
+    items.push({ key: s.key, type: t, label: s.key, secret: false, value: s.value, set: true })
+  }
+  return items
+}
+
+app.get('/api/settings', (_req, res) => {
+  res.json({ items: settingsItems() })
 })
 app.put('/api/settings', (req, res) => {
-  const changes = req.body.changes || {}
+  const changes = req.body?.changes
+  // без changes — пустой сейв (фронт шлёт {changes}); 400 только если changes есть, но не объект
+  if (changes !== undefined && (changes === null || typeof changes !== 'object' || Array.isArray(changes))) {
+    return res.status(400).json({ detail: 'changes must be an object' })
+  }
+  const list: Record<string, any> = changes || {}
   const changed: string[] = []
-  for (const [key, value] of Object.entries(changes)) {
+  for (const [key, value] of Object.entries(list)) {
+    const def = SETTING_BY_KEY[key]
+    if (def?.secret) {
+      // маска или пустое поле — секрет не трогаем (так же, как core/config.write_settings)
+      const s = String(value ?? '')
+      if (!s || s.includes('…') || s === '•••') continue
+    }
+    let v: any = value
+    if (def?.type === 'int') {
+      const n = parseInt(String(value ?? '').trim(), 10)
+      if (Number.isNaN(n)) continue
+      v = n
+    } else if (def?.type === 'bool') {
+      v = ['1', 'true', 'yes', 'on', 'да'].includes(String(value ?? '').toLowerCase())
+    } else if (def?.type === 'str') {
+      v = value == null ? '' : String(value)
+    }
     const existing = state.settings.find(s => s.key === key)
-    if (existing) existing.value = value as any
-    else state.settings.push({ key, value: value as any })
+    if (existing) existing.value = v
+    else state.settings.push({ key, value: v })
     changed.push(key)
   }
   broadcast('settings')

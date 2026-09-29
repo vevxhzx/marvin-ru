@@ -52,7 +52,8 @@ export default function Settings({ health }) {
   const load = () => Promise.all([api.settings().then(setData), api.status().then(setStatus)]).catch(show.err)
   useEffect(() => { load() }, [])
 
-  const val = (it) => (it.key in draft ? draft[it.key] : it.value)
+  // сервер может не вернуть пункт (например, brain.cloud.provider) — страница не должна от этого падать
+  const val = (it) => (it ? (it.key in draft ? draft[it.key] : it.value) : undefined)
   const dirty = Object.keys(draft).length > 0
   const dirtyCats = new Set(Object.keys(draft).map((k) => CATS.find((c) => c.groups.some((g) => k.startsWith(g + '.')))?.id))
 
@@ -749,7 +750,7 @@ function SettingField({ it, value, onChange, providers }) {
 
 function DesktopClientSection() {
   const [info, setInfo] = useState(null)
-  const [edition, setEdition] = useState('jarvis')
+  const [edition, setEdition] = useState('marvin')
   const [, show] = useToast()
 
   useEffect(() => {
