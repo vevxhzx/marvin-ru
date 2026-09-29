@@ -53,3 +53,20 @@ jobs:
             git status --short -- web/site
             exit 1
           fi
+
+  server:
+    # server.ts — второй (Node) стек проекта: его контракты проверяет npm test,
+    # типы — tsc, а сборка — vite build.
+    name: server.ts (tsc, build, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: npm test
