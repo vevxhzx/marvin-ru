@@ -352,7 +352,10 @@ class _Speaker:
 
     def say(self, text: str) -> None:
         if text and text.strip() and not _interrupt.is_set():
-            self._q.put(self._pool.submit(_synth, text.strip()))
+            try:
+                self._q.put(self._pool.submit(_synth, text.strip()))
+            except RuntimeError:
+                pass   # пул уже остановлен в finish() — поздняя фраза из таймера-заглушки
 
     def say_now(self, text: str) -> None:
         """Озвучить немедленно вне очереди (заглушка «Секунду», пока мозг думает)."""
@@ -362,6 +365,8 @@ class _Speaker:
         self._q.put(None)
         if self._thread:
             self._thread.join()
+        # _Speaker() создаётся заново на каждом цикле: без shutdown поток пула остаётся до конца процесса
+        self._pool.shutdown(wait=True)
         time.sleep(0.15)
         _drain_mic()
         _speaking.clear()

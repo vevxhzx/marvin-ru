@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from core.pc import organize
 
 def test_plan_groups_montage_files_and_undo(tmp_path):
@@ -18,7 +20,7 @@ def test_sound_profile_uses_filename_semantics_and_custom_keywords(tmp_path):
     assert p['by_category']['05_Шаги']==1
     assert p['by_category']['08_Интерфейс']==1
     assert p['by_category']['10_Природа']==1
-    assert all('/SFX/' in m['dst'] for m in p['moves'])
-    rules=tmp_path/'rules.json'; rules.write_text('{"keywords":{"13_Магия":["my_custom"]}}')
+    assert all('SFX' in Path(m['dst']).parts for m in p['moves'])   # путь не зависит от разделителя ОС
+    rules=tmp_path/'rules.json'; rules.write_text('{"keywords":{"13_Магия":["my_custom"]}}', encoding='utf-8')
     p=organize.make_plan(root,tmp_path/'data',rules)
     assert p['by_category']['13_Магия']==1

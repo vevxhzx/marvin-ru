@@ -1,6 +1,12 @@
 .venv
 data
+.env
+.env.*
 web/node_modules
+node_modules
+dist
+web/dist
+.github
 **/__pycache__
 *.pyc
 .git

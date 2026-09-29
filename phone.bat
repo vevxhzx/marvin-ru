@@ -10,7 +10,7 @@ if errorlevel 1 (
     exit /b
 )
 netsh advfirewall firewall delete rule name="Assistant 8765" >nul 2>&1
-netsh advfirewall firewall add rule name="Assistant 8765" dir=in action=allow protocol=TCP localport=8765 profile=any >nul
+netsh advfirewall firewall add rule name="Assistant 8765" dir=in action=allow protocol=TCP localport=8765 profile=private >nul
 if errorlevel 1 (
     echo  FAILED to add firewall rule.
 ) else (

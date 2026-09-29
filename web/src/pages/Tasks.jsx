@@ -174,7 +174,7 @@ export default function Tasks() {
         </>
       )}
 
-      <TaskSheet open={!!sheet} task={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }} />
+      <TaskSheet open={!!sheet} task={sheet === 'new' ? null : sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }} />
     </div>
   )
 }

@@ -1,11 +1,26 @@
 const BASE = ''
 
-async function req(method, path, body) {
-  const r = await fetch(BASE + path, {
-    method,
-    headers: body ? { 'content-type': 'application/json' } : undefined,
-    body: body ? JSON.stringify(body) : undefined,
-  })
+async function req(method, path, body, timeoutMs = 30000) {
+  const ctrl = new AbortController()
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs)
+  let r
+  try {
+    r = await fetch(BASE + path, {
+      method,
+      headers: body ? { 'content-type': 'application/json' } : undefined,
+      body: body ? JSON.stringify(body) : undefined,
+      signal: ctrl.signal,
+    })
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      const e = new Error(`${method} ${path} → нет ответа за ${Math.round(timeoutMs / 1000)} с`)
+      e.status = 0
+      throw e
+    }
+    throw err
+  } finally {
+    clearTimeout(timer)
+  }
   if (r.status === 401) {
     const { tg } = await import('./tg')
     const msg = tg.active
@@ -32,7 +47,7 @@ export const api = {
 
   health: () => req('GET', '/api/health'),
   dashboard: () => req('GET', '/api/dashboard'),
-  chat: (text) => req('POST', '/api/chat', { text, channel: 'web' }),
+  chat: (text) => req('POST', '/api/chat', { text, channel: 'web' }, 120000),   // ответ ядра (LLM) может идти долго
   chatHistory: (limit = 40) => req('GET', `/api/chat/history?limit=${limit}`),
 
   events: (start, end, tasksToo = false) => req('GET', `/api/events?${start ? `start=${start}` : ''}${end ? `&end=${end}` : ''}${tasksToo ? '&tasks_too=true' : ''}`),
