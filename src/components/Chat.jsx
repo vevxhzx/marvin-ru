@@ -15,7 +15,7 @@ export const ACT = {
   add_recurring: ['регулярный платёж', Wallet], stop_recurring: ['платёж остановлен', Wallet], undo: ['отменено', Undo2], undo_last: ['отменено', Undo2],
   bulk_delete: ['удалено пачкой', Undo2], game_mode: ['режим переключён', Cpu], voice: ['голос сменён', Sparkles],
 }
-const VIA = { rules: ['правила', Zap], ollama: ['локально', Cpu], gemini: ['облако', Cloud], none: ['сбой', AlertCircle] }
+const VIA = { rules: ['правила', Zap], ollama: ['локально', Cpu], llm: ['облако', Cloud], gemini: ['облако', Cloud], none: ['сбой', AlertCircle] }
 const CH = { tg: 'telegram', 'tg-voice': 'telegram · голос', voice: 'голос', web: 'сайт', system: 'авто' }
 const fromServer = (h) => h.map((m) => ({ id: m.id, role: m.role === 'user' ? 'me' : 'bot', text: m.text, channel: m.channel, at: m.at }))
 

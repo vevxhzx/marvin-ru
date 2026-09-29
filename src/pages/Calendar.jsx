@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, plural } from '../lib/api'
-import { Sheet, Field, useToast } from '../components/ui'
+import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, plural } from '../lib/api'
+import { Sheet, Field, useToast, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
-import { Plus, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
+import { Plus, Check, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
+import { usePageAccent } from '../lib/prefs'
 
 const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
 const WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
@@ -14,8 +15,15 @@ const CAL_WIDTHS = { month: 8, day: 4, week: 12, upcoming: 12 }
 
 export function EventSheet({ open, ev, day, onClose, onDone }) {
   const isNew = ev === 'new' || !ev?.id
+  // событие-проекция (задача/дедлайн заказа) в календаре правится в своей карточке — здесь только просмотр
+  const synthetic = !isNew && Number(ev?.id) < 0
   const [title, setTitle] = useState('')
   const [start, setStart] = useState('')
+  const [location, setLocation] = useState('')
+  const [taskId, setTaskId] = useState('')
+  const [orderId, setOrderId] = useState('')
+  const [tasks, setTasks] = useState([])
+  const [orders, setOrders] = useState([])
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
@@ -24,6 +32,13 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
     setTitle(isNew ? '' : ev?.title || '')
     const d = isNew ? (day || new Date()) : new Date(ev?.start || Date.now())
     setStart(toLocalISO(d).slice(0, 16))
+    setLocation(ev?.location || '')
+    setTaskId(ev?.task_id ? String(ev.task_id) : '')
+    setOrderId(ev?.order_id ? String(ev.order_id) : '')
+    if (!synthetic) {
+      api.tasks(true, false).then((l) => setTasks((l || []).filter((t) => t.kind !== 'event'))).catch(() => setTasks([]))
+      api.orders(true).then((l) => setOrders(l || [])).catch(() => setOrders([]))
+    }
   }, [open, ev, day, isNew])
 
   const save = async (e) => {
@@ -31,11 +46,15 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
     if (!title.trim()) return
     setSaving(true)
     try {
-      if (isNew) {
-        await api.addEvent({ title: title.trim(), start: new Date(start).toISOString() })
-      } else {
-        await api.updateEvent(ev.id, { title: title.trim(), start: new Date(start).toISOString() })
+      const payload = {
+        title: title.trim(),
+        start: new Date(start).toISOString(),
+        location: location.trim() || null,
+        task_id: taskId ? Number(taskId) : null,
+        order_id: orderId ? Number(orderId) : null,
       }
+      if (isNew) await api.addEvent({ ...payload, duration_min: 60, end: new Date(new Date(start).getTime() + 3600000).toISOString() })
+      else await api.updateEvent(ev.id, payload)
       onDone()
     } catch (err) {
       show.err(err)
@@ -54,18 +73,92 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
     }
   }
 
+  const toggleDone = async () => {
+    const next = ev.done ? 0 : 1
+    setSaving(true)
+    try {
+      const r = await api.doneEvent(ev.id, !!next)
+      const linked = (r?.linked || []).filter(Boolean)
+      if (next) show('Завершено', linked.join(' · '), ev.title)
+      else show('Возвращено в работу', linked.join(' · '), ev.title)
+      onDone()
+    } catch (err) {
+      show.err(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const kindChip = ev?.kind === 'task'
+    ? { txt: 'задача из списка', cls: '!bg-[var(--acc)] !text-white' }
+    : ev?.kind === 'order'
+      ? { txt: 'дедлайн заказа', cls: '!bg-[var(--warn)] !text-black' }
+      : null
+
+  if (synthetic) {
+    return (
+      <Sheet open={open} onClose={onClose} title={ev?.kind === 'order' ? 'сдача заказа' : 'задача из календаря'}>
+        <div className="space-y-4">
+          <div className="flex items-center gap-2">
+            {kindChip && <span className={`chip ${kindChip.cls}`}>{kindChip.txt}</span>}
+            {ev.done && <span className="chip !bg-[var(--pos)] !text-white">выполнено</span>}
+          </div>
+          <div className="text-[18px] font-semibold">{ev?.title}</div>
+          <div className="text-sm text-[var(--ink2)] num">
+            {fullDate(ev?.start)} {ev?.start ? hhmm(ev.start) : ''}
+          </div>
+          <p className="text-sm text-[var(--ink3)]">
+            {ev?.kind === 'order'
+              ? 'Это дедлайн заказа. Завершение переведёт заказ в статус «сдан» — он также изменится на странице заказов.'
+              : 'Это задача, показанная в календаре. Завершение закроет её и в списке задач.'}
+          </p>
+          <div className="flex justify-end gap-2 pt-2">
+            <button type="button" className="btn g" onClick={onClose}>закрыть</button>
+            <button type="button" className="btn" disabled={saving} onClick={toggleDone}>
+              {ev.done ? 'вернуть в работу' : ev?.kind === 'order' ? 'заказ сдан ✓' : 'выполнено ✓'}
+            </button>
+          </div>
+        </div>
+      </Sheet>
+    )
+  }
+
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новое событие' : 'редактировать событие'}>
+    <Sheet open={open} onClose={onClose} title={isNew ? 'новое событие' : ev.done ? 'встреча завершена' : 'редактировать встречу'}>
       <form onSubmit={save} className="space-y-4">
-        <Field label="название события">
+        <Field label="название встречи">
           <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Встреча с клиентом, созвон…" />
         </Field>
         <Field label="дата и время">
           <input type="datetime-local" className="input" value={start} onChange={(e) => setStart(e.target.value)} />
         </Field>
-        <div className="flex items-center justify-between pt-4">
-          {!isNew && <button type="button" className="btn g !text-[var(--neg)]" onClick={remove}>удалить</button>}
-          <div className="ml-auto flex gap-2">
+        <Field label="место или ссылка">
+          <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Zoom, переговорная, https://…" />
+        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="привязать к задаче" hint="завершение встречи закроет и задачу">
+            <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
+              <option value="">не привязывать</option>
+              {tasks.map((t) => <option key={t.id} value={t.id}>{t.done ? '✓ ' : ''}{t.title}</option>)}
+            </select>
+          </Field>
+          <Field label="привязать к заказу" hint="завершение закроет заказ">
+            <select className="input" value={orderId} onChange={(e) => setOrderId(e.target.value)}>
+              <option value="">не привязывать</option>
+              {orders.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
+            </select>
+          </Field>
+        </div>
+        <div className="flex items-center justify-between gap-2 pt-4">
+          {!isNew ? (
+            <button type="button" className="btn g !text-[var(--neg)]" onClick={remove}>удалить</button>
+          ) : <span />}
+          <div className="flex gap-2">
+            {!isNew && (
+              <button type="button" className={`btn ${ev.done ? 'g' : ''}`} disabled={saving} onClick={toggleDone}>
+                {ev.done ? 'открыть заново' : 'завершить'}
+              </button>
+            )}
             <button type="button" className="btn g" onClick={onClose}>отмена</button>
             <button type="submit" className="btn" disabled={saving || !title.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
           </div>
@@ -75,13 +168,49 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
   )
 }
 
+/* Кружок завершения в строке календаря: галочка ставится на месте, без открытия карточки */
+export function EvCheck({ ev, onToggle, small }) {
+  return (
+    <button
+      type="button"
+      className={`ev-check ${small ? 'sm' : ''} ${ev.done ? 'on' : ''}`}
+      onClick={(e) => { e.stopPropagation(); onToggle(ev, e) }}
+      aria-label={ev.done ? 'вернуть в работу' : 'завершить'}
+      title={ev.done ? 'вернуть в работу' : 'завершить'}
+    >
+      <Check size={small ? 9 : 12} strokeWidth={3} />
+    </button>
+  )
+}
+
+/* Подпись строки: откуда она — задача, дедлайн заказа или обычная встреча */
+function evSub(e, tasks = [], orders = []) {
+  const bits = []
+  if (e.kind === 'task') bits.push('задача')
+  else if (e.kind === 'order') bits.push(`заказ · ${e.location || 'сдать'}`)
+  if (e.task_id && e.kind !== 'task') {
+    const t = tasks.find((x) => x.id === Number(e.task_id))
+    if (t) bits.push(`↳ задача «${t.title}»`)
+  }
+  if (e.order_id && e.kind !== 'order') {
+    const o = orders.find((x) => x.id === Number(e.order_id))
+    if (o) bits.push(`↳ заказ «${o.title}»`)
+  }
+  if (e.location && e.kind !== 'order') bits.push(e.location)
+  if (e.sub) bits.push(e.sub)
+  return bits.join(' · ')
+}
+
 export default function Calendar() {
   const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d })
   const [selected, setSelected] = useState(new Date())
   const [events, setEvents] = useState([])
+  const [linkTasks, setLinkTasks] = useState([])
+  const [linkOrders, setLinkOrders] = useState([])
   const [sheet, setSheet] = useState(null)
   const [view, setView] = useState('month') // 'month' | 'week'
   const { tick, bump } = useRefresh()
+  const [, show] = useToast()
 
   const range = useMemo(() => {
     const start = new Date(cursor)
@@ -93,11 +222,38 @@ export default function Calendar() {
 
   const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([]))
   useEffect(() => { load() }, [range, tick])
+  // справочники для привязок «встреча → задача/заказ»: тянем один раз
+  useEffect(() => {
+    api.tasks(true, false).then((l) => setLinkTasks((l || []).filter((t) => t.kind !== 'event'))).catch(() => {})
+    api.orders(true).then((l) => setLinkOrders(l || [])).catch(() => {})
+  }, [])
+
+  /* Завершение встречи/задачи/дедлайна заказа — сервер закрывает связанные сущности,
+     а тост показывает, что именно синхронизировалось. */
+  const toggleDone = async (e) => {
+    const next = e.done ? 0 : 1
+    setEvents((list) => list.map((x) => (x.id === e.id ? { ...x, done: next } : x)))
+    try {
+      const r = await api.doneEvent(e.id, !!next)
+      const linked = (r?.linked || []).filter(Boolean)
+      if (next) {
+        show('Завершено', linked.join(' · '), e.title)
+      } else {
+        show('Возвращено в работу', linked.join(' · '), e.title)
+      }
+      load()
+      bump()
+    } catch (err) {
+      show.err(err)
+      load()
+    }
+  }
 
   const today = new Date()
 
   // Раскладка карточек: порядок и ширина (режим «настроить» в шапке)
   const wide = useWide()
+  const pageAcc = usePageAccent('calendar')
   const [cardsEdit, setCardsEdit] = useState(false)
   const { order: cardOrder, widths: cardWidths, move, cycleWidth } = useCardLayout('calendar', CAL_CARDS, CAL_WIDTHS)
   /** карточки, которые есть в текущем виде, в сохранённом порядке */
@@ -202,7 +358,7 @@ export default function Calendar() {
   }
 
   return (
-    <div className="pg on" id="p-cal">
+    <div className="pg on" id="p-cal" style={pageAcc.style}>
       {/* Шапка календаря */}
       <div className="top">
         <div>
@@ -222,6 +378,7 @@ export default function Calendar() {
             <span onClick={() => shiftTime(1)}>›</span>
           </div>
           <span className="btn" onClick={() => setSheet('new')}>+ событие</span>
+          <PageAccent page="calendar" />
           {shown.length > 1 && (
             <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
               title="Переместить или поменять ширину карточек">настроить</span>
@@ -259,8 +416,8 @@ export default function Calendar() {
                       {c.events && c.events.length > 0 && (
                         <div className="day-evs">
                           {c.events.slice(0, 2).map((ev, evIdx) => (
-                            <span key={ev.id || evIdx} className={`ev-pill ${ev.kind === 'order' ? 'y' : ''}`}>
-                              {ev.title}
+                            <span key={ev.id || evIdx} className={`ev-pill ${ev.kind === 'order' ? 'y' : ''} ${ev.done ? 'done' : ''}`}>
+                              {ev.done ? '✓ ' : ''}{ev.title}
                             </span>
                           ))}
                           {c.events.length > 2 && (
@@ -304,11 +461,17 @@ export default function Calendar() {
                   </div>
                 ) : (
                   dayEvents.map((e) => (
-                    <div className="rowi hover:bg-[var(--sf2)] !rounded-xl !px-2.5 transition" key={e.id} onClick={() => setSheet(e)} style={{ cursor: 'pointer' }}>
+                    <div
+                      className={`rowi hover:bg-[var(--sf2)] !rounded-xl !px-2.5 transition ${e.done ? 'is-done' : ''}`}
+                      key={e.id}
+                      onClick={() => setSheet(e)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <EvCheck ev={e} onToggle={toggleDone} />
                       <time className="text-[var(--acc)] font-medium">{hhmm(e.start)}</time>
                       <span className="t">
                         {e.title}
-                        {e.sub && <small>{e.sub}</small>}
+                        {(evSub(e, linkTasks, linkOrders) || e.sub) && <small>{evSub(e, linkTasks, linkOrders) || e.sub}</small>}
                       </span>
                     </div>
                   ))
@@ -362,11 +525,18 @@ export default function Calendar() {
                           <div
                             key={ev.id}
                             onClick={(e) => { e.stopPropagation(); setSheet(ev) }}
-                            className="p-1.5 rounded-lg text-xs bg-[var(--sf2)] border border-[var(--line)] hover:scale-[1.02] transition"
+                            className={`p-1.5 rounded-lg text-xs border hover:scale-[1.02] transition ${
+                              ev.done ? 'border-[var(--pos)]/50 bg-[var(--sf2)] opacity-70' : 'border-[var(--line)] bg-[var(--sf2)]'
+                            }`}
                             title={ev.title}
                           >
-                            <span className="mono text-[10px] text-[var(--ink3)] block">{hhmm(ev.start)}</span>
-                            <span className="font-medium truncate block">{ev.title}</span>
+                            <div className="flex items-start gap-1.5">
+                              <EvCheck small ev={ev} onToggle={toggleDone} />
+                              <div className="min-w-0 flex-1">
+                                <span className="mono text-[10px] text-[var(--ink3)] block">{hhmm(ev.start)}</span>
+                                <span className={`font-medium truncate block ${ev.done ? 'line-through' : ''}`}>{ev.title}</span>
+                              </div>
+                            </div>
                           </div>
                         ))
                       )}
@@ -391,13 +561,16 @@ export default function Calendar() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
               {upcoming.map((e) => {
                 const d = new Date(e.start)
+                const sub = evSub(e, linkTasks, linkOrders)
                 return (
-                  <div className="rowi" key={e.id} onClick={() => setSheet(e)} style={{ cursor: 'pointer' }}>
+                  <div className={`rowi ${e.done ? 'is-done' : ''}`} key={e.id} onClick={() => setSheet(e)} style={{ cursor: 'pointer' }}>
+                    <EvCheck ev={e} onToggle={toggleDone} />
                     <time>{WD[d.getDay()]} {hhmm(e.start)}</time>
                     <span className="t">
                       {e.title}
-                      <small>{shortDate(e.start)}</small>
+                      <small>{sub || shortDate(e.start)}</small>
                     </span>
+                    <span className="chip">{e.kind === 'task' ? 'задача' : e.kind === 'order' ? 'заказ' : 'встреча'}</span>
                   </div>
                 )
               })}

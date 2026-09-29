@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import { Plus, Check, Play, Square, Coffee, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api, money, moneyShort, dayLabel, shortDate, hhmm, plural, toLocalISO } from '../lib/api'
-import { Section, Empty, Sheet, Field, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Stat, Num } from '../components/ui'
+import { Section, Empty, Sheet, Field, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Stat, Num, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
+import { usePageAccent } from '../lib/prefs'
 
 const VIEWS = [['open', 'в работе'], ['unpaid', 'ждут оплаты'], ['all', 'все']]
 const STATUS = { new: 'новый', work: 'в работе', review: 'на правках', done: 'сдан', paid: 'оплачен', cancelled: 'отменён' }
@@ -32,6 +33,7 @@ export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${Str
 
 export default function Orders() {
   const [orders, setOrders] = useState(null)
+  const pageAcc = usePageAccent('orders')
   const [stats, setStats] = useState(null)
   const [pulse, setPulse] = useState(null)   // задержки оплат + налог за месяц (режим фрилансера)
   const [view, setView] = useState('open')
@@ -72,9 +74,9 @@ export default function Orders() {
 
   const kicker = overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : openN ? `${openN} ${plural(openN, 'заказ в работе', 'заказа в работе', 'заказов в работе')}` : 'свободен'
   return (
-    <div className="bento-page space-y-10">
+    <div className="bento-page space-y-10" style={pageAcc.style}>
       <PageHead kicker={kicker} title="заказы" idx={openN}
-        right={<><Seg value={view} onChange={setView} options={VIEWS} /><button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button></>} />
+        right={<><Seg value={view} onChange={setView} options={VIEWS} /><PageAccent page="orders" /><button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button></>} />
 
       <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />

@@ -383,6 +383,30 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .rowi .t { flex: 1; font-weight: 500; letter-spacing: -0.01em; }
 .rowi small { display: block; color: var(--ink3); font-weight: 400; font-size: 13px; margin-top: 2px; }
 
+/* Кружок завершения встречи в строке календаря: ставится на месте, с лёгким «поп» */
+.ev-check { width: 20px; height: 20px; flex: none; border-radius: 50%; border: 1.5px solid var(--line);
+  background: var(--sf2); display: grid; place-items: center; cursor: pointer; padding: 0;
+  transition: transform .16s var(--e), border-color .16s var(--e), background .16s var(--e); }
+.ev-check svg { opacity: 0; transform: scale(.4); transition: .18s var(--e); color: #fff; }
+.ev-check:hover { border-color: var(--acc); transform: scale(1.12); }
+.ev-check.on { background: var(--pos); border-color: var(--pos); animation: evPop .32s var(--e); }
+.ev-check.on svg { opacity: 1; transform: scale(1); }
+.ev-check.sm { width: 15px; height: 15px; border-width: 1.25px; }
+@keyframes evPop { 0% { transform: scale(.7); } 55% { transform: scale(1.25); } 100% { transform: scale(1); } }
+.rowi.is-done .t, .rowi.is-done time { text-decoration: line-through; color: var(--ink3); }
+.ev-pill.done { text-decoration: line-through; opacity: .55; }
+
+/* Цвет вкладки: кнопка в шапке страницы и палитра под ней */
+.pa-wrap { position: relative; display: inline-flex; }
+.pa-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, transparent); }
+.pa-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 90; width: 214px; padding: 12px; border-radius: 16px; animation: rise .18s var(--e); }
+.pa-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
+.pa-sw { width: 100%; aspect-ratio: 1; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; padding: 0;
+  transition: transform .15s var(--e), box-shadow .15s var(--e); }
+.pa-sw:hover { transform: scale(1.14); box-shadow: 0 6px 16px rgba(0, 0, 0, .25); }
+.pa-sw-reset { background: var(--sf2); color: var(--ink2); font-size: 9px; line-height: 1.15; display: grid; place-items: center; text-align: center; }
+.pa-note { margin-top: 10px; font-size: 11px; color: var(--ink3); line-height: 1.35; }
+
 .ck input { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--ink3); cursor: pointer; flex: none; transition: 0.3s; margin: 0; }
 .ck input:checked { background: var(--acc); border-color: var(--acc); }
 .ck input:checked + .t { text-decoration: line-through; color: var(--ink3); }

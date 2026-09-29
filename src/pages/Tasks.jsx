@@ -2,11 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
 import { api, hhmm, isSameDay, plural } from '../lib/api'
-import { Num, useToast } from '../components/ui'
+import { Num, useToast, useLeave, useArrived, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
 import { usePrefs, prefs as PREFS } from '../lib/prefs'
+import { usePageAccent } from '../lib/prefs'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 
 const dueTs = (t) => (t.due ? new Date(t.due).getTime() : 9e15)
@@ -34,6 +35,10 @@ export default function Tasks() {
   const [cardsEdit, setCardsEdit] = useState(false)
   const { order: cardOrder, setOrder: setCardOrder, widths: cardWidths, move, cycleWidth, reset: resetCards } = useCardLayout('tasks', CARDS, CARD_WIDTHS)
   const wide = useWide()
+  const pageAcc = usePageAccent('tasks')
+  /* плашка задачи: уезжает с анимацией при закрытии и вспыхивает при появлении новой */
+  const [leaveCls, leave] = useLeave()
+  const arriveCls = useArrived((tasks || []).map((t) => t.id))
 
   const load = () => api.tasks(true, true).then(setTasks).catch(() => {})
   useEffect(() => { load() }, [tick])
@@ -69,25 +74,26 @@ export default function Tasks() {
   }
 
   const toggle = async (t) => {
-    try {
-      if (t.done) {
-        await api.undoneTask(t.id)
-      } else {
+    if (t.done) {
+      try { await api.undoneTask(t.id); load(); bump() } catch (e) { show.err(e) }
+      return
+    }
+    // строка сначала красиво уезжает (зелёная вспышка), и только потом задача закрывается
+    await leave(t.id, 'done', async () => {
+      try {
         await api.doneTask(t.id)
         show('Задача закрыта', '', t.title)
-      }
-      load()
-      bump()
-    } catch (e) {
-      show.err(e)
-    }
+        load()
+        bump()
+      } catch (e) { show.err(e) }
+    })
   }
 
   const currentList = view === 'today' ? todayTasks : view === 'done' ? done : open
   const kicker = open.length ? `${open.length} в работе` : 'всё сделано'
 
   return (
-    <div className="pg on" id="p-tasks">
+    <div className="pg on" id="p-tasks" style={pageAcc.style}>
       {/* Шапка */}
       <div className="top">
         <div>
@@ -105,6 +111,7 @@ export default function Tasks() {
             <>
               <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title="Переместить, спрятать или поменять ширину карточек">настроить</span>
               <span className="btn" onClick={() => setSheet('new')}>+ задача</span>
+              <PageAccent page="tasks" />
             </>
           )}
         </div>
@@ -165,7 +172,7 @@ export default function Tasks() {
                         кружок слева — закрыть задачу · название — открыть и изменить
                       </p>
                       {currentList.map((t) => (
-                        <div className="rowi ck" key={t.id}>
+                        <div className={`rowi ck ${leaveCls(t.id)} ${arriveCls(t.id)}`} key={t.id}>
                           <input type="checkbox" checked={!!t.done} onChange={() => toggle(t)} aria-label={t.done ? 'вернуть в работу' : 'закрыть задачу'} />
                           <span className="t" style={{ cursor: 'pointer' }} onClick={() => setSheet(t)} title="открыть задачу">
                             {t.title}

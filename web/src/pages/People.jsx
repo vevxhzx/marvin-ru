@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Users } from 'lucide-react'
 import { api, money, plural } from '../lib/api'
-import { Sheet, Field, Empty, useToast } from '../components/ui'
+import { Sheet, Field, Empty, useToast, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
+import { usePageAccent } from '../lib/prefs'
 
 // colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово
 const KIND_RU = { person: 'человек', family: 'семья', friend: 'друг', client: 'клиент', company: 'компания', colleague: 'коллега' }
@@ -12,6 +13,7 @@ const initials = (name) => (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0
 
 export default function People() {
   const [list, setList] = useState([])
+  const pageAcc = usePageAccent('people')
   const [q, setQ] = useState('')
   const [tab, setTab] = useState('all')
   const [sheet, setSheet] = useState(null)
@@ -33,7 +35,7 @@ export default function People() {
   const openCount = (list || []).filter((p) => p.open).length
 
   return (
-    <div className="pg on" id="p-ppl">
+    <div className="pg on" id="p-ppl" style={pageAcc.style}>
       {/* Шапка */}
       <div className="top">
         <div>
@@ -52,6 +54,7 @@ export default function People() {
             ))}
           </div>
           <span className="btn" onClick={() => setSheet('new')}>+ человек</span>
+          <PageAccent page="people" />
         </div>
       </div>
 

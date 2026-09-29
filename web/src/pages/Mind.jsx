@@ -2,13 +2,15 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Graph from '../components/Graph'
 import { api, relTime, plural } from '../lib/api'
-import { useToast } from '../components/ui'
+import { useToast, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
+import { usePageAccent } from '../lib/prefs'
 
 const URL_RE = /https?:\/\/[^\s]+/
 
 export default function Mind() {
   const [params, setParams] = useSearchParams()
+  const pageAcc = usePageAccent('mind')
   const [tab, setTab] = useState(() => (params.get('tab') === 'graph' ? 'graph' : 'all'))
   const [q, setQ] = useState(() => params.get('q') || '')
   const [notes, setNotes] = useState([])
@@ -71,7 +73,7 @@ export default function Mind() {
   const count = items.length || 25
 
   return (
-    <div className="pg on" id="p-brain">
+    <div className="pg on" id="p-brain" style={pageAcc.style}>
       {/* Шапка */}
       <div className="top">
         <div>
@@ -86,6 +88,7 @@ export default function Mind() {
             <span className={tab === 'link' ? 'on' : ''} onClick={() => setTab('link')}>ссылки</span>
             <span className={tab === 'graph' ? 'on' : ''} onClick={() => setTab('graph')}>граф</span>
           </div>
+          <PageAccent page="mind" />
         </div>
       </div>
 

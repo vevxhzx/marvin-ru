@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { api, money, hhmm, plural } from '../lib/api'
-import { Num, useToast } from '../components/ui'
+import { Num, useToast, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import { EventSheet } from './Calendar'
-import { usePrefs } from '../lib/prefs'
+import { usePrefs, usePageAccent } from '../lib/prefs'
 import { Sheet } from '../components/ui'
 import { ArrowLeft, EyeOff, Plus, RotateCcw, Check, Sparkles, Square, Play } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
@@ -43,6 +43,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const nav = useNavigate()
   const [d, setD] = useState(null)
   const [fin, setFin] = useState(null)
+  const [fc, setFc] = useState(null)
   const [screenData, setScreenData] = useState(null)
   const { tick, bump } = useRefresh()
   const [prefs, setPrefs] = usePrefs()
@@ -53,6 +54,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const [editMode, setEditMode] = useState(false)
   const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth, reset: resetLayout } = useCardLayout('today', DEFAULT_ORDER, DEFAULT_WIDTHS)
   const wide = useWide()
+  const pageAcc = usePageAccent('today')
   const [addSheetOpen, setAddSheetOpen] = useState(false)
   const [draggedWidget, setDraggedWidget] = useState(null)
 
@@ -71,10 +73,12 @@ export default function Today({ openChat, address = 'вовчик' }) {
     Promise.all([
       api.dashboard().catch(() => null),
       api.finSummary(30).catch(() => null),
+      api.finForecast(30).catch(() => null),
       api.get('/api/screen?days=1').catch(() => null),
-    ]).then(([dash, f, sc]) => {
+    ]).then(([dash, f, fe, sc]) => {
       if (dash) setD(dash)
       if (f) setFin(f)
+      if (fe) setFc(fe)
       if (sc) setScreenData(sc)
     })
   }
@@ -136,7 +140,9 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const balance = d?.finance?.balance ?? 0
   const daysLeft = Math.min(30, Math.max(1, Math.round(d?.finance?.runway_days ?? 0)))
   const avgDaily = d?.finance?.avg_daily ?? 0
-  const forecastBalance = balance - avgDaily * 30
+  // Прогноз на конец периода берём у сервера (реальные операции + регулярные платежи)
+  const fcLast = fc?.points?.filter((p) => p.kind === 'future').slice(-1)[0]
+  const forecastBalance = fcLast ? fcLast.balance : balance - avgDaily * 30
 
   // 30 дней отсечек
   const startD = new Date(now)
@@ -196,46 +202,45 @@ export default function Today({ openChat, address = 'вовчик' }) {
     date: 'сегодня',
   }))
 
-  // Скраббер графика
-  const P = [
-    [0, 20], [60, 34], [100, 46], [130, 54], [160, 42],
-    [200, 58], [330, 100], [450, 140], [600, 186],
-  ]
-  function at(x) {
-    for (let j = 1; j < P.length; j++) {
-      if (x <= P[j][0]) {
-        const a = P[j - 1], b = P[j]
-        return a[1] + ((b[1] - a[1]) * (x - a[0])) / (b[0] - a[0])
-      }
-    }
-    return 186
-  }
+  // Скраббер графика: точки приходят из того же расчёта, что и в разделе «финансы» —
+  // здесь раньше была рисованная вручную кривая, которая врала про будущий баланс
+  const pts = fc?.points || []
+  const geo = useMemo(() => {
+    if (pts.length < 2) return null
+    const vals = pts.map((p) => p.balance)
+    let max = Math.max(...vals)
+    let min = Math.min(...vals)
+    if (min > 0) min = 0
+    if (max < 0) max = 0
+    const span = (max - min) || 1
+    const X = (i) => (i / (pts.length - 1)) * 600
+    const Y = (v) => 186 - ((v - min) / span) * 166
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.balance).toFixed(1)}`).join('')
+    return { X, Y, line, area: `${line}L600 200L0 200Z`, zero: Y(0), iNow: Math.max(0, pts.findIndex((p) => p.kind === 'future')) }
+  }, [fc])
 
-  const [scrubX, setScrubX] = useState(600)
-  const [scrubY, setScrubY] = useState(186)
-  const [scrubTip, setScrubTip] = useState(`−${money(Math.abs(forecastBalance))} к ${endStr}`)
+  const [scrubI, setScrubI] = useState(null)
   const [scrubActive, setScrubActive] = useState(false)
   const svRef = useRef(null)
 
   const handlePointerMove = (e) => {
-    if (!svRef.current) return
+    if (!svRef.current || !pts.length || !geo) return
     const r = svRef.current.getBoundingClientRect()
-    const x = Math.min(Math.max(((e.clientX - r.left) / r.width) * 600, 0), 600)
-    const y = at(x)
-    const v = balance + ((y - 20) / 166) * -57880
-    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() + Math.round(x / 20))
-    setScrubX(x)
-    setScrubY(y)
+    const fx = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    setScrubI(Math.round(fx * (pts.length - 1)))
     setScrubActive(true)
-    setScrubTip(`${z(dt.getDate())}.${z(dt.getMonth() + 1)} · ${v < 0 ? '−' : ''}${money(Math.abs(v))}`)
   }
 
-  const handlePointerLeave = () => {
-    setScrubX(600)
-    setScrubY(186)
-    setScrubActive(false)
-    setScrubTip(`−${money(Math.abs(forecastBalance))} к ${endStr}`)
-  }
+  const handlePointerLeave = () => { setScrubActive(false); setScrubI(null) }
+
+  // подсказка: при наведении — день под курсором, в покое — итог на конец периода
+  const tipI = scrubActive && scrubI != null ? scrubI : pts.length - 1
+  const tipP = pts[tipI]
+  const tipLeft = geo ? Math.min(Math.max(geo.X(tipI) / 6, 9), 91) : 50
+  const tipTop = geo && tipP ? (geo.Y(tipP.balance) / 200) * 100 : 50
+  const tipText = tipP
+    ? `${z(Number(tipP.date.slice(8, 10)))}.${tipP.date.slice(5, 7)} · ${tipP.balance < 0 ? '−' : ''}${money(Math.abs(tipP.balance))}`
+    : `${endStr} · ${forecastBalance < 0 ? '−' : ''}${money(Math.abs(forecastBalance))}`
 
   // Диалоги правки
   const [editTask, setEditTask] = useState(null)
@@ -337,36 +342,52 @@ export default function Today({ openChat, address = 'вовчик' }) {
             {renderCardControls('chart', idx)}
             <div className="hd"><h2>касса на 30 дней</h2><small>при текущем темпе</small></div>
             <div className="cw" id="cw" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
-              <div className="tip mono" id="tip" style={{ left: `${Math.min(Math.max(scrubX / 6, 9), 91)}%`, top: `${(scrubY / 200) * 100}%` }}>
-                {scrubTip}
-              </div>
-              <svg id="sv" ref={svRef} viewBox="0 0 600 200" role="img" aria-label="касса на 30 дней">
-                <defs>
-                  <linearGradient id="gaToday" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" style={{ stopColor: 'var(--neg)', stopOpacity: 0.35 }} />
-                    <stop offset="1" style={{ stopColor: 'var(--neg)', stopOpacity: 0 }} />
-                  </linearGradient>
-                  <linearGradient id="glToday" x1="0" x2="1">
-                    <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
-                    <stop offset="1" style={{ stopColor: 'var(--neg)' }} />
-                  </linearGradient>
-                </defs>
-                <line className="zero" x1="0" x2="600" y1="66" y2="66" />
-                <path className="ar" fill="url(#gaToday)" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186V200H0Z" />
-                <path className="ln" stroke="url(#glToday)" pathLength="1" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186" />
-                <circle className="pulse" cx="0" cy="20" r="5" />
-                <circle className="d" style={{ '--t': '.9s' }} cx="0" cy="20" r="5" fill="var(--pos)" />
-                <circle className="d" style={{ '--t': '1.1s' }} cx="60" cy="34" r="4.5" fill="var(--ink)" />
-                <circle className="d" style={{ '--t': '1.3s' }} cx="160" cy="42" r="5" fill="var(--pos)" />
-                <circle className="d" style={{ '--t': '1.8s' }} cx="330" cy="100" r="4.5" fill="var(--ink)" />
-                <circle className="d" style={{ '--t': '2.1s' }} cx="450" cy="140" r="4.5" fill="var(--ink)" />
-                <circle className="d" style={{ '--t': '2.6s' }} cx="600" cy="186" r="6" fill="var(--neg)" />
-                <line className="sl" x1={scrubX} x2={scrubX} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
-                <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0} cx={scrubX} cy={scrubY} />
-              </svg>
+              {!geo ? (
+                <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', opacity: 0.6 }}>
+                  собираю данные…
+                </div>
+              ) : (
+                <>
+                  <div className="tip mono" id="tip" style={{ left: `${tipLeft}%`, top: `${tipTop}%` }}>
+                    {tipText}
+                  </div>
+                  <svg id="sv" ref={svRef} viewBox="0 0 600 200" role="img" aria-label="касса на 30 дней">
+                    <defs>
+                      <linearGradient id="gaToday" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" style={{ stopColor: 'var(--acc)', stopOpacity: 0.35 }} />
+                        <stop offset="1" style={{ stopColor: 'var(--acc)', stopOpacity: 0 }} />
+                      </linearGradient>
+                      <linearGradient id="glToday" x1="0" x2="1">
+                        <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
+                        <stop offset="1" style={{ stopColor: 'var(--acc)' }} />
+                      </linearGradient>
+                    </defs>
+                    <line className="zero" x1="0" x2="600" y1={geo.zero} y2={geo.zero} />
+                    <path className="ar" fill="url(#gaToday)" d={geo.area} />
+                    <path className="ln" stroke="url(#glToday)" pathLength="1" d={geo.line} />
+                    {geo.iNow > 0 && (
+                      <line className="sl" x1={geo.X(geo.iNow)} x2={geo.X(geo.iNow)} y1="0" y2="200" style={{ opacity: 0.3, strokeDasharray: '4 6' }} />
+                    )}
+                    <circle className="pulse" cx={geo.X(0)} cy={geo.Y(pts[0].balance)} r="5" />
+                    <circle className="d" style={{ '--t': '.9s' }} cx={geo.X(0)} cy={geo.Y(pts[0].balance)} r="5" fill="var(--pos)" />
+                    <circle className="d" style={{ '--t': '1.4s' }} cx={geo.X(geo.iNow)} cy={geo.Y(pts[geo.iNow].balance)} r="5" fill="var(--ink)" />
+                    <circle className="d" style={{ '--t': '2.1s' }} cx={geo.X(pts.length - 1)} cy={geo.Y(pts[pts.length - 1].balance)} r="6"
+                      fill={pts[pts.length - 1].balance < 0 ? 'var(--neg)' : 'var(--pos)'} />
+                    <line className="sl" x1={scrubActive ? geo.X(scrubI || 0) : 0} x2={scrubActive ? geo.X(scrubI || 0) : 0} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
+                    <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0}
+                      cx={scrubActive ? geo.X(scrubI || 0) : 0} cy={scrubActive ? geo.Y(pts[scrubI || 0]?.balance || 0) : 0} />
+                  </svg>
+                </>
+              )}
             </div>
-            <div className="ax mono"><span>{startStr}</span><span>14.10</span><span>{endStr}</span></div>
-            <div className="lg"><span><i style={{ background: 'var(--pos)' }}></i>поступление</span><span><i style={{ background: 'var(--ink)' }}></i>платёж</span></div>
+            <div className="ax mono"><span>{startStr}</span><span>сегодня</span><span>{endStr}</span></div>
+            <div className="lg">
+              <span><i style={{ background: '#ff9f5c' }}></i>факт</span>
+              <span><i style={{ background: 'var(--acc)' }}></i>прогноз</span>
+              {fc?.min_balance != null && fc.min_balance >= 0 && fc.min_date && (
+                <span>минимум {money(fc.min_balance)} · {z(Number(fc.min_date.slice(8, 10)))}.{fc.min_date.slice(5, 7)}</span>
+              )}
+            </div>
           </section>
         )
 
@@ -573,12 +594,15 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const hiddenWidgets = Object.keys(ALL_WIDGET_DEFS).filter((id) => !widgetOrder.includes(id))
 
   return (
-    <div className="pg on" id="p-today">
+    <div className="pg on" id="p-today" style={pageAcc.style}>
       {/* Шапка страницы */}
       <div className="top">
         <div>
           <h1 className="r" style={{ '--i': 0 }}>{greeting}, {ownerName}</h1>
           <p className="sub r" style={{ '--i': 1 }}>{daySubtitle}</p>
+        </div>
+        <div className="hr r" style={{ '--i': 1 }}>
+          <PageAccent page="today" />
         </div>
       </div>
 

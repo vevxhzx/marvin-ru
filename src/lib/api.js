@@ -65,6 +65,7 @@ export const api = {
 
   finSummary: (days = 30) => req('GET', `/api/finance/summary?days=${days}`),
   finDaily: (days = 30) => req('GET', `/api/finance/daily?days=${days}`),
+  finForecast: (days = 30) => req('GET', `/api/finance/forecast?days=${days}`),
   txs: (days = 30) => req('GET', `/api/finance/transactions?days=${days}`),
   addTx: (t) => req('POST', '/api/finance/transactions', t),
   updateTx: (id, t) => req('PUT', `/api/finance/transactions/${id}`, t),

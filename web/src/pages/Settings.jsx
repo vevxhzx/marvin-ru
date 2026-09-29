@@ -46,10 +46,12 @@ export default function Settings({ health }) {
   const [notif, setNotif] = useState(notifyState())
   const [gem, setGem] = useState(null)
   const [small, setSmall] = useState(null)   // результат проверки малой модели
+  const [llm, setLlm] = useState(null)       // внешняя модель из .env (если сервер её умеет)
   const [cat, setCat] = useState(() => (location.hash.replace('#', '') || localStorage.getItem('settings.cat') || 'general'))
   const pick = (id) => { setCat(id); localStorage.setItem('settings.cat', id); history.replaceState(null, '', '#' + id); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
-  const load = () => Promise.all([api.settings().then(setData), api.status().then(setStatus)]).catch(show.err)
+  const load = () => Promise.all([api.settings().then(setData), api.status().then(setStatus),
+    api.get('/api/llm').then(setLlm).catch(() => setLlm(null))]).catch(show.err)
   useEffect(() => { load() }, [])
 
   // сервер может не вернуть пункт (например, brain.cloud.provider) — страница не должна от этого падать
@@ -125,6 +127,9 @@ export default function Settings({ health }) {
               line1={!status.gemini.enabled ? 'выключен' : gem ? (gem.ok ? 'отвечает' : 'ошибка') : status.gemini.last_error ? 'ошибка' : status.gemini.model}
               line2={gem && !gem.ok ? gem.detail : gem?.ok ? `модель ${gem.model}${status.gemini.proxy ? ' · через прокси' : ''}` : status.gemini.last_error || (status.gemini.enabled ? `${status.gemini.model}${status.gemini.proxy ? ' · через прокси' : ' · напрямую'}` : 'ключ не задан или режим local')}
               action={status.gemini.enabled && <button className="btn-ghost btn-sm" onClick={() => { setGem({ pending: true }); api.post('/api/status/gemini').then(setGem).catch((e) => setGem({ ok: false, detail: e.message })) }}>{gem?.pending ? 'проверяю…' : 'проверить'}</button>} />
+            {llm && <StatusCard ok={!!llm.enabled} warn={!llm.enabled} title="внешняя модель · llm"
+              line1={llm.enabled ? `${llm.model} · отвечает через API` : 'ключ не задан'}
+              line2={llm.enabled ? 'ключ лежит в .env · такие ответы помечены в чате как ☁️ облако' : 'впишите LLM_API_KEY (и LLM_URL, LLM_MODEL) в .env — и чат пойдёт во внешнюю модель; без неё работает по правилам'} />}
             {status.voice && <StatusCard ok={status.voice.stt && status.voice.stt_ready && (!status.voice.tts || status.voice.tts_ready)} warn={status.voice.stt && !status.voice.stt_ready} title="голос"
               line1={!status.voice.stt ? 'не установлен' : !status.voice.stt_ready ? (status.voice.stt_error ? 'ошибка' : 'загружается…') : `whisper-${status.voice.stt_model} · ${status.voice.tts ? status.voice.tts_engine : 'без озвучки'}`}
               line2={status.voice.stt_error || status.voice.tts_error || (!status.voice.stt ? 'запустите update.bat — поставит распознавание и голос' : status.voice.stt_ready ? `голосовые в Telegram работают · ответ голосом: ${{ voice: 'на голосовые', always: 'всегда', never: 'никогда' }[status.voice.reply] || status.voice.reply}` : 'первый запуск качает модели (~600 МБ), подождите пару минут')} />}

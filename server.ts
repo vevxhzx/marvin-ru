@@ -14,6 +14,22 @@ const PORT = Number(process.env.PORT) || 3000
 // по умолчанию сервер слушает только локально; открыть наружу — явно HOST=0.0.0.0
 const HOST = process.env.HOST || '127.0.0.1'
 
+// .env читаем вручную — новых зависимостей ради этого не заводим.
+// Так подключаются LLM_API_KEY / LLM_URL / LLM_MODEL, TELEGRAM_BOT_TOKEN и прочие секреты.
+try {
+  const envFile = path.join(process.cwd(), '.env')
+  if (fs.existsSync(envFile)) {
+    for (const line of fs.readFileSync(envFile, 'utf8').split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/)
+      if (!m || !m[2]) continue
+      const val = m[2].replace(/^(["'])(.*)\1$/, '$2')
+      if (process.env[m[1]] === undefined) process.env[m[1]] = val
+    }
+  }
+} catch (e) {
+  console.warn('[env] не смог прочитать .env:', (e as any)?.message || e)
+}
+
 // страховка: необработанный промис/исключение не должен ронять весь процесс —
 // один HTTP-запрос с неожиданным телом убивал сервер (см. роуты /api/chat)
 process.on('unhandledRejection', (reason) => {
@@ -75,11 +91,11 @@ const state = {
     { id: 2, title: 'Оплатить интернет и сервисы', due: `${todayStr}T23:59:00`, priority: 1, done: 0, created_at: now.toISOString(), category: 'Счета' },
     { id: 3, title: 'Забрать посылку из пункта выдачи', due: `${todayStr}T20:00:00`, priority: 0, done: 1, created_at: now.toISOString(), category: 'Личное' },
     { id: 4, title: 'Согласовать правки по сценарию ролика', due: `${todayStr}T16:30:00`, priority: 2, done: 0, created_at: now.toISOString(), category: 'Фриланс' },
-  ],
+  ] as any[],
   events: [
     { id: 1, title: 'Синхронизация с командой', start: `${todayStr}T11:00:00`, end: `${todayStr}T12:00:00`, duration_min: 60, location: 'Google Meet', notes: 'План на следующую неделю', remind_minutes: 15, repeat: 'weekly', repeat_days: [1], done: 0 },
-    { id: 2, title: 'Встреча с клиентом (ролик)', start: `${todayStr}T15:00:00`, end: `${todayStr}T16:00:00`, duration_min: 60, location: 'Zoom', notes: 'Обсуждение раскадровки и тайминга', remind_minutes: 30, repeat: '', repeat_days: [], done: 0 },
-  ],
+    { id: 2, title: 'Встреча с клиентом (ролик)', start: `${todayStr}T15:00:00`, end: `${todayStr}T16:00:00`, duration_min: 60, location: 'Zoom', notes: 'Обсуждение раскадровки и тайминга', remind_minutes: 30, repeat: '', repeat_days: [], done: 0, order_id: 1 },
+  ] as any[],
   accounts: [
     { id: 1, name: 'Т-Банк Основной', balance: 142500, kind: 'card', currency: 'RUB' },
     { id: 2, name: 'Накопительный счёт', balance: 350000, kind: 'savings', currency: 'RUB' },
@@ -101,7 +117,7 @@ const state = {
   ],
   debts: [
     { id: 1, name: 'Кредитная карта', total: 45000, paid: 15000, due_date: `${todayStr}`, monthly_payment: 10000, rate: 0, kind: 'owe_them' },
-  ],
+  ] as any[],
   recurring: [
     { id: 1, title: 'Яндекс Плюс', amount: 299, kind: 'expense', period: 'monthly', day_of_month: 15, category: 'Подписки', account: 'Т-Банк Основной', active: true },
     { id: 2, title: 'Аренда жилья', amount: 40000, kind: 'expense', period: 'monthly', day_of_month: 25, category: 'Жильё', account: 'Т-Банк Основной', active: true },
@@ -109,7 +125,7 @@ const state = {
   goals: [
     { id: 1, name: 'Финансовая подушка 500к', target: 500000, current: 350000, due_date: '2026-12-31', color: '#30d158', icon: '🛡️' },
     { id: 2, name: 'Новый ноутбук для монтажа', target: 180000, current: 95000, due_date: '2026-11-15', color: '#64d2ff', icon: '💻' },
-  ],
+  ] as any[],
   orders: [
     {
       id: 1,
@@ -620,14 +636,46 @@ app.get('/api/focus', (req, res) => {
   })
 })
 
+// Дедлайн заказа живёт в календаре такой же строкой, как встреча:
+// галочка «сдать» в календаре переводит заказ в статус «сдан» (и обратно).
+const ORDER_EVENT_OFFSET = 1_000_000
+function orderAsEvent(o: any) {
+  const closed = ['done', 'paid', 'cancelled'].includes(o.status)
+  return {
+    id: -(ORDER_EVENT_OFFSET + o.id),
+    order_id: o.id,
+    kind: 'order',
+    title: `Сдать: ${o.title}`,
+    start: o.deadline || o.created_at,
+    end: o.deadline || o.created_at,
+    duration_min: 0,
+    all_day: true,
+    location: o.client || null,
+    notes: o.notes || null,
+    repeat: '',
+    status: o.status,
+    done: closed,
+  }
+}
+
 // Events (Calendar)
 app.get('/api/events', (req, res) => {
-  const { tasks_too } = req.query
-  let list: any[] = [...state.events]
-  if (tasks_too === 'true') {
-    const taskEvents = state.tasks.map(taskAsEvent)
-    list = [...list, ...taskEvents]
+  const { tasks_too, start, end } = req.query
+  // календарь просит свой диапазон — без фильтра он получал все события всех месяцев сразу
+  const from = start ? new Date(String(start)).getTime() - 86_400_000 : null
+  const to = end ? new Date(String(end)).getTime() + 86_400_000 : null
+  const inRange = (iso?: string) => {
+    if (from == null && to == null) return true
+    const t = iso ? new Date(iso).getTime() : NaN
+    if (Number.isNaN(t)) return true   // дата без времени — не прячем
+    return (from == null || t >= from) && (to == null || t <= to)
   }
+  const list: any[] = []
+  if (tasks_too === 'true') {
+    list.push(...state.tasks.map(taskAsEvent).filter((e) => inRange(e.start)))
+    list.push(...(state.orders as any[]).map(orderAsEvent).filter((e) => inRange(e.start)))
+  }
+  list.push(...state.events.filter((e) => inRange(e.start)))
   res.json(list)
 })
 
@@ -656,14 +704,66 @@ app.delete('/api/events/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+/* Завершение события — каскад по связям (как в оригинальном Марвине: одно действие,
+   а отражается оно и в задачах, и в заказах):
+   - отрицательный id < -1_000_000 → это дедлайн заказа: галочка «сдал», обратно — «вернуть в работу»;
+   - отрицательный id → это задача, показанная в календаре;
+   - у обычной встречи может быть task_id/order_id — закрываем и их. */
 app.post('/api/events/:id/done', (req, res) => {
   const id = Number(req.params.id)
-  const ev = state.events.find(e => e.id === id)
-  if (ev) {
-    ev.done = req.body.done ? 1 : 0
+  const done = req.body?.done === false ? 0 : 1
+  const linked: string[] = []
+
+  if (id <= -ORDER_EVENT_OFFSET) {
+    const order = state.orders.find((o: any) => o.id === -(id + ORDER_EVENT_OFFSET)) as any
+    if (!order) return res.status(404).json({ error: 'Order not found' })
+    if (done && !['paid', 'cancelled'].includes(order.status)) {
+      order.status = 'done'
+      linked.push(`заказ «${order.title}» — сдан`)
+    } else if (!done && order.status === 'done') {
+      order.status = 'work'
+      linked.push(`заказ «${order.title}» — снова в работе`)
+    }
+    broadcast('orders')
     broadcast('events')
+    return res.json({ ok: true, linked })
   }
-  res.json({ ok: true })
+
+  if (id < 0) {
+    const task = state.tasks.find((t) => t.id === -id)
+    if (!task) return res.status(404).json({ error: 'Task not found' })
+    task.done = done
+    if (done) task.done_at = new Date().toISOString(); else delete task.done_at
+    broadcast('tasks')
+    broadcast('events')
+    return res.json({ ok: true, linked })
+  }
+
+  const ev = state.events.find((e) => e.id === id)
+  if (!ev) return res.status(404).json({ error: 'Event not found' })
+  ev.done = done
+  if (done) ev.done_at = new Date().toISOString(); else delete ev.done_at
+
+  if (ev.task_id) {
+    const task = state.tasks.find((t) => t.id === Number(ev.task_id))
+    if (task) {
+      task.done = done
+      if (done) task.done_at = new Date().toISOString(); else delete task.done_at
+      linked.push(`задача «${task.title}»`)
+      broadcast('tasks')
+    }
+  }
+  if (ev.order_id) {
+    const order = state.orders.find((o: any) => o.id === Number(ev.order_id)) as any
+    if (order) {
+      if (done && !['paid', 'cancelled'].includes(order.status)) order.status = 'done'
+      else if (!done && order.status === 'done') order.status = 'work'
+      linked.push(`заказ «${order.title}»`)
+      broadcast('orders')
+    }
+  }
+  broadcast('events')
+  res.json({ ok: true, linked })
 })
 
 app.post('/api/events/:id/skip', (req, res) => {
@@ -719,6 +819,7 @@ app.post('/api/tasks/:id/done', (req, res) => {
   const t = state.tasks.find(x => x.id === id)
   if (t) {
     t.done = 1
+    t.done_at = new Date().toISOString()
     broadcast('tasks')
   }
   res.json({ ok: true })
@@ -729,6 +830,7 @@ app.post('/api/tasks/:id/undone', (req, res) => {
   const t = state.tasks.find(x => x.id === id)
   if (t) {
     t.done = 0
+    delete t.done_at
     broadcast('tasks')
   }
   res.json({ ok: true })
@@ -742,46 +844,208 @@ app.delete('/api/tasks/:id', (req, res) => {
 })
 
 // Finance
+// Сколько дней считаем: 0/не указано — вся история (период «всё»).
+const finDays = (q: any) => Math.max(0, Number(q) || 0)
+const finSince = (days: number) => {
+  if (!days) return null
+  const d = new Date(); d.setDate(d.getDate() - days)
+  return d
+}
+const inPeriod = (iso: any, since: Date | null) => (!since || !iso || new Date(iso).getTime() >= since.getTime())
+
+/* Обязательные платежи в месяц: подписки и аренда нормируются к месяцу,
+   чтобы «свободно в месяц» считалось от реальных сумм, а не выдуманных. */
+const recurringMonthly = (kind: string) => (state.recurring as any[])
+  .filter(r => r.active !== false && (kind ? r.kind === kind : true))
+  .reduce((s, r) => {
+    const a = Number(r.amount) || 0
+    const p = String(r.period || 'monthly').toLowerCase()
+    if (/year|annual|год/.test(p)) return s + a / 12
+    if (/week|нед/.test(p)) return s + a * 365 / 12 / 7
+    return s + a
+  }, 0)
+
 app.get('/api/finance/summary', (req, res) => {
-  const balance = state.accounts.reduce((acc, a) => acc + (a.balance || 0), 0)
-  const income_month = state.transactions.filter(t => t.amount > 0).reduce((acc, t) => acc + t.amount, 0)
-  const expense_month = Math.abs(state.transactions.filter(t => t.amount < 0).reduce((acc, t) => acc + t.amount, 0))
+  const days = finDays(req.query.days)
+  const since = finSince(days)
+  const tx = state.transactions.filter(t => inPeriod(t.date, since))
+  const balance = state.accounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0)
+  const spent = Math.abs(tx.filter(t => Number(t.amount) < 0).reduce((acc, t) => acc + Number(t.amount), 0))
+  const earned = tx.filter(t => Number(t.amount) > 0).reduce((acc, t) => acc + Number(t.amount), 0)
+
+  // денежный поток считаем на полных 30 дней — независимо от выбранного периода просмотра
+  const monthTx = state.transactions.filter(t => inPeriod(t.date, finSince(30)))
+  const income30 = monthTx.filter(t => Number(t.amount) > 0).reduce((a, t) => a + Number(t.amount), 0)
+  const recurring = Math.round(recurringMonthly('expense'))
+  const debtPayments = (state.debts as any[]).filter(d => d.kind !== 'them_me').reduce((s, d) => s + (Number(d.monthly_payment) || 0), 0)
+  const income = Math.round(income30)
+  // без ограничения нулём: если обязательные платежи больше дохода — это важный сигнал, а не «0»
+  const free = income - recurring - debtPayments
+
   res.json({
+    total_balance: balance,
+    spent,
+    earned,
+    debts_total: (state.debts as any[]).reduce((s, d) => s + Math.max(0, (Number(d.total) || 0) - (Number(d.paid) || 0)), 0),
+    cashflow: {
+      income,
+      income_is_estimate: income === 0,
+      recurring,
+      debt_payments: debtPayments,
+      free,
+    },
+    // старое имя — чтобы ничего не отвалилось у других потребителей
     balance,
-    income_month,
-    expense_month,
-    cashflow: income_month - expense_month,
-    runway_days: 180,
+    income_month: income,
+    expense_month: Math.abs(state.transactions.filter(t => Number(t.amount) < 0).reduce((a, t) => a + Number(t.amount), 0)),
     accounts: state.accounts,
   })
 })
 
+// Реальные дневные суммы за период (раньше тут были случайные числа — график врал)
 app.get('/api/finance/daily', (req, res) => {
-  const days = Number(req.query.days) || 30
+  const days = finDays(req.query.days) || 30
   const list = []
   for (let i = days - 1; i >= 0; i--) {
     const d = new Date()
     d.setDate(d.getDate() - i)
-    const ds = d.toISOString().split('T')[0]
+    const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const dayTx = state.transactions.filter(t => (t.date || '').slice(0, 10) === ds)
     list.push({
       date: ds,
-      expense: Math.floor(Math.random() * 2500 + 400),
-      income: i === 5 || i === 20 ? 45000 : 0,
+      expense: Math.round(Math.abs(dayTx.filter(t => Number(t.amount) < 0).reduce((a, t) => a + Number(t.amount), 0))),
+      income: Math.round(dayTx.filter(t => Number(t.amount) > 0).reduce((a, t) => a + Number(t.amount), 0)),
     })
   }
   res.json(list)
 })
 
-app.get('/api/finance/transactions', (req, res) => {
-  res.json(state.transactions)
+/* Прогноз кассы: прошлое — пересчёт баланса по операциям вперёд, будущее — средний темп
+   плюс известные регулярные списания. Именно это рисуется на графике «касса на N дней». */
+app.get('/api/finance/forecast', (req, res) => {
+  const horizon = Math.max(7, finDays(req.query.days) || 30)
+  const hist = Math.max(30, Math.min(horizon, 90))
+  const balance = state.accounts.reduce((s, a) => s + (Number(a.balance) || 0), 0)
+  const nowD = new Date()
+  const dayKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+  // баланс в начале каждого прошедшего дня: вычитаем всё, что произошло позже
+  const since = new Date(); since.setDate(since.getDate() - hist)
+  const pastTx = state.transactions
+    .filter(t => t.date && new Date(t.date).getTime() >= since.getTime())
+    .slice().sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+  const points: any[] = []
+  for (let i = hist; i >= 0; i--) {
+    const d = new Date(nowD); d.setDate(d.getDate() - i)
+    const key = dayKey(d)
+    // баланс на конец дня = текущий баланс − всё, что списалось/поступило после этого дня
+    const after = pastTx.filter(t => (t.date || '').slice(0, 10) > key).reduce((s, t) => s + Number(t.amount || 0), 0)
+    points.push({ date: key, balance: Math.round(balance - after), kind: 'past' })
+  }
+
+  const avgDaySpent = pastTx.filter(t => Number(t.amount) < 0).reduce((s, t) => s + Math.abs(Number(t.amount)), 0) / hist
+  const avgDayIncome = pastTx.filter(t => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0) / hist
+
+  // регулярные платежи вперёд по календарю (сколько уже наступило на i-й день вперёд)
+  const upcoming = (dayIndex: number) => {
+    let delta = 0
+    const today0 = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate())
+    for (const r of (state.recurring as any[]).filter(r => r.active !== false)) {
+      const dom = Number(r.day_of_month || r.day) || null
+      if (!dom) continue
+      let target = new Date(nowD.getFullYear(), nowD.getMonth(), Math.min(dom, 28))
+      if (target < today0) target = new Date(nowD.getFullYear(), nowD.getMonth() + 1, Math.min(dom, 28))
+      const diffDays = Math.round((target.getTime() - today0.getTime()) / 86_400_000)
+      // ровно в тот день, когда платёж наступает — иначе сумма считалась бы заново каждый день после
+      if (diffDays === dayIndex) {
+        const a = Number(r.amount) || 0
+        delta += r.kind === 'income' ? a : -a
+      }
+    }
+    return delta
+  }
+
+  let bal = balance
+  const startDate = new Date(nowD.getFullYear(), nowD.getMonth(), nowD.getDate())
+  let runwayDays: number | null = null
+  let minBalance = balance
+  let minDate: string | null = dayKey(nowD)
+  for (let i = 1; i <= horizon; i++) {
+    const d = new Date(startDate); d.setDate(d.getDate() + i)
+    bal = bal + avgDayIncome - avgDaySpent + upcoming(i)
+    points.push({ date: dayKey(d), balance: Math.round(bal), kind: 'future' })
+    if (bal < minBalance) { minBalance = bal; minDate = dayKey(d) }
+    if (runwayDays === null && bal <= 0) runwayDays = i
+  }
+
+  res.json({
+    points,
+    horizon_days: horizon,
+    avg_day_spent: Math.round(avgDaySpent),
+    avg_day_income: Math.round(avgDayIncome),
+    runway_days: runwayDays,
+    min_balance: Math.round(minBalance),
+    min_date: minDate,
+    balance: Math.round(balance),
+  })
 })
+
+/* Бюджеты: лимит живёт в категории (budget), потрачено — из операций текущего месяца. */
+app.get('/api/finance/budgets', (req, res) => {
+  const month = String(req.query.month || todayStr).slice(0, 7)
+  const spent: Record<string, number> = {}
+  for (const t of state.transactions) {
+    if ((t.date || '').slice(0, 7) !== month) continue
+    if (Number(t.amount) >= 0) continue
+    const c = t.category || 'Другое'
+    spent[c] = (spent[c] || 0) + Math.abs(Number(t.amount))
+  }
+  const items = (state.categories as any[])
+    .filter(c => Number(c.budget) > 0 && c.kind !== 'income')
+    .map(c => {
+      const s = Math.round(spent[c.name] || 0)
+      const budget = Math.round(Number(c.budget))
+      const left = budget - s
+      const pct = budget ? Math.round((s / budget) * 100) : 0
+      return {
+        category: c.name,
+        budget,
+        spent: s,
+        left,
+        pct,
+        status: pct >= 100 ? 'over' : pct >= 80 ? 'warn' : 'ok',
+        color: c.color || null,
+        icon: c.icon || null,
+      }
+    })
+    .sort((a, b) => b.pct - a.pct)
+  const unbudgeted = Object.entries(spent)
+    .filter(([name]) => !(state.categories as any[]).some(c => c.name === name && Number(c.budget) > 0))
+    .map(([name, v]) => ({ category: name, spent: Math.round(v) }))
+    .sort((a, b) => b.spent - a.spent)
+  res.json({ month, items, unbudgeted, total_budget: items.reduce((s, i) => s + i.budget, 0), total_spent: items.reduce((s, i) => s + i.spent, 0) })
+})
+
+app.get('/api/finance/transactions', (req, res) => {
+  const since = finSince(finDays(req.query.days))
+  const list = state.transactions.filter(t => inPeriod(t.date, since))
+  res.json(list)
+})
+
+/* Операция двигает баланс счёта. При правке/удалении нужно вернуть прошлое движение,
+   иначе сумма на счёте «уезжала» и баланс переставал сходиться с операциями. */
+const accountByName = (name?: string) =>
+  name ? (state.accounts as any[]).find(a => a.name === name) || null : null
+function moveBalance(tx: any, sign: 1 | -1) {
+  const acc = accountByName(tx?.account) || (state.accounts as any[])[0]
+  if (acc) acc.balance = (Number(acc.balance) || 0) + sign * (Number(tx?.amount) || 0)
+}
 
 app.post('/api/finance/transactions', (req, res) => {
   const tx = { id: ++nextId, date: new Date().toISOString(), ...req.body }
   state.transactions.unshift(tx)
-  // Update account balance
-  const acc = state.accounts.find(a => a.name === tx.account) || state.accounts[0]
-  if (acc) acc.balance = (acc.balance || 0) + Number(tx.amount)
+  moveBalance(tx, 1)
   broadcast('finance')
   res.json(tx)
 })
@@ -790,7 +1054,11 @@ app.put('/api/finance/transactions/:id', (req, res) => {
   const id = Number(req.params.id)
   const idx = state.transactions.findIndex(t => t.id === id)
   if (idx !== -1) {
-    state.transactions[idx] = { ...state.transactions[idx], ...req.body }
+    const old = state.transactions[idx]
+    const next = { ...old, ...req.body }
+    moveBalance(old, -1)      // вернуть прежнее движение
+    moveBalance(next, 1)      // записать новое
+    state.transactions[idx] = next
     broadcast('finance')
     return res.json(state.transactions[idx])
   }
@@ -799,6 +1067,8 @@ app.put('/api/finance/transactions/:id', (req, res) => {
 
 app.delete('/api/finance/transactions/:id', (req, res) => {
   const id = Number(req.params.id)
+  const tx = state.transactions.find(t => t.id === id)
+  if (tx) moveBalance(tx, -1)
   state.transactions = state.transactions.filter(t => t.id !== id)
   broadcast('finance')
   res.json({ ok: true })
@@ -887,17 +1157,42 @@ app.delete('/api/finance/debts/:id', (req, res) => {
 app.post('/api/finance/debts/:id/pay', (req, res) => {
   const id = Number(req.params.id)
   const d = state.debts.find(x => x.id === id)
+  const amount = Number(req.body.amount || 0)
   if (d) {
-    d.paid = (d.paid || 0) + Number(req.body.amount || 0)
+    d.paid = (d.paid || 0) + amount
+    // платёж уходит с реального счёта — иначе «внесли 5 000», а баланс не изменился
+    if (amount > 0 && req.body.account !== 'none') {
+      const tx = {
+        id: ++nextId,
+        date: new Date().toISOString(),
+        amount: -amount,
+        category: 'Долги',
+        account: req.body.account || undefined,
+        comment: `Платёж по долгу: ${d.name || d.title || ''}`.trim(),
+      }
+      state.transactions.unshift(tx)
+      moveBalance(tx, 1)
+    }
     broadcast('finance')
   }
   res.json({ ok: true })
 })
 app.get('/api/finance/debts/:id/payments', (req, res) => res.json([]))
 
+// поля «название/день» в форме называются name/day, а в данных — title/day_of_month:
+// держим оба, иначе правка регулярного платежа сохранялась, но расчёт шёл по старому дню
+const recurringNormalize = (r: any) => {
+  if (r.name && !r.title) r.title = r.name
+  if (r.title && !r.name) r.name = r.title
+  if (r.day != null && !r.day_of_month) r.day_of_month = Number(r.day) || 1
+  if (r.day_of_month != null && !r.day) r.day = Number(r.day_of_month) || 1
+  if (!r.period) r.period = 'monthly'
+  if (!r.kind) r.kind = 'expense'
+  return r
+}
 app.get('/api/finance/recurring', (req, res) => res.json(state.recurring))
 app.post('/api/finance/recurring', (req, res) => {
-  const r = { id: ++nextId, active: true, ...req.body }
+  const r = recurringNormalize({ id: ++nextId, active: true, ...req.body })
   state.recurring.push(r)
   broadcast('finance')
   res.json(r)
@@ -906,7 +1201,7 @@ app.put('/api/finance/recurring/:id', (req, res) => {
   const id = Number(req.params.id)
   const idx = state.recurring.findIndex(r => r.id === id)
   if (idx !== -1) {
-    state.recurring[idx] = { ...state.recurring[idx], ...req.body }
+    state.recurring[idx] = recurringNormalize({ ...state.recurring[idx], ...req.body })
     broadcast('finance')
     return res.json(state.recurring[idx])
   }
@@ -919,9 +1214,17 @@ app.delete('/api/finance/recurring/:id', (req, res) => {
   res.json({ ok: true })
 })
 
+// в форме цель называется title/deadline, в сиде — name/due_date: нормализуем, иначе правка «терялась»
+const goalNormalize = (g: any) => {
+  if (g.title && !g.name) g.name = g.title
+  if (g.name && !g.title) g.title = g.name
+  if (g.deadline && !g.due_date) g.due_date = g.deadline
+  if (g.due_date && !g.deadline) g.deadline = g.due_date
+  return g
+}
 app.get('/api/finance/goals', (req, res) => res.json(state.goals))
 app.post('/api/finance/goals', (req, res) => {
-  const g = { id: ++nextId, current: 0, ...req.body }
+  const g = goalNormalize({ id: ++nextId, current: 0, ...req.body })
   state.goals.push(g)
   broadcast('finance')
   res.json(g)
@@ -930,7 +1233,7 @@ app.put('/api/finance/goals/:id', (req, res) => {
   const id = Number(req.params.id)
   const idx = state.goals.findIndex(g => g.id === id)
   if (idx !== -1) {
-    state.goals[idx] = { ...state.goals[idx], ...req.body }
+    state.goals[idx] = goalNormalize({ ...state.goals[idx], ...req.body })
     broadcast('finance')
     return res.json(state.goals[idx])
   }
@@ -945,13 +1248,26 @@ app.delete('/api/finance/goals/:id', (req, res) => {
 app.post('/api/finance/goals/:id/put', (req, res) => {
   const id = Number(req.params.id)
   const g = state.goals.find(x => x.id === id)
+  const amount = Number(req.body.amount || 0)
   if (g) {
-    g.current = (g.current || 0) + Number(req.body.amount || 0)
+    g.current = (g.current || 0) + amount
+    // отложили на копилку — деньги списались со счёта, иначе итог не сходится
+    if (amount > 0 && req.body.account !== 'none') {
+      const tx = {
+        id: ++nextId,
+        date: new Date().toISOString(),
+        amount: -amount,
+        category: 'Накопления',
+        account: req.body.account || undefined,
+        comment: `Отложено на цель: ${g.title || g.name || ''}`.trim(),
+      }
+      state.transactions.unshift(tx)
+      moveBalance(tx, 1)
+    }
     broadcast('finance')
   }
   res.json({ ok: true })
 })
-app.get('/api/finance/budgets', (req, res) => res.json([]))
 // Форма ответа — как в Python-ядре {buckets, compare, annual, payments, runway} (см. core/api/app.py:1435),
 // иначе вкладка «техники» получает чужой объект и показывает пустоту/выдуманные цифры.
 const BUCKET_RULES: { bucket: 'need' | 'save'; label: string; norm: number; cats: string[] }[] = [
@@ -1307,6 +1623,7 @@ app.put('/api/orders/:id', (req, res) => {
     orderMoney(o)
     state.orders[idx] = o
     broadcast('orders')
+    broadcast('events')   // дедлайн заказа показан в календаре — статус должен обновиться там же
     return res.json(state.orders[idx])
   }
   res.status(404).json({ error: 'Order not found' })
@@ -2158,7 +2475,34 @@ app.get('/api/chat/history', (req, res) => {
   res.json(state.chatHistory)
 })
 
-function processChatInput(text: string): { reply: string; actions: string[]; via: string } {
+/* Реальные цифры для ответов чата: дайджест, итоги недели и «куда ушли деньги»
+   считаются из операций, а не берутся из заготовленного текста — иначе ассистент
+   отвечал бы про баланс и даты, которых давно нет. */
+const RU_DAYS = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
+function isoBack(days: number) { return new Date(Date.now() - days * 86_400_000).toISOString().slice(0, 10) }
+function spentByCategory(sinceIso: string) {
+  const by = new Map<string, number>()
+  let spent = 0
+  let earned = 0
+  for (const t of state.transactions as any[]) {
+    if ((t.date || '') < sinceIso) continue
+    const amount = Number(t.amount) || 0
+    if (amount > 0) { earned += amount; continue }
+    if (!amount) continue
+    const v = -amount
+    spent += v
+    const cat = t.category || 'Другое'
+    by.set(cat, (by.get(cat) || 0) + v)
+  }
+  return { spent, earned, cats: [...by.entries()].sort((a, b) => b[1] - a[1]) }
+}
+function categoriesLine(cats: [string, number][], spent: number, take = 5) {
+  return cats.slice(0, take)
+    .map(([c, v]) => `• ${c}: ${v.toLocaleString('ru-RU')} ₽ (${Math.round((v / Math.max(1, spent)) * 100)}%)`)
+    .join('\n')
+}
+
+function processChatInput(text: string): { reply: string; actions: string[]; via: string; fallback?: boolean } {
   const lower = text.toLowerCase().trim()
 
   // 1. Finance: Expense detection e.g. "700 такси", "трата 500 кофе", "1200 обед"
@@ -2240,14 +2584,48 @@ function processChatInput(text: string): { reply: string; actions: string[]; via
     }
   }
 
-  // 4. Events: "встреча ...", "календарь: ..."
-  if (lower.startsWith('встреча') || lower.startsWith('событие')) {
-    const title = text.replace(/^(?:встреча:?|событие:?)\s*/i, '').trim()
+  // 4. Events: "встреча ...", "событие ...", "календарь: ..."
+  // Разбираем день (сегодня/завтра/в среду) и время (в 15 / в 15:30) — раньше всё
+  // записывалось на сегодня в 17:00, а ответ всё равно говорил «сегодня».
+  if (lower.startsWith('встреча') || lower.startsWith('событие') || lower.startsWith('календарь')) {
+    const rest = text.replace(/^(?:встреча:?|событие:?|календарь:?)\s*/i, '').trim()
+    const now = new Date()
+    const when = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    // Важно: \b в JS работает только по латинице, поэтому границы слов ищем пробелами
+    if (/послезавтра/.test(lower)) when.setDate(when.getDate() + 2)
+    else if (/(?:^|\s)завтра(?:\s|$)/.test(lower)) when.setDate(when.getDate() + 1)
+    else if (!/(?:^|\s)сегодня(?:\s|$)/.test(lower)) {
+      const WD: [RegExp, number][] = [
+        [/(?:в|во)\s+понедельник/, 1],
+        [/(?:в|во)\s+вторник/, 2],
+        [/(?:в|во)\s+сред/, 3],
+        [/(?:в|во)\s+четверг/, 4],
+        [/(?:в|во)\s+пятниц/, 5],
+        [/(?:в|во)\s+суббот/, 6],
+        [/(?:в|во)\s+воскресень/, 0],
+      ]
+      for (const [re, dow] of WD) {
+        if (re.test(lower)) { when.setDate(when.getDate() + ((dow - now.getDay() + 7) % 7)); break }
+      }
+    }
+    const tm = rest.match(/(?:^|\s)в\s*(\d{1,2})(?:[:.](\d{2}))?/i)
+    const hh = tm ? Math.min(23, Number(tm[1])) : 17
+    const mm = tm && tm[2] ? Math.min(59, Number(tm[2])) : 0
+    const clean = rest
+      .replace(/(?:сегодня|завтра|послезавтра)/gi, '')
+      .replace(/(?:^|\s)в\s*\d{1,2}(?:[:.]\d{2})?/gi, '')
+      .replace(/\s{2,}/g, ' ')
+      .replace(/^[\s,.;]+|[\s,.;]+$/g, '')
+    const kw = /^встреча/i.test(text) ? 'встреча' : /^событие/i.test(text) ? 'событие' : /^календарь/i.test(text) ? 'встреча' : ''
+    const title = clean ? (/^встреча/i.test(clean) ? clean : `${kw} ${clean}`.trim()) : (kw || 'Встреча')
+    const start = `${when.getFullYear()}-${String(when.getMonth() + 1).padStart(2, '0')}-${String(when.getDate()).padStart(2, '0')}T${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`
+    const endD = new Date(when.getTime())
+    endD.setHours(hh, mm + 60, 0, 0)
     const ev = {
       id: ++nextId,
-      title: title || 'Встреча',
-      start: `${todayStr}T17:00:00`,
-      end: `${todayStr}T18:00:00`,
+      title,
+      start,
+      end: `${endD.getFullYear()}-${String(endD.getMonth() + 1).padStart(2, '0')}-${String(endD.getDate()).padStart(2, '0')}T${String(endD.getHours()).padStart(2, '0')}:${String(endD.getMinutes()).padStart(2, '0')}:00`,
       duration_min: 60,
       location: null,
       notes: null,
@@ -2258,8 +2636,10 @@ function processChatInput(text: string): { reply: string; actions: string[]; via
     }
     state.events.push(ev)
     broadcast('events')
+    const shown = `${when.getDate()}.${when.getMonth() + 1}`
+    const shownTime = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`
     return {
-      reply: `Записал в календарь: «${ev.title}» на ${todayStr} в 17:00.`,
+      reply: `Записал в календарь: «${ev.title}» — ${shown} в ${shownTime}. Откройте «календарь», если нужно поправить.`,
       actions: ['add_event'],
       via: 'rule',
     }
@@ -2380,24 +2760,52 @@ function processChatInput(text: string): { reply: string; actions: string[]; via
   }
 
   if (lower.includes('итоги недели') || lower.includes('недельный отчёт') || lower.includes('отчёт за неделю')) {
+    const { spent, earned, cats } = spentByCategory(isoBack(7))
+    const balance = state.accounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0)
+    const closed = (state.tasks as any[]).filter((t) => t.done && t.done_at && t.done_at >= isoBack(7)).length
+    const dt = new Date()
+    const from = new Date(Date.now() - 7 * 86_400_000)
+    const p = (d: Date) => `${d.getDate()}.${d.getMonth() + 1}`
     return {
-      reply: '📊 Итоги недели, вовчик. 20.09 — 27.09.2026\nПотрачено: 6 589 ₽ (−5% к прошлому)\nЗаработано: 0 ₽\n\nКуда ушло:\n• Еда: 3 047 ₽\n• Другое: 2 638 ₽\n• Алкоголь: 605 ₽\n• Подписки: 299 ₽\n\nДела: 2 задачи закрыто, 1 заметка, 8 из 7 дней с записями.\nБаланс: 15 761 ₽, долги: 205 700 ₽.',
+      reply: [
+        `📊 Итоги недели, ${p(from)} — ${p(dt)}.${dt.getFullYear()}`,
+        `Потрачено: ${spent.toLocaleString('ru-RU')} ₽ · Заработано: ${earned.toLocaleString('ru-RU')} ₽`,
+        '',
+        cats.length ? `Куда ушло:\n${categoriesLine(cats, spent)}` : 'Операций за неделю не было.',
+        '',
+        `Закрыто задач: ${closed}. Баланс: ${balance.toLocaleString('ru-RU')} ₽.`,
+      ].join('\n'),
       actions: ['summary'],
       via: 'rule',
     }
   }
 
   if (lower.includes('доброе утро') || lower.includes('утренний дайджест') || lower.includes('дайджест')) {
+    const now = new Date()
+    const balance = state.accounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0)
+    const evs = (state.events as any[]).filter((e) => (e.start || '').slice(0, 10) === todayStr)
+    const open = (state.tasks as any[]).filter((t) => !t.done)
+    const { spent } = spentByCategory(todayStr)
+    const date = `${now.getDate()}.${now.getMonth() + 1}.${now.getFullYear()}`
     return {
-      reply: '☀️ Доброе утро, вовчик. Воскресенье, 27.09\nСегодня встреч нет — день ваш.\nЗадач нет. Подозрительно.\nБаланс: 15 761 ₽. Можно тратить в день: 3 940 ₽.',
+      reply: [
+        `☀️ Доброе утро. ${RU_DAYS[now.getDay()]}, ${date}.`,
+        evs.length
+          ? `Встреч сегодня ${evs.length}: ${evs.slice(0, 3).map((e) => `${e.title} (${String(e.start).slice(11, 16)})`).join('; ')}${evs.length > 3 ? '…' : ''}.`
+          : 'Сегодня встреч нет — день ваш.',
+        open.length
+          ? `Открытых задач: ${open.length}. Главная — «${open[0].title}».`
+          : 'Задач нет. Подозрительно.',
+        `Баланс: ${balance.toLocaleString('ru-RU')} ₽. Сегодня потрачено: ${spent.toLocaleString('ru-RU')} ₽.`,
+      ].join('\n'),
       actions: ['digest'],
       via: 'rule',
     }
   }
 
   if (lower.includes('что на сегодня') || lower.includes('план на сегодня') || lower.includes('расписание')) {
-    const evCount = state.events.length
-    const taskCount = state.tasks.filter(t => !t.done).length
+    const evCount = (state.events as any[]).filter((e) => (e.start || '').slice(0, 10) === todayStr).length
+    const taskCount = state.tasks.filter((t: any) => !t.done).length
     return {
       reply: `На сегодня запланировано ${evCount} встреч и ${taskCount} невыполненных задач. Главный приоритет — «${state.tasks.find(t => !t.done)?.title || 'отдых'}».`,
       actions: [],
@@ -2405,12 +2813,121 @@ function processChatInput(text: string): { reply: string; actions: string[]; via
     }
   }
 
-  // Fallback assistant response
+  // Куда ушли деньги: разбор реальных операций по категориям
+  if (/(куда ушли|куда дел|во что ушли|сколько потрат|расход[аы]? за|трат[ыа] за|по категори)/.test(lower)) {
+    const days = /недел|7\s*дн/.test(lower) ? 7 : 30
+    const { spent, cats } = spentByCategory(isoBack(days))
+    const balance = state.accounts.reduce((acc, a) => acc + (Number(a.balance) || 0), 0)
+    if (!spent) {
+      return {
+        reply: `За последние ${days} дней расходов не было. На счетах ${balance.toLocaleString('ru-RU')} ₽.`,
+        actions: ['finance'],
+        via: 'rule',
+      }
+    }
+    return {
+      reply: `За ${days} дней потрачено ${spent.toLocaleString('ru-RU')} ₽:\n${categoriesLine(cats, spent)}\n\nБаланс: ${balance.toLocaleString('ru-RU')} ₽. Подробнее — в разделе «финансы».`,
+      actions: ['finance'],
+      via: 'rule',
+    }
+  }
+
+  // Fallback assistant response (сюда уходят свободные вопросы — на них может ответить ИИ)
   return {
     reply: `Да, сэр. Я зафиксировал: «${text}». Могу записать трату («700 такси»), засечь время («таймер 25 мин»), напомнить о встрече или проверить статус заказов.`,
     actions: [],
     via: 'rule',
+    fallback: true,
   }
+}
+
+/* ---------------- ИИ (по желанию) ----------------
+   Никаких новых зависимостей: обычный fetch на любой совместимый с OpenAI эндпоинт.
+   Задаётся в .env:  LLM_API_KEY=...   LLM_URL=https://.../chat/completions   LLM_MODEL=...
+   Без ключа всё работает как раньше — правила и голосовые команды не меняются. */
+const LLM_KEY = process.env.LLM_API_KEY || process.env.OPENAI_API_KEY || process.env.DASHSCOPE_API_KEY || ''
+const LLM_URL = process.env.LLM_URL || (LLM_KEY ? 'https://api.openai.com/v1/chat/completions' : '')
+const LLM_MODEL = process.env.LLM_MODEL || 'gpt-4o-mini'
+const llmOn = () => Boolean(LLM_KEY && LLM_URL)
+
+app.get('/api/llm', (req, res) => {
+  res.json({ enabled: llmOn(), model: llmOn() ? LLM_MODEL : null })
+})
+
+/* Контекст: ассистенту нужно знать реальное состояние, а не выдумывать.
+   Собираем компактно — задачи, встречи, заказы, деньги. */
+function llmContext() {
+  const now = new Date()
+  const day = `${now.getDate()}.${now.getMonth() + 1}.${now.getFullYear()}`
+  const balance = state.accounts.reduce((s, a) => s + (Number(a.balance) || 0), 0)
+  const openTasks = (state.tasks as any[]).filter(t => !t.done).slice(0, 6)
+  const dayEvents = (state.events as any[]).filter(e => (e.start || '').slice(0, 10) === todayStr)
+  const openOrders = (state.orders as any[]).filter(o => ['new', 'work', 'review'].includes(o.status)).slice(0, 5)
+  const lines = [
+    `Сегодня ${day}.`,
+    `Баланс по счетам: ${Math.round(balance).toLocaleString('ru-RU')} ₽.`,
+    openTasks.length ? `Открытые задачи: ${openTasks.map(t => `«${t.title}»${t.due ? ` до ${String(t.due).slice(11, 16)}` : ''}`).join('; ')}.` : 'Открытых задач нет.',
+    dayEvents.length ? `Встречи сегодня: ${dayEvents.map(e => `${e.title} (${String(e.start).slice(11, 16)})`).join('; ')}.` : 'Встреч сегодня нет.',
+    openOrders.length ? `Заказы в работе: ${openOrders.map(o => `${o.title} — ${o.status}`).join('; ')}.` : 'Заказов в работе нет.',
+  ]
+  return lines.join('\n')
+}
+
+async function llmAnswer(text: string): Promise<string | null> {
+  if (!llmOn()) return null
+  try {
+    const ctrl = new AbortController()
+    const timer = setTimeout(() => ctrl.abort(), 25000)
+    const history = (state.chatHistory as any[])
+      .slice(-6)
+      .filter(m => m.text)
+      .map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: String(m.text).slice(0, 500) }))
+    const payload = {
+      model: LLM_MODEL,
+      temperature: 0.4,
+      max_tokens: 600,
+      messages: [
+        {
+          role: 'system',
+          content:
+            'Ты — Марвин (Джарвис), личный ассистент владельца. Отвечай коротко, по-русски, спокойно и по делу. ' +
+            'Никогда не выдумывай суммы, даты и статусы — используй только данные ниже. ' +
+            'Если вопрос про действия в приложении (записать трату, поставить задачу) — просто подскажи, как это сказать одной фразой.\n\n' +
+            llmContext(),
+        },
+        ...history,
+        { role: 'user', content: text },
+      ],
+    }
+    const r = await fetch(LLM_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${LLM_KEY}` },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
+    })
+    clearTimeout(timer)
+    if (!r.ok) {
+      console.warn(`[llm] ${r.status} ${r.statusText}`)
+      return null
+    }
+    const j = await r.json()
+    const out = j?.choices?.[0]?.message?.content
+    return typeof out === 'string' && out.trim() ? out.trim() : null
+  } catch (err) {
+    console.warn('[llm] error:', (err as any)?.message || err)
+    return null
+  }
+}
+
+/* Правила сначала: команды («700 такси», «задача: …») должны срабатывать всегда и мгновенно.
+   На свободный вопрос, если настроен ИИ, уходит в модель; ключа нет — остаёмся на правилах. */
+async function reply(text: string): Promise<{ reply: string; actions: string[]; via: string }> {
+  const base = processChatInput(text)
+  if (base.fallback && llmOn()) {
+    const ai = await llmAnswer(text)
+    if (ai) return { reply: ai, actions: [], via: 'llm' }
+  }
+  return { reply: base.reply, actions: base.actions, via: base.via }
 }
 
 app.post('/api/chat', async (req, res, next) => {
@@ -2419,7 +2936,7 @@ app.post('/api/chat', async (req, res, next) => {
     if (typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ error: 'text must be a non-empty string' })
     }
-    const result = processChatInput(text)
+    const result = await reply(text)
 
     state.chatHistory.push({
       id: ++nextId,
@@ -2450,7 +2967,7 @@ app.post('/api/chat/stream', async (req, res, next) => {
     if (typeof text !== 'string' || !text.trim()) {
       return res.status(400).json({ error: 'text must be a non-empty string' })
     }
-    const result = processChatInput(text)
+    const result = await reply(text)
 
     state.chatHistory.push({
       id: ++nextId,

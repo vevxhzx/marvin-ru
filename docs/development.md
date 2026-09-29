@@ -56,6 +56,27 @@ cd web && npm ci && npm run dev                   # фронт с hot reload н�
 
 Дизайн-система сайта — [`web/DESIGN.md`](../web/DESIGN.md). Архитектура — [`ARCHITECTURE.md`](../ARCHITECTURE.md). Планы — [`ROADMAP.md`](../ROADMAP.md).
 
+## Стенд на Node (тот же сайт без Python)
+
+```bash
+npm ci && npx tsx server.ts     # сайт на :3000, своё состояние в data/server-state.json
+npm test                        # 17 API-тестов на :3999 — не запускайте их рядом со стендом на :3000
+```
+
+Чат этого стенда умеет ходить в настоящую модель: ключ кладётся в `.env` в корне (файл в `.gitignore`,
+новых зависимостей не нужно — запрос уходит обычным `fetch`).
+
+```bash
+LLM_API_KEY=sk-...                                   # или OPENAI_API_KEY / DASHSCOPE_API_KEY
+LLM_URL=https://api.openai.com/v1/chat/completions    # любой OpenAI-совместимый адрес
+LLM_MODEL=gpt-4o-mini                                # модель; по умолчанию gpt-4o-mini
+```
+
+С ключом ответы в чате помечены ☁️ облако, без него — ⚡ правила; если модель не ответила, чат честно
+отвечает по правилам, а не молчит. Проверить: `GET /api/llm` → `{"enabled":true,"model":"…"}` — то же видно
+в ⚙ Настройки → система → состояние («внешняя модель»). Работа с облаком и локальной моделью описана в
+[`brain.md`](brain.md); секреты — в `config.yaml` / `.env`, они не попадают в git.
+
 Стек: Python 3.11+ · FastAPI · SQLite (SQLModel) · aiogram 3 · APScheduler · Ollama · faster-whisper · Vosk · Silero/edge-tts · React + Vite + Tailwind.
 
 Лицензия — [Apache 2.0](../LICENSE): свободное использование и форки, с сохранением авторства (`NOTICE`, ссылка на оригинал) и пометкой изменённых файлов. Pull request'ы приветствуются — особенно новые фразы-шаблоны в `core/brain/quick.py` и тесты к ним.

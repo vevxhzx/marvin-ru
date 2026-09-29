@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Trash2, Check } from 'lucide-react'
 import { parseNum } from '../lib/api'
+import { ACCENTS, accentFor, usePageAccent, setPageAccent } from '../lib/prefs'
 
 export function Card({ className = '', variant = '', col = '', i = 0, children, lift, ...p }) {
   const vClass = variant === 'hero' ? 'hero' : variant === 'p1' ? 'p1' : variant === 'p2' ? 'p2' : variant === 'blk' ? 'blk' : variant === 'chart' ? 'chart' : ''
@@ -598,5 +599,54 @@ export function PriorityDot({ value, onChange, disabled }) {
           ))}
         </div>, document.body)}
     </>
+  )
+}
+
+/* Цвет самой вкладки: «заказы» могут быть оранжевыми, «финансы» — зелёными.
+   Выбор локальный (только этот браузер), общие настройки сайта не меняются. */
+export function PageAccent({ page, className = '' }) {
+  const [open, setOpen] = useState(false)
+  const { hex } = usePageAccent(page)
+  const wrap = useRef(null)
+  const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false) }
+    const k = (e) => e.key === 'Escape' && setOpen(false)
+    document.addEventListener('mousedown', h)
+    document.addEventListener('keydown', k)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
+  }, [open])
+
+  const pick = (c) => { setPageAccent(page, c); setOpen(false) }
+
+  return (
+    <span className={`pa-wrap ${className}`} ref={wrap}>
+      <button type="button" className={`btn-soft btn-sm ${open ? 'on' : ''}`} onClick={() => setOpen((v) => !v)}
+        title="Цвет этой вкладки — только для неё, другие страницы не изменятся">
+        <span className="pa-dot" style={{ background: hex || 'var(--acc)' }}></span>
+        цвет
+      </button>
+      {open && (
+        <div className="pa-pop elevated" role="dialog" aria-label="цвет вкладки">
+          <div className="label">цвет этой вкладки</div>
+          <div className="pa-grid">
+            <button type="button" className="pa-sw pa-sw-reset" onClick={() => pick('')} title="Как в общих настройках">
+              <span>как<br />всё</span>
+            </button>
+            {Object.entries(ACCENTS).map(([k, a]) => {
+              const raw = dark ? a.dark : a.light
+              return (
+                <button key={k} type="button" className="pa-sw" title={a.label}
+                  style={{ background: accentFor(raw, dark) }}
+                  onClick={() => pick(raw)} />
+              )
+            })}
+          </div>
+          <p className="pa-note">цвет живёт только здесь — в настройках сайта он не меняется</p>
+        </div>
+      )}
+    </span>
   )
 }

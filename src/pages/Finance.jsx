@@ -1,14 +1,27 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { api, money, shortDate, toLocalISO, plural } from '../lib/api'
-import { Num, Sheet, Field, Empty, useToast } from '../components/ui'
+import { Num, Sheet, Field, Empty, useToast, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
+import { usePageAccent } from '../lib/prefs'
 
 /* Карточки вкладки «обзор»: порядок и ширина хранятся общим модулем lib/layout */
-const FIN_CARDS = ['balance', 'chart', 'income', 'recurring', 'debts', 'free', 'flow']
-const FIN_CARD_WIDTHS = { balance: 4, chart: 8, income: 3, recurring: 3, debts: 3, free: 3, flow: 12 }
+const FIN_CARDS = ['balance', 'chart', 'income', 'recurring', 'debts', 'free', 'flow', 'budgets', 'upcoming']
+const FIN_CARD_WIDTHS = { balance: 4, chart: 8, income: 3, recurring: 3, debts: 3, free: 3, flow: 12, budgets: 6, upcoming: 6 }
+const FIN_CARD_LABELS = { balance: 'баланс', chart: 'касса', income: 'доход', recurring: 'регулярные', debts: 'долги', free: 'свободно', flow: 'поток', budgets: 'бюджеты', upcoming: 'ближайшие списания' }
+
+/* Честная оценка «когда накоплю»: при темпе 5 000 ₽ в месяц — без обещаний точности */
+const MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+function goalEta(need) {
+  const months = Math.ceil(need / 5000)
+  if (!Number.isFinite(months) || months <= 0) return ''
+  if (months > 60) return null
+  const d0 = new Date()
+  d0.setMonth(d0.getMonth() + months)
+  return `к ${d0.getDate()} ${MON_SHORT[d0.getMonth()]}`
+}
 
 export default function Finance() {
   const [tab, setTab] = useState('overview') // 'overview' | 'txs' | 'accounts' | 'debts' | 'recurring' | 'goals'
@@ -21,6 +34,8 @@ export default function Finance() {
   const [goals, setGoals] = useState([])
   const [categories, setCategories] = useState([])
   const [techniquesData, setTechniquesData] = useState(null)
+  const [forecast, setForecast] = useState(null)
+  const [budgets, setBudgets] = useState(null)
 
   // Modal sheets
   const [sheet, setSheet] = useState(null) // 'tx' | 'account' | 'debt' | 'payDebt' | 'recurring' | 'goal' | 'putGoal'
@@ -29,16 +44,18 @@ export default function Finance() {
   // Filters for txs
   const [txSearch, setTxSearch] = useState('')
   const [txCategory, setTxCategory] = useState('all')
+  const [txAccount, setTxAccount] = useState('all')
   const [cardsEdit, setCardsEdit] = useState(false)
   const { order: cardOrder, setOrder: setCardOrder, widths: cardWidths, move, cycleWidth, reset: resetCards } = useCardLayout('finance', FIN_CARDS, FIN_CARD_WIDTHS)
   const wide = useWide()
+  const pageAcc = usePageAccent('finance')
 
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
 
   const load = async () => {
     try {
-      const [s, t, accs, d, rec, g, cats, tech] = await Promise.all([
+      const [s, t, accs, d, rec, g, cats, tech, fc, bg] = await Promise.all([
         api.finSummary(days).catch(() => null),
         api.txs(days).catch(() => []),
         api.accounts().catch(() => []),
@@ -47,6 +64,8 @@ export default function Finance() {
         api.goals().catch(() => []),
         api.categories().catch(() => []),
         api.techniques().catch(() => null),
+        api.finForecast(days || 90).catch(() => null),
+        api.budgets().catch(() => null),
       ])
       if (s) setSum(s)
       setTxs(t || [])
@@ -56,6 +75,8 @@ export default function Finance() {
       setGoals(g || [])
       setCategories(cats || [])
       if (tech) setTechniquesData(tech)
+      if (fc) setForecast(fc)
+      setBudgets(bg)
     } catch (e) {
       show.err(e)
     }
@@ -85,65 +106,81 @@ export default function Finance() {
   const livingSpent = spent || 40575
   const livingRemain = (cf.free || 7816) - livingSpent
 
-  // Скраббер графика кассы
-  const [scrubX, setScrubX] = useState(600)
-  const [scrubY, setScrubY] = useState(186)
-  const [scrubTip, setScrubTip] = useState(`−42 719 ₽ к 29.10`)
+  // График кассы: прошлое — пересчёт баланса по операциям, будущее — прогноз сервера
+  const [scrubI, setScrubI] = useState(null)
   const [scrubActive, setScrubActive] = useState(false)
   const svRef = useRef(null)
-
-  const P = [
-    [0, 20], [60, 34], [100, 46], [130, 54], [160, 42],
-    [200, 58], [330, 100], [450, 140], [600, 186],
-  ]
-  function at(x) {
-    for (let j = 1; j < P.length; j++) {
-      if (x <= P[j][0]) {
-        const a = P[j - 1], b = P[j]
-        return a[1] + ((b[1] - a[1]) * (x - a[0])) / (b[0] - a[0])
-      }
-    }
-    return 186
-  }
 
   const now = new Date()
   const z = (n) => ('0' + n).slice(-2)
   const endD = new Date(now)
-  endD.setDate(endD.getDate() + days)
+  endD.setDate(endD.getDate() + (days || 90))
   const startStr = `${z(now.getDate())}.${z(now.getMonth() + 1)}`
   const endStr = `${z(endD.getDate())}.${z(endD.getMonth() + 1)}`
 
+  const pts = forecast?.points || []
+  const geo = useMemo(() => {
+    if (pts.length < 2) return null
+    const vals = pts.map((p) => p.balance)
+    let max = Math.max(...vals)
+    let min = Math.min(...vals)
+    if (min > 0) min = 0
+    if (max < 0) max = 0
+    const span = (max - min) || 1
+    const X = (i) => (i / (pts.length - 1)) * 600
+    const Y = (v) => 186 - ((v - min) / span) * 166
+    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.balance).toFixed(1)}`).join('')
+    return { X, Y, line, area: `${line}L600 200L0 200Z`, zero: Y(0), iNow: pts.findIndex((p) => p.kind === 'future') }
+  }, [forecast])
+
+  const scrubPoint = scrubI != null ? pts[scrubI] : null
+
   const handlePointerMove = (e) => {
-    if (!svRef.current) return
+    if (!svRef.current || !pts.length) return
     const r = svRef.current.getBoundingClientRect()
-    const x = Math.min(Math.max(((e.clientX - r.left) / r.width) * 600, 0), 600)
-    const y = at(x)
-    const v = balance + ((y - 20) / 166) * -57880
-    const dt = new Date(now.getFullYear(), now.getMonth(), now.getDate() + Math.round((x / 600) * days))
-    setScrubX(x)
-    setScrubY(y)
+    const fx = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
+    setScrubI(Math.round(fx * (pts.length - 1)))
     setScrubActive(true)
-    setScrubTip(`${z(dt.getDate())}.${z(dt.getMonth() + 1)} · ${v < 0 ? '−' : ''}${money(Math.abs(v))}`)
   }
 
-  const handlePointerLeave = () => {
-    setScrubX(600)
-    setScrubY(186)
-    setScrubActive(false)
-    setScrubTip(`−42 719 ₽ к ${endStr}`)
-  }
+  const handlePointerLeave = () => { setScrubActive(false); setScrubI(null) }
+
+  // Ближайшие списания: дата берётся из дня платежа, а не «ежемесячно» — так видно, когда придётся платить
+  const nextPayments = useMemo(() => {
+    const today0 = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+    return recurring
+      .filter((r) => r.active !== false && r.kind !== 'income')
+      .map((r) => {
+        const dom = Math.min(Number(r.day_of_month || r.day) || 1, 28)
+        let d0 = new Date(now.getFullYear(), now.getMonth(), dom)
+        if (d0 < today0) d0 = new Date(now.getFullYear(), now.getMonth() + 1, dom)
+        return { ...r, on: d0, dom }
+      })
+      .sort((a, b) => a.on - b.on)
+  }, [recurring, now.getMonth(), now.getDate()])
+
+  const daysUntil = (d0) => Math.round((d0 - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5)
+  const budgetItems = budgets?.items || []
+  const budgetLeft = (budgets?.total_budget || 0) - (budgets?.total_spent || 0)
 
   // Фильтрация транзакций
   const filteredTxs = useMemo(() => {
-    return txs.filter((t) => {
+    const q = txSearch.trim().toLowerCase()
+    const list = txs.filter((t) => {
       const matchCat = txCategory === 'all' || t.category === txCategory
-      const matchSearch = !txSearch.trim() ||
-        (t.title && t.title.toLowerCase().includes(txSearch.toLowerCase())) ||
-        (t.category && t.category.toLowerCase().includes(txSearch.toLowerCase())) ||
-        (t.comment && t.comment.toLowerCase().includes(txSearch.toLowerCase()))
-      return matchCat && matchSearch
+      const matchAcc = txAccount === 'all' || t.account === txAccount
+      const matchSearch = !q ||
+        (t.title && t.title.toLowerCase().includes(q)) ||
+        (t.category && t.category.toLowerCase().includes(q)) ||
+        (t.comment && t.comment.toLowerCase().includes(q)) ||
+        (t.account && t.account.toLowerCase().includes(q))
+      return matchCat && matchAcc && matchSearch
     })
-  }, [txs, txCategory, txSearch])
+    const income = list.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0)
+    const expense = Math.abs(list.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Number(t.amount), 0))
+    return { list, income: Math.round(income), expense: Math.round(expense) }
+  }, [txs, txCategory, txAccount, txSearch])
+  const shownTxs = filteredTxs.list
 
   // Экспорт выписки в CSV
   const exportCSV = () => {
@@ -169,14 +206,14 @@ export default function Finance() {
   }
 
   return (
-    <div className="pg on" id="p-fin">
+    <div className="pg on" id="p-fin" style={pageAcc.style}>
       {/* Шапка страницы */}
       <div className="top">
         <div>
           <h1 className="r" style={{ '--i': 0 }}>финансы</h1>
           <p className="sub r" style={{ '--i': 1 }}>
             {tab === 'overview' && 'все счета и баланс'}
-            {tab === 'txs' && `${filteredTxs.length} ${plural(filteredTxs.length, 'операция', 'операции', 'операций')}`}
+            {tab === 'txs' && `${shownTxs.length} ${plural(shownTxs.length, 'операция', 'операции', 'операций')}`}
             {tab === 'accounts' && `${accounts.length} ${plural(accounts.length, 'счёт', 'счёта', 'счетов')}`}
             {tab === 'debts' && `${debts.length} ${plural(debts.length, 'долг', 'долга', 'долгов')}`}
             {tab === 'recurring' && `${recurring.length} регулярных платежей`}
@@ -184,13 +221,13 @@ export default function Finance() {
           </p>
         </div>
         <div className="hr r" style={{ '--i': 1 }}>
-          {tab === 'overview' && (
-            <div className="sg">
-              <span className={days === 7 ? 'on' : ''} onClick={() => setDays(7)}>7 дн</span>
-              <span className={days === 30 ? 'on' : ''} onClick={() => setDays(30)}>30 дн</span>
-              <span className={days === 90 ? 'on' : ''} onClick={() => setDays(90)}>90 дн</span>
-            </div>
-          )}
+          <div className="sg" title="период: цифры и операции считаются за него">
+            <span className={days === 7 ? 'on' : ''} onClick={() => setDays(7)}>7 дн</span>
+            <span className={days === 30 ? 'on' : ''} onClick={() => setDays(30)}>30 дн</span>
+            <span className={days === 90 ? 'on' : ''} onClick={() => setDays(90)}>90 дн</span>
+            <span className={days === 0 ? 'on' : ''} onClick={() => setDays(0)}>всё</span>
+          </div>
+          <PageAccent page="finance" />
           {tab === 'overview' && <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title="Переместить, спрятать или поменять ширину карточек">настроить</span>}
           <span className="btn g" onClick={exportCSV} title="Скачать CSV выписку">выписка</span>
           <span
@@ -243,38 +280,59 @@ export default function Finance() {
             )
             if (id === 'chart') return (
               <section key="chart" className="c chart s8 r" style={st}>{ctl}
-                <div className="hd"><h2>касса на {days} дней</h2><small>при текущем темпе</small></div>
-                <div className="cw" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
-                  <div className="tip mono" style={{ left: `${Math.min(Math.max(scrubX / 6, 9), 91)}%`, top: `${(scrubY / 200) * 100}%` }}>
-                    {scrubTip}
-                  </div>
-                  <svg ref={svRef} viewBox="0 0 600 200" role="img" aria-label="касса на 30 дней">
-                    <defs>
-                      <linearGradient id="gaFin" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0" style={{ stopColor: 'var(--neg)', stopOpacity: 0.35 }} />
-                        <stop offset="1" style={{ stopColor: 'var(--neg)', stopOpacity: 0 }} />
-                      </linearGradient>
-                      <linearGradient id="glFin" x1="0" x2="1">
-                        <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
-                        <stop offset="1" style={{ stopColor: 'var(--neg)' }} />
-                      </linearGradient>
-                    </defs>
-                    <line className="zero" x1="0" x2="600" y1="66" y2="66" />
-                    <path className="ar" fill="url(#gaFin)" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186V200H0Z" />
-                    <path className="ln" stroke="url(#glFin)" pathLength="1" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186" />
-                    <circle className="pulse" cx="0" cy="20" r="5" />
-                    <circle className="d" style={{ '--t': '.9s' }} cx="0" cy="20" r="5" fill="var(--pos)" />
-                    <circle className="d" style={{ '--t': '1.1s' }} cx="60" cy="34" r="4.5" fill="var(--ink)" />
-                    <circle className="d" style={{ '--t': '1.3s' }} cx="160" cy="42" r="5" fill="var(--pos)" />
-                    <circle className="d" style={{ '--t': '1.8s' }} cx="330" cy="100" r="4.5" fill="var(--ink)" />
-                    <circle className="d" style={{ '--t': '2.1s' }} cx="450" cy="140" r="4.5" fill="var(--ink)" />
-                    <circle className="d" style={{ '--t': '2.6s' }} cx="600" cy="186" r="6" fill="var(--neg)" />
-                    <line className="sl" x1={scrubX} x2={scrubX} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
-                    <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0} cx={scrubX} cy={scrubY} />
-                  </svg>
+                <div className="hd">
+                  <h2>касса на {days || 'все'} {days === 1 ? 'день' : 'дней'}</h2>
+                  <small>
+                    {forecast ? `баланс сейчас ${money(forecast.balance)} · темп ${money(forecast.avg_day_spent)}/дн` : 'при текущем темпе'}
+                  </small>
                 </div>
-                <div className="ax mono"><span>{startStr}</span><span>14.10</span><span>{endStr}</span></div>
-                <div className="lg"><span><i style={{ background: 'var(--pos)' }}></i>поступление</span><span><i style={{ background: 'var(--ink)' }}></i>платёж</span></div>
+                {!geo ? (
+                  <p className="py-10 text-center text-sm text-[var(--ink3)]">мало операций для прогноза — добавьте расходы за месяц</p>
+                ) : (
+                  <div className="cw" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
+                    {scrubPoint && (
+                      <div className="tip mono" style={{
+                        left: `${Math.min(Math.max((geo.X(scrubI) / 600) * 100, 9), 91)}%`,
+                        top: `${(geo.Y(scrubPoint.balance) / 200) * 100}%`,
+                      }}>
+                        {z(scrubPoint.date.slice(8, 10))}.{scrubPoint.date.slice(5, 7)} · {money(scrubPoint.balance)}
+                        {scrubPoint.kind === 'future' ? ' ₅' : ''}
+                      </div>
+                    )}
+                    <svg ref={svRef} viewBox="0 0 600 200" role="img" aria-label="график баланса и прогноза">
+                      <defs>
+                        <linearGradient id="gaFin" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" style={{ stopColor: 'var(--acc)', stopOpacity: 0.35 }} />
+                          <stop offset="1" style={{ stopColor: 'var(--acc)', stopOpacity: 0 }} />
+                        </linearGradient>
+                        <linearGradient id="glFin" x1="0" x2="1">
+                          <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
+                          <stop offset="1" style={{ stopColor: 'var(--acc)' }} />
+                        </linearGradient>
+                      </defs>
+                      <line className="zero" x1="0" x2="600" y1={geo.zero} y2={geo.zero} />
+                      <path className="ar" fill="url(#gaFin)" d={geo.area} />
+                      <path className="ln" stroke="url(#glFin)" pathLength="1" d={geo.line} />
+                      {geo.iNow > 0 && (
+                        <line className="sl" x1={geo.X(geo.iNow)} x2={geo.X(geo.iNow)} y1="0" y2="200" style={{ opacity: 0.3, strokeDasharray: '4 6' }} />
+                      )}
+                      <line className="sl" x1={scrubActive ? geo.X(scrubI || 0) : 0} x2={scrubActive ? geo.X(scrubI || 0) : 0} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
+                      <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0}
+                        cx={scrubActive ? geo.X(scrubI || 0) : 0} cy={scrubActive ? geo.Y(pts[scrubI || 0]?.balance || 0) : 0} />
+                    </svg>
+                  </div>
+                )}
+                <div className="ax mono"><span>{startStr}</span><span>сегодня</span><span>{endStr}</span></div>
+                <div className="lg">
+                  <span><i style={{ background: '#ff9f5c' }}></i>факт</span>
+                  <span><i style={{ background: 'var(--acc)' }}></i>прогноз</span>
+                  {forecast?.runway_days != null && (
+                    <span className="text-[var(--neg)]">до нуля ~{forecast.runway_days} дн</span>
+                  )}
+                  {forecast?.min_balance != null && forecast.min_balance >= 0 && (
+                    <span>минимум {money(forecast.min_balance)} · {forecast.min_date?.slice(8, 10)}.{forecast.min_date?.slice(5, 7)}</span>
+                  )}
+                </div>
               </section>
             )
             if (id === 'income') return (
@@ -301,6 +359,71 @@ export default function Finance() {
                 <div className="mid"><Num value={cf.free || 7816} /> ₽</div>
               </section>
             )
+            if (id === 'budgets') return (
+              <section key="budgets" className="c p2 s6 r" style={st}>{ctl}
+                <div className="hd">
+                  <h2>бюджеты на месяц</h2>
+                  <small>{budgets?.month ? `${budgets.month.slice(5, 10).replace('-', '.')} · ${budgetLeft >= 0 ? 'осталось' : 'перерасход'}` : ''}</small>
+                </div>
+                {!budgetItems.length ? (
+                  <p className="py-6 text-center text-sm text-[var(--ink3)]">
+                    лимиты не заданы — укажите бюджет в категории, и тут появится контроль
+                  </p>
+                ) : (
+                  <>
+                    <div className="flex items-baseline gap-2">
+                      <span className="text-[26px] font-semibold" style={{ color: budgetLeft < 0 ? 'var(--neg)' : 'inherit' }}>
+                        <Num value={Math.abs(budgetLeft)} /> ₽
+                      </span>
+                      <span className="text-xs text-[var(--ink3)]">{budgetLeft < 0 ? 'перерасход' : 'в запасе'} из {money(budgets.total_budget)}</span>
+                    </div>
+                    <div className="mt-4 space-y-3">
+                      {budgetItems.slice(0, 5).map((b) => (
+                        <div key={b.category} className="text-[13px]">
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="flex items-center gap-1.5">{b.icon} {b.category}</span>
+                            <span className="num text-[var(--ink2)]">{money(b.spent)} / {money(b.budget)}</span>
+                          </div>
+                          <div className="h-1.5 rounded-full bg-[var(--sf2)] overflow-hidden">
+                            <div className="h-full rounded-full transition-all" style={{
+                              width: `${Math.min(100, b.pct)}%`,
+                              background: b.status === 'over' ? 'var(--neg)' : b.status === 'warn' ? 'var(--warn)' : 'linear-gradient(90deg, var(--acc), #8a5cff)',
+                            }}></div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)] text-xs text-[var(--ink3)]">
+                      <span>перерасход: {budgetItems.filter((b) => b.status === 'over').length}</span>
+                      <span className="btn-soft btn-sm" onClick={() => { setTxCategory('all'); setTab('txs') }}>смотреть операции →</span>
+                    </div>
+                  </>
+                )}
+              </section>
+            )
+            if (id === 'upcoming') return (
+              <section key="upcoming" className="c s6 r" style={st}>{ctl}
+                <div className="hd"><h2>ближайшие списания</h2><small>регулярные платежи</small></div>
+                {!nextPayments.length ? (
+                  <p className="py-6 text-center text-sm text-[var(--ink3)]">регулярных платежей нет</p>
+                ) : nextPayments.slice(0, 5).map((r) => (
+                  <div className="rowi" key={r.id}>
+                    <time>{r.on.getDate()} {['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'][r.on.getMonth()]}</time>
+                    <span className="t">
+                      {r.title || r.name}
+                      <small>через {daysUntil(r.on)} {plural(daysUntil(r.on), 'день', 'дня', 'дней')}{r.category ? ` · ${r.category}` : ''}</small>
+                    </span>
+                    <span className="amt">−{money(r.amount)}</span>
+                  </div>
+                ))}
+                {nextPayments.length > 0 && (
+                  <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--line)] text-xs text-[var(--ink3)]">
+                    <span>за 7 дней: {money(nextPayments.filter((r) => daysUntil(r.on) <= 7).reduce((s, r) => s + (r.amount || 0), 0))}</span>
+                    <span className="btn-soft btn-sm" onClick={() => setTab('recurring')}>управление →</span>
+                  </div>
+                )}
+              </section>
+            )
             return (
               <section key="flow" className="c s12 r" style={st}>{ctl}
                 <div className="hd"><h2>поток в месяц</h2><small>доход минус обязательные платежи — то, чем реально можно распоряжаться</small></div>
@@ -322,7 +445,7 @@ export default function Finance() {
               <p className="muted text-[13px]">стрелки — порядок, кнопка с числом — ширина карточки, крестик — спрятать.</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {FIN_CARDS.filter((x) => !cardOrder.includes(x)).map((x) => (
-                  <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {({ balance: 'баланс', chart: 'касса', income: 'доход', recurring: 'регулярные', debts: 'долги', free: 'свободно', flow: 'поток' })[x]}</button>
+                  <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {FIN_CARD_LABELS[x]}</button>
                 ))}
                 <button className="btn-ghost btn-sm" onClick={resetCards}>вернуть всё как было</button>
               </div>
@@ -371,18 +494,36 @@ export default function Finance() {
                 </span>
               </div>
             </div>
+            {/* фильтр по счёту: отдельной строкой, чтобы не спорить с категориями */}
+            <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-[var(--line)]">
+              <span className="text-[11px] uppercase tracking-wider text-[var(--ink3)]">счёт</span>
+              <span className="chips !m-0 !gap-1.5">
+                <button type="button" className={txAccount === 'all' ? '!bg-[var(--ink)] !text-[var(--bg)]' : ''} onClick={() => setTxAccount('all')}>все</button>
+                {accounts.map((a) => (
+                  <button type="button" key={a.id || a.name} className={txAccount === a.name ? '!bg-[var(--ink)] !text-[var(--bg)]' : ''} onClick={() => setTxAccount(a.name)}>{a.name}</button>
+                ))}
+              </span>
+              {(txCategory !== 'all' || txAccount !== 'all' || txSearch) && (
+                <button type="button" className="btn-ghost btn-sm !h-6" onClick={() => { setTxCategory('all'); setTxAccount('all'); setTxSearch('') }}>сбросить</button>
+              )}
+              <span className="ml-auto text-[13px] num text-[var(--ink2)]">
+                <b className="text-[var(--pos)]">+{money(filteredTxs.income)}</b>
+                <span className="text-[var(--ink3)]"> / </span>
+                <b>−{money(filteredTxs.expense)}</b>
+              </span>
+            </div>
           </section>
 
           {/* Список операций */}
           <section className="c s12 r" style={{ '--i': 4 }}>
             <div className="hd">
               <h2>история операций</h2>
-              <small>{filteredTxs.length} записей</small>
+              <small>{shownTxs.length} {plural(shownTxs.length, 'запись', 'записи', 'записей')} · {days ? `за ${days} дн` : 'вся история'}</small>
             </div>
-            {filteredTxs.length === 0 ? (
+            {shownTxs.length === 0 ? (
               <p className="py-8 text-center text-sm text-[var(--ink3)]">нет операций за указанный период</p>
             ) : (
-              filteredTxs.map((t) => (
+              shownTxs.map((t) => (
                 <div className="rowi group" key={t.id}>
                   <time>{shortDate(t.date || t.created_at)}</time>
                   <span className="t">
@@ -446,34 +587,48 @@ export default function Finance() {
               </div>
             </section>
           ) : (
-            accounts.map((a, idx) => (
+            accounts.map((a, idx) => {
+              const atype = a.type || a.kind || 'bank'
+              return (
               <section key={a.id || idx} className="c s4 r relative" style={{ '--i': 3 + idx }}>
                 <div className="hd">
                   <h2 className="flex items-center gap-2">
-                    {a.type === 'card' && <CreditCard size={17} />}
-                    {a.type === 'cash' && <Wallet size={17} />}
-                    {a.type === 'crypto' && <PiggyBank size={17} />}
-                    {(!a.type || a.type === 'bank') && <Landmark size={17} />}
+                    {atype === 'card' && <CreditCard size={17} />}
+                    {atype === 'cash' && <Wallet size={17} />}
+                    {atype === 'crypto' && <PiggyBank size={17} />}
+                    {(atype === 'bank' || atype === 'savings') && <Landmark size={17} />}
                     {a.name}
                   </h2>
                   <small>{a.currency || 'RUB'}</small>
                 </div>
                 <div className="mid font-semibold"><Num value={a.balance || 0} /> ₽</div>
                 <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)]">
-                  <span className="text-[13px] text-[var(--ink3)]">{a.comment || 'основной счёт'}</span>
+                  <span className="text-[13px] text-[var(--ink3)]">{a.comment || ({ card: 'карта', cash: 'наличные', bank: 'счёт', savings: 'вклад', crypto: 'крипта' })[atype] || 'счёт'}</span>
                   <div className="flex gap-1.5">
                     <button
                       type="button"
                       onClick={() => { setEditingItem(a); setSheet('account') }}
                       className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)]"
-                      title="Изменить баланс"
+                      title="Изменить"
                     >
                       <Edit2 size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!confirm(`Удалить счёт «${a.name}»? Операции по нему останутся в истории.`)) return
+                        try { await api.delAccount(a.id); load(); bump() } catch (e) { show.err(e) }
+                      }}
+                      className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
+                      title="Удалить счёт"
+                    >
+                      <Trash2 size={13} />
                     </button>
                   </div>
                 </div>
               </section>
-            ))
+              )
+            })
           )}
         </div>
       )}
@@ -516,13 +671,27 @@ export default function Finance() {
                   >
                     внести платёж
                   </button>
-                  <button
-                    type="button"
-                    onClick={() => { setEditingItem(d); setSheet('debt') }}
-                    className="p-1.5 text-white/50 hover:text-white"
-                  >
-                    <Edit2 size={13} />
-                  </button>
+                  <div className="flex gap-1">
+                    <button
+                      type="button"
+                      onClick={() => { setEditingItem(d); setSheet('debt') }}
+                      className="p-1.5 text-white/50 hover:text-white"
+                      title="Изменить"
+                    >
+                      <Edit2 size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!confirm(`Удалить долг «${d.name || d.title}»?`)) return
+                        try { await api.delDebt(d.id); load(); bump() } catch (e) { show.err(e) }
+                      }}
+                      className="p-1.5 text-[var(--neg)] hover:opacity-80"
+                      title="Удалить"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
                 </div>
               </section>
             )
@@ -549,25 +718,32 @@ export default function Finance() {
               <p className="py-6 text-center text-sm text-[var(--ink3)]">нет регулярных платежей</p>
             ) : (
               recurring.map((r) => (
-                <div className="rowi" key={r.id}>
-                  <time>{r.day ? `${r.day} числа` : 'ежемес.'}</time>
+                <div className="rowi group" key={r.id}>
+                  <time>{(r.day_of_month || r.day) ? `${r.day_of_month || r.day} числа` : 'ежемес.'}</time>
                   <span className="t">
                     {r.name || r.title}
-                    {r.category && <small>{r.category}</small>}
+                    <small>{[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? 'поступление' : 'списание')}</small>
                   </span>
-                  <span className="amt">{money(r.amount)}</span>
+                  <span className="amt" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit' }}>
+                    {r.kind === 'income' ? '+' : '−'}{money(r.amount)}
+                  </span>
+                  <span className={`chip !ml-2 ${r.active === false ? '!opacity-50' : ''}`}>{r.active === false ? 'пауза' : 'активен'}</span>
+                  <button
+                    type="button"
+                    onClick={() => { setEditingItem(r); setSheet('recurring') }}
+                    className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)] opacity-0 group-hover:opacity-100 transition"
+                    title="Изменить платёж"
+                  >
+                    <Edit2 size={13} />
+                  </button>
                   <button
                     type="button"
                     onClick={async () => {
-                      if (confirm(`Удалить платёж «${r.name || r.title}»?`)) {
-                        try {
-                          await api.delRecurring(r.id)
-                          load()
-                          bump()
-                        } catch (e) { show.err(e) }
-                      }
+                      if (!confirm(`Удалить платёж «${r.name || r.title}»?`)) return
+                      try { await api.delRecurring(r.id); load(); bump() } catch (e) { show.err(e) }
                     }}
-                    className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)] ml-2"
+                    className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
+                    title="Удалить"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -615,6 +791,9 @@ export default function Finance() {
                     <span>{pct}% накоплено</span>
                     <span>цель: {money(target)}</span>
                   </div>
+                  {target > current && goalEta(target - current) && (
+                    <div className="mt-2 text-[12px] text-[var(--ink3)]">при 5 000 ₽/мес — {goalEta(target - current)}</div>
+                  )}
                   <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)]">
                     <button
                       type="button"
@@ -623,13 +802,27 @@ export default function Finance() {
                     >
                       пополнить
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => { setEditingItem(g); setSheet('goal') }}
-                      className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)]"
-                    >
-                      <Edit2 size={13} />
-                    </button>
+                    <div className="flex gap-1">
+                      <button
+                        type="button"
+                        onClick={() => { setEditingItem(g); setSheet('goal') }}
+                        className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)]"
+                        title="Изменить"
+                      >
+                        <Edit2 size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          if (!confirm(`Удалить цель «${g.title || g.name}»?`)) return
+                          try { await api.delGoal(g.id); load(); bump() } catch (e) { show.err(e) }
+                        }}
+                        className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
+                        title="Удалить"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
                 </section>
               )
@@ -686,6 +879,7 @@ export default function Finance() {
       <PayDebtSheet
         open={sheet === 'payDebt'}
         debt={editingItem}
+        accounts={accounts}
         onClose={() => { setSheet(null); setEditingItem(null) }}
         onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
       />
@@ -708,6 +902,7 @@ export default function Finance() {
       <PutGoalSheet
         open={sheet === 'putGoal'}
         goal={editingItem}
+        accounts={accounts}
         onClose={() => { setSheet(null); setEditingItem(null) }}
         onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
       />
@@ -725,6 +920,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
   const [title, setTitle] = useState('')
   const [category, setCategory] = useState('')
   const [account, setAccount] = useState('')
+  const [comment, setComment] = useState('')
   const [kind, setKind] = useState('expense')
   const [date, setDate] = useState('')
   const [saving, setSaving] = useState(false)
@@ -737,13 +933,15 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
       setTitle(item.title || '')
       setCategory(item.category || '')
       setAccount(item.account || '')
+      setComment(item.comment || '')
       setKind(item.amount < 0 ? 'expense' : 'income')
       setDate(item.date ? item.date.slice(0, 10) : toLocalISO(new Date()).slice(0, 10))
     } else {
       setAmount('')
       setTitle('')
       setCategory('')
-      setAccount('')
+      setAccount(accounts[0]?.name || '')
+      setComment('')
       setKind('expense')
       setDate(toLocalISO(new Date()).slice(0, 10))
     }
@@ -760,7 +958,8 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
         title: title.trim() || category || (kind === 'expense' ? 'Расход' : 'Доход'),
         category: category.trim() || undefined,
         account: account.trim() || undefined,
-        date: date || toLocalISO(new Date()).slice(0, 10),
+        comment: comment.trim() || undefined,
+        date: date ? `${date}T${item?.date ? item.date.slice(11, 19) : '12:00:00'}` : toLocalISO(new Date()).slice(0, 10),
       }
       if (isNew) {
         await api.addTx(payload)
@@ -788,18 +987,38 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
         <Field label="описание">
           <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Супермаркет, такси, зарплата…" />
         </Field>
-        <Field label="категория">
-          <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Еда, транспорт, здоровье…" list="cat-list" />
-          <datalist id="cat-list">
-            {categories.map(c => <option key={c.id || c.name || c} value={c.name || c} />)}
-          </datalist>
-        </Field>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="категория">
+            <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Еда, транспорт…" list="cat-list" />
+            <datalist id="cat-list">
+              {categories.map(c => <option key={c.id || c.name || c} value={c.name || c} />)}
+            </datalist>
+          </Field>
+          <Field label="счёт">
+            <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
+              <option value="">не указан</option>
+              {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
+            </select>
+          </Field>
+        </div>
         <Field label="дата">
           <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !amount}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+        <Field label="комментарий">
+          <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="необязательно" />
+        </Field>
+        <div className="flex justify-between gap-2 pt-4">
+          {!isNew && (
+            <button type="button" className="btn g !text-[var(--neg)]"
+              onClick={async () => {
+                if (!confirm('Удалить операцию? Баланс счёта вернётся обратно.')) return
+                try { await api.delTx(item.id); onDone() } catch (err) { show.err(err) }
+              }}>удалить</button>
+          )}
+          <div className="ml-auto flex gap-2">
+            <button type="button" className="btn g" onClick={onClose}>отмена</button>
+            <button type="submit" className="btn" disabled={saving || !amount}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+          </div>
         </div>
       </form>
     </Sheet>
@@ -818,7 +1037,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
     if (!open) return
     setName(account?.name || '')
     setBalance(account?.balance != null ? String(account.balance) : '')
-    setType(account?.type || 'card')
+    setType(account?.type || account?.kind || 'card')
   }, [open, account])
 
   const submit = async (e) => {
@@ -830,6 +1049,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
         name: name.trim(),
         balance: parseFloat(balance) || 0,
         type,
+        kind: type,   // сиды хранят kind, форма — type: держим оба, чтобы иконка и расчёты сходились
       }
       if (isNew) {
         await api.addAccount(payload)
@@ -929,10 +1149,13 @@ function DebtSheet({ open, debt, onClose, onDone }) {
   )
 }
 
-function PayDebtSheet({ open, debt, onClose, onDone }) {
+function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
   const [amount, setAmount] = useState('')
+  const [account, setAccount] = useState('')
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
+
+  useEffect(() => { if (open) setAccount(accounts[0]?.name || '') }, [open])
 
   const submit = async (e) => {
     if (e) e.preventDefault()
@@ -940,7 +1163,7 @@ function PayDebtSheet({ open, debt, onClose, onDone }) {
     if (!a || isNaN(a) || !debt?.id) return
     setSaving(true)
     try {
-      await api.payDebt(debt.id, a)
+      await api.payDebt(debt.id, a, { account })
       onDone()
     } catch (err) {
       show.err(err)
@@ -954,6 +1177,12 @@ function PayDebtSheet({ open, debt, onClose, onDone }) {
       <form onSubmit={submit} className="space-y-4">
         <Field label="сумма платежа (₽)">
           <input className="input" autoFocus type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="5000" />
+        </Field>
+        <Field label="списать со счёта" hint="деньги реально уйдут с баланса — иначе расчёт не сойдётся">
+          <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
+            <option value="none">не списывать</option>
+            {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
+          </select>
         </Field>
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" className="btn g" onClick={onClose}>отмена</button>
@@ -1085,10 +1314,13 @@ function GoalSheet({ open, goal, onClose, onDone }) {
   )
 }
 
-function PutGoalSheet({ open, goal, onClose, onDone }) {
+function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
   const [amount, setAmount] = useState('')
+  const [account, setAccount] = useState('')
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
+
+  useEffect(() => { if (open) setAccount(accounts[0]?.name || '') }, [open])
 
   const submit = async (e) => {
     if (e) e.preventDefault()
@@ -1096,7 +1328,7 @@ function PutGoalSheet({ open, goal, onClose, onDone }) {
     if (!a || isNaN(a) || !goal?.id) return
     setSaving(true)
     try {
-      await api.putGoal(goal.id, a)
+      await api.putGoal(goal.id, a, { account })
       onDone()
     } catch (err) {
       show.err(err)
@@ -1106,10 +1338,16 @@ function PutGoalSheet({ open, goal, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={`пополнить копилку: ${goal?.title || ''}`}>
+    <Sheet open={open} onClose={onClose} title={`пополнить копилку: ${goal?.title || goal?.name || ''}`}>
       <form onSubmit={submit} className="space-y-4">
         <Field label="сумма пополнения (₽)">
           <input className="input" autoFocus type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="2000" />
+        </Field>
+        <Field label="списать со счёта" hint="отложенные деньги уйдут с баланса — так видна настоящая картина">
+          <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
+            <option value="none">не списывать</option>
+            {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
+          </select>
         </Field>
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" className="btn g" onClick={onClose}>отмена</button>

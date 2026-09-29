@@ -39,6 +39,8 @@ export const DEFAULTS = {
   showGreeting: true, showContext: true, showQuick: true, density: 'calm',
   hiddenBlocks: ['upcoming', 'recent'], // блоки главной, скрытые по умолчанию
   tasksSort: 'priority', // сортировка внутри групп задач: priority | due | new
+  // свой цвет у каждой вкладки: { page: '#hex' }. Локально, на сервер не уходит.
+  pageAccents: {},
 }
 let _cur = load()
 const subs = new Set()
@@ -92,14 +94,14 @@ const rgbOf = (hex) => {
   const n = parseInt(h, 16)
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
 }
-const lumOf = (hex) => {
+export const lumOf = (hex) => {
   const [r, g, b] = rgbOf(hex).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 })
   return 0.2126 * r + 0.7152 * g + 0.0722 * b
 }
 const mixHex = (from, to, k) => '#' + rgbOf(from).map((v, i) => Math.round(v + (rgbOf(to)[i] - v) * k).toString(16).padStart(2, '0')).join('')
 /* HSL из hex: нужен hue для «оттенка в тон акценту» и насыщенность,
    чтобы у серого акцента (графит) не получался синий подтон фона. */
-function hexHsl(hex) {
+export function hexHsl(hex) {
   const [r, g, b] = rgbOf(hex).map((v) => v / 255)
   const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn
   const l = (mx + mn) / 2
@@ -112,7 +114,7 @@ function hexHsl(hex) {
   return [Math.round(((h * 60) + 360) % 360), Math.round(s * 100), Math.round(l * 100)]
 }
 /* Акцент должен читаться и в светлой, и в тёмной теме: слишком светлый — притемняем, слишком тёмный — осветляем */
-function accentFor(hex, dark) {
+export function accentFor(hex, dark) {
   const base = /^#[0-9a-f]{6}$/i.test(String(hex)) ? hex : '#0a3cff'
   const L = lumOf(base)
   if (dark && L < 0.16) return mixHex(base, '#ffffff', 0.5)
@@ -159,4 +161,63 @@ export function usePrefs() {
   const [p, setP] = useState(_cur)
   useEffect(() => { subs.add(setP); return () => subs.delete(setP) }, [])
   return [p, prefs.set]
+}
+
+/* ---------------- Цветовая схема отдельной вкладки ----------------
+   Пользователь может покрасить, например, «заказы» в оранжевый, а «финансы» — в зелёный.
+   Цвет хранится только в этом браузере (не в SYNC_KEYS — на сервер не уходит)
+   и применяется к корню страницы, не меняя общую тему сайта. */
+export function setPageAccent(page, hex) {
+  const cur = { ...(prefs.get().pageAccents || {}) }
+  if (!hex) delete cur[page]
+  else cur[page] = hex
+  prefs.set({ pageAccents: cur })
+}
+
+const hslHex = (h, s, l) => {
+  const a = (s / 100) * Math.min(l, 1 - l)
+  const f = (n) => {
+    const k = (n + h / 30) % 12
+    const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)))
+    return Math.round(255 * c).toString(16).padStart(2, '0')
+  }
+  return `#${f(0)}${f(8)}${f(4)}`
+}
+
+export function usePageAccent(page) {
+  const [p] = usePrefs()
+  const [dark, setDark] = useState(() => document.documentElement.classList.contains('dark'))
+  useEffect(() => {
+    const upd = () => setDark(document.documentElement.classList.contains('dark'))
+    const mo = new MutationObserver(upd)
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    return () => mo.disconnect()
+  }, [])
+
+  const hex = (p.pageAccents || {})[page]
+  if (!hex) return { style: {}, hex: '' }
+
+  const acc = accentFor(hex, dark)
+  const [hue, sat] = hexHsl(acc)
+  const nearGrey = sat < 14
+  // подкраска фонов — аккуратная, как в глобальном «оттенке», но в тон вкладки
+  const s = (nearGrey ? 0 : Math.min(sat, dark ? 16 : 12)) / 100
+  const tintC = dark ? hslHex(hue, 55, 55) : hslHex(hue, 65, 50)
+  const paint = (base, mult) => mixHex(tintC, base, 1 - Math.min(1, s * mult))
+
+  return {
+    hex,
+    style: {
+      '--acc': acc,
+      '--accent': acc,
+      '--accent-light': accentFor(hex, false),
+      '--accent-dark': accentFor(hex, true),
+      '--accent-ink': lumOf(acc) > 0.45 ? '#101114' : '#ffffff',
+      '--accent-soft': `color-mix(in srgb, ${acc} 16%, transparent)`,
+      '--bg': paint(dark ? '#050507' : '#e9ecf3', dark ? 2.4 : 1.7),
+      '--sf': paint(dark ? '#131317' : '#ffffff', dark ? 2 : 1),
+      '--sf2': paint(dark ? '#1e1e24' : '#f0f1f6', dark ? 2.4 : 1.4),
+      '--g1': `color-mix(in srgb, ${acc} 30%, transparent)`,
+    },
+  }
 }
