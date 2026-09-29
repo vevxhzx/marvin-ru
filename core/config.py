@@ -26,6 +26,30 @@ class _Node:
         return f"_Node({self.__dict__})"
 
 
+def _load_env_file() -> None:
+    """Подгрузить .env в переменные окружения.
+
+    Файл никогда не читался автоматически, поэтому задокументированные в .env.example
+    переменные молча не работали. Правила: только пустые (не заданные в системе) ключи,
+    уже установленное окружение всегда важнее файла.
+    """
+    path = ROOT / ".env"
+    if not path.exists():
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = val.strip().strip('"').strip("'")
+
+
 def _load() -> _Node:
     path = ROOT / "config.yaml"
     if not path.exists():
@@ -48,6 +72,7 @@ def _load() -> _Node:
     return _Node(raw)
 
 
+_load_env_file()
 cfg = _load()
 DB_PATH = DATA_DIR / "assistant.db"
 TZ = cfg.owner.timezone if hasattr(cfg, "owner") else "Europe/Moscow"
