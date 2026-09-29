@@ -170,7 +170,8 @@ export default function Mind() {
               created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
             },
           ]).map((it, idx) => (
-            <section className="c r" key={it.id} style={{ '--i': 4 + (idx % 6) }}>
+            // id у заметок и ссылок начинаются с 1 — ключ составной, иначе дубли
+            <section className="c r" key={`${it._t}-${it.id}`} style={{ '--i': 4 + (idx % 6) }}>
               {it.image && (
                 <div className={`img ${it.imgVariant === 'b' ? 'b' : ''}`}>
                   {it.imgVariant === 'b' ? 'фото' : 'скриншот'}

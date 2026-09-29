@@ -112,7 +112,10 @@ function NewBoardSheet({ open, onClose, onDone, onErr, orderId, aimId }) {
 function BoardEditor({ id }) {
   const [board, setBoard] = useState(null)
   const [err, setErr] = useState(null)
-  const [tool, setTool] = useState('hand')
+  // инструмент доски запоминается: иначе после возврата на доску снова «рука»
+  // и клик просто двигает холст — фигура «не появляется у курсора»
+  const [tool, setTool] = useState(() => { try { return localStorage.getItem('board.tool') || 'hand' } catch { return 'hand' } })
+  useEffect(() => { try { localStorage.setItem('board.tool', tool) } catch { /* приватный режим */ } }, [tool])
   const [style, setStyle] = useState(() => ({ stickyColor: 'yellow', inkColor: 'ink', inkWidth: 3, ratio: '16:9', fontSize: 18, ...JSON.parse(localStorage.getItem('board.style') || '{}') }))
   useEffect(() => { localStorage.setItem('board.style', JSON.stringify(style)) }, [style])
   const [selection, setSelection] = useState([])
@@ -167,7 +170,13 @@ function BoardEditor({ id }) {
   const showFrameBar = tool === 'frame' || types.has('frame')
 
   return (
-    <div className="board-page-root -mx-4 -mt-6 flex flex-col sm:-mx-8 sm:-mt-8" style={{ height: 'calc(100dvh - var(--topbar-h))' }}>
+    // ширина и высота — от реальных отступов: раньше отрицательный отступ
+    // затаскивал шапку доски под строку поиска, а высота считалась «на глаз»
+    <div className="board-page-root flex flex-col" style={{
+      marginLeft: 'calc(-1 * clamp(4px, 1vw, 16px))',
+      marginRight: 'calc(-1 * clamp(4px, 1vw, 16px))',
+      height: 'calc(100dvh - var(--app-pad, 16px) - 66px)',
+    }}>
       {/* шапка */}
       <div className="flex shrink-0 items-center gap-2 border-b hair px-2 py-1.5 sm:px-4" style={{ background: 'var(--bg)' }}>
         <button className="btn-icon" onClick={() => nav('/board')} aria-label="К списку досок" data-tip="все доски"><ChevronLeft size={16} /></button>

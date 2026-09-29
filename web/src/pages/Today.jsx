@@ -378,7 +378,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
             <div className="mid"><Num value={expenses30} /> ₽</div>
             <div className="bars">
               {weekdayHeights.map((h, bidx) => (
-                <i key={bidx} style={{ '--h': `${h}%`, '--k': bidx }} />
+                <i key={bidx} className={h ? '' : 'z'} style={{ '--h': `${h}%`, '--k': bidx }} />
               ))}
             </div>
             <div className="bl mono"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div>
@@ -393,7 +393,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
             <div className="mid"><Num value={freeMonth} /> ₽</div>
             <div className="bars">
               {monthDayHeights.map((h, bidx) => (
-                <i key={bidx} style={{ '--h': `${h}%`, '--k': bidx }} />
+                <i key={bidx} className={h ? '' : 'z'} style={{ '--h': `${h}%`, '--k': bidx }} />
               ))}
             </div>
             <div className="bl mono"><span>1</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span></div>

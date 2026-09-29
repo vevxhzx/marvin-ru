@@ -387,10 +387,21 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
         const b = itemBox(it), ih = frameWindow(it)
         withRot(it, b, () => {
           g.fillStyle = dark ? 'rgba(236,236,233,.05)' : 'rgba(14,14,14,.035)'; rr(it.x, it.y, it.w, b.h, 10 * it.w / 320); g.fill()
-          g.fillStyle = dark ? '#0b0b0d' : '#ffffff'; rr(it.x, it.y, it.w, ih, 10 * it.w / 320); g.fill()
+          g.fillStyle = dark ? '#17171d' : '#ffffff'; rr(it.x, it.y, it.w, ih, 10 * it.w / 320); g.fill()
           const im = getImg(it.data.image)
           if (im) { g.save(); rr(it.x, it.y, it.w, ih, 10 * it.w / 320); g.clip(); const s = Math.max(it.w / im.width, ih / im.height); g.drawImage(im, it.x + (it.w - im.width * s) / 2, it.y + (ih - im.height * s) / 2, im.width * s, im.height * s); g.restore() }
-          else { g.strokeStyle = dark ? 'rgba(236,236,233,.1)' : 'rgba(14,14,14,.08)'; g.lineWidth = 1 / v.k; g.beginPath(); g.moveTo(it.x, it.y); g.lineTo(it.x + it.w, it.y + ih); g.moveTo(it.x + it.w, it.y); g.lineTo(it.x, it.y + ih); g.stroke() }
+          // пустой кадр — пунктирная рамка с подписью, а не крест «как будто картинка битая»
+          else if (ih > 36 && it.w > 84) {
+            const pad = Math.min(it.w, ih) * .07
+            g.strokeStyle = dark ? 'rgba(236,236,233,.15)' : 'rgba(14,14,14,.12)'; g.lineWidth = 1 / v.k
+            g.setLineDash([5 / v.k, 4 / v.k]); rr(it.x + pad, it.y + pad, it.w - pad * 2, ih - pad * 2, Math.max(4, 6 * it.w / 320)); g.stroke(); g.setLineDash([])
+            const ts = Math.max(9, Math.min(13, 12 * it.w / 320))
+            g.font = `500 ${ts}px "Inter Tight", "Inter", sans-serif`
+            g.fillStyle = dark ? 'rgba(236,236,233,.4)' : 'rgba(14,14,14,.38)'
+            g.textAlign = 'center'; g.textBaseline = 'middle'
+            g.fillText('картинка не выбрана', it.x + it.w / 2, it.y + ih / 2)
+            g.textAlign = 'left'
+          }
           g.strokeStyle = line; g.lineWidth = 1 / v.k; rr(it.x, it.y, it.w, ih, 10 * it.w / 320); g.stroke(); rr(it.x, it.y, it.w, b.h, 10 * it.w / 320); g.stroke()
           // номер и длительность — в масштабе кадра, читаются на любом зуме
           const fs = Math.max(11, 13 * it.w / 320)
@@ -611,7 +622,8 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
     if (readOnly) return
     const p = toWorld(e.clientX, e.clientY), it = hit(p.x, p.y)
     if (it && ['sticky', 'text', 'frame', 'arrow'].includes(it.type)) { setSel(new Set([it.id])); startEdit(it.id); return }
-    if (!it && !['hand', 'pen', 'eraser'].includes(toolRef.current)) { const n = addItem('sticky', p.x - 100, p.y - 100); if (n) { setSel(new Set([n.id])); startEdit(n.id) } }
+    // двойной клик по пустому месту — стикер под курсором (работает и с «рукой»)
+    if (!it && !['pen', 'eraser'].includes(toolRef.current)) { const n = addItem('sticky', p.x - 100, p.y - 100); if (n) { setSel(new Set([n.id])); startEdit(n.id) } }
   }
   useEffect(() => {
     const el = wrapRef.current; if (!el) return

@@ -4,8 +4,10 @@ import { api, money, plural } from '../lib/api'
 import { Sheet, Field, Empty, useToast } from '../components/ui'
 import { useRefresh } from '../App'
 
-const KIND_RU = { person: 'человек', family: 'семья', friend: 'друг', client: 'клиент', company: 'компания' }
+// colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово
+const KIND_RU = { person: 'человек', family: 'семья', friend: 'друг', client: 'клиент', company: 'компания', colleague: 'коллега' }
 const kindLabel = (p) => p.kind_label || KIND_RU[p.kind] || p.kind || 'человек'
+const chip = (on) => ({ background: on ? 'var(--ink)' : 'var(--sf)', color: on ? 'var(--bg)' : 'var(--ink2)' })
 const initials = (name) => (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('')
 
 export default function People() {
@@ -41,13 +43,13 @@ export default function People() {
           </p>
         </div>
         <div className="hr r" style={{ '--i': 1 }}>
-          <div className="sg">
-            <span className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>все</span>
-            <span className={tab === 'person' ? 'on' : ''} onClick={() => setTab('person')}>человек</span>
-            <span className={tab === 'family' ? 'on' : ''} onClick={() => setTab('family')}>семья</span>
-            <span className={tab === 'friend' ? 'on' : ''} onClick={() => setTab('friend')}>друг</span>
-            <span className={tab === 'client' ? 'on' : ''} onClick={() => setTab('client')}>клиент</span>
-            <span className={tab === 'company' ? 'on' : ''} onClick={() => setTab('company')}>компания</span>
+          {/* переносимые «пилюли», а не .sg: шесть-семь пунктов в одну таблетку
+              не влезали и превращались в странную пустую подложку */}
+          <div className="flex flex-wrap gap-2">
+            <button type="button" style={chip(tab === 'all')} className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition" onClick={() => setTab('all')}>все</button>
+            {Object.entries(KIND_RU).map(([k, label]) => (
+              <button type="button" key={k} style={chip(tab === k)} className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition" onClick={() => setTab(k)}>{label}</button>
+            ))}
           </div>
           <span className="btn" onClick={() => setSheet('new')}>+ человек</span>
         </div>
@@ -144,9 +146,15 @@ function PersonSheet({ open, person, onClose, onDone }) {
           <input className="input" value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="Ваня, ivan_dev" />
         </Field>
         <Field label="тип контакта">
-          <div className="sg w-full">
+          {/* обычные «пилюли» с переносом: .sg — это одна кнопка-таблетка, в неё
+              пять пунктов не влезают и получалась странная пустая подложка */}
+          <div className="flex flex-wrap gap-2">
             {Object.entries(KIND_RU).map(([k, label]) => (
-              <span key={k} className={kind === k ? 'on' : ''} onClick={() => setKind(k)}>{label}</span>
+              <button type="button" key={k} onClick={() => setKind(k)}
+                className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition"
+                style={chip(kind === k)}>
+                {label}
+              </button>
             ))}
           </div>
         </Field>

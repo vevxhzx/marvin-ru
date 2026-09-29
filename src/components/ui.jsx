@@ -374,6 +374,7 @@ export function Bars({ values = [], labels = [], height = 62, className = '' }) 
         {values.map((v, i) => (
           <i
             key={i}
+            className={v ? '' : 'z'}
             style={{
               '--h': `${Math.round((v / max) * 100)}%`,
               '--k': i,

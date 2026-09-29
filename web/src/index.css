@@ -14,7 +14,8 @@
 .aur i:nth-child(2) { right: -25vmax; bottom: -35vmax; background: radial-gradient(closest-side, var(--g2), transparent); animation-duration: 30s; animation-delay: -8s; }
 .aur i:nth-child(3) { left: 35vmax; top: 25vmax; width: 55vmax; height: 55vmax; background: radial-gradient(closest-side, color-mix(in srgb, var(--acc) 18%, transparent), transparent); animation: drift 36s ease-in-out infinite alternate-reverse; animation-delay: -14s; }
 
-.app { position: relative; z-index: 1; display: grid; grid-template-columns: 232px 1fr; gap: 20px; padding: 16px; min-height: 100vh; }
+/* --app-pad — тот же отступ, но как переменная: доска считает от неё свою высоту */
+.app { position: relative; z-index: 1; display: grid; grid-template-columns: 232px 1fr; gap: 20px; padding: 16px; --app-pad: 16px; min-height: 100vh; }
 aside.sidebar-bench, aside { background-image: linear-gradient(180deg, var(--sb-1), var(--sb-2)); position: sticky; top: 16px; height: calc(100vh - 32px); align-self: start; color: var(--sb-ink); border-radius: 30px; box-shadow: var(--sb-shadow), inset 0 1px 0 var(--sb-inset); border: 1px solid var(--sb-line); padding: 20px 12px 14px; display: flex; flex-direction: column; gap: 3px; z-index: 50; }
 .logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -0.02em; padding: 4px 12px 22px; color: var(--sb-ink); }
 .logo i { width: 10px; height: 10px; border-radius: 50%; background: var(--acc); animation: breathe 3.2s ease-in-out infinite; }
@@ -23,6 +24,10 @@ nav.bench-nav a svg, aside nav a svg { width: 19px; height: 19px; fill: none; st
 nav.bench-nav a:hover, aside nav a:hover { color: var(--sb-ink); background: var(--sb-hover); }
 nav.bench-nav a.on, nav.bench-nav a.active, aside nav a.on, aside nav a.active { background: var(--acc); color: var(--accent-ink); box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--acc) 70%, transparent); }
 .sb { margin-top: auto; display: flex; flex-direction: column; gap: 10px; position: relative; }
+/* Меню — по центру сайдбара: логотип остаётся сверху, помодоро и статус снизу,
+   а свободное место уходит в равные отступы вокруг навигации. */
+aside nav { margin: auto 0; }
+aside .sb { margin-top: 0; }
 .pomo { display: flex; align-items: center; gap: 12px; padding: 8px 12px; color: var(--sb-dim); font-size: 14px; }
 .pomo b { color: var(--sb-ink); font-weight: 500; font-size: 15px; }
 .pomo-ring, .ring, .pomo-gauge, .pomo-circle {
@@ -162,8 +167,9 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 }
 .p1 .hd small, .p2 .hd small { color: inherit; opacity: 0.75; }
 .bars { display: flex; align-items: flex-end; gap: 8px; height: 62px; margin-top: 22px; }
-.bars i { flex: 1; border-radius: 8px; background: linear-gradient(180deg, currentColor, color-mix(in srgb, currentColor 45%, transparent)); height: var(--h); animation: rise 1.2s calc(1s + var(--k) * 80ms) var(--e) both; transform-origin: bottom; }
-.bars i:nth-child(6) { opacity: 0.35; }
+/* высота в процентах: без минимума «0» превращался в невидимую линию и график выглядел пустым */
+.bars i { flex: 1; min-height: 6px; border-radius: 8px; background: linear-gradient(180deg, currentColor, color-mix(in srgb, currentColor 45%, transparent)); height: max(var(--h), 6px); animation: rise 1.2s calc(1s + var(--k) * 80ms) var(--e) both; transform-origin: bottom; }
+.bars i.z { background: var(--sf2); color: var(--ink3); }
 .bl { display: flex; gap: 8px; margin-top: 6px; font-size: 11px; opacity: 0.7; }
 .bl span { flex: 1; text-align: center; }
 
@@ -490,6 +496,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   .app {
     grid-template-columns: 1fr;
     padding: 10px 10px calc(76px + env(safe-area-inset-bottom, 0px));
+    --app-pad: 10px;
     gap: 12px;
   }
   aside { display: none !important; }

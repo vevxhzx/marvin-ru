@@ -416,14 +416,18 @@ export function ScreenTimeBentoWidget({ data }) {
         <div className="flex items-end h-10 gap-1 px-1">
           {(d.hours || []).slice(8, 20).map((val, idx) => {
             const h = idx + 8
-            const pct = Math.max(8, (val / maxH) * 100)
+            // контейнеру нужна явная высота: иначе height в процентах считается от
+            // элемента с auto-высотой и все столбцы схлопывались в 0
+            const pct = Math.max(14, (val / maxH) * 100)
             return (
-              <div key={h} className="flex-1 flex flex-col items-center gap-1 group relative">
+              <div key={h} className="h-full flex-1 flex flex-col items-center justify-end gap-1 group relative">
                 <div
                   className="w-full rounded-md transition-all"
                   style={{
                     height: `${pct}%`,
-                    background: val > 20 ? 'linear-gradient(180deg, #8a5cff, #2f57ff)' : 'var(--line)',
+                    background: val > 20 ? 'linear-gradient(180deg, #8a5cff, #2f57ff)'
+                      : val > 0 ? 'color-mix(in srgb, #8a5cff 55%, transparent)'
+                      : 'var(--line)',
                   }}
                   title={`${h}:00 — ${val} мин`}
                 />
