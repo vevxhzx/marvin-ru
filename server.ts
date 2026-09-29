@@ -5,6 +5,9 @@ import { createHmac, timingSafeEqual } from 'crypto'
 import { createServer as createViteServer } from 'vite'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
+import { execFileSync } from 'child_process'
+import qrcode from 'qrcode-generator'
 
 const isProd = process.env.NODE_ENV === 'production'
 const PORT = Number(process.env.PORT) || 3000
@@ -1962,24 +1965,76 @@ app.post('/api/tg/login', (req, res) => {
 })
 
 // Phone access / Tailscale QR
-app.get('/api/phone', (req, res) => {
-  res.json({
-    tailscale: true,
-    opened_from: 'localhost:3000',
-    items: [
-      {
-        kind: 'tailscale',
-        title: 'Через Tailscale (из любой сети)',
-        url: 'http://desktop-jarvis.tailnet.ts.net:3000?t=sample-token-key-2026',
-        qr: '',
-      },
-      {
-        kind: 'lan',
-        title: 'Домашний Wi-Fi',
-        url: 'http://192.168.1.105:3000?t=sample-token-key-2026',
-        qr: '',
+/* QR-код для ссылки доступа: SVG в data-URI — тот же вид, что и в Python-версии (segno). */
+function qrDataUri(url: string): string {
+  try {
+    const qr = qrcode(0, 'M')
+    qr.addData(url)
+    qr.make()
+    const n = qr.getModuleCount()
+    const quiet = 2
+    const cell = 4
+    const size = (n + quiet * 2) * cell
+    let d = ''
+    for (let r = 0; r < n; r++) {
+      for (let c = 0; c < n; c++) {
+        if (!qr.isDark(r, c)) continue
+        const x = (c + quiet) * cell
+        const y = (r + quiet) * cell
+        d += `M${x} ${y}h${cell}v${cell}h${-cell}z`
       }
-    ]
+    }
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${size} ${size}" width="${size}" height="${size}" shape-rendering="crispEdges"><rect width="${size}" height="${size}" fill="#ffffff"/><path d="${d}" fill="#1c1c1e"/></svg>`
+    return `data:image/svg+xml;base64,${Buffer.from(svg, 'utf8').toString('base64')}`
+  } catch {
+    return ''
+  }
+}
+/* IP компьютера: Tailscale — через их CLI, домашняя сеть — из сетевых интерфейсов. */
+function tailscaleIp(): string | null {
+  const exes = process.platform === 'win32'
+    ? [path.join(process.env.ProgramFiles || 'C:\\Program Files', 'Tailscale', 'tailscale.exe'), 'tailscale']
+    : ['tailscale']
+  for (const exe of exes) {
+    try {
+      const out = execFileSync(exe, ['ip', '-4'], { encoding: 'utf8', timeout: 4000 })
+      const ip = String(out || '').split(/\r?\n/).map((s) => s.trim()).find(Boolean)
+      if (ip && /^\d+\.\d+\.\d+\.\d+$/.test(ip)) return ip
+    } catch {}
+  }
+  return null
+}
+function lanIp(): string | null {
+  const nets = os.networkInterfaces()
+  const found: string[] = []
+  for (const list of Object.values(nets)) {
+    for (const i of list || []) {
+      const v4 = (i as any).family === 4 || (i as any).family === 'IPv4'
+      if (v4 && !i.internal && i.address) found.push(i.address)
+    }
+  }
+  return found.find((a) => a.startsWith('192.168.')) || found.find((a) => a.startsWith('10.')) || found[0] || null
+}
+
+app.get('/api/phone', (req, res) => {
+  const host = os.hostname().toLowerCase()
+  const ts = tailscaleIp()
+  const lan = lanIp()
+  const base = (ip: string) => `http://${ip}:${PORT}`
+  const items = [
+    ts && { kind: 'tailscale', title: 'Через Tailscale (из любой сети)', url: base(ts), alt: `http://${host}:${PORT}`, qr: qrDataUri(base(ts)) },
+    lan && { kind: 'lan', title: 'Домашний Wi-Fi — телефон в той же сети', url: base(lan), qr: qrDataUri(base(lan)) },
+  ].filter(Boolean) as any[]
+  res.json({
+    tailscale: !!ts,
+    host,
+    port: PORT,
+    items,
+    opened_from: String(req.headers.host || ''),
+    is_windows: process.platform === 'win32',
+    local_only: HOST === '127.0.0.1',
+    can_rotate: false,
+    note: 'В QR зашит адрес компьютера. Наведите камеру телефона — сайт откроется, дальше «Добавить на экран Домой».',
   })
 })
 app.post('/api/phone/rotate', (req, res) => {

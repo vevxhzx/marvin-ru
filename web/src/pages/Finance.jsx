@@ -2,8 +2,13 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { api, money, shortDate, toLocalISO, plural } from '../lib/api'
 import { Num, Sheet, Field, Empty, useToast } from '../components/ui'
 import { useRefresh } from '../App'
-import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles } from 'lucide-react'
+import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
+import { useCardLayout, CardCtl, useWide } from '../lib/layout'
+
+/* Карточки вкладки «обзор»: порядок и ширина хранятся общим модулем lib/layout */
+const FIN_CARDS = ['balance', 'chart', 'income', 'recurring', 'debts', 'free', 'flow']
+const FIN_CARD_WIDTHS = { balance: 4, chart: 8, income: 3, recurring: 3, debts: 3, free: 3, flow: 12 }
 
 export default function Finance() {
   const [tab, setTab] = useState('overview') // 'overview' | 'txs' | 'accounts' | 'debts' | 'recurring' | 'goals'
@@ -24,6 +29,9 @@ export default function Finance() {
   // Filters for txs
   const [txSearch, setTxSearch] = useState('')
   const [txCategory, setTxCategory] = useState('all')
+  const [cardsEdit, setCardsEdit] = useState(false)
+  const { order: cardOrder, setOrder: setCardOrder, widths: cardWidths, move, cycleWidth, reset: resetCards } = useCardLayout('finance', FIN_CARDS, FIN_CARD_WIDTHS)
+  const wide = useWide()
 
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
@@ -115,7 +123,7 @@ export default function Finance() {
     setScrubX(x)
     setScrubY(y)
     setScrubActive(true)
-    setScrubTip(`${z(dt.getDate())}.${z(dt.getMonth() + 1)} · ${v < 0 ? '−' : ''}${money(Math.abs(v))} ₽`)
+    setScrubTip(`${z(dt.getDate())}.${z(dt.getMonth() + 1)} · ${v < 0 ? '−' : ''}${money(Math.abs(v))}`)
   }
 
   const handlePointerLeave = () => {
@@ -183,6 +191,7 @@ export default function Finance() {
               <span className={days === 90 ? 'on' : ''} onClick={() => setDays(90)}>90 дн</span>
             </div>
           )}
+          {tab === 'overview' && <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title="Переместить, спрятать или поменять ширину карточек">настроить</span>}
           <span className="btn g" onClick={exportCSV} title="Скачать CSV выписку">выписка</span>
           <span
             className="btn"
@@ -210,93 +219,115 @@ export default function Finance() {
         <span className={tab === 'techniques' ? 'on' : ''} onClick={() => setTab('techniques')}>техники</span>
       </div>
 
-      {/* Вкладка 1: ОБЗОР (Классический Bento из эталона) */}
+      {/* Вкладка 1: ОБЗОР (Классический Bento из эталона; порядок и ширина — кнопка «настроить») */}
       {tab === 'overview' && (
         <div className="bento">
-          {/* Карточка 1: Баланс (hero.s4) */}
-          <section className="c hero s4 r" style={{ '--i': 3 }}>
-            <div className="hd"><h2>баланс</h2><small>все счета</small></div>
-            <div className="big"><Num value={balance} /> ₽</div>
-            <span className="tag">за {days} дн −{money(spent)} ₽</span>
-            <div className="hm">
-              <div><small>доходы за {days} дн</small><b>+{money(earned)} ₽</b></div>
-              <div><small>долги</small><b>{money(debtsTotal)} ₽</b></div>
-            </div>
-          </section>
-
-          {/* Карточка 2: График кассы (chart.s8) */}
-          <section className="c chart s8 r" style={{ '--i': 4 }}>
-            <div className="hd"><h2>касса на {days} дней</h2><small>при текущем темпе</small></div>
-            <div className="cw" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
-              <div className="tip mono" style={{ left: `${Math.min(Math.max(scrubX / 6, 9), 91)}%`, top: `${(scrubY / 200) * 100}%` }}>
-                {scrubTip}
+          {cardOrder.map((id, i) => {
+            const st = { '--i': 3 + i, ...(wide ? { gridColumn: `span ${cardWidths[id] || FIN_CARD_WIDTHS[id]}` } : {}) }
+            const ctl = (
+              <CardCtl id={id} order={cardOrder} edit={cardsEdit} wide={wide}
+                onMove={move} onHide={(x) => setCardOrder((o) => o.filter((w) => w !== x))}
+                onWidth={cycleWidth} width={cardWidths[id] || FIN_CARD_WIDTHS[id]}
+                Icon={ChevronLeft} HideIcon={EyeOff} />
+            )
+            if (id === 'balance') return (
+              <section key="balance" className="c hero s4 r" style={st}>{ctl}
+                <div className="hd"><h2>баланс</h2><small>все счета</small></div>
+                <div className="big"><Num value={balance} /> ₽</div>
+                <span className="tag">за {days} дн −{money(spent)}</span>
+                <div className="hm">
+                  <div><small>доходы за {days} дн</small><b>+{money(earned)}</b></div>
+                  <div><small>долги</small><b>{money(debtsTotal)}</b></div>
+                </div>
+              </section>
+            )
+            if (id === 'chart') return (
+              <section key="chart" className="c chart s8 r" style={st}>{ctl}
+                <div className="hd"><h2>касса на {days} дней</h2><small>при текущем темпе</small></div>
+                <div className="cw" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
+                  <div className="tip mono" style={{ left: `${Math.min(Math.max(scrubX / 6, 9), 91)}%`, top: `${(scrubY / 200) * 100}%` }}>
+                    {scrubTip}
+                  </div>
+                  <svg ref={svRef} viewBox="0 0 600 200" role="img" aria-label="касса на 30 дней">
+                    <defs>
+                      <linearGradient id="gaFin" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="0" style={{ stopColor: 'var(--neg)', stopOpacity: 0.35 }} />
+                        <stop offset="1" style={{ stopColor: 'var(--neg)', stopOpacity: 0 }} />
+                      </linearGradient>
+                      <linearGradient id="glFin" x1="0" x2="1">
+                        <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
+                        <stop offset="1" style={{ stopColor: 'var(--neg)' }} />
+                      </linearGradient>
+                    </defs>
+                    <line className="zero" x1="0" x2="600" y1="66" y2="66" />
+                    <path className="ar" fill="url(#gaFin)" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186V200H0Z" />
+                    <path className="ln" stroke="url(#glFin)" pathLength="1" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186" />
+                    <circle className="pulse" cx="0" cy="20" r="5" />
+                    <circle className="d" style={{ '--t': '.9s' }} cx="0" cy="20" r="5" fill="var(--pos)" />
+                    <circle className="d" style={{ '--t': '1.1s' }} cx="60" cy="34" r="4.5" fill="var(--ink)" />
+                    <circle className="d" style={{ '--t': '1.3s' }} cx="160" cy="42" r="5" fill="var(--pos)" />
+                    <circle className="d" style={{ '--t': '1.8s' }} cx="330" cy="100" r="4.5" fill="var(--ink)" />
+                    <circle className="d" style={{ '--t': '2.1s' }} cx="450" cy="140" r="4.5" fill="var(--ink)" />
+                    <circle className="d" style={{ '--t': '2.6s' }} cx="600" cy="186" r="6" fill="var(--neg)" />
+                    <line className="sl" x1={scrubX} x2={scrubX} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
+                    <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0} cx={scrubX} cy={scrubY} />
+                  </svg>
+                </div>
+                <div className="ax mono"><span>{startStr}</span><span>14.10</span><span>{endStr}</span></div>
+                <div className="lg"><span><i style={{ background: 'var(--pos)' }}></i>поступление</span><span><i style={{ background: 'var(--ink)' }}></i>платёж</span></div>
+              </section>
+            )
+            if (id === 'income') return (
+              <section key="income" className="c p2 s3 r" style={st}>{ctl}
+                <div className="hd"><h2>доход</h2><small>{cf.income_is_estimate ? 'средний' : ''}</small></div>
+                <div className="mid"><Num value={cf.income || 22844} /> ₽</div>
+              </section>
+            )
+            if (id === 'recurring') return (
+              <section key="recurring" className="c p1 s3 r" style={st}>{ctl}
+                <div className="hd"><h2>регулярные</h2><small></small></div>
+                <div className="mid"><Num value={cf.recurring || 1528} /> ₽</div>
+              </section>
+            )
+            if (id === 'debts') return (
+              <section key="debts" className="c blk s3 r" style={st}>{ctl}
+                <div className="hd"><h2>по долгам</h2><small></small></div>
+                <div className="mid"><Num value={cf.debt_payments || 13500} /> ₽</div>
+              </section>
+            )
+            if (id === 'free') return (
+              <section key="free" className="c hero s3 r" style={st}>{ctl}
+                <div className="hd"><h2>свободно</h2><small>в месяц</small></div>
+                <div className="mid"><Num value={cf.free || 7816} /> ₽</div>
+              </section>
+            )
+            return (
+              <section key="flow" className="c s12 r" style={st}>{ctl}
+                <div className="hd"><h2>поток в месяц</h2><small>доход минус обязательные платежи — то, чем реально можно распоряжаться</small></div>
+                <div className="flow">
+                  <i style={{ width: `${flowRecurringPct}%`, background: 'var(--ink)' }}></i>
+                  <i style={{ width: `${flowDebtPct}%`, background: 'var(--ink3)' }}></i>
+                  <i style={{ width: `${flowFreePct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }}></i>
+                </div>
+                <div className="fl">
+                  <span>регулярные · долги · свободно</span>
+                  <span>на жизнь обычно уходит {money(livingSpent)} → остаётся <b>{livingRemain < 0 ? '−' : ''}{money(Math.abs(livingRemain))}</b></span>
+                </div>
+              </section>
+            )
+          })}
+          {cardsEdit && (
+            <section className="c s12 r" style={{ '--i': 11 }}>
+              <div className="hd"><h2>настройка карточек</h2><small></small></div>
+              <p className="muted text-[13px]">стрелки — порядок, кнопка с числом — ширина карточки, крестик — спрятать.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {FIN_CARDS.filter((x) => !cardOrder.includes(x)).map((x) => (
+                  <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {({ balance: 'баланс', chart: 'касса', income: 'доход', recurring: 'регулярные', debts: 'долги', free: 'свободно', flow: 'поток' })[x]}</button>
+                ))}
+                <button className="btn-ghost btn-sm" onClick={resetCards}>вернуть всё как было</button>
               </div>
-              <svg ref={svRef} viewBox="0 0 600 200" role="img" aria-label="касса на 30 дней">
-                <defs>
-                  <linearGradient id="gaFin" x1="0" y1="0" x2="0" y2="1">
-                    <stop offset="0" style={{ stopColor: 'var(--neg)', stopOpacity: 0.35 }} />
-                    <stop offset="1" style={{ stopColor: 'var(--neg)', stopOpacity: 0 }} />
-                  </linearGradient>
-                  <linearGradient id="glFin" x1="0" x2="1">
-                    <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
-                    <stop offset="1" style={{ stopColor: 'var(--neg)' }} />
-                  </linearGradient>
-                </defs>
-                <line className="zero" x1="0" x2="600" y1="66" y2="66" />
-                <path className="ar" fill="url(#gaFin)" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186V200H0Z" />
-                <path className="ln" stroke="url(#glFin)" pathLength="1" d="M0 20L60 34L100 46L130 54L160 42L200 58L330 100L450 140L600 186" />
-                <circle className="pulse" cx="0" cy="20" r="5" />
-                <circle className="d" style={{ '--t': '.9s' }} cx="0" cy="20" r="5" fill="var(--pos)" />
-                <circle className="d" style={{ '--t': '1.1s' }} cx="60" cy="34" r="4.5" fill="var(--ink)" />
-                <circle className="d" style={{ '--t': '1.3s' }} cx="160" cy="42" r="5" fill="var(--pos)" />
-                <circle className="d" style={{ '--t': '1.8s' }} cx="330" cy="100" r="4.5" fill="var(--ink)" />
-                <circle className="d" style={{ '--t': '2.1s' }} cx="450" cy="140" r="4.5" fill="var(--ink)" />
-                <circle className="d" style={{ '--t': '2.6s' }} cx="600" cy="186" r="6" fill="var(--neg)" />
-                <line className="sl" x1={scrubX} x2={scrubX} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
-                <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0} cx={scrubX} cy={scrubY} />
-              </svg>
-            </div>
-            <div className="ax mono"><span>{startStr}</span><span>14.10</span><span>{endStr}</span></div>
-            <div className="lg"><span><i style={{ background: 'var(--pos)' }}></i>поступление</span><span><i style={{ background: 'var(--ink)' }}></i>платёж</span></div>
-          </section>
-
-          {/* Карточка 3: Доход (p2.s3) */}
-          <section className="c p2 s3 r" style={{ '--i': 5 }}>
-            <div className="hd"><h2>доход</h2><small>{cf.income_is_estimate ? 'средний' : ''}</small></div>
-            <div className="mid"><Num value={cf.income || 22844} /> ₽</div>
-          </section>
-
-          {/* Карточка 4: Регулярные (p1.s3) */}
-          <section className="c p1 s3 r" style={{ '--i': 6 }}>
-            <div className="hd"><h2>регулярные</h2><small></small></div>
-            <div className="mid"><Num value={cf.recurring || 1528} /> ₽</div>
-          </section>
-
-          {/* Карточка 5: По долгам (blk.s3) */}
-          <section className="c blk s3 r" style={{ '--i': 7 }}>
-            <div className="hd"><h2>по долгам</h2><small></small></div>
-            <div className="mid"><Num value={cf.debt_payments || 13500} /> ₽</div>
-          </section>
-
-          {/* Карточка 6: Свободно в месяц (hero.s3) */}
-          <section className="c hero s3 r" style={{ '--i': 8 }}>
-            <div className="hd"><h2>свободно</h2><small>в месяц</small></div>
-            <div className="mid"><Num value={cf.free || 7816} /> ₽</div>
-          </section>
-
-          {/* Карточка 7: Поток в месяц (s12) */}
-          <section className="c s12 r" style={{ '--i': 9 }}>
-            <div className="hd"><h2>поток в месяц</h2><small>доход минус обязательные платежи — то, чем реально можно распоряжаться</small></div>
-            <div className="flow">
-              <i style={{ width: `${flowRecurringPct}%`, background: 'var(--ink)' }}></i>
-              <i style={{ width: `${flowDebtPct}%`, background: 'var(--ink3)' }}></i>
-              <i style={{ width: `${flowFreePct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }}></i>
-            </div>
-            <div className="fl">
-              <span>регулярные · долги · свободно</span>
-              <span>на жизнь обычно уходит {money(livingSpent)} ₽ → остаётся <b>{livingRemain < 0 ? '−' : ''}{money(Math.abs(livingRemain))} ₽</b></span>
-            </div>
-          </section>
+            </section>
+          )}
         </div>
       )}
 
@@ -361,7 +392,7 @@ export default function Finance() {
                     </small>
                   </span>
                   <span className="amt" style={{ color: t.amount > 0 ? 'var(--pos)' : 'inherit' }}>
-                    {t.amount > 0 ? '+' : ''}{money(t.amount)} ₽
+                    {t.amount > 0 ? '+' : ''}{money(t.amount)}
                   </span>
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
                     <button
@@ -471,11 +502,11 @@ export default function Finance() {
                 </div>
                 <div className="mid"><Num value={left} /> ₽</div>
                 <div className="w-full bg-white/10 rounded-full h-2 mt-4 overflow-hidden">
-                  <div className="bg-gradient-to-r from-[#5b7cff] to-[#a07bff] h-full rounded-full transition-all" style={{ width: `${pct}%` }}></div>
+                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #a07bff)' }}></div>
                 </div>
                 <div className="flex items-center justify-between mt-3 text-xs text-[#8b8e98] num">
-                  <span>выплачено {money(paid)} ₽ ({pct}%)</span>
-                  <span>из {money(total)} ₽</span>
+                  <span>выплачено {money(paid)} ({pct}%)</span>
+                  <span>из {money(total)}</span>
                 </div>
                 <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/10">
                   <button
@@ -524,7 +555,7 @@ export default function Finance() {
                     {r.name || r.title}
                     {r.category && <small>{r.category}</small>}
                   </span>
-                  <span className="amt">{money(r.amount)} ₽</span>
+                  <span className="amt">{money(r.amount)}</span>
                   <button
                     type="button"
                     onClick={async () => {
@@ -582,7 +613,7 @@ export default function Finance() {
                   </div>
                   <div className="flex items-center justify-between mt-2.5 text-xs text-[var(--ink2)] num">
                     <span>{pct}% накоплено</span>
-                    <span>цель: {money(target)} ₽</span>
+                    <span>цель: {money(target)}</span>
                   </div>
                   <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)]">
                     <button

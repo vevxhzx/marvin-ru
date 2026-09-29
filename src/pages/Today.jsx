@@ -6,7 +6,8 @@ import TaskSheet from '../components/TaskSheet'
 import { EventSheet } from './Calendar'
 import { usePrefs } from '../lib/prefs'
 import { Sheet } from '../components/ui'
-import { ArrowLeft, ArrowRight, EyeOff, Plus, RotateCcw, Check, Sparkles, Square, Play } from 'lucide-react'
+import { ArrowLeft, EyeOff, Plus, RotateCcw, Check, Sparkles, Square, Play } from 'lucide-react'
+import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 import { useTimer, mmss } from './Orders'
 
 import { TodaySummaryWidget, ScreenTimeBentoWidget } from '../components/ReportCards'
@@ -36,7 +37,7 @@ const ALL_WIDGET_DEFS = {
 }
 
 const DEFAULT_ORDER = ['summary', 'screen', 'balance', 'chart', 'expenses', 'free', 'debts', 'today', 'calendar', 'brain']
-const STORAGE_KEY = 'marvin_today_widgets_order_v3'
+const DEFAULT_WIDTHS = { summary: 8, screen: 4, balance: 4, chart: 8, expenses: 4, free: 4, debts: 4, today: 4, calendar: 4, brain: 4, pomo: 4, orders: 8 }
 
 export default function Today({ openChat, address = 'вовчик' }) {
   const nav = useNavigate()
@@ -48,54 +49,23 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const [, show] = useToast()
   const { t: timer, left: pomoLeft, reload: reloadTimer } = useTimer()
 
-  // Режим настройки главной
+  // Режим настройки главной: порядок и ширина карточек
   const [editMode, setEditMode] = useState(false)
-  const [widgetOrder, setWidgetOrder] = useState(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) {
-        const parsed = JSON.parse(saved)
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed
-      }
-    } catch {}
-    return DEFAULT_ORDER
-  })
+  const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth, reset: resetLayout } = useCardLayout('today', DEFAULT_ORDER, DEFAULT_WIDTHS)
+  const wide = useWide()
   const [addSheetOpen, setAddSheetOpen] = useState(false)
   const [draggedWidget, setDraggedWidget] = useState(null)
 
-  const saveOrder = (newOrder) => {
-    setWidgetOrder(newOrder)
-    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(newOrder)) } catch {}
-  }
-
-  const removeWidget = (id) => {
-    const updated = widgetOrder.filter((w) => w !== id)
-    saveOrder(updated)
-  }
+  const removeWidget = (id) => setWidgetOrder((o) => o.filter((w) => w !== id))
 
   const addWidget = (id) => {
-    if (!widgetOrder.includes(id)) {
-      const updated = [...widgetOrder, id]
-      saveOrder(updated)
-    }
+    if (!widgetOrder.includes(id)) setWidgetOrder((o) => [...o, id])
     setAddSheetOpen(false)
   }
 
-  const moveWidget = (id, direction) => {
-    const idx = widgetOrder.indexOf(id)
-    if (idx === -1) return
-    const targetIdx = idx + direction
-    if (targetIdx < 0 || targetIdx >= widgetOrder.length) return
-    const copy = [...widgetOrder]
-    const temp = copy[idx]
-    copy[idx] = copy[targetIdx]
-    copy[targetIdx] = temp
-    saveOrder(copy)
-  }
+  const moveWidget = (id, direction) => move(id, direction)
 
-  const resetWidgets = () => {
-    saveOrder(DEFAULT_ORDER)
-  }
+  const resetWidgets = () => resetLayout()
 
   const load = () => {
     Promise.all([
@@ -243,7 +213,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
 
   const [scrubX, setScrubX] = useState(600)
   const [scrubY, setScrubY] = useState(186)
-  const [scrubTip, setScrubTip] = useState(`−${money(Math.abs(forecastBalance))} ₽ к ${endStr}`)
+  const [scrubTip, setScrubTip] = useState(`−${money(Math.abs(forecastBalance))} к ${endStr}`)
   const [scrubActive, setScrubActive] = useState(false)
   const svRef = useRef(null)
 
@@ -257,14 +227,14 @@ export default function Today({ openChat, address = 'вовчик' }) {
     setScrubX(x)
     setScrubY(y)
     setScrubActive(true)
-    setScrubTip(`${z(dt.getDate())}.${z(dt.getMonth() + 1)} · ${v < 0 ? '−' : ''}${money(Math.abs(v))} ₽`)
+    setScrubTip(`${z(dt.getDate())}.${z(dt.getMonth() + 1)} · ${v < 0 ? '−' : ''}${money(Math.abs(v))}`)
   }
 
   const handlePointerLeave = () => {
     setScrubX(600)
     setScrubY(186)
     setScrubActive(false)
-    setScrubTip(`−${money(Math.abs(forecastBalance))} ₽ к ${endStr}`)
+    setScrubTip(`−${money(Math.abs(forecastBalance))} к ${endStr}`)
   }
 
   // Диалоги правки
@@ -288,55 +258,24 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const handleDrop = (e, targetId) => {
     if (!editMode || !draggedWidget || draggedWidget === targetId) return
     e.preventDefault()
-    const sourceIdx = widgetOrder.indexOf(draggedWidget)
-    const targetIdx = widgetOrder.indexOf(targetId)
-    if (sourceIdx === -1 || targetIdx === -1) return
-    const copy = [...widgetOrder]
-    copy.splice(sourceIdx, 1)
-    copy.splice(targetIdx, 0, draggedWidget)
-    saveOrder(copy)
+    dropWidget(draggedWidget, targetId)
     setDraggedWidget(null)
   }
 
   // Рендер элементов управления карточки в режиме правки
-  const renderCardControls = (widgetId, idx) => {
-    if (!editMode) return null
-    return (
-      <div className="absolute top-3 right-3 z-30 flex items-center gap-1.5 rounded-full p-1 bg-[var(--sf)] shadow-md border border-[var(--line)]">
-        <button
-          type="button"
-          disabled={idx === 0}
-          onClick={(e) => { e.stopPropagation(); moveWidget(widgetId, -1) }}
-          className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)] disabled:opacity-30 transition"
-          title="Сдвинуть влево/вверх"
-        >
-          <ArrowLeft size={14} />
-        </button>
-        <button
-          type="button"
-          disabled={idx === widgetOrder.length - 1}
-          onClick={(e) => { e.stopPropagation(); moveWidget(widgetId, 1) }}
-          className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)] disabled:opacity-30 transition"
-          title="Сдвинуть вправо/вниз"
-        >
-          <ArrowRight size={14} />
-        </button>
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); removeWidget(widgetId) }}
-          className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)] transition"
-          title="Скрыть карточку"
-        >
-          <EyeOff size={14} />
-        </button>
-      </div>
-    )
-  }
+  const renderCardControls = (widgetId) => (
+    <CardCtl id={widgetId} order={widgetOrder} edit={editMode} wide={wide}
+      onMove={moveWidget} onHide={removeWidget} onWidth={cycleWidth}
+      width={widgetWidths[widgetId] || DEFAULT_WIDTHS[widgetId] || 4}
+      Icon={ArrowLeft} HideIcon={EyeOff} />
+  )
 
   // Генератор виджетов
   const renderWidget = (id, idx) => {
     const isWig = editMode ? 'wig' : ''
-    const animStyle = { '--i': 4 + idx }
+    // ширина задаётся инлайном (перебивает класс s4/s8), но только на широком экране —
+    // на планшете и телефоне карточки по-прежнему подстраиваются под экран
+    const animStyle = { '--i': 4 + idx, ...(wide ? { gridColumn: `span ${widgetWidths[id] || DEFAULT_WIDTHS[id] || 4}` } : {}) }
     const dragProps = editMode ? {
       draggable: true,
       onDragStart: (e) => handleDragStart(e, id),
@@ -386,8 +325,8 @@ export default function Today({ openChat, address = 'вовчик' }) {
             </div>
             <div className="dl mono"><span>{startStr}</span><span>{endStr}</span></div>
             <div className="hm">
-              <div><small>в среднем в день</small><b>{money(avgDaily)} ₽</b></div>
-              <div><small>к {endStr}</small><b>{forecastBalance < 0 ? '−' : ''}{money(Math.abs(forecastBalance))} ₽</b></div>
+              <div><small>в среднем в день</small><b>{money(avgDaily)}</b></div>
+              <div><small>к {endStr}</small><b>{forecastBalance < 0 ? '−' : ''}{money(Math.abs(forecastBalance))}</b></div>
             </div>
           </section>
         )
@@ -553,7 +492,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
                 <svg className="pomo-circle-lg" viewBox="0 0 80 80">
                   <defs>
                     <linearGradient id="pomoTodayGrad" x1="0" y1="0" x2="1" y2="1">
-                      <stop offset="0%" stopColor="#5b7cff" />
+                      <stop offset="0%" stopColor="var(--acc)" />
                       <stop offset="100%" stopColor="#c04cff" />
                     </linearGradient>
                   </defs>
@@ -686,7 +625,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
             <div>
               <b className="block text-[15px] font-semibold">режим настройки главного экрана</b>
               <span className="text-[13px] text-[var(--ink2)]">
-                перетаскивайте карточки или перемещайте стрелками, скрывайте или добавляйте новые
+                перетаскивайте карточки мышью или стрелками, меняйте ширину (кнопка с числом столбцов), скрывайте и добавляйте новые
               </span>
             </div>
           </div>
@@ -702,7 +641,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
               type="button"
               className="btn g !h-9 !px-3 text-[13px]"
               onClick={resetWidgets}
-              title="Сбросить порядок"
+              title="Сбросить порядок и ширину карточек"
             >
               <RotateCcw size={14} />
             </button>

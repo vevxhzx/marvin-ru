@@ -152,7 +152,7 @@ function Buckets({ b, onOpenCat }) {
       <div className="mt-1.5 flex h-[3px] w-full overflow-hidden rounded-full opacity-40" style={{ background: 'var(--fill-2)' }} title="норма 50 / 30 / 20">
         {b.buckets.map((x) => <div key={x.bucket} className="h-full" style={{ width: `${x.norm * 100}%`, background: BUCKET_TONE[x.bucket] }} />)}
       </div>
-      <div className="mt-6 grid grid-cols-3 gap-4">
+      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         {b.buckets.map((x) => (
           <div key={x.bucket}>
             <div className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-full" style={{ background: BUCKET_TONE[x.bucket] }} /><span className="label">{x.label}</span></div>

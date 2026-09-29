@@ -40,7 +40,7 @@ export function LivePopover({ live, onClose, place = "absolute left-0 top-[46px]
   const PRES = { active: 'за ПК', idle: 'отошли', away: 'давно нет', offline: 'ПК не на связи' }
   return (
     <div
-      className={`${place} z-[100] w-[300px] !p-3.5 text-[13px] rounded-2xl`}
+      className={`${place} z-[100] w-[300px] max-w-[calc(100vw-24px)] !p-3.5 text-[13px] rounded-2xl`}
       style={{
         background: '#16161d',
         border: '1px solid rgba(255, 255, 255, 0.14)',

@@ -295,7 +295,8 @@ export default function Calendar() {
               <h2>расписание на неделю</h2>
               <small>кликните на день или событие для просмотра</small>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-7 gap-3 mt-4">
+            {/* на телефоне неделя листается вбок (7 колонок в ряд), на ПК — как обычно */}
+            <div className="flex gap-3 mt-4 overflow-x-auto -mx-1 px-1 pb-1 md:mx-0 md:px-0 md:pb-0 md:overflow-visible md:grid md:grid-cols-7">
               {weekDays.map((dayItem) => {
                 const isCurrent = dayItem.isToday
                 const isPicked = dayItem.isSel
@@ -303,7 +304,7 @@ export default function Calendar() {
                   <div
                     key={dayItem.key}
                     onClick={() => setSelected(dayItem.date)}
-                    className={`rounded-2xl p-3 border transition cursor-pointer flex flex-col min-h-[140px] ${
+                    className={`w-[200px] shrink-0 md:w-auto md:shrink rounded-2xl p-3 border transition cursor-pointer flex flex-col min-h-[140px] ${
                       isPicked
                         ? 'border-[var(--acc)] bg-[var(--sf2)] shadow-sm'
                         : isCurrent

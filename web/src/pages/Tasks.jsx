@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
 import { api, hhmm, isSameDay, plural } from '../lib/api'
 import { Num, useToast } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
 import { usePrefs, prefs as PREFS } from '../lib/prefs'
+import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 
 const dueTs = (t) => (t.due ? new Date(t.due).getTime() : 9e15)
 const SORT_FN = {
@@ -13,6 +15,10 @@ const SORT_FN = {
   due: (a, b) => dueTs(a) - dueTs(b) || a.priority - b.priority,
   new: (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
 }
+
+/* Карточки этой страницы: порядок и ширина хранятся общим модулем lib/layout */
+const CARDS = ['done', 'list', 'empty', 'sort']
+const CARD_WIDTHS = { done: 4, list: 8, empty: 6, sort: 6 }
 
 export default function Tasks() {
   const [tasks, setTasks] = useState(null)
@@ -25,6 +31,9 @@ export default function Tasks() {
   const { tick, bump } = useRefresh()
   const [{ tasksSort = 'priority' }] = usePrefs()
   const sortFn = SORT_FN[tasksSort] || SORT_FN.priority
+  const [cardsEdit, setCardsEdit] = useState(false)
+  const { order: cardOrder, setOrder: setCardOrder, widths: cardWidths, move, cycleWidth, reset: resetCards } = useCardLayout('tasks', CARDS, CARD_WIDTHS)
+  const wide = useWide()
 
   const load = () => api.tasks(true, true).then(setTasks).catch(() => {})
   useEffect(() => { load() }, [tick])
@@ -93,7 +102,10 @@ export default function Tasks() {
             <span className={view === 'aims' ? 'on' : ''} onClick={() => setView('aims')}>цели</span>
           </div>
           {view !== 'aims' && (
-            <span className="btn" onClick={() => setSheet('new')}>+ задача</span>
+            <>
+              <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title="Переместить, спрятать или поменять ширину карточек">настроить</span>
+              <span className="btn" onClick={() => setSheet('new')}>+ задача</span>
+            </>
           )}
         </div>
       </div>
@@ -118,63 +130,91 @@ export default function Tasks() {
             <span className="send" style={{ fontSize: '24px', cursor: 'pointer' }} onClick={addQuick}>+</span>
           </div>
 
-          {/* Bento сетка задач */}
+          {/* Bento сетка задач: порядок и ширина настраиваются кнопкой «настроить» */}
           <div className="bento">
-            {/* Карточка 1: Выполнено (hero.s4) */}
-            <section className="c hero s4 r" style={{ '--i': 3 }}>
-              <div className="hd"><h2>выполнено</h2><small>всего</small></div>
-              <div className="big"><Num value={done.length} /></div>
-              <span className="tag">{open.length === 0 ? 'всё сделано' : `${open.length} в работе`}</span>
-              <div className="hm">
-                <div><small>сегодня по календарю</small><b>{agenda.length}</b></div>
-                <div><small>цели</small><b>0</b></div>
-              </div>
-            </section>
-
-            {/* Карточка 2: Список задач (s8) */}
-            <section className="c s8 r" style={{ '--i': 4 }}>
-              <div className="hd">
-                <h2>{view === 'today' ? 'сегодня по календарю' : view === 'done' ? 'выполнено' : 'задачи в работе'}</h2>
-                <small>{currentList.length}</small>
-              </div>
-              {currentList.length === 0 ? (
-                <p style={{ color: 'var(--ink3)', paddingTop: '12px' }}>список пуст</p>
-              ) : (
-                currentList.map((t) => (
-                  <label className="rowi ck" key={t.id}>
-                    <input type="checkbox" checked={!!t.done} onChange={() => toggle(t)} />
-                    <span className="t">
-                      {t.title}
-                      {t.sub || t.category ? <small>{t.sub || t.category}</small> : null}
-                    </span>
-                    {t.due && <time>{hhmm(t.due)}</time>}
-                  </label>
-                ))
-              )}
-            </section>
-
-            {/* Карточка 3: Список пуст (p2.s6) */}
-            <section className="c p2 s6 r" style={{ '--i': 5 }}>
-              <div className="hd"><h2>список пуст</h2><small></small></div>
-              <p className="emp">можно отдыхать, сэр. или сказать мне что-нибудь</p>
-              <span className="chip" onClick={() => addQuickDirect('купить молоко')}>«задача: купить молоко» ↗</span>
-            </section>
-
-            {/* Карточка 4: Сортировка (p1.s6) */}
-            <section className="c p1 s6 r" style={{ '--i': 6 }}>
-              <div className="hd"><h2>сортировка</h2><small></small></div>
-              <div className="sg">
-                <span className={tasksSort === 'priority' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'priority' })}>по важности</span>
-                <span className={tasksSort === 'due' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'due' })}>по сроку</span>
-                <span className={tasksSort === 'new' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'new' })}>по новизне</span>
-              </div>
-              <p style={{ marginTop: '18px', opacity: 0.8 }}>важное сверху, просроченное подсвечивается</p>
-            </section>
+            {cardOrder.map((id, i) => {
+              const st = { '--i': 3 + i, ...(wide ? { gridColumn: `span ${cardWidths[id] || CARD_WIDTHS[id]}` } : {}) }
+              const ctl = (
+                <CardCtl id={id} order={cardOrder} edit={cardsEdit} wide={wide}
+                  onMove={move} onHide={(x) => setCardOrder((o) => o.filter((w) => w !== x))}
+                  onWidth={cycleWidth} width={cardWidths[id] || CARD_WIDTHS[id]}
+                  Icon={ChevronLeft} HideIcon={EyeOff} />
+              )
+              if (id === 'done') return (
+                <section key="done" className="c hero s4 r" style={st}>{ctl}
+                  <div className="hd"><h2>выполнено</h2><small>всего</small></div>
+                  <div className="big"><Num value={done.length} /></div>
+                  <span className="tag">{open.length === 0 ? 'всё сделано' : `${open.length} в работе`}</span>
+                  <div className="hm">
+                    <div><small>сегодня по календарю</small><b>{agenda.length}</b></div>
+                    <div><small>цели</small><b>0</b></div>
+                  </div>
+                </section>
+              )
+              if (id === 'list') return (
+                <section key="list" className="c s8 r" style={st}>{ctl}
+                  <div className="hd">
+                    <h2>{view === 'today' ? 'сегодня по календарю' : view === 'done' ? 'выполнено' : 'задачи в работе'}</h2>
+                    <small>{currentList.length}</small>
+                  </div>
+                  {currentList.length === 0 ? (
+                    <p style={{ color: 'var(--ink3)', paddingTop: '12px' }}>список пуст</p>
+                  ) : (
+                    <>
+                      <p className="label" style={{ marginTop: '-6px', marginBottom: '10px', textTransform: 'none', letterSpacing: 0 }}>
+                        кружок слева — закрыть задачу · название — открыть и изменить
+                      </p>
+                      {currentList.map((t) => (
+                        <div className="rowi ck" key={t.id}>
+                          <input type="checkbox" checked={!!t.done} onChange={() => toggle(t)} aria-label={t.done ? 'вернуть в работу' : 'закрыть задачу'} />
+                          <span className="t" style={{ cursor: 'pointer' }} onClick={() => setSheet(t)} title="открыть задачу">
+                            {t.title}
+                            {t.sub || t.category ? <small>{t.sub || t.category}</small> : null}
+                          </span>
+                          {t.due && <time>{hhmm(t.due)}</time>}
+                          <button className="row-open" onClick={() => setSheet(t)} aria-label="открыть задачу" title="изменить задачу"><ChevronRight size={16} /></button>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </section>
+              )
+              if (id === 'empty') return (
+                <section key="empty" className="c p2 s6 r" style={st}>{ctl}
+                  <div className="hd"><h2>список пуст</h2><small></small></div>
+                  <p className="emp">можно отдыхать, сэр. или сказать мне что-нибудь</p>
+                  <span className="chip" onClick={() => addQuickDirect('купить молоко')}>«задача: купить молоко» ↗</span>
+                </section>
+              )
+              return (
+                <section key="sort" className="c p1 s6 r" style={st}>{ctl}
+                  <div className="hd"><h2>сортировка</h2><small></small></div>
+                  <div className="sg">
+                    <span className={tasksSort === 'priority' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'priority' })}>по важности</span>
+                    <span className={tasksSort === 'due' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'due' })}>по сроку</span>
+                    <span className={tasksSort === 'new' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'new' })}>по новизне</span>
+                  </div>
+                  <p style={{ marginTop: '18px', opacity: 0.8 }}>важное сверху, просроченное подсвечивается</p>
+                </section>
+              )
+            })}
+            {cardsEdit && cardOrder.length < CARDS.length && (
+              <section className="c s12 r" style={{ '--i': 8 }}>
+                <div className="hd"><h2>спрятанные карточки</h2><small>{CARDS.length - cardOrder.length}</small></div>
+                <div className="flex flex-wrap gap-2">
+                  {CARDS.filter((x) => !cardOrder.includes(x)).map((x) => (
+                    <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {({ done: 'выполнено', list: 'задачи', empty: 'список пуст', sort: 'сортировка' })[x]}</button>
+                  ))}
+                  <button className="btn-ghost btn-sm" onClick={resetCards}>вернуть всё как было</button>
+                </div>
+              </section>
+            )}
           </div>
         </>
       )}
 
-      <TaskSheet open={!!sheet} task={sheet === 'new' ? null : sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }} />
+      <TaskSheet open={!!sheet} task={sheet === 'new' ? null : sheet} onClose={() => setSheet(null)}
+        onDone={(msg) => { setSheet(null); load(); bump(); if (msg) show(msg) }} onErr={show.err} />
     </div>
   )
 }

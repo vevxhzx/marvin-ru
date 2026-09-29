@@ -239,13 +239,9 @@ const ACCENT_SWATCHES = ['#0a3cff', '#1d1d24', '#5b5bf0', '#8a5cff', '#c04cff', 
 function Appearance() {
   const [p, set] = usePrefs()
   const [mode, setMode] = useTheme()
-  const [activeAcc, setActiveAcc] = useState(() => p.accentHex || '#0a3cff')
+  const activeAcc = p.accentHex || '#0a3cff'
 
-  const applyAccent = (hex) => {
-    setActiveAcc(hex)
-    set({ accentHex: hex })
-    document.documentElement.style.setProperty('--acc', hex)
-  }
+  const applyAccent = (hex) => set({ accentHex: hex })
 
   const toggleMotion = () => {
     const next = !p.motion
@@ -288,7 +284,7 @@ function Appearance() {
         </div>
         <div className="lbl">углы</div>
         <div className="sg">
-          {[['soft', 'мягкие'], ['strict', 'строгие'], ['round', 'круглые']].map(([id, label]) => (
+          {[['soft', 'мягкие'], ['sharp', 'строгие'], ['round', 'круглые']].map(([id, label]) => (
             <span key={id} className={p.radius === id ? 'on' : ''} onClick={() => set({ radius: id })}>{label}</span>
           ))}
         </div>
@@ -301,7 +297,7 @@ function Appearance() {
         </div>
       </section>
 
-      <button className="btn-ghost btn-sm" onClick={() => { PREFS.reset(); setMode('auto'); applyAccent('#0a3cff') }}><RotateCcw size={13} /> сбросить вид</button>
+      <button className="btn-ghost btn-sm" onClick={() => { PREFS.reset(); setMode('auto') }}><RotateCcw size={13} /> сбросить вид</button>
     </>
   )
 }
@@ -518,19 +514,23 @@ function PhoneAccess() {
               <div className="min-w-0">
                 <div className="label">{it.title}</div>
                 <a className="h4 mt-1 block truncate text-accent" href={it.url} target="_blank" rel="noreferrer">{it.url.replace(/\?t=.*$/, '')}</a>
-                <div className="faint mt-2 text-[12px]">Наведи камеру телефона на QR → открыть → «Добавить на экран Домой». В QR зашит ключ доступа: после первого захода телефон запомнит его на год.</div>
+                <div className="faint mt-2 text-[12px]">{info.note || 'Наведи камеру телефона на QR → открыть → «Добавить на экран Домой».'}</div>
               </div>
             </Card>
           ))}
         </div>
       )}
-      <div className="flex flex-wrap items-center gap-3">
-        <button className="btn-ghost" onClick={rotate} disabled={rotating}><RefreshCw size={14} className={rotating ? 'animate-spin' : ''} /> новый ключ доступа</button>
-        <span className="faint text-[12px]">Потеряли телефон или показали QR не тому — выпустите новый ключ, старые ссылки перестанут работать.</span>
-      </div>
+      {info.can_rotate !== false && (
+        <div className="flex flex-wrap items-center gap-3">
+          <button className="btn-ghost" onClick={rotate} disabled={rotating}><RefreshCw size={14} className={rotating ? 'animate-spin' : ''} /> новый ключ доступа</button>
+          <span className="faint text-[12px]">Потеряли телефон или показали QR не тому — выпустите новый ключ, старые ссылки перестанут работать.</span>
+        </div>
+      )}
       <div className="faint text-[12px]">
         {remote ? <span className="pos">Эта страница уже открыта не с самого ПК ({info.opened_from}) — значит, доступ работает.</span>
-          : <>Не открывается? Скорее всего, порт закрыт брандмауэром Windows — запустите <code>phone.bat</code> (один раз, попросит права администратора). Ассистент при этом должен быть запущен.</>}
+          : info.local_only
+            ? <>Сервер сейчас слушает только этот компьютер (<code>127.0.0.1</code>) — QR отсканируется, но телефон не откроет сайт. Чтобы открыть доступ, запустите сервер с переменной <code>HOST=0.0.0.0</code>.</>
+            : <>Не открывается? Скорее всего, порт закрыт брандмауэром Windows — запустите <code>phone.bat</code> (один раз, попросит права администратора). Ассистент при этом должен быть запущен.</>}
       </div>
     </div>
   )

@@ -17,7 +17,7 @@ import Chat from './components/Chat'
 import Palette from './components/Palette'
 import { useLive, LiveDot, LivePopover, MicButton } from './components/Live'
 import { setName, lower } from './lib/name'
-import { usePrefs, prefs as PREFS, pullRemote, CLIENT_ID } from './lib/prefs'
+import { usePrefs, prefs as PREFS, pullRemote, CLIENT_ID, apply } from './lib/prefs'
 import { api, relTime, kb, kbAlt } from './lib/api'
 import { tg, tgBackButton } from './lib/tg'
 import { Toaster, toast } from './components/ui'
@@ -52,15 +52,24 @@ function useThemeState() {
   useEffect(() => { const h = (e) => setModeState(e.detail || 'auto'); window.addEventListener('prefs:theme', h); return () => window.removeEventListener('prefs:theme', h) }, [])
   useEffect(() => {
     const mq = window.matchMedia('(prefers-color-scheme: dark)')
-    const apply = () => {
+    const applyTheme = () => {
       const dark = mode === 'dark' || (mode === 'auto' && mq.matches)
-      document.documentElement.classList.toggle('dark', dark)
-      document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#0e0e0d' : '#ecece9')
+      const de = document.documentElement
+      de.classList.toggle('dark', dark)
+      /* data-theme — второй, «явный» признак темы: на него смотрят :root[data-theme=…] правила в index.css */
+      de.setAttribute('data-theme', dark ? 'dark' : 'light')
+      apply() // пересчитать акцент/оттенок под новую тему
+      const metas = document.querySelectorAll('meta[name="theme-color"]')
+      metas.forEach((m, i) => {
+        if (i > 0) { m.remove(); return }
+        m.removeAttribute('media')
+        m.setAttribute('content', dark ? '#050507' : '#ecece9')
+      })
     }
-    apply()
-    mq.addEventListener('change', apply)
+    applyTheme()
+    mq.addEventListener('change', applyTheme)
     localStorage.setItem('theme', mode)
-    return () => mq.removeEventListener('change', apply)
+    return () => mq.removeEventListener('change', applyTheme)
   }, [mode])
   return [mode, setMode]
 }
@@ -285,7 +294,7 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
           <svg className="pomo-gauge" viewBox="0 0 24 24" style={{ outline: 'none', border: 'none', boxShadow: 'none' }}>
             <defs>
               <linearGradient id="pomoSideGrad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="#5b7cff" />
+                <stop offset="0%" stopColor="var(--acc)" />
                 <stop offset="100%" stopColor="#c04cff" />
               </linearGradient>
             </defs>
@@ -482,7 +491,7 @@ function Shell({ inbox }) {
         </main>
 
         {/* bottom tabs (mobile <= 820px) */}
-        <nav className="tabbar fixed inset-x-0 bottom-0 z-[60] md:hidden">
+        <nav className="tabbar fixed inset-x-0 bottom-0 z-[60]">
           <div className="mx-3 flex items-stretch justify-around rounded-full border hair px-1 py-1" style={{ background: 'var(--surface-2)', boxShadow: 'var(--shadow-2)' }}>
             {(mobileNav.length ? mobileNav : MOBILE_NAV.filter((n) => freelance || n.to !== '/orders')).map(({ to, label, icon: I }) => (
               <NavLink key={to} to={to} end={to === '/'} className={({ isActive }) =>

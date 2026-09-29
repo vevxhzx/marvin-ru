@@ -186,7 +186,7 @@ export function WeekSummaryCard({ data, ownerName = 'вовчик' }) {
             <div key={idx} className="category-progress-item">
               <div className="flex justify-between items-baseline text-[13.5px]">
                 <span className="font-medium text-[var(--ink)]">{cat.name}</span>
-                <span className="mono font-semibold text-[13.5px]">{money(cat.amount)} ₽</span>
+                <span className="mono font-semibold text-[13.5px]">{money(cat.amount)}</span>
               </div>
               <div className="progress-bar-track mt-1.5">
                 <div
@@ -317,7 +317,7 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
             <Num value={balance} /> ₽
           </div>
           <div className="text-[11px] opacity-60 mt-1">
-            траты: −{money(spentToday)} ₽
+            траты: −{money(spentToday)}
           </div>
         </div>
 
@@ -360,7 +360,7 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
       <div className="mt-3 pt-3 border-t border-[var(--line)] flex items-center justify-between text-xs text-[var(--ink2)]">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-[var(--pos)] animate-pulseSoft"></span>
-          доступно сегодня: <b className="text-[var(--ink)] num font-semibold">{money(dailyBudget)} ₽</b>
+          доступно сегодня: <b className="text-[var(--ink)] num font-semibold">{money(dailyBudget)}</b>
         </span>
         <span className="mono text-[11px] opacity-70">фокус дня: активен</span>
       </div>

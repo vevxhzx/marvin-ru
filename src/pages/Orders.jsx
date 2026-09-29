@@ -106,7 +106,8 @@ export default function Orders() {
       )}
 
       {!orders ? <ListSkeleton n={4} /> : (
-        <Section title={VIEWS.find((v) => v[0] === view)[1]} idx={list.length}>
+        <Section title={VIEWS.find((v) => v[0] === view)[1]} idx={list.length}
+          hint="как закрыть заказ: кнопка со статусом справа в строке, либо раскройте заказ (стрелка) — там «сдан», оплата и удаление. На телефоне — свайп вправо: следующий статус, влево: удалить.">
           <div className="rule stagger">
             {list.length === 0 && (
               view === 'open' ? <Empty glyph="tasks" text="Заказов в работе нет" sub="Как возьмёте — скажите мне, я запомню дедлайн и буду ждать оплату" hint="заказ: монтаж свадьбы для Иванова, 60к, до 30 сентября" />
@@ -189,6 +190,11 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, 
             {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">осталось {money(o.left)}</div>}
             {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">не оплачен</div>}
           </div>
+          {!closed && NEXT[o.status] && (
+            <button className="btn-soft btn-sm !h-7 shrink-0 hidden sm:inline-flex" title={`перевести в статус «${STATUS[NEXT[o.status]]}»`} onClick={(e) => { e.stopPropagation(); onStatus(o, NEXT[o.status]) }}>
+              <Check size={12} /> {NEXT_LABEL[o.status]}
+            </button>
+          )}
           {!closed && <button className="btn-icon !hidden !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100 sm:!inline-flex" data-tip={running ? 'таймер идёт' : `таймер ${timer?.focus_min || 25} мин`} onClick={(e) => { e.stopPropagation(); if (!running) onStart() }} aria-label="Таймер">{running ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : <Play size={13} />}</button>}
           <span className="btn-icon !h-7 !w-7 faint">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
         </div>

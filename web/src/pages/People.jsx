@@ -37,7 +37,7 @@ export default function People() {
         <div>
           <h1 className="r" style={{ '--i': 0 }}>люди</h1>
           <p className="sub r" style={{ '--i': 1 }}>
-            {openCount} с открытыми заказами · не оплачено {money(unpaidTotal)} ₽
+            {openCount} с открытыми заказами · не оплачено {money(unpaidTotal)}
           </p>
         </div>
         <div className="hr r" style={{ '--i': 1 }}>
@@ -87,7 +87,7 @@ export default function People() {
             </div>
             <div className="pps">
               {p.open ? <span className="pl">{p.open} {plural(p.open, 'заказ в работе', 'заказа в работе', 'заказов в работе')}</span> : null}
-              {p.unpaid ? <span className="pl y">ждём {money(p.unpaid)} ₽</span> : null}
+              {p.unpaid ? <span className="pl y">ждём {money(p.unpaid)}</span> : null}
               {!p.open && !p.unpaid ? 'без заказов' : null}
             </div>
           </section>

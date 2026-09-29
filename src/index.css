@@ -15,16 +15,16 @@
 .aur i:nth-child(3) { left: 35vmax; top: 25vmax; width: 55vmax; height: 55vmax; background: radial-gradient(closest-side, color-mix(in srgb, var(--acc) 18%, transparent), transparent); animation: drift 36s ease-in-out infinite alternate-reverse; animation-delay: -14s; }
 
 .app { position: relative; z-index: 1; display: grid; grid-template-columns: 232px 1fr; gap: 20px; padding: 16px; min-height: 100vh; }
-aside.sidebar-bench, aside { background-image: linear-gradient(180deg, #16161d, #0b0b0f); position: sticky; top: 16px; height: calc(100vh - 32px); align-self: start; color: #f5f5f7; border-radius: 30px; box-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.6), inset 0 1px 0 rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.06); padding: 20px 12px 14px; display: flex; flex-direction: column; gap: 3px; z-index: 50; }
-.logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -0.02em; padding: 4px 12px 22px; }
-.logo i { width: 10px; height: 10px; border-radius: 50%; background: #5b7cff; animation: breathe 3.2s ease-in-out infinite; }
-nav.bench-nav a, aside nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; color: #9b9ea8; text-decoration: none; font-weight: 500; transition: background 0.3s var(--e), color 0.3s; }
+aside.sidebar-bench, aside { background-image: linear-gradient(180deg, var(--sb-1), var(--sb-2)); position: sticky; top: 16px; height: calc(100vh - 32px); align-self: start; color: var(--sb-ink); border-radius: 30px; box-shadow: var(--sb-shadow), inset 0 1px 0 var(--sb-inset); border: 1px solid var(--sb-line); padding: 20px 12px 14px; display: flex; flex-direction: column; gap: 3px; z-index: 50; }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -0.02em; padding: 4px 12px 22px; color: var(--sb-ink); }
+.logo i { width: 10px; height: 10px; border-radius: 50%; background: var(--acc); animation: breathe 3.2s ease-in-out infinite; }
+nav.bench-nav a, aside nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; color: var(--sb-dim); text-decoration: none; font-weight: 500; transition: background 0.3s var(--e), color 0.3s; }
 nav.bench-nav a svg, aside nav a svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
-nav.bench-nav a:hover, aside nav a:hover { color: #fff; }
-nav.bench-nav a.on, nav.bench-nav a.active, aside nav a.on, aside nav a.active { background: #fff; color: #0d0d11; }
+nav.bench-nav a:hover, aside nav a:hover { color: var(--sb-ink); background: var(--sb-hover); }
+nav.bench-nav a.on, nav.bench-nav a.active, aside nav a.on, aside nav a.active { background: var(--acc); color: var(--accent-ink); box-shadow: 0 6px 18px -8px color-mix(in srgb, var(--acc) 70%, transparent); }
 .sb { margin-top: auto; display: flex; flex-direction: column; gap: 10px; position: relative; }
-.pomo { display: flex; align-items: center; gap: 12px; padding: 8px 12px; color: #9b9ea8; font-size: 14px; }
-.pomo b { color: #fff; font-weight: 500; font-size: 15px; }
+.pomo { display: flex; align-items: center; gap: 12px; padding: 8px 12px; color: var(--sb-dim); font-size: 14px; }
+.pomo b { color: var(--sb-ink); font-weight: 500; font-size: 15px; }
 .pomo-ring, .ring, .pomo-gauge, .pomo-circle {
   width: 26px;
   height: 26px;
@@ -71,7 +71,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .comp i { width: 9px; height: 9px; border-radius: 50%; background: var(--acc); flex: none; animation: breathe 3.2s ease-in-out infinite; }
 .ph { flex: 1; font-size: 18px; color: var(--ink3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ph::after { content: ""; display: inline-block; width: 1.5px; height: 1.05em; background: var(--acc); margin-left: 2px; vertical-align: -2px; animation: blink 1.1s steps(1) infinite; }
-.send { width: 48px; height: 48px; border-radius: 50%; background: var(--acc); display: grid; place-items: center; color: #fff; flex: none; transition: transform 0.5s var(--e); cursor: pointer; }
+.send { width: 48px; height: 48px; border-radius: 50%; background: var(--acc); display: grid; place-items: center; color: var(--accent-ink); flex: none; transition: transform 0.5s var(--e); cursor: pointer; }
 .comp:hover .send { transform: scale(1.08); }
 .send svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .chips { display: flex; gap: 8px; margin: 14px 0 0 10px; flex-wrap: wrap; }
@@ -81,7 +81,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .bento { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; margin-top: 32px; }
 .c {
   background: var(--sf);
-  border-radius: 30px;
+  border-radius: calc(30px * var(--r-k));
   padding: 26px;
   min-width: 0;
   position: relative;
@@ -106,11 +106,11 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .mid { font-size: clamp(28px, 3.2vw, 38px); font-weight: 500; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; line-height: 1.1; }
 
 .hero {
-  background: linear-gradient(135deg, #0a3cff 0%, #2f57ff 45%, #8a5cff 100%) !important;
-  color: #fff !important;
+  background: linear-gradient(135deg, var(--acc) 0%, color-mix(in srgb, var(--acc) 62%, #8a5cff) 55%, #8a5cff 100%) !important;
+  color: var(--accent-ink) !important;
   display: flex;
   flex-direction: column;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 24px 50px -16px rgba(10, 60, 255, 0.5) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 24px 50px -16px color-mix(in srgb, var(--acc) 55%, transparent) !important;
 }
 .hero::after {
   content: '';
@@ -175,7 +175,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .blk .hd small { color: #8b8e98; }
 .seg { display: grid; grid-template-columns: repeat(16, 1fr); gap: 3px; margin-top: 22px; }
 .seg i { height: 18px; border-radius: 5px; background: #26262d; animation: fade 0.4s both; animation-delay: calc(1.2s + var(--k) * 45ms); }
-.seg i.on { background: linear-gradient(90deg, #5b7cff, #a07bff); box-shadow: 0 0 8px rgba(91, 124, 255, 0.5); }
+.seg i.on { background: linear-gradient(90deg, var(--acc), color-mix(in srgb, var(--acc) 45%, #a07bff)); box-shadow: 0 0 8px color-mix(in srgb, var(--acc) 55%, transparent); }
 .cap { margin-top: 8px; font-size: 12px; color: #8b8e98; }
 
 .emp { font-size: 20px; font-weight: 500; letter-spacing: -0.03em; line-height: 1.25; max-width: 16ch; }
@@ -188,7 +188,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .cal b:hover:not(.o) { background: var(--sf2); transform: translateY(-2px) scale(1.06); }
 .cal b.o { color: var(--ink3); font-weight: 400; opacity: 0.6; }
 .cal b.is-sel { background: var(--sf2); box-shadow: inset 0 0 0 1.5px var(--acc); }
-.cal b.t span { background: var(--acc); color: #fff; border-radius: 50%; display: inline-grid; place-items: center; width: 26px; height: 26px; margin: -3px 0 -3px; }
+.cal b.t span { background: var(--acc); color: var(--accent-ink); border-radius: 50%; display: inline-grid; place-items: center; width: 26px; height: 26px; margin: -3px 0 -3px; }
 .cal em { position: absolute; left: 50%; bottom: 2px; transform: translateX(-50%); display: flex; gap: 2px; }
 .cal em i { width: 3px; height: 3px; border-radius: 50%; background: var(--ink); }
 .cal em i.y { background: var(--warn); }
@@ -264,14 +264,14 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   display: inline-grid;
   place-items: center;
   background: linear-gradient(135deg, var(--acc), #8a5cff);
-  color: #fff;
+  color: var(--accent-ink);
   font-weight: 600;
-  box-shadow: 0 4px 14px -2px rgba(10, 60, 255, 0.7);
+  box-shadow: 0 4px 14px -2px color-mix(in srgb, var(--acc) 70%, transparent);
 }
 .cal2 b.is-sel:not(.t) {
   background: var(--sf2);
   border-color: var(--acc);
-  box-shadow: inset 0 0 0 1.5px var(--acc), 0 8px 24px -6px rgba(10, 60, 255, 0.35);
+  box-shadow: inset 0 0 0 1.5px var(--acc), 0 8px 24px -6px color-mix(in srgb, var(--acc) 35%, transparent);
 }
 .cal2 .day-evs {
   margin-top: 4px;
@@ -365,7 +365,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .sg span:hover, .sg button:hover { color: var(--ink); }
 .sg span.on, .sg button.on, .sg span.active, .sg button.active { background: var(--ink); color: var(--bg); }
 
-.btn { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 999px; background: var(--acc); color: #fff; font-weight: 500; font-size: 14px; cursor: pointer; transition: transform 0.5s var(--e); }
+.btn { display: inline-flex; align-items: center; gap: 8px; height: 44px; padding: 0 20px; border-radius: 999px; background: var(--acc); color: var(--accent-ink); font-weight: 500; font-size: 14px; cursor: pointer; transition: transform 0.5s var(--e); }
 .btn:hover { transform: scale(1.05); }
 .btn.g { background: var(--sf); color: var(--ink); }
 .hr { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
@@ -381,6 +381,16 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .ck input:checked { background: var(--acc); border-color: var(--acc); }
 .ck input:checked + .t { text-decoration: line-through; color: var(--ink3); }
 .ck { cursor: pointer; }
+/* Кружок-галочка: знак выполнения рисуем фоном (надёжно на input) и расширяем тач-таргет */
+.ck input { position: relative; }
+.ck input::before { content: ''; position: absolute; inset: -8px; }
+.ck input:checked {
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath d='M2 6.4l2.6 2.6L10 3.4' fill='none' stroke='%23ffffff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / 12px no-repeat, var(--acc);
+  border-color: var(--acc);
+}
+/* Стрелка «открыть задачу» — явная подсказка, что название редактируется */
+.row-open { display: grid; place-items: center; width: 34px; height: 34px; margin: -6px -8px -6px 0; border: 0; border-radius: 999px; background: transparent; color: var(--ink3); cursor: pointer; flex: none; transition: background 0.2s var(--e), color 0.2s var(--e), transform 0.2s var(--e); }
+.row-open:hover { background: var(--fill-2); color: var(--ink); transform: translateX(2px); }
 
 .pl { display: inline-block; padding: 4px 12px; border-radius: 999px; font-size: 12px; font-weight: 500; background: linear-gradient(135deg, rgba(47, 87, 255, 0.18), rgba(138, 92, 255, 0.22)); color: #7697ff; border: 1px solid rgba(118, 151, 255, 0.25); white-space: nowrap; }
 .pl.y { background: linear-gradient(135deg, rgba(245, 168, 0, 0.2), rgba(255, 110, 40, 0.22)); color: #ffb833; border: 1px solid rgba(255, 184, 51, 0.28); }
@@ -399,7 +409,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .tg { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; font-size: 12px; color: var(--ink3); align-items: center; }
 .tg span { background: var(--sf2); padding: 3px 10px; border-radius: 999px; color: var(--ink2); }
 .img { height: 150px; border-radius: 18px; margin-bottom: 14px; background: linear-gradient(135deg, #0d3a2a, #1f6b4a 60%, #0d0d11); display: grid; place-items: center; color: #fff; font: 12px "Inter Tight", "Inter", sans-serif; }
-.img.b { background: linear-gradient(135deg, #0d0d11, #2a2470 55%, #5b7cff); }
+.img.b { background: linear-gradient(135deg, #0d0d11, #2a2470 55%, var(--acc)); }
 
 .ppl { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
 .av2 { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-weight: 600; font-size: 14px; background: color-mix(in srgb, var(--acc) 16%, transparent); color: var(--acc); flex: none; }
@@ -486,7 +496,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   .s3, .s4, .s6, .s8, .s12 { grid-column: span 12; }
   .bento { gap: 12px; margin-top: 18px; }
   .c {
-    border-radius: 24px;
+    border-radius: calc(24px * var(--r-k));
     padding: 18px;
   }
   .ppl { grid-template-columns: 1fr; }
@@ -589,6 +599,13 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   .mas {
     columns: 1 100%;
   }
+}
+
+/* Нижние вкладки видны ровно там же, где прячется боковая панель (≤820px).
+   Раньше таббар выключался от 768px, а сайдбар — от 820px: на 768–820px навигации не было вообще. */
+.tabbar { display: none; }
+@media (max-width: 820px) {
+  .tabbar { display: block; }
 }
 
 /* =====================================================================
@@ -701,7 +718,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .report-pill.active-glow {
   background: linear-gradient(135deg, var(--acc), #8a5cff);
   color: #fff;
-  box-shadow: 0 4px 14px -3px rgba(10, 60, 255, 0.6);
+  box-shadow: 0 4px 14px -3px color-mix(in srgb, var(--acc) 60%, transparent);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -722,6 +739,9 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --ink: #101114;
   --ink2: #5d6068;
   --ink3: #9a9da6;
+  /* алиасы с дефисом — так их зовут утилиты .muted/.label/.faint и часть разметки */
+  --ink-2: var(--ink2);
+  --ink-3: var(--ink3);
   --line: rgba(16, 17, 20, 0.07);
   --line-2: rgba(16, 17, 20, 0.14);
   --acc: #0a3cff;
@@ -732,14 +752,34 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --p1b: #d3cdff;
   --p2: #e3f7ea;
   --p2b: #c2ecd1;
-  --spot: rgba(10, 60, 255, 0.07);
-  --g1: rgba(10, 60, 255, 0.16);
+  --spot: color-mix(in srgb, var(--acc) 7%, transparent);
+  --g1: color-mix(in srgb, var(--acc) 18%, transparent);
   --g2: rgba(160, 100, 255, 0.16);
   --p1i: #2a2470;
   --p2i: #0f5a2b;
   --e: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-apple: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Оттенок поверхностей. hue/насыщенность пишутся из настроек (prefs.apply),
+     0% означает «без подкраски» и даёт ровно те же цвета, что и базовые. */
+  --tint-h-light: 60; --tint-s-light: 0%;
+  --tint-h-dark: 60;  --tint-s-dark: 0%;
+  --tint-c-light: hsl(var(--tint-h-light) 65% 50%);
+  --tint-c-dark: hsl(var(--tint-h-dark) 55% 55%);
+  --bg: color-mix(in srgb, var(--tint-c-light) calc(var(--tint-s-light) * 1.7), #e9ecf3);
+  --sf: color-mix(in srgb, var(--tint-c-light) var(--tint-s-light), #ffffff);
+  --sf2: color-mix(in srgb, var(--tint-c-light) calc(var(--tint-s-light) * 1.4), #f0f1f6);
+
+  /* Боковая панель — раньше была захардкожена тёмной и не реагировала на тему */
+  --sb-1: #ffffff;
+  --sb-2: #f2f3f7;
+  --sb-ink: #101114;
+  --sb-dim: #5d6068;
+  --sb-hover: rgba(16, 17, 20, 0.05);
+  --sb-line: rgba(16, 17, 20, 0.07);
+  --sb-inset: rgba(255, 255, 255, 0.9);
+  --sb-shadow: 0 20px 60px -20px rgba(16, 17, 20, 0.16);
 
   /* Алиасы и совместимость с компонентами проекта */
   --surface: var(--sf);
@@ -767,13 +807,14 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 
   --shadow-1: 0 4px 20px -8px rgba(0, 0, 0, 0.06);
   --shadow-2: 0 20px 60px -20px rgba(0, 0, 0, 0.18);
-  --shadow-3: 0 34px 56px -36px rgba(10, 60, 255, 0.25);
+  --shadow-3: 0 34px 56px -36px color-mix(in srgb, var(--acc) 42%, transparent);
 
   --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-base: 15px; --fs-lg: 16px; --fs-xl: 18px;
   --ui-zoom: 1;
   --sidebar-w: 232px; --sidebar-w-min: 68px; --topbar-h: 56px; --content-max: 1200px;
 }
 
+/* Тёмная тема «до скриптов»: системная настройка, чтобы не было вспышки светлого при старте */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #050507;
@@ -782,6 +823,8 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
     --ink: #f5f5f7;
     --ink2: #a4a7b0;
     --ink3: #6c6f78;
+    --ink-2: var(--ink2);
+    --ink-3: var(--ink3);
     --line: rgba(255, 255, 255, 0.08);
     --line-2: rgba(255, 255, 255, 0.16);
     --acc: #2f57ff;
@@ -797,6 +840,17 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
     --g2: rgba(150, 80, 255, 0.22);
     --p1i: #cfcaff;
     --p2i: #a6ecc0;
+    --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #050507);
+    --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #131317);
+    --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1e1e24);
+    --sb-1: #16161d;
+    --sb-2: #0b0b0f;
+    --sb-ink: #f5f5f7;
+    --sb-dim: #9b9ea8;
+    --sb-hover: rgba(255, 255, 255, 0.07);
+    --sb-line: rgba(255, 255, 255, 0.06);
+    --sb-inset: rgba(255, 255, 255, 0.08);
+    --sb-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.6);
     --accent: var(--acc);
     --surface: var(--sf);
     --surface-2: var(--sf2);
@@ -822,6 +876,8 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --ink: #f5f5f7;
   --ink2: #a4a7b0;
   --ink3: #6c6f78;
+  --ink-2: var(--ink2);
+  --ink-3: var(--ink3);
   --line: rgba(255, 255, 255, 0.08);
   --line-2: rgba(255, 255, 255, 0.16);
   --acc: #2f57ff;
@@ -837,6 +893,17 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --g2: rgba(150, 80, 255, 0.22);
   --p1i: #cfcaff;
   --p2i: #a6ecc0;
+  --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #050507);
+  --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #131317);
+  --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1e1e24);
+  --sb-1: #16161d;
+  --sb-2: #0b0b0f;
+  --sb-ink: #f5f5f7;
+  --sb-dim: #9b9ea8;
+  --sb-hover: rgba(255, 255, 255, 0.07);
+  --sb-line: rgba(255, 255, 255, 0.06);
+  --sb-inset: rgba(255, 255, 255, 0.08);
+  --sb-shadow: 0 20px 60px -20px rgba(0, 0, 0, 0.6);
   --accent: var(--acc);
   --surface: var(--sf);
   --surface-2: var(--sf2);
@@ -861,6 +928,8 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --ink: #101114;
   --ink2: #5d6068;
   --ink3: #9a9da6;
+  --ink-2: var(--ink2);
+  --ink-3: var(--ink3);
   --line: rgba(16, 17, 20, 0.07);
   --line-2: rgba(16, 17, 20, 0.14);
   --acc: #0a3cff;
@@ -871,11 +940,22 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --p1b: #d3cdff;
   --p2: #e3f7ea;
   --p2b: #c2ecd1;
-  --spot: rgba(10, 60, 255, 0.07);
-  --g1: rgba(10, 60, 255, 0.16);
+  --spot: color-mix(in srgb, var(--acc) 7%, transparent);
+  --g1: color-mix(in srgb, var(--acc) 18%, transparent);
   --g2: rgba(160, 100, 255, 0.16);
   --p1i: #2a2470;
   --p2i: #0f5a2b;
+  --bg: color-mix(in srgb, var(--tint-c-light) calc(var(--tint-s-light) * 1.7), #e9ecf3);
+  --sf: color-mix(in srgb, var(--tint-c-light) var(--tint-s-light), #ffffff);
+  --sf2: color-mix(in srgb, var(--tint-c-light) calc(var(--tint-s-light) * 1.4), #f0f1f6);
+  --sb-1: #ffffff;
+  --sb-2: #f2f3f7;
+  --sb-ink: #101114;
+  --sb-dim: #5d6068;
+  --sb-hover: rgba(16, 17, 20, 0.05);
+  --sb-line: rgba(16, 17, 20, 0.07);
+  --sb-inset: rgba(255, 255, 255, 0.9);
+  --sb-shadow: 0 20px 60px -20px rgba(16, 17, 20, 0.16);
   --accent: var(--acc);
   --surface: var(--sf);
   --surface-2: var(--sf2);
@@ -885,6 +965,20 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --fill-2: rgba(16, 17, 20, 0.085);
   --bubble: rgba(16, 17, 20, 0.055);
 }
+
+/* Углы: настройка «углы» масштабирует типовые радиусы карточек, кнопок и полей по всему интерфейсу.
+   Значение --rk приходит из prefs.apply() через <html data-radius>. Без настройки всё остаётся как было. */
+html[data-radius="sharp"] { --rk: 0.45; }
+html[data-radius="round"] { --rk: 1.35; }
+html[data-radius] .rounded-xs { border-radius: calc(2px * var(--rk, 1)); }
+html[data-radius] .rounded-sm, html[data-radius] .rounded { border-radius: calc(4px * var(--rk, 1)); }
+html[data-radius] .rounded-md { border-radius: calc(7px * var(--rk, 1)); }
+html[data-radius] .rounded-lg { border-radius: calc(10px * var(--rk, 1)); }
+html[data-radius] .rounded-xl { border-radius: calc(13px * var(--rk, 1)); }
+html[data-radius] .rounded-2xl { border-radius: calc(17px * var(--rk, 1)); }
+html[data-radius] .rounded-3xl { border-radius: calc(26px * var(--rk, 1)); }
+html[data-radius] aside { border-radius: calc(30px * var(--rk, 1)); }
+html[data-radius] .rounded-\[3px\] { border-radius: calc(3px * var(--rk, 1)); }
 
 html {
   -webkit-text-size-adjust: 100%;

@@ -27,11 +27,12 @@ export const TINTS = {
   accent: { label: 'в тон акценту', light: 'accent', dark: 'accent' },
 }
 export const FONT_SIZES = { sm: ['мельче', 0.92], md: ['обычный', 1], lg: ['крупнее', 1.1] }
-export const RADII = { soft: ['мягкие', 1], sharp: ['строгие', 0.45], round: ['круглые', 1.35] }
+/* 'strict' — старое имя «строгих» углов из настроек, оставлено как синоним 'sharp' */
+export const RADII = { soft: ['мягкие', 1], sharp: ['строгие', 0.45], strict: ['строгие', 0.45], round: ['круглые', 1.35] }
 
 const KEY = 'ui.prefs.v1'
 export const DEFAULTS = {
-  accent: 'blue', tint: 'neutral', font: 'md', radius: 'soft', motion: true, compactNav: false,
+  accent: 'blue', accentHex: '#0a3cff', tint: 'neutral', font: 'md', radius: 'soft', motion: true, compactNav: false,
   address: '', // как обращаться: пусто — берём из настроек ядра («сэр»)
   hiddenNav: [], // скрытые разделы в боковой панели (кроме «сегодня» и «настройки»)
   tabbar: ['/', '/tasks', '/calendar', '/finance', '/mind'], // нижняя панель телефона (5 макс)
@@ -44,7 +45,7 @@ const subs = new Set()
 function load() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return { ...DEFAULTS } } }
 
 export const CLIENT_ID = (() => { let id = sessionStorage.getItem('client.id'); if (!id) { id = Math.random().toString(36).slice(2); sessionStorage.setItem('client.id', id) } return id })()
-const SYNC_KEYS = ['accent', 'tint', 'font', 'radius', 'motion', 'compactNav', 'address', 'hiddenNav', 'tabbar', 'showGreeting', 'showContext', 'showQuick', 'density', 'hiddenBlocks', 'tasksSort', 'theme', 'todayOrder']
+const SYNC_KEYS = ['accent', 'accentHex', 'tint', 'font', 'radius', 'motion', 'compactNav', 'address', 'hiddenNav', 'tabbar', 'showGreeting', 'showContext', 'showQuick', 'density', 'hiddenBlocks', 'tasksSort', 'theme', 'todayOrder', 'todayWidgets']
 let pushTimer
 function pushRemote() {
   clearTimeout(pushTimer)
@@ -80,28 +81,76 @@ export const prefs = {
   reset() { localStorage.removeItem(KEY); _cur = { ...DEFAULTS }; apply(_cur); subs.forEach((f) => f(_cur)); pushRemote() },
 }
 
-/* Применяем к документу: CSS-переменные и классы */
-let _lastAccent = null, _lastTint = null
+/* Применяем к документу: CSS-переменные и классы.
+   Всё, что раньше жило только в CSS (акцент, оттенок, углы), считается здесь — иначе настройки были «мёртвыми». */
+const BOOT_AT = Date.now()
+let _lastAccent = null, _lastAccentHex = null, _lastTint = null, _lastDark = null
+
+const rgbOf = (hex) => {
+  const s = String(hex || '').replace('#', '')
+  const h = s.length === 3 ? s.split('').map((c) => c + c).join('') : s.padEnd(6, '0').slice(0, 6)
+  const n = parseInt(h, 16)
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
+}
+const lumOf = (hex) => {
+  const [r, g, b] = rgbOf(hex).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 })
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+const mixHex = (from, to, k) => '#' + rgbOf(from).map((v, i) => Math.round(v + (rgbOf(to)[i] - v) * k).toString(16).padStart(2, '0')).join('')
+/* HSL из hex: нужен hue для «оттенка в тон акценту» и насыщенность,
+   чтобы у серого акцента (графит) не получался синий подтон фона. */
+function hexHsl(hex) {
+  const [r, g, b] = rgbOf(hex).map((v) => v / 255)
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn
+  const l = (mx + mn) / 2
+  if (!d) return [0, 0, Math.round(l * 100)]
+  const s = d / (1 - Math.abs(2 * l - 1))
+  let h
+  if (mx === r) h = ((g - b) / d) % 6
+  else if (mx === g) h = (b - r) / d + 2
+  else h = (r - g) / d + 4
+  return [Math.round(((h * 60) + 360) % 360), Math.round(s * 100), Math.round(l * 100)]
+}
+/* Акцент должен читаться и в светлой, и в тёмной теме: слишком светлый — притемняем, слишком тёмный — осветляем */
+function accentFor(hex, dark) {
+  const base = /^#[0-9a-f]{6}$/i.test(String(hex)) ? hex : '#0a3cff'
+  const L = lumOf(base)
+  if (dark && L < 0.16) return mixHex(base, '#ffffff', 0.5)
+  if (dark && L < 0.3) return mixHex(base, '#ffffff', 0.28)
+  if (!dark && L > 0.62) return mixHex(base, '#101114', 0.55)
+  return base
+}
+
 export function apply(p = _cur) {
   const r = document.documentElement
-  if (_lastAccent !== null && (_lastAccent !== p.accent || _lastTint !== p.tint) && p.motion !== false) {
+  const dark = r.classList.contains('dark')
+  const accentHex = p.accentHex || DEFAULTS.accentHex
+  const changed = _lastAccent !== null && (_lastAccent !== p.accent || _lastAccentHex !== accentHex || _lastTint !== p.tint || _lastDark !== dark)
+  if (changed && p.motion !== false && Date.now() - BOOT_AT > 900) {
     r.classList.add('theme-anim'); clearTimeout(apply._t); apply._t = setTimeout(() => r.classList.remove('theme-anim'), 650)
   }
-  _lastAccent = p.accent; _lastTint = p.tint
-  const a = ACCENTS[p.accent] || ACCENTS.blue
-  r.style.setProperty('--accent-light', a.light)
-  r.style.setProperty('--accent-dark', a.dark)
-  r.style.setProperty('--accent-ink-dark', a.ink?.dark || '#ffffff')
+  _lastAccent = p.accent; _lastAccentHex = accentHex; _lastTint = p.tint; _lastDark = dark
+
+  const acc = accentFor(accentHex, dark)
+  r.style.setProperty('--acc', acc)
+  r.style.setProperty('--accent-light', accentFor(accentHex, false))
+  r.style.setProperty('--accent-dark', accentFor(accentHex, true))
+  r.style.setProperty('--accent-ink', lumOf(acc) > 0.45 ? '#101114' : '#ffffff')
+  r.style.setProperty('--accent-ink-dark', '#ffffff')
   r.style.setProperty('--ui-zoom', String((FONT_SIZES[p.font] || FONT_SIZES.md)[1]))
   r.style.setProperty('--r-k', String((RADII[p.radius] || RADII.soft)[1]))
+  r.dataset.radius = RADII[p.radius] ? (p.radius === 'round' ? 'round' : p.radius === 'soft' ? 'soft' : 'sharp') : 'soft'
   r.classList.toggle('no-motion', !p.motion)
-  r.classList.toggle('accent-custom', p.accent !== 'blue')
-  // оттенок поверхностей: одна пара hue/sat на тему, дальше всё считается в CSS через hsl()
+  r.classList.toggle('accent-custom', accentHex !== DEFAULTS.accentHex)
+
+  /* Оттенок поверхностей: одна пара hue/насыщенность на тему, дальше всё считается в CSS через color-mix() */
   const t = TINTS[p.tint] || TINTS.neutral
-  const pick = (v) => (v === 'accent' ? (a.mono ? null : [a.hue, 10]) : v)
+  const [hue, sat] = hexHsl(acc)
+  const nearGrey = sat < 14   // графит/белый: красить по их hue нельзя — остаёмся нейтральными
+  const pick = (v) => (v === 'accent' ? (nearGrey ? null : [hue, 10]) : v)
   const L = pick(t.light), D = pick(t.dark)
-  r.style.setProperty('--tint-h-light', L ? String(L[0]) : '60'); r.style.setProperty('--tint-s-light', L ? `${L[1]}%` : '4%')
-  r.style.setProperty('--tint-h-dark', D ? String(D[0]) : '60'); r.style.setProperty('--tint-s-dark', D ? `${D[1]}%` : '2%')
+  r.style.setProperty('--tint-h-light', L ? String(L[0]) : '60'); r.style.setProperty('--tint-s-light', L ? `${L[1]}%` : '0%')
+  r.style.setProperty('--tint-h-dark', D ? String(D[0]) : '60'); r.style.setProperty('--tint-s-dark', D ? `${D[1]}%` : '0%')
   r.classList.toggle('tinted', !!(L || D))
 }
 apply(_cur)
