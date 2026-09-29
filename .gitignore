@@ -5,15 +5,19 @@ data/
 *.db-shm
 *.db-wal
 .env
+.env.local
 
 # окружение и сборка
 .venv/
 __pycache__/
 *.pyc
 .pytest_cache/
+node_modules/
 web/node_modules/
+dist/
 web/dist/
 *.log
+*.zip
 .DS_Store
 Thumbs.db
 
