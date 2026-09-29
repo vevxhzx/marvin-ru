@@ -166,7 +166,7 @@ function BoardEditor({ id }) {
   return (
     <div className="board-page-root -mx-4 -mt-6 flex flex-col sm:-mx-8 sm:-mt-8" style={{ height: 'calc(100dvh - var(--topbar-h))' }}>
       {/* шапка */}
-      <div className="flex shrink-0 items-center gap-2 border-b hair px-2 py-1.5 sm:px-4" style={{ background: 'var(--bg)' }}>
+      <div className="board-topbar flex min-w-0 shrink-0 items-center gap-2 overflow-hidden border-b hair px-2 py-1.5 sm:px-4" style={{ background: 'var(--bg)' }}>
         <button className="btn-icon" onClick={() => nav('/board')} aria-label="К списку досок" data-tip="все доски"><ChevronLeft size={16} /></button>
         <div className="min-w-0 flex-1">
           {renaming ? <input autoFocus className="input !h-8 max-w-[360px] !text-[14px]" defaultValue={board.title} onBlur={(e) => rename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setRenaming(false) }} />
@@ -178,8 +178,8 @@ function BoardEditor({ id }) {
             <span className={`ml-1 transition ${status === 'dirty' ? 'opacity-70' : status === 'err' || status === 'conflict' ? 'neg' : 'opacity-40'}`}>{status === 'dirty' ? 'сохраняю…' : status === 'err' ? 'не сохранилось — повторю' : status === 'conflict' ? 'доска изменилась в другом месте' : 'сохранено'}</span>
           </div>
         </div>
-        <div className="hidden items-center gap-0.5 md:flex">
-          <button className="btn-icon" onClick={() => controls.current.undo()} data-tip="отменить · Ctrl+Z" aria-label="Отменить"><Undo2 size={15} /></button>
+        <div className="board-topbar-actions hidden min-w-0 shrink items-center gap-0.5 overflow-x-auto whitespace-nowrap md:flex">
+          <button className="btn-icon shrink-0" onClick={() => controls.current.undo()} data-tip="отменить · Ctrl+Z" aria-label="Отменить"><Undo2 size={15} /></button>
           <button className="btn-icon" onClick={() => controls.current.redo()} data-tip="вернуть · Ctrl+Shift+Z" aria-label="Вернуть"><Redo2 size={15} /></button>
           <div className="mx-1 h-5 w-px" style={{ background: 'var(--line)' }} />
           <button className="btn-icon" onClick={() => controls.current.zoomOut()} aria-label="Отдалить" data-tip="Ctrl −"><Minus size={15} /></button>

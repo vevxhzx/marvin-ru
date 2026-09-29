@@ -72,7 +72,7 @@ export default function Orders() {
 
   const kicker = overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : openN ? `${openN} ${plural(openN, 'заказ в работе', 'заказа в работе', 'заказов в работе')}` : 'свободен'
   return (
-    <div className="space-y-10">
+    <div className="bento-page space-y-10">
       <PageHead kicker={kicker} title="заказы" idx={openN}
         right={<><Seg value={view} onChange={setView} options={VIEWS} /><button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button></>} />
 
@@ -200,7 +200,22 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, 
 
 function Details({ o, onEdit, onPay, onDel, onStatus, onStart, closed }) {
   const [d, setD] = useState(null)
-  useEffect(() => { api.order(o.id).then(setD).catch(() => {}) }, [o.id, o.paid, o.hours, o.status])
+  const [manualMin, setManualMin] = useState('')
+  const [manualNote, setManualNote] = useState('')
+  const [manualBusy, setManualBusy] = useState(false)
+  const [manualMsg, setManualMsg] = useState('')
+  const [screenProjects, setScreenProjects] = useState([])
+  useEffect(() => { api.order(o.id).then(setD).catch(() => {}); api.screen(1).then((r) => setScreenProjects(r.projects || [])).catch(() => setScreenProjects([])) }, [o.id, o.paid, o.hours, o.status])
+  const addManual = async () => {
+    const minutes = Number(manualMin)
+    if (!Number.isFinite(minutes) || minutes < 1) { setManualMsg('Укажи минуты'); return }
+    setManualBusy(true); setManualMsg('')
+    try {
+      await api.addOrderTime(o.id, Math.round(minutes), { note: manualNote.trim() || 'ручной учёт' })
+      setManualMin(''); setManualNote(''); setManualMsg('Время добавлено')
+      const fresh = await api.order(o.id); setD(fresh)
+    } catch (e) { setManualMsg(e.message || 'Не удалось сохранить') } finally { setManualBusy(false) }
+  }
   return (
     <div className="animate-rise -mt-1 mb-3 ml-[2px] space-y-3 border-l-2 pl-4" style={{ borderColor: 'var(--line)' }}>
       {o.notes && <div className="muted whitespace-pre-wrap text-[13.5px]">{o.notes}</div>}
@@ -211,6 +226,24 @@ function Details({ o, onEdit, onPay, onDel, onStatus, onStart, closed }) {
         <div><div className="label">дедлайн</div><div className="mt-0.5">{o.deadline ? `${dayLabel(o.deadline).toLowerCase()}, ${hhmm(o.deadline)}` : '—'}</div></div>
       </div>
       {o.pulse?.warn && <div className="warn text-[12.5px]">заказ съедает на {o.pulse.over_pct} % больше времени, чем планировали — {hours(o.pulse.hours)} из {hours(o.pulse.estimate_h)}</div>}
+      <div className="rounded-xl border hair p-3">
+        <div className="label mb-2">добавить потраченное время</div>
+        <div className="flex flex-wrap items-center gap-2">
+          <input className="input !h-8 !w-24 num" type="number" min="1" max="10080" placeholder="минуты" value={manualMin} onChange={(e) => setManualMin(e.target.value)} aria-label="Потраченные минуты" />
+          <input className="input !h-8 min-w-[160px] flex-1" placeholder="что делал (необязательно)" value={manualNote} onChange={(e) => setManualNote(e.target.value)} aria-label="Комментарий к времени" />
+          <button className="btn-soft btn-sm" disabled={manualBusy} onClick={addManual}>{manualBusy ? 'сохраняю…' : 'добавить'}</button>
+        </div>
+        {manualMsg && <div className="muted mt-1 text-[12px]">{manualMsg}</div>}
+      </div>
+      {screenProjects.length > 0 && <div className="rounded-xl border hair p-3">
+        <div className="label mb-2">найдено за ПК сегодня</div>
+        <div className="space-y-1.5">
+          {screenProjects.map((x) => <div key={`${x.app}-${x.project}`} className="flex items-center justify-between gap-3 text-[12.5px]">
+            <span className="min-w-0 truncate"><b>{x.app}</b> · {x.project} · {hours(x.minutes / 60)}</span>
+            <button className="btn-ghost btn-sm shrink-0" onClick={async () => { try { await api.addOrderScreenTime(o.id, x); setScreenProjects((p) => p.filter((q) => q !== x)); const fresh = await api.order(o.id); setD(fresh) } catch (e) { setManualMsg(e.message || 'Не удалось добавить') } }}>добавить</button>
+          </div>)}
+        </div>
+      </div>}
       {d?.payments?.length > 0 && (
         <div className="text-[12.5px]"><div className="label mb-1">оплаты</div>{d.payments.map((p) => <div key={p.id} className="muted flex justify-between gap-3"><span>{dayLabel(p.date).toLowerCase()} · {p.note || 'оплата'}</span><span className="num pos">+{money(p.amount)}</span></div>)}</div>
       )}

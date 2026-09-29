@@ -10,7 +10,7 @@ import re
 import time
 from dataclasses import dataclass, field
 
-log = logging.getLogger("assistant.pc")
+log = logging.getLogger("jarvis.pc")
 
 # состояние ПК-клиента: когда последний раз был на связи и что сейчас делает (idle/listening/thinking/speaking/off)
 LAST_SEEN: float = 0.0
@@ -39,7 +39,7 @@ SITES = {
     "гитхаб": "https://github.com", "github": "https://github.com", "хабр": "https://habr.com", "чат гпт": "https://chatgpt.com", "chatgpt": "https://chatgpt.com", "джипити": "https://chatgpt.com",
     "озон": "https://ozon.ru", "вайлдберриз": "https://wildberries.ru", "авито": "https://avito.ru", "карты": "https://yandex.ru/maps", "погоду": "https://yandex.ru/pogoda", "погода": "https://yandex.ru/pogoda",
     "нетфликс": "https://netflix.com", "спотифай": "https://open.spotify.com", "spotify": "https://open.spotify.com", "яндекс музыку": "https://music.yandex.ru", "музыку": "https://music.yandex.ru",
-    "ассистента": "__self__", "сайт ассистента": "__self__", "твой сайт": "__self__",
+    "джарвиса": "__self__", "сайт джарвиса": "__self__", "джарвис сайт": "__self__",
 }
 APPS = {
     "телегу": "telegram", "телеграм": "telegram", "telegram": "telegram", "дискорд": "discord", "discord": "discord", "стим": "steam", "steam": "steam",
@@ -65,6 +65,8 @@ LOCK_RX = re.compile(r"^\s*(заблокируй\s+(?:комп|компьюте�
 
 TIDY_RX = re.compile(r"^\s*(?:[а-яё]+,\s*)?(разбери|прибери|прибраться|убери(?:сь)?|наведи\s+порядок|почисти|расчисти|рассортируй|разгреби)\s+(?:на\s+|в\s+)?(?:мо[йю]\s+)?(рабоч\w+\s+стол\w*|стол\w*|загрузк\w*|скачанн\w*|десктоп\w*|всё|все|бардак)(?:\s+и\s+(?:в\s+|на\s+)?(рабоч\w+\s+стол\w*|стол\w*|загрузк\w*))?\s*[.!]?\s*$", re.I)
 TIDY_UNDO_RX = re.compile(r"^\s*(отмени|верни|откати)\s+(уборку|разбор|порядок|файлы\s+(?:на\s+место|обратно))\s*[.!]?\s*$", re.I)
+ORGANIZE_RX = re.compile(r"^\s*(?:организуй|рассортируй|разложи)\s+(?:монтажную\s+)?(?:папку\s+)?[«\"']?(.+?)[»\"']?\s*$", re.I)
+ORGANIZE_UNDO_RX = re.compile(r"^\s*(?:отмени|откати)\s+(?:организацию|сортировку|разбор)\s*(?:папки)?\s*$", re.I)
 
 
 def _tidy_targets(*words: str | None) -> list[str]:
@@ -112,6 +114,13 @@ def parse(text: str) -> PcCommand | None:
         return PcCommand("screen", q, say="Смотрю на экран…")
     if CLIP_RX.match(t):
         return PcCommand("clipboard", "", say="Беру из буфера обмена.")
+    m = ORGANIZE_UNDO_RX.match(t)
+    if m:
+        return PcCommand("organize_undo", "", say="Возвращаю файлы из последней организации.")
+    m = ORGANIZE_RX.match(t)
+    if m and ("/" in m.group(1) or "\\" in m.group(1) or "." in m.group(1) or len(m.group(1).split()) <= 5):
+        path = m.group(1).strip(" «»\"'")
+        return PcCommand("organize", path, say="Сканирую монтажную папку. Сначала покажу полный план, ничего пока не перемещаю.")
     m = TIDY_RX.match(t)
     if m:
         targets = _tidy_targets(m.group(2), m.group(3))
@@ -136,7 +145,7 @@ def parse(text: str) -> PcCommand | None:
         return PcCommand("find", m.group(2).strip(" «»\"'"), say=f"Ищу «{m.group(2).strip()}» на компьютере…")
     m = OPEN_RX.match(t)
     if m and re.search(r"\b(задач|дел[аоы]?|встреч|событи|календар|финанс|баланс|долг|трат|расход|доход|заметк|мысл|ссылк|мозг|памят|бриф|план|подписк|прогноз|отч[её]т|сводк|напомина|регулярн)", low):
-        m = None   # «покажи задачи», «открой календарь» — это про данные ассистента, не про ПК
+        m = None   # «покажи задачи», «открой календарь» — это про данные Джарвиса, не про ПК
     if m:
         target = m.group(2).strip(" «»\"'").lower()
         if re.search(r"^(https?://|www\.)|\.(ru|com|org|net|io|tv|me|dev|app)(/|$)", target):

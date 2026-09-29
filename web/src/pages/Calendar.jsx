@@ -84,7 +84,7 @@ export default function Calendar() {
   }, [selected, cursor, sheet])
 
   return (
-    <div className="space-y-6">
+    <div className="bento-page space-y-6">
       <PageHead kicker={String(cursor.getFullYear())} title={MONTHS_NOM[cursor.getMonth()].toLowerCase()} idx={cursor.getMonth() + 1}
         right={<>
           <Seg value={view} onChange={setView} options={[['month', 'месяц'], ['week', 'неделя']]} />

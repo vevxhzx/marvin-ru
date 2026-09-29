@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2 } from 'lucide-react'
 import { playChime } from '../lib/sound'
 import { api, relTime, kb } from '../lib/api'
-import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton } from '../components/ui'
+import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm } from '../components/ui'
 import { enableNotifications, disableNotifications, notifyEnabled, notifyState } from '../lib/notify'
 import { usePrefs, prefs as PREFS, ACCENTS, TINTS, FONT_SIZES, RADII } from '../lib/prefs'
 import { useTheme, NAV_GROUPS, useRefresh } from '../App'
@@ -18,18 +18,17 @@ const GROUPS = [
   ['google', 'google календарь', 'События ассистента появляются в Google Календаре — на телефоне, часах, в любом приложении. Только в одну сторону: ассистент → Google. Client ID и secret — 5 минут по инструкции в README (бесплатно, карта не нужна).'],
   ['backup', 'бэкапы', 'Ежедневно в 03:00. Вторая копия — на другой диск или в папку Яндекс.Диска / Google Drive.'],
   ['owner', 'вы', ''],
-  ['assistant', 'ассистент', 'Имя — так он представляется и на него откликается голосом. После смены — перезапуск.'],
   ['persona', 'характер', 'Готовые реплики и стиль ответов. Обращение — из «вы».'],
   ['finance', 'финансы', ''],
   ['server', 'сервер', ''],
 ]
 /* Категории — только из того, что реально есть в config.yaml и статусе. Ничего нового не выдумываем. */
 const CATS = [
-  { id: 'general', label: 'общее', groups: ['owner', 'assistant', 'persona', 'finance', 'notifications'], extra: ['browser-notif', 'phone'] },
+  { id: 'general', label: 'общее', groups: ['owner', 'persona', 'finance', 'notifications'], extra: ['browser-notif', 'phone'] },
   { id: 'look', label: 'вид', groups: [], extra: ['look'] },
   { id: 'freelance', label: 'фриланс', groups: [], extra: ['freelance', 'pomodoro'] },
   { id: 'ai', label: 'мозг', groups: ['brain', 'brain.cloud'] },
-  { id: 'voice', label: 'голос и пк', groups: ['voice'] },
+  { id: 'voice', label: 'голос и пк', groups: ['voice'], extra: ['organizer'] },
   { id: 'memory', label: 'память и данные', groups: ['backup'], extra: ['data'] },
   { id: 'integrations', label: 'интеграции', groups: ['telegram', 'google'] },
   { id: 'system', label: 'система', groups: ['server'], extra: ['status'] },
@@ -98,6 +97,7 @@ export default function Settings({ health }) {
   }
 
   const extras = {
+    organizer: <FileOrganizer key="organizer" show={show} />,
     look: <Appearance key="look" />,
     freelance: <Freelance key="freelance" />,
     pomodoro: <Pomodoro key="pomodoro" />,
@@ -166,7 +166,7 @@ export default function Settings({ health }) {
     data: (
       <Section key="data" title="данные" hint="Всё лежит в data/assistant.db на вашем компьютере. Экспорт — на всякий случай и для Excel.">
         <Card className="flex flex-wrap items-center gap-2">
-          <button className="btn-ghost" onClick={() => api.backupNow().then((r) => show(r.ok ? 'Копия сделана' : 'Бэкап выключен')).catch(show.err)}><HardDriveDownload size={15} /> бэкап сейчас</button>
+          <button className="btn-ghost" onClick={() => api.backupNow().then((r) => show(r.ok ? `Копия: ${r.name || 'готово'}` : 'Не вышло — нет базы?')).catch(show.err)}><HardDriveDownload size={15} /> бэкап сейчас</button>
           <a className="btn-ghost" href="/api/export/transactions.csv"><Download size={15} /> операции.csv</a>
           <a className="btn-ghost" href="/api/export/events.csv"><Download size={15} /> календарь.csv</a>
           <a className="btn-ghost" href="/api/export/tasks.csv"><Download size={15} /> задачи.csv</a>
@@ -174,15 +174,16 @@ export default function Settings({ health }) {
           <a className="btn-soft" href="/api/export/all.json"><Download size={15} /> всё в json</a>
           <button className="btn-soft" onClick={() => api.reindex().then((r) => show(`Проиндексировано: ${r.indexed}`)).catch(show.err)}><RefreshCw size={15} /> переиндексировать мозг</button>
         </Card>
+        <BackupRestore show={show} />
       </Section>
     ),
   }
 
   const current = CATS.find((c) => c.id === cat) || CATS[0]
-  const order = current.id === 'general' ? ['owner', 'assistant', 'persona', 'finance', 'browser-notif', 'notifications', 'phone'] : current.id === 'memory' ? ['backup', 'data'] : [...current.groups, ...(current.extra || [])]
+  const order = current.id === 'general' ? ['owner', 'persona', 'finance', 'browser-notif', 'notifications', 'phone'] : current.id === 'memory' ? ['backup', 'data'] : [...current.groups, ...(current.extra || [])]
 
   return (
-    <div className="space-y-8">
+    <div className="bento-page space-y-8">
       <PageHead kicker="только то, что есть в config.yaml — ничего лишнего" title="настройки" idx={7}
         right={dirty && <button className="btn-primary" disabled={saving} onClick={save}>{saving ? 'сохраняю…' : 'сохранить'}</button>} />
 
@@ -363,7 +364,7 @@ function Pomodoro() {
             <input type="range" min={0.1} max={1} step={0.05} value={p.volume} onChange={(e) => setP({ ...p, volume: Number(e.target.value) })} onMouseUp={(e) => { save({ volume: Number(e.target.value) }); playChime(p.sound, Number(e.target.value)) }} onTouchEnd={(e) => save({ volume: Number(e.target.value) })} className="range w-full" />
           </Block>
         )}
-        <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">сказать голосом</div><div className="muted text-[12.5px]">«Помидор готов» — на ПК через voice.bat; выключено — только звук</div></div><Switch on={p.voice} onChange={(v) => save({ voice: v })} /></div>
+        <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">сказать голосом</div><div className="muted text-[12.5px]">«Помидор готов, сэр» — на ПК через voice.bat; выключено — только звук</div></div><Switch on={p.voice} onChange={(v) => save({ voice: v })} /></div>
       </Card>
     </Section>
   )
@@ -541,6 +542,77 @@ function MiniApp({ current, onUse }) {
   )
 }
 
+
+/* Список backup-*.db + «восстановить» (ROADMAP P1). После restore — перезапуск start.bat. */
+function BackupRestore({ show }) {
+  const [list, setList] = useState(null)
+  const [pick, setPick] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const load = () => api.backups().then(setList).catch(() => setList([]))
+  useEffect(() => { load() }, [])
+  const doRestore = async () => {
+    if (!pick) return
+    setBusy(true)
+    try {
+      const r = await api.restoreBackup(pick.name)
+      setPick(null)
+      show(`База из «${r.restored}». Закройте start.bat и запустите снова.` + (r.safety ? ` Страховка: ${r.safety}` : ''))
+      load()
+    } catch (e) { show.err(e) } finally { setBusy(false) }
+  }
+  const fmtSize = (n) => (n >= 1e6 ? `${(n / 1e6).toFixed(1)} МБ` : `${Math.max(1, Math.round(n / 1024))} КБ`)
+  return (
+    <Card className="mt-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div>
+          <div className="h4">восстановить из бэкапа</div>
+          <div className="muted text-[12.5px]">Текущая база сохранится как backup-pre-restore-…. Картинки в data/media не откатываются. После — перезапуск start.bat.</div>
+        </div>
+        <button className="btn-icon outlined" data-tip="обновить список" onClick={load} aria-label="Обновить"><RefreshCw size={14} /></button>
+      </div>
+      {list === null ? <Skeleton h={72} /> : list.length === 0 ? (
+        <div className="muted text-[13px]">Копий пока нет. «Бэкап сейчас» выше или дождитесь 03:00 (если бэкапы включены).</div>
+      ) : (
+        <ul className="divide-y hair max-h-[280px] overflow-y-auto">
+          {list.map((b) => (
+            <li key={b.name} className="flex items-center gap-3 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13.5px] font-medium">{b.pre_restore ? 'страховка перед прошлым restore' : relTime(b.at)} <span className="faint mono text-[11px]">· {b.name.replace(/^backup-(?:pre-restore-)?/, '').replace(/\.db$/, '')}</span></div>
+                <div className="faint text-[12px]">{fmtSize(b.size)}{b.pre_restore ? ' · pre-restore' : ''}</div>
+              </div>
+              <button className="btn-soft btn-sm !h-7" onClick={() => setPick(b)}>восстановить</button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <Confirm open={!!pick} onClose={() => !busy && setPick(null)} title="Восстановить базу?"
+        text={pick ? `Файл «${pick.name}» (${relTime(pick.at)}) заменит data/assistant.db. Текущая копия уйдёт в backup-pre-restore. После — закройте окно start.bat и запустите снова.` : ''}
+        onOk={doRestore} danger />
+      {busy && <div className="muted text-[12.5px]">копирую…</div>}
+    </Card>
+  )
+}
+
+function FileOrganizer({ show }) {
+  const [path, setPath] = useState('')
+  const [logs, setLogs] = useState([])
+  const [preview, setPreview] = useState(null)
+  const load = () => Promise.all([api.get('/api/pc/organize/log').then(setLogs), api.organizePreview().then((p) => setPreview(p.status === 'ready' ? p : null))]).catch(() => {})
+  useEffect(() => { load() }, [])
+  const run = async () => {
+    if (!path.trim()) return show('Укажите путь к монтажной папке')
+    try { await api.chat(`организуй монтажную папку «${path.trim()}»`); show('План готовится…'); let p = null; for (let i = 0; i < 20; i++) { await new Promise((r) => setTimeout(r, 500)); p = await api.organizePreview(); if (p.status === 'ready') break } setPreview(p?.status === 'ready' ? p : null); load() } catch (e) { show.err(e) }
+  }
+  return <Section title="организация монтажных папок" hint="Путь читается на компьютере, где запущен voice.bat. Сначала получите предпросмотр, затем подтвердите в чате. Файлы не удаляются.">
+    <Card className="space-y-4">
+      <div className="flex flex-col gap-2 sm:flex-row"><input className="input flex-1" value={path} onChange={(e) => setPath(e.target.value)} placeholder={'D:\\Проекты\\Клиент\\Монтаж'} /><button className="btn-primary" onClick={run}>показать план</button></div>
+      <div className="muted text-[12px]">Структура: исходники по типам, графика, музыка, проекты Premiere/After Effects/DaVinci, прокси, рендеры, экспорт, прочее. В чате можно проверить список и написать «да» или «нет».</div>
+      {preview && <div className="rounded-2xl border border-accent/30 bg-accent/5 p-4"><div className="flex flex-wrap items-center justify-between gap-2"><b>Предпросмотр готов</b><span className="muted text-[12px]">{preview.root}</span></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{Object.entries(preview.by_category || {}).map(([k, n]) => <div key={k} className="fill rounded-xl p-3"><div className="text-[12px]">{k}</div><div className="num mt-1 text-lg font-semibold">{n}</div></div>)}</div><div className="mt-3 text-[13px]">Всего файлов: <b>{preview.total}</b>. {preview.profile === 'sound' && <><b>Звуки будут собраны в отдельной папке SFX.</b> </>}Ничего не перемещено. {preview.cleanup_dirs?.length ? `Пустые старые папки: до ${preview.cleanup_dirs.length}. ` : ''}Подтвердите <b>«да»</b> в чате или отклоните план.</div><details className="mt-3"><summary className="cursor-pointer text-[12px]">показать список перемещений</summary><div className="mt-2 max-h-48 overflow-auto text-[11px]">{(preview.moves || []).map((m, i) => <div key={i} className="py-0.5">{m.src} → {m.dst}</div>)}</div></details></div>}
+      <div className="flex items-center justify-between"><div className="label">журнал последних операций</div><button className="btn-ghost btn-sm" onClick={load}>обновить</button></div>
+      {!logs.length ? <div className="muted text-[13px]">Операций ещё нет.</div> : <div className="space-y-2">{logs.map((l, i) => <div key={i} className="fill rounded-xl p-3 text-[13px]"><div className="flex justify-between gap-3"><b>{l.kind === 'organize_undo' ? 'отмена организации' : 'организация завершена'}</b><span className="muted">{l.at}</span></div><div className="muted mt-1">{l.text}</div>{(l.log?.moved || []).slice(0, 8).map((m, j) => <div key={j} className="mt-1 truncate text-[11px]">{m.src} → {m.dst}</div>)}{(l.log?.moved || []).length > 8 && <div className="muted mt-1 text-[11px]">и ещё {l.log.moved.length - 8}</div>}</div>)}</div>}
+    </Card>
+  </Section>
+}
 
 function StatusCard({ ok, warn, title, line1, line2, action }) {
   const color = ok ? 'var(--pos)' : warn ? 'var(--warn)' : 'var(--neg)'

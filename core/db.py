@@ -64,7 +64,7 @@ class Aim(SQLModel, table=True):
     а если вех нет — по задачам с aim_id; поле progress — ручная поправка, когда считать не по чему."""
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
-    why: str = ""                      # зачем — одна фраза; Марвин напоминает её, когда цель буксует
+    why: str = ""                      # зачем — одна фраза; Джарвис напоминает её, когда цель буксует
     status: str = Field(default="active", index=True)   # active / paused / done / dropped
     priority: int = 2                  # 1 главная сейчас, 2 обычная, 3 фоновая
     due: Optional[datetime] = None
@@ -297,7 +297,7 @@ class Setting(SQLModel, table=True):
 
 
 class ActionLog(SQLModel, table=True):
-    """Что ассистент сделал по команде — чтобы «отмени» работало для чего угодно и переживало перезапуск."""
+    """Что Джарвис сделал по команде — чтобы «отмени» работало для чего угодно и переживало перезапуск."""
     id: Optional[int] = Field(default=None, primary_key=True)
     kind: str                          # add_event / add_task / add_expense / add_income / add_debt / add_note / add_link / add_recurring / pay_debt
     ref_table: str
@@ -486,7 +486,7 @@ def init_db() -> None:
             if not c.bucket and c.name in DEFAULT_BUCKETS:
                 c.bucket = DEFAULT_BUCKETS[c.name]; s.add(c)
         if s.exec(select(Account)).first() is None:
-            main = str(getattr(getattr(cfg, "finance", None), "main_account", "") or "Основной")
+            main = cfg.finance.main_account if hasattr(cfg, "finance") else "Т-Банк"
             s.add(Account(name=main, kind="bank", is_main=True))
             s.add(Account(name="Наличные", kind="cash"))
         s.commit()

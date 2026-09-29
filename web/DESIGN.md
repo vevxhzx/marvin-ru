@@ -68,3 +68,19 @@
 
 ## Приоритет задач
 `PriorityDot` (`ui.jsx`) — точка + всплывающее меню через портал в `body` (строки лежат внутри `.swipe` с `overflow:hidden`, обычный absolute-попап там обрезался). Сортировка внутри групп задач — `prefs.tasksSort` (`priority | due | new`), переключатель над списком.
+
+## Reference page pass · 2026
+
+The current visual target is the supplied `джарвис · сегодня.html` reference. The shared CSS keeps the same tokens across every route:
+
+- light `#e9ecf3`, dark `#050507` backgrounds;
+- 232px dark sidebar, 30px radius, 16px outer inset;
+- white active navigation item;
+- 12-column bento utilities with 16px gaps and no content max-width;
+- 28–30px cards, 26px padding, thin inset border, restrained shadows;
+- signal blue `#0a3cff` / dark `#2f57ff`;
+- Inter Tight-style display hierarchy and JetBrains Mono for data labels;
+- reference easing `cubic-bezier(.16,1,.3,1)` and reduced-motion fallbacks;
+- empty states use `Empty` and a chat chip rather than a dead blank panel.
+
+Routes and components use the same primitives from `src/index.css` and `components/ui.jsx`; page logic, API calls, hooks, storage and tests remain separate from the visual layer.

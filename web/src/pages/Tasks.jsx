@@ -71,7 +71,7 @@ export default function Tasks() {
   const rowProps = { toggle, del, setPriority, setSheet, now, leaveCls, arrivedCls }
   const kicker = groups.overdue.length ? `${groups.overdue.length} ${plural(groups.overdue.length, 'просрочена', 'просрочены', 'просрочено')}` : open.length ? `${open.length} ${plural(open.length, 'открытая', 'открытые', 'открытых')}` : 'всё сделано'
   return (
-    <div className="space-y-10">
+    <div className="bento-page space-y-10">
       <PageHead kicker={view === 'aims' ? 'ради чего всё это' : kicker} title={view === 'aims' ? 'цели' : 'задачи'} idx={view === 'aims' ? undefined : open.length}
         right={<><Seg value={view} onChange={setView} options={VIEWS} />{view !== 'aims' && <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> задача</button>}</>} />
 

@@ -18,7 +18,7 @@ from . import finance
 from .finance import money
 from .match import same
 
-log = logging.getLogger("assistant.orders")
+log = logging.getLogger("jarvis.orders")
 
 STATUSES = ("new", "work", "review", "done", "paid", "cancelled")
 STATUS_LABEL = {"new": "обсуждение", "work": "в работе", "review": "на правках", "done": "сдан", "paid": "оплачен", "cancelled": "отменён"}
@@ -213,6 +213,23 @@ def sessions_for(oid: int, limit: int = 50) -> list[WorkSession]:
     with session() as s:
         return list(s.exec(select(WorkSession).where(WorkSession.order_id == oid, WorkSession.kind == "focus")
                            .order_by(WorkSession.started_at.desc()).limit(limit)))
+
+
+def add_manual_time(oid: int, minutes: int, started_at: datetime | None = None,
+                    note: str | None = None, source: str = "manual") -> WorkSession:
+    """Записать уже потраченное время, не запуская таймер."""
+    if not get_order(oid):
+        raise OrderError("Заказ не найден")
+    minutes = int(minutes or 0)
+    if minutes < 1 or minutes > 24 * 60 * 7:
+        raise OrderError("Время должно быть от 1 минуты до 7 дней")
+    start = started_at or (datetime.now() - timedelta(minutes=minutes))
+    row = WorkSession(order_id=oid, kind="focus", started_at=start,
+                      planned_min=minutes, ended_at=start + timedelta(minutes=minutes),
+                      note=(note or "").strip() or "ручной учёт", source=source)
+    with session() as s:
+        s.add(row); s.commit(); s.refresh(row)
+    return row
 
 
 def hours_for(oid: int) -> float:

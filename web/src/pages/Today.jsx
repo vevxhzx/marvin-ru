@@ -95,7 +95,7 @@ export default function Today({ openChat, address = 'сэр' }) {
   const wide = (id) => id === 'money'
 
   return (
-    <div className="space-y-12 sm:space-y-14">
+    <div className="bento-page space-y-12 sm:space-y-14">
       <header className="animate-rise">
         <div className="label mb-2">{WD[now.getDay()]} · {now.getDate()} {MONTHS[now.getMonth()]}</div>
         {prefs.showGreeting && <h1 className="h1">{GREETS[part(now.getHours())]}, {prefs.address || address}</h1>}

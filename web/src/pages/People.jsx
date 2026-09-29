@@ -81,7 +81,7 @@ export default function People() {
 
   const unpaidTotal = (list || []).reduce((s, p) => s + (p.unpaid || 0), 0)
   return (
-    <div className="space-y-8">
+    <div className="bento-page space-y-8">
       <PageHead kicker="кто есть кто" title="люди" idx={list?.length}
         sub={list?.length ? `${(list || []).filter((p) => p.open).length} с открытыми заказами${unpaidTotal ? ` · не оплачено ${money(unpaidTotal)}` : ''}` : undefined}
         right={<div className="flex flex-wrap items-center gap-2"><Pills value={tab} onChange={setTab} options={[['all', 'все'], ...kinds.filter((k) => k.id !== 'person' || (list || []).some((p) => p.kind === 'person')).filter((k) => !k.custom || (list || []).some((p) => p.kind === k.id)).map((k) => [k.id, k.label])]} /><button className="btn-primary btn-sm" onClick={() => setAdding(true)}><Plus size={14} /> человек</button></div>} />

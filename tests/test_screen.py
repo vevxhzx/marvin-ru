@@ -2,7 +2,7 @@
 import os
 from datetime import datetime, timedelta
 
-os.environ.setdefault("ASSISTANT_TEST", "1")
+os.environ.setdefault("JARVIS_TEST", "1")
 
 import pytest  # noqa: E402
 
@@ -51,6 +51,7 @@ def test_slots_merge_and_summary():
               (20, "telegram.exe", "Telegram", 0)])
     rows = screen.slots(t0)
     assert [(r.app, r.idle) for r in rows] == [("Premiere Pro", False), ("YouTube", False), ("Отошёл", True), ("Telegram", False)]
+    assert rows[0].title == "ролик"
     d = screen.summary(t0)
     assert 107 <= d["active_min"] <= 112 and 14 <= d["idle_min"] <= 16   # простой отсчитывается с последнего движения мыши, а не с 5-й минуты
     assert d["apps"][0][0] == "Premiere Pro" and 58 <= d["apps"][0][1] <= 61

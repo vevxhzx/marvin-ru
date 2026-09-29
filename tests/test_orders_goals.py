@@ -192,6 +192,9 @@ def test_orders_goals_api():
     assert not _j(c.delete("/api/orders/timer"))["active"]
     d = _j(c.get("/api/orders/1"))
     assert d["payments"][0]["amount"] == 10000 and isinstance(d["sessions"], list)
+    manual = _j(c.post("/api/orders/1/time", json={"minutes": 95, "note": "монтаж в Premiere"}))
+    assert manual["session"]["source"] == "manual" and manual["order"]["hours"] >= 1.58
+    assert c.post("/api/orders/1/time", json={"minutes": 0}).status_code == 422
     assert _j(c.put("/api/orders/2", json={"status": "done"}))["status"] == "done"
     assert c.put("/api/orders/2", json={"status": "weird"}).status_code == 400
     assert [x["title"] for x in _j(c.get("/api/orders"))] == ["Ролик", "Свадьба"]

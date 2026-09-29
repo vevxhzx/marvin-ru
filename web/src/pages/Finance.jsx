@@ -46,7 +46,7 @@ export default function Finance() {
   const arrivedCls = useArrived(txs.map((t) => t.id))
   const [pick, setPick] = useState(null) // выбранный день на графике (тап на телефоне)
 
-  if (!sum) return <div className="space-y-4"><Skeleton h={160} /><Skeleton h={200} /><Skeleton h={200} /></div>
+  if (!sum) return <div className="bento-page space-y-4"><Skeleton h={160} /><Skeleton h={200} /><Skeleton h={200} /></div>
   const cf = sum.cashflow
   const openDebts = debts.filter((d) => !d.closed)
   const closedDebts = debts.filter((d) => d.closed)

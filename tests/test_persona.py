@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-os.environ["ASSISTANT_TEST"] = "1"
+os.environ["JARVIS_TEST"] = "1"
 
 from core import db  # noqa: E402
 from core.brain import persona  # noqa: E402
@@ -171,10 +171,10 @@ def test_vibe_candidate_only_when_quiet_and_daytime(monkeypatch):
     assert not [x for x in proactive.candidates(day) if x["key"].startswith("vibe")]
 
 
-def test_character_prompt_has_examples_and_bans_lectures():
+def test_character_prompt_defaults_to_short_business_tone():
     b = persona.character_block()
-    assert "ОБРАЗЦЫ ТОНА" in b and "АНТИОБРАЗЦЫ" in b and "Подкол + плечо" in b
-    assert "Давай поставим срок" in b and "можешь отдохнуть" in b     # именно те провалы, что видели вживую
+    assert "короткие фразы" in b and "без шуток" in b
+    assert "ОБРАЗЦЫ ТОНА" not in b and "Подкол + плечо" not in b
 
 
 def test_recent_images_block_repeats(monkeypatch):
@@ -227,8 +227,10 @@ def test_opinion_question_goes_to_cloud_and_not_to_sorter():
     assert sorter.looks_like_batch("купить хлеб, позвонить маме, отправить инвойс Headway") is True
 
 
-def test_compact_prompt_for_local_model():
+def test_compact_prompt_for_local_model(monkeypatch):
     from core.brain import persona
+    monkeypatch.setattr(persona, "STYLE", "swag")
+    monkeypatch.setattr(persona, "HUMOR", 8)
     full, compact = persona.system_prompt(), persona.system_prompt(compact=True)
     assert "ОБРАЗЦЫ ТОНА" in full and "ОБРАЗЦЫ ТОНА" not in compact
     assert "ГРАДАЦИЯ" in compact and "ЗАПРЕЩЕНО" in compact

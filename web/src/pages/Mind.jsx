@@ -72,7 +72,7 @@ export default function Mind() {
   ].filter((x) => tab === 'all' || (tab === 'photo' ? !!x.image : tab === 'note' ? x._t === 'note' && !x.image : x._t === tab)).sort((a, b) => (mode === 'semantic' && q ? (b.score || 0) - (a.score || 0) : new Date(b.created_at) - new Date(a.created_at)))
 
   return (
-    <div className="space-y-8">
+    <div className="bento-page space-y-8">
       <PageHead kicker="второй мозг" title="мозг" idx={items.length}
         right={<Pills value={tab} onChange={setTab} options={[['all', 'всё'], ['note', 'мысли'], ['photo', 'фото'], ['link', 'ссылки'], ['graph', 'граф']]} />} />
 

@@ -1,4 +1,4 @@
-"""Мозг ассистента.
+"""Мозг Джарвиса.
 
 Порядок обработки любой фразы:
  1. Быстрые правила (мгновенно, без LLM, 100% приватно): траты, доходы, встречи, задачи, заметки, ссылки, отчёты.
@@ -18,7 +18,6 @@ from datetime import datetime, timedelta
 from sqlmodel import select
 
 from ..db import ChatMessage, get_setting, session, set_setting
-from .. import identity
 from ..services import brain_notes, calendar, finance, judge, memory, tasks, trace, undo, screen
 from ..services.calendar import fmt_dt, fmt_due, fmt_repeat
 from ..services.finance import money
@@ -29,7 +28,7 @@ from .dates import ambiguous_night_hour, first_occurrence, parse_amount, parse_d
 from . import persona
 from .persona import localize, now_line, say, system_prompt
 
-log = logging.getLogger("assistant.agent")
+log = logging.getLogger("jarvis.agent")
 
 
 @dataclass
@@ -97,7 +96,7 @@ def _pending_clear(channel: str) -> None:
     set_setting(f"pending:{channel}", "")
 
 CLOUD_RX = re.compile(r"^\s*(?:спроси\s+(?:у\s+)?)?(гемини|gemini|облако|джемини|дипсик|deepseek|грок|groq|нейронк\w*|интернет)\s*[,:\-—]?\s*", re.I)
-LOCAL_RX = re.compile(r"^\s*(?:локально|" + identity.NAME_RX_SRC + r"\s+сам|сам|без\s+облака)\s*[,:\-—]?\s*", re.I)
+LOCAL_RX = re.compile(r"^\s*(?:локально|джарвис\s+сам|сам|без\s+облака)\s*[,:\-—]?\s*", re.I)
 
 # Всё, что пахнет личными данными или действием с ними, — только локальная модель.
 PERSONAL_RX = re.compile(
@@ -160,9 +159,9 @@ def _core_status_text() -> str:
         parts.append(f"на диске свободно {u.free / 2**30:.0f} ГБ")
     except Exception:
         pass
+    parts.append("локальный мозг " + ("спит (игровой режим)" if llm.GAME_MODE else llm.OLLAMA_MODEL))
     if llm.SMALL_MODEL:
         parts.append(f"малая модель {llm.SMALL_MODEL} " + ("на месте" if llm.small_model_active() else "НЕ скачана — мини-задачи на основной"))
-    parts.append("локальный мозг " + ("спит (игровой режим)" if llm.GAME_MODE else llm.OLLAMA_MODEL))
     if llm.GPU_NOTE:
         parts.append(llm.GPU_NOTE.split(":")[-1].strip())
     parts.append(f"облако {llm.cloud_title()}" if llm.cloud_enabled() else "облако выключено")
@@ -422,7 +421,7 @@ def rules(text: str, channel: str) -> Reply | None:
     low = t.lower()
     if FIN_TECH_RX.match(t):   # «хватит ли на платежи» — готовый отчёт, а не анализ моделью
         return _orders_rules(t, low, channel)
-    if pc.TIDY_RX.match(t) or pc.TIDY_UNDO_RX.match(t):   # «разбери рабочий стол» — уборка на ПК, а не «разбери ситуацию»
+    if pc.TIDY_RX.match(t) or pc.TIDY_UNDO_RX.match(t) or pc.ORGANIZE_RX.match(t) or pc.ORGANIZE_UNDO_RX.match(t):   # файловые операции — только через план и подтверждение
         cmd = pc.parse(t)
         return Reply(pc.dispatch(cmd, channel), [f"pc_{cmd.action}"])
     r_fix = _resolve_judge(t, channel) or _fix_rule(t, channel)
@@ -489,9 +488,9 @@ def rules(text: str, channel: str) -> Reply | None:
                      else "Протокол «Чистый лист»: архивировать нечего — всё и так чисто. Подозрительно чисто.", ["clean_slate"])
     if re.match(r"^(я\s+)?железный человек\s*[.!]?$|^я\s+тони\s+старк", low):
         return Reply("Конечно, сэр. Костюм в ремонте, Пеппер не в курсе, а реактор — это ваш кофе. Но в остальном — один в один.", ["easter"])
-    if re.match(r"^(" + identity.NAME_RX_SRC + r",?\s+)?ты\s+(жив|живой|тут|здесь|на связи|меня слышишь)\??$", low):
+    if re.match(r"^(джарвис,?\s+)?ты\s+(жив|живой|тут|здесь|на связи|меня слышишь)\??$", low):
         return Reply("На связи, сэр. Всегда.", ["ping"])
-    if re.match(r"^(статус\s+костюма|статус\s+" + identity.NAME_RX_SRC + r"|статус\s+систем)\s*[?.!]?$", low) and not pc.alive():
+    if re.match(r"^(статус\s+костюма|статус\s+джарвиса|статус\s+систем)\s*[?.!]?$", low) and not pc.alive():
         return Reply(_core_status_text(), ["status"])
     if re.match(r"^(спокойной ночи|доброй ночи|я спать|пошёл спать|пошел спать|иду спать)\s*[.!]?$", low):
         evs = calendar.list_events(datetime.now().replace(hour=0, minute=0) + timedelta(days=1), datetime.now().replace(hour=0, minute=0) + timedelta(days=2))
@@ -757,7 +756,7 @@ def _edit_note_rule(t: str, channel: str) -> Reply | None:
     return Reply(f"Заметка обновлена: «{n.text[:200]}». Старый вариант сохранён как оригинал.", ["edit_note"])
 
 
-POMO_RX = re.compile(r"^\s*(?:" + identity.NAME_RX_SRC + r"\W*)?(?:запусти|включи|поставь|начни|стартуй)?\s*(?:таймер|помодоро|помидор\w*|фокус)\s*(?:на\s+(\d{1,3})\s*(?:мин\w*)?)?"
+POMO_RX = re.compile(r"^\s*(?:джарвис\W*)?(?:запусти|включи|поставь|начни|стартуй)?\s*(?:таймер|помодоро|помидор\w*|фокус)\s*(?:на\s+(\d{1,3})\s*(?:мин\w*)?)?"
                      r"\s*(?:(?:по|на|над|для)\s+(.+?))?\s*[.!]?\s*$", re.I)
 POMO_STOP_RX = re.compile(r"^\s*(?:стоп|останови|выключи|хватит|заверши|закончи)\s*(?:таймер|помодоро|фокус|работу)?\s*[.!]?\s*$|^\s*(?:таймер|помодоро)\s+(?:стоп|выкл\w*|хватит)\s*[.!]?$", re.I)
 POMO_BREAK_RX = re.compile(r"^\s*(?:перерыв|пауза|отдых)\s*(?:на\s+)?(\d{1,2})?\s*(?:мин\w*)?\s*[.!]?\s*$", re.I)
@@ -1169,6 +1168,9 @@ def _resolve_confirm(text: str, channel: str) -> Reply | None:
         if "tidy" in d:
             cmd = pc.PcCommand("tidy_apply", d["tidy"], say="Убираю. Отчёт — через пару секунд.")
             return Reply(pc.dispatch(cmd, channel), ["pc_tidy"], "rules")
+        if "organize" in d:
+            cmd = pc.PcCommand("organize_apply", d["organize"], say="Перемещаю по подтверждённому плану. Отчёт отправлю в чат.")
+            return Reply(pc.dispatch(cmd, channel), ["pc_organize"], "rules")
         res = registry.run_tool(d["name"], d["args"], channel)
         return Reply(res, [d["name"]], "rules")
     if NO_RX.match(text):
@@ -1374,9 +1376,9 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     allow_cloud_pre = llm.cloud_enabled() and llm.GEMINI_AUTO
     # Блок памяти («что ты знаешь о хозяине») меняется от фразы к фразе, поэтому он идёт НЕ в системное сообщение,
     # а перед репликой пользователя: системный промпт + схемы 40 инструментов тогда неизменны от запроса к запросу,
-    # и Ollama берёт их из кэша вместо того, чтобы каждый раз заново читать ~6k токенов (на 6 ГБ карте это 15–25 с).
+    # и Ollama берёт их из кэша вместо того, чтобы каждый раз заново читать ~6k токенов (на 1660 Super это 15–25 с).
     mem_ctx = await memory.context(text)
-    messages = [{"role": "system", "content": system_prompt(compact=not cloud_tools) + voice_hint +
+    messages = [{"role": "system", "content": system_prompt() + voice_hint +
                  "\nУ тебя есть инструменты — это ЕДИНСТВЕННЫЙ способ что-то сохранить. Правила:\n"
                  "• Просят записать/добавить/запомнить/сохранить/напомнить/показать — ВЫЗОВИ инструмент. "
                  "Отвечать «записал» без вызова инструмента ЗАПРЕЩЕНО — это ложь.\n"
@@ -1605,7 +1607,7 @@ def _changed(channel: str, actions: list[str]) -> None:
 
 
 # --------------------------------------------------------------------------- вход
-VOICE_RX = re.compile(r"^\s*(?:" + identity.NAME_RX_SRC + r"\W*)?(поменяй|смени|измени|другой|давай другой|переключи|выбери|поставь)?\s*голос(?![а-яё])\W*(?:на\s+)?([а-яёa-z0-9\- ]+)?\s*$", re.I)
+VOICE_RX = re.compile(r"^\s*(?:джарвис\W*)?(поменяй|смени|измени|другой|давай другой|переключи|выбери|поставь)?\s*голос(?![а-яё])\W*(?:на\s+)?([а-яёa-z0-9\- ]+)?\s*$", re.I)
 _VOICE_NAMES = {"евгений": ("silero", "eugene"), "eugene": ("silero", "eugene"), "айдар": ("silero", "aidar"), "aidar": ("silero", "aidar"),
                 "бая": ("silero", "baya"), "baya": ("silero", "baya"), "ксения": ("silero", "kseniya"), "kseniya": ("silero", "kseniya"),
                 "ксения 2": ("silero", "xenia"), "ксения-2": ("silero", "xenia"), "xenia": ("silero", "xenia"),
@@ -1650,12 +1652,12 @@ GAME_ON_RX = re.compile(r"^(игров(ой|ый) режим|иду играть
 GAME_OFF_RX = re.compile(r"^(игра окончена|наигрался|отыграл|поиграл|конец игры|игров(ой|ый) режим (выкл\w*|off)|game over|game mode off)\W*$", re.I)
 
 
-WAKE_RX = identity.WAKE_RX
+WAKE_RX = re.compile(r"^\s*(?:эй|окей|ок|слушай|привет)?\s*,?\s*джарвис\s*[,!.:\-—]*\s*", re.I)
 _SPOKEN_MARK_RX = re.compile(r"^\s*(задача|таск|мысль|идея|заметка|запиши|напомни|событие|встреча|мозг)\s*,\s*", re.I)
 
 
 def normalize_spoken(text: str) -> str:
-    """Распознанная речь → текст как если бы напечатали: убрать «<имя>,», «задача, …» → «задача: …»,
+    """Распознанная речь → текст как если бы напечатали: убрать «Джарвис,», «задача, …» → «задача: …»,
     финальную точку/вопрос (Whisper их ставит, а правила ждут чистую фразу)."""
     t = WAKE_RX.sub("", text).strip()
     if not t:
@@ -1936,10 +1938,12 @@ async def _handle(text: str, channel: str) -> Reply:
                 # многострочный список, а разбирать некому — честно сказать, а не хватать первое время как одно событие
                 r = Reply("Вижу список из нескольких пунктов, но сейчас нет ни локальной модели, ни облака, чтобы его разобрать. "
                           "Включите Ollama или ключ облака в настройках — или пришлите пункты по одному.", [], "rules")
-        if r is None and not force_local:
-            r = await _judge_disputed(text, channel)
+        # Команды ПК должны обрабатываться до судьи/облака: организация файлов не должна
+        # вызывать Groq и ждать модель, это локальное действие с подтверждением.
         if r is None:
             r = rules(text, channel)
+        if r is None and not force_local:
+            r = await _judge_disputed(text, channel)
     except finance.FinanceError as e:
         # «потратил 0 на кофе», «баланс -abc»: ошибка ввода — это ответ, а не падение (раньше веб получал 500, TG — «ошибка»)
         r = Reply(f"Не записал: {e}", [], "rules")

@@ -468,7 +468,7 @@ function Shell({ inbox }) {
         <footer className="mx-auto w-full max-w-[var(--content-max)] px-4 pb-28 sm:px-8 md:pb-6">
           <div className="rule flex flex-wrap items-center justify-between gap-2 pt-4">
             <div className="label">{lower()} · локально · {health?.ollama ? 'модель онлайн' : 'без локальной модели'}</div>
-            <div className="label">v{health?.version || '?'}</div>
+            <div className="label">v{health?.version || '?'} · {health?.build || 'build ?'}</div>
           </div>
         </footer>
       </div>

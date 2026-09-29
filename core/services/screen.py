@@ -19,7 +19,7 @@ from sqlmodel import select
 from ..config import cfg
 from ..db import ScreenSlot, session
 
-log = logging.getLogger("assistant.screen")
+log = logging.getLogger("jarvis.screen")
 
 # --------------------------------------------------------------- настройки
 def _node():
@@ -77,6 +77,9 @@ APPS = {
     "steam.exe": ("Steam", "игра"), "steamwebhelper.exe": ("Steam", "игра"), "epicgameslauncher.exe": ("Epic Games", "игра"),
 }
 BROWSERS = {k for k, v in APPS.items() if v[1] == "браузер"}
+# Для монтажа сохраняем заголовок окна локально: обычно там имя .prproj/.aep или проекта.
+# Полное содержимое экрана не читается и никуда не отправляется.
+PROJECT_APPS = {"adobe premiere pro.exe", "premiere pro.exe", "afterfx.exe", "davinci resolve.exe", "resolve.exe", "capcut.exe"}
 
 # сайты по хвосту заголовка браузера: «Видео — YouTube — Google Chrome»
 SITES = [
@@ -138,6 +141,10 @@ def record(app: str, title: str, idle_sec: int, now: datetime | None = None, ste
         name, sub, cat = "Отошёл", "", "простой"
     else:
         name, sub, cat = classify(app, title, _GAMES)
+        # У монтажных приложений заголовок обычно содержит название проекта.
+        # Это только локальная метка для отчёта и будущей привязки к заказу.
+        if app.lower().strip() in PROJECT_APPS and title.strip():
+            sub = title.strip()[:120]
     with session() as s:
         last = s.exec(select(ScreenSlot).order_by(ScreenSlot.id.desc())).first()
         gap = (now - last.end).total_seconds() if last else 1e9
@@ -229,6 +236,17 @@ def summary(day: datetime | None = None, days: int = 1) -> dict:
             "sessions": sessions, "first": first, "last": last, "hours": [round(h) for h in hours],
             "hour_cats": [max(hc.items(), key=lambda kv: kv[1])[0] if hc else "" for hc in hour_cats],
             "recording": enabled(), "days": days}
+
+
+def project_sessions(day: datetime | None = None, days: int = 1) -> list[dict]:
+    """Рабочие сессии монтажных приложений для ручной привязки к заказу."""
+    r = summary(day, days)
+    out = []
+    for app, minutes, category, project in r["apps"]:
+        if category != "работа" or app not in {"Premiere Pro", "After Effects", "DaVinci Resolve", "CapCut"}:
+            continue
+        out.append({"app": app, "project": project or "без названия проекта", "minutes": int(minutes), "days": days})
+    return out
 
 
 def fmt_min(m: float) -> str:

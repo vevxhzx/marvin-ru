@@ -4,7 +4,7 @@ import { X, Trash2, Check } from 'lucide-react'
 import { parseNum } from '../lib/api'
 
 export function Card({ className = '', children, lift, ...p }) {
-  return <div className={`panel p-5 sm:p-6 ${lift ? 'lift' : ''} ${className}`} {...p}>{children}</div>
+  return <div className={`panel p-6 ${lift ? 'lift' : ''} ${className}`} {...p}>{children}</div>
 }
 
 /* Число, которое «накручивается» до значения при появлении и при изменении */

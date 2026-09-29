@@ -4,10 +4,9 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 import asyncio
 import logging
-import os
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
@@ -15,16 +14,15 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel import select
 
-from ..brain import agent
+from ..brain import agent, persona
 from ..config import ROOT
 from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring, Aim, Milestone, get_setting, set_setting
-from .. import identity
 from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, people, pulse, relations, tasks, screen
 from ..services.scheduler import morning_digest_text
 
-log = logging.getLogger("assistant.api")
+log = logging.getLogger("jarvis.api")
 
-app = FastAPI(title="Assistant Core", version="0.1")
+app = FastAPI(title="J.A.R.V.I.S. Core", version="0.1")
 # CORS: сайт живёт на том же origin, что и API, — чужим сайтам доступ не нужен. Разрешаем только dev-сервер Vite.
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
@@ -39,6 +37,8 @@ import json as _json
 from fastapi.responses import StreamingResponse
 
 _subscribers: set[_asyncio.Queue] = set()
+PC_ORGANIZE_LOG: list[dict] = []
+PC_ORGANIZE_PREVIEW: dict | None = None
 
 
 def broadcast(kind: str, payload: dict | None = None) -> None:
@@ -65,7 +65,6 @@ async def stream(client: str = ""):
     _subscribers.add(q)
     if client == "pc":
         _pc_streams.add(id(q)); _pc.SSE_CLIENTS = len(_pc_streams)
-
 
     async def gen():
         try:
@@ -185,10 +184,11 @@ def screen_report(day: str | None = None, days: int = 1):
     """Экранное время: сводка за день (карточка на «Сегодня») или за несколько дней."""
     from ..services import screen
     d = datetime.fromisoformat(day) if day else None
-    r = screen.summary(d, max(1, min(days, 31)))
+    n = max(1, min(days, 31))
+    r = screen.summary(d, n)
     return {**r, "first": r["first"].isoformat() if r["first"] else None, "last": r["last"].isoformat() if r["last"] else None,
             "sessions": [[a.isoformat(), b.isoformat()] for a, b in r["sessions"]], "idle_min_setting": screen.idle_min(),
-            "pc_alive": pc.alive(), "text": screen.text(d, max(1, min(days, 31)))}
+            "pc_alive": pc.alive(), "projects": screen.project_sessions(d, n), "text": screen.text(d, n)}
 
 
 class PcAck(BaseModel):
@@ -209,10 +209,22 @@ def pc_state():
     return {"alive": pc.alive(), **pc.STATE}
 
 
+@app.get("/api/pc/organize/log")
+def pc_organize_log():
+    """Последние операции организации файлов, включая список перемещений."""
+    return list(reversed(PC_ORGANIZE_LOG))
+
+
+@app.get("/api/pc/organize/preview")
+def pc_organize_preview():
+    """Последний план, присланный Windows-клиентом, чтобы сайт не зависел от чата."""
+    return PC_ORGANIZE_PREVIEW or {"status": "empty"}
+
+
 class PcResult(BaseModel):
     text: str
     channel: str = "voice"
-    kind: str = "result"          # result / find / screen / clipboard / status / tidy_plan / tidy_done / tidy_undo
+    kind: str = "result"          # result / find / screen / clipboard / status / tidy_plan / tidy_done / tidy_undo / organize_plan
     extra: dict = {}
 
 
@@ -222,9 +234,16 @@ async def pc_result(r: PcResult):
     на сайте/в TG. План уборки ждёт «да» тем же механизмом подтверждения, что крупные суммы и выключение ПК."""
     from ..services import pc
     pc.seen()
-    if r.kind == "tidy_plan" and r.extra.get("plan_id") and r.extra.get("total"):
-        agent._pending_set(r.channel, "confirm|" + _json.dumps({"tidy": r.extra["plan_id"]}))
+    global PC_ORGANIZE_PREVIEW
+    if r.kind == "organize_plan":
+        PC_ORGANIZE_PREVIEW = {"status": "ready", "at": datetime.now().isoformat(timespec="seconds"), **r.extra, "text": r.text}
+    if r.kind in ("tidy_plan", "organize_plan") and r.extra.get("plan_id") and r.extra.get("total"):
+        key = "tidy" if r.kind == "tidy_plan" else "organize"
+        agent._pending_set(r.channel, "confirm|" + _json.dumps({key: r.extra["plan_id"]}))
     agent._log_chat("assistant", r.text, r.channel)
+    if r.kind in ("organize_done", "organize_undo"):
+        PC_ORGANIZE_LOG.append({"at": datetime.now().isoformat(timespec="seconds"), "kind": r.kind, "text": r.text, "log": r.extra.get("log", {})})
+        del PC_ORGANIZE_LOG[:-100]
     broadcast("chat", {"channel": r.channel, "actions": [f"pc_{r.kind}"]})
     if (r.channel.startswith("tg") or r.channel == "system") and agent.notify:   # system — ночная уборка: отчёт утром в Telegram
         try:
@@ -360,9 +379,10 @@ async def insights_weekly():
 @app.get("/api/health")
 async def health():
     from ..brain import llm
-    from .. import VERSION
-    return {"ok": True, "ollama": await llm.ollama_available(), "mode": llm.MODE, "time": datetime.now().isoformat(), "version": VERSION,
-            "name": identity.title(), "name_latin": identity.NAME_LATIN}
+    from .. import VERSION, BUILD
+    from ..brain import persona
+    return {"ok": True, "ollama": await llm.ollama_available(), "mode": llm.MODE, "time": datetime.now().isoformat(), "version": VERSION, "build": BUILD,
+            "name": persona.display_name()}
 
 
 # ---------------- дашборд ----------------
@@ -1055,6 +1075,18 @@ class TimerIn(BaseModel):
     kind: str = "focus"
 
 
+class ManualTimeIn(BaseModel):
+    minutes: int = Field(..., ge=1, le=24 * 60 * 7)
+    started_at: Optional[datetime] = None
+    note: Optional[str] = Field(default=None, max_length=500)
+
+
+class ScreenImportIn(BaseModel):
+    minutes: int = Field(..., ge=1, le=24 * 60 * 7)
+    app: str = Field(..., min_length=1, max_length=80)
+    project: str = Field(default="", max_length=160)
+
+
 def _order_or_404(oid: int):
     o = orders.get_order(oid)
     if not o:
@@ -1284,6 +1316,27 @@ def orders_get(oid: int):
     o = _order_or_404(oid)
     return {**orders.order_view(o), "payments": [t.model_dump() for t in orders.payments_for(oid)],
             "sessions": [w.model_dump() for w in orders.sessions_for(oid)]}
+
+
+@app.post("/api/orders/{oid}/time")
+def orders_add_manual_time(oid: int, p: ManualTimeIn):
+    _order_or_404(oid)
+    try:
+        row = orders.add_manual_time(oid, p.minutes, p.started_at, p.note)
+    except orders.OrderError as e:
+        raise HTTPException(400, str(e))
+    return {"session": row.model_dump(), "order": orders.order_view(orders.get_order(oid))}
+
+
+@app.post("/api/orders/{oid}/time/from-screen")
+def orders_add_screen_time(oid: int, p: ScreenImportIn):
+    _order_or_404(oid)
+    note = f"{p.app} · {p.project}".strip(" ·")
+    try:
+        row = orders.add_manual_time(oid, p.minutes, note=note, source="screen")
+    except orders.OrderError as e:
+        raise HTTPException(400, str(e))
+    return {"session": row.model_dump(), "order": orders.order_view(orders.get_order(oid))}
 
 
 @app.put("/api/orders/{oid}")
@@ -2065,8 +2118,6 @@ def runs_report(days: int = 7):
     return {**trace.report(days), "text": trace.report_text(days)}
 
 
-
-
 @app.post("/api/phone/rotate")
 def phone_rotate(request: Request):
     """Новый ключ доступа: все телефоны, где сайт был открыт по старой ссылке, потеряют доступ до нового QR."""
@@ -2103,7 +2154,7 @@ async def tg_login(body: TgLogin, request: Request):
 @app.post("/api/tg/logout")
 def tg_logout():
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie("assistant_tg", path="/")
+    resp.delete_cookie("jarvis_tg", path="/")
     return resp
 
 
@@ -2261,7 +2312,7 @@ def google_connect():
 @app.get("/api/google/callback", response_class=HTMLResponse)
 async def google_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     gcal = _gcal_reload()
-    page = "<html><head><meta charset='utf-8'><title>Google Календарь</title></head><body style='font-family:-apple-system,Segoe UI,sans-serif;background:#f4f3f1;color:#1d1d1f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center;max-width:520px;padding:32px'>{}</div></body></html>"
+    page = "<html><head><meta charset='utf-8'><title>Джарвис · Google</title></head><body style='font-family:-apple-system,Segoe UI,sans-serif;background:#f4f3f1;color:#1d1d1f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center;max-width:520px;padding:32px'>{}</div></body></html>"
     if error or not code:
         return page.format(f"<h1 style='font-weight:500'>Не вышло</h1><p>{error or 'Google не вернул код'}.</p><p><a href='/settings'>← назад в настройки</a></p>")
     try:
@@ -2296,9 +2347,32 @@ def google_disconnect():
 
 @app.post("/api/backup")
 def backup_now():
+    """Ручной снимок — даже если ночной бэкап выключен (force)."""
     from ..services.scheduler import backup_db
-    dst = backup_db()
-    return {"ok": dst is not None, "file": str(dst) if dst else None}
+    dst = backup_db(force=True)
+    return {"ok": dst is not None, "file": str(dst) if dst else None, "name": dst.name if dst else None}
+
+
+@app.get("/api/backups")
+def backups_list():
+    from ..services.scheduler import list_backups
+    return list_backups()
+
+
+class BackupRestoreIn(BaseModel):
+    name: str = Field(..., min_length=8, max_length=80)
+
+
+@app.post("/api/backups/restore")
+def backups_restore(body: BackupRestoreIn):
+    """Восстановить data/jarvis.db из выбранного backup-*.db. После — перезапуск start.bat."""
+    from ..services.scheduler import restore_backup
+    try:
+        return restore_backup(body.name)
+    except LookupError:
+        raise HTTPException(404, "Такого бэкапа нет")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/export/{what}.{fmt}")
@@ -2320,7 +2394,7 @@ def export(what: str, fmt: str):
     stamp = datetime.now().strftime("%Y%m%d")
     if fmt == "json":
         body = _json.dumps(data if what == "all" else data[what], ensure_ascii=False, default=str, indent=1)
-        return Response(body, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="export-{what}-{stamp}.json"'})
+        return Response(body, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="jarvis-{what}-{stamp}.json"'})
     if fmt == "csv":
         buf = io.StringIO()
         buf.write("\ufeff")  # BOM — чтобы Excel открыл кириллицу
@@ -2334,7 +2408,7 @@ def export(what: str, fmt: str):
                     w.writerow({k: (str(v).replace("T", " ")[:19] if isinstance(v, datetime) else v) for k, v in r.items()})
             buf.write("\n")
         return Response(buf.getvalue(), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="export-{what}-{stamp}.csv"'})
+                        headers={"Content-Disposition": f'attachment; filename="jarvis-{what}-{stamp}.csv"'})
     raise HTTPException(400, "fmt: csv или json")
 
 
@@ -2353,7 +2427,7 @@ async def semantic_reindex():
 @app.get("/manifest.json", include_in_schema=False)
 def manifest():
     return {
-        "name": identity.title(), "short_name": identity.title(), "start_url": "/", "display": "standalone",
+        "name": persona.display_name(), "short_name": persona.display_name(), "start_url": "/", "display": "standalone",
         "background_color": "#f4f3f0", "theme_color": "#f4f3f0", "lang": "ru",
         "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}],
@@ -2361,122 +2435,6 @@ def manifest():
 
 
 # ---------------- сайт (Этап 2): раздаём собранную статику, если есть ----------------
-
-# ---------------- мастер первого запуска ----------------
-from .. import setup_wizard as _sw  # noqa: E402
-
-
-class _CloudCheckIn(BaseModel):
-    provider: str
-    api_key: str = ""
-    model: str = ""
-    base_url: str = ""
-    proxy: str = ""
-
-
-class _TgCheckIn(BaseModel):
-    token: str
-    proxy: str = ""
-
-
-class _PullIn(BaseModel):
-    model: str
-
-
-class _SetupSaveIn(BaseModel):
-    changes: dict
-
-
-@app.get("/api/setup/state")
-async def setup_state():
-    from ..config import setup_done, read_settings
-    from .. import identity
-    return {"done": setup_done(), "name": identity.title(), "settings": read_settings()}
-
-
-@app.get("/api/setup/hardware")
-async def setup_hardware():
-    from ..config import cfg
-    hw = await _sw.detect_hardware(str(cfg.brain.ollama.url))
-    return {"hardware": _sw.hardware_dict(hw), "recommend": _sw.recommend(hw)}
-
-
-@app.post("/api/setup/check/telegram")
-async def setup_check_tg(p: _TgCheckIn):
-    return await _sw.check_telegram(p.token, p.proxy)
-
-
-@app.post("/api/setup/telegram/owner")
-async def setup_tg_owner(p: _TgCheckIn):
-    """Ждём сообщение владельца боту и возвращаем его ID (до 90 с)."""
-    return await _sw.wait_owner_id(p.token, p.proxy)
-
-
-@app.post("/api/setup/check/cloud")
-async def setup_check_cloud(p: _CloudCheckIn):
-    return await _sw.check_cloud(p.provider, p.api_key, p.model, p.base_url, p.proxy)
-
-
-@app.get("/api/setup/providers")
-def setup_providers():
-    from ..brain import llm
-    out = []
-    for k, v in llm.PROVIDERS.items():
-        out.append({"id": k, **{kk: vv for kk, vv in v.items() if kk != "base_url"}})
-    out.append({"id": "gemini", "title": "Google Gemini", "free": True, "ru_ok": False, "key_url": "https://aistudio.google.com/apikey"})
-    return out
-
-
-@app.get("/api/setup/ollama")
-async def setup_ollama():
-    from ..config import cfg
-    st = await _sw.ollama_status(str(cfg.brain.ollama.url))
-    if not st["running"] and st["installed"]:
-        if _sw.start_ollama_if_installed():
-            await asyncio.sleep(2.5)
-            st = await _sw.ollama_status(str(cfg.brain.ollama.url))
-    return st
-
-
-@app.post("/api/setup/ollama/pull")
-async def setup_ollama_pull(p: _PullIn):
-    from ..config import cfg
-    if _sw.pull_progress(p.model)["status"] in ("starting", "pulling manifest") or (_sw.pull_progress(p.model)["total"] and _sw.pull_progress(p.model)["status"] not in ("success", "error")):
-        return _sw.pull_progress(p.model)
-    asyncio.get_event_loop().create_task(_sw.ollama_pull(str(cfg.brain.ollama.url), p.model))
-    await asyncio.sleep(0.5)
-    return _sw.pull_progress(p.model)
-
-
-@app.get("/api/setup/ollama/pull/{model:path}")
-def setup_ollama_pull_progress(model: str):
-    return _sw.pull_progress(model)
-
-
-@app.post("/api/setup/save")
-async def setup_save(p: _SetupSaveIn):
-    """Записать настройки мастера. Имя ассистента и токен требуют перезапуска — мастер сам об этом скажет."""
-    from ..config import write_settings
-    changed = write_settings(p.changes)
-    from ..brain import llm
-    llm.reload_cloud_settings()
-    return {"changed": changed}
-
-
-@app.post("/api/setup/restart")
-async def setup_restart():
-    """Завершить процесс; start.bat / docker перезапустят его с новым config.yaml."""
-    async def _die():
-        await asyncio.sleep(0.8)
-        os._exit(0)
-    asyncio.get_event_loop().create_task(_die())
-    return {"ok": True}
-
-
-def _setup_html() -> str:
-    return (ROOT / "core" / "api" / "setup.html").read_text(encoding="utf-8")
-
-
 web_dist = ROOT / "web" / "site"
 if not web_dist.exists():
     web_dist = ROOT / "web" / "dist"
@@ -2488,25 +2446,13 @@ if (web_dist / "index.html").exists():
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
         # любой не-API маршрут (/finance, /calendar…) → index.html, роутинг делает React
-        if path == "setup":
-            return HTMLResponse(_setup_html())
         f = web_dist / path
         if path and f.is_file():
             return FileResponse(f)
-        from ..config import setup_done
-        if not setup_done() and not path.startswith(("api", "media", "assets")):
-            return RedirectResponse("/setup")
         return FileResponse(web_dist / "index.html")
 else:
     _preview = (ROOT / "core" / "api" / "preview.html").read_text(encoding="utf-8")
 
     @app.get("/", response_class=HTMLResponse, include_in_schema=False)
     def preview_page():
-        from ..config import setup_done
-        if not setup_done():
-            return RedirectResponse("/setup")
         return _preview
-
-    @app.get("/setup", response_class=HTMLResponse, include_in_schema=False)
-    def setup_page_noweb():
-        return HTMLResponse(_setup_html())

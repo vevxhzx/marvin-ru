@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import actions
 
-log = logging.getLogger("assistant.pc")
+log = logging.getLogger("jarvis.pc")
 
 API = ""
 DATA_DIR = Path(".")
@@ -197,6 +197,28 @@ def run_command(ev: dict, say) -> None:
                 _post("/api/pc/result", {"text": tidy.plan_text(plan), "channel": channel, "kind": "tidy_plan",
                                          "extra": {"plan_id": plan["id"], "total": plan["total"]}}, timeout=10)
                 msg = tidy.plan_speech(plan) if channel == "voice" else ""
+        elif action == "organize":
+            from . import organize
+            root = Path(arg.strip().strip('«»"\''))
+            log.info("Организация: сканирую %s", root)
+            plan = organize.make_plan(root, DATA_DIR, DATA_DIR / "organize_rules.json")
+            log.info("Организация: план готов, %d файл(ов)", plan.get("total", 0))
+            text = organize.text(plan)
+            _post("/api/pc/result", {"text": text, "channel": channel, "kind": "organize_plan", "extra": {"plan_id": plan.get("id"), "total": plan.get("total", 0), "root": plan.get("root"), "by_category": plan.get("by_category", {}), "moves": plan.get("moves", []), "cleanup_dirs": plan.get("cleanup_dirs", []), "profile": plan.get("profile"), "large_packs": plan.get("large_packs", []), "ai_status": plan.get("ai_status")}}, timeout=10)
+            msg = "План отправил в чат. Проверьте, что и куда пойдёт, и подтвердите «да»." if channel == "voice" else ""
+        elif action == "organize_apply":
+            from . import organize
+            plan = organize.load_plan(DATA_DIR, arg or None)
+            res = organize.apply_plan(plan, DATA_DIR) if plan else {"moved": [], "skipped": [{"reason": "план устарел"}]}
+            msg = f"Организация завершена: перемещено {len(res.get('moved', []))}, пропущено {len(res.get('skipped', []))}. Отменить можно командой «отмени организацию»."
+            _post("/api/pc/result", {"text": msg, "channel": channel, "kind": "organize_done", "extra": {"log": res}}, timeout=10)
+            if channel != "voice": msg = ""
+        elif action == "organize_undo":
+            from . import organize
+            res = organize.undo(DATA_DIR)
+            msg = f"Отмена организации: возвращено {len(res.get('moved', []))}, пропущено {len(res.get('skipped', []))}."
+            _post("/api/pc/result", {"text": msg, "channel": channel, "kind": "organize_undo", "extra": {"log": res}}, timeout=10)
+            if channel != "voice": msg = ""
         elif action == "tidy_apply":
             from . import tidy
             plan = tidy.load_plan(DATA_DIR, arg or None)
