@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { api, money, shortDate, toLocalISO, plural } from '../lib/api'
-import { Num, Sheet, Field, useToast } from '../components/ui'
+import { Num, Sheet, Field, Empty, useToast } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
@@ -611,59 +611,19 @@ export default function Finance() {
       {tab === 'techniques' && (
         <div className="bento">
           <section className="c s12 r" style={{ '--i': 3 }}>
-            <Techniques
-              t={techniquesData || {
-                buckets: {
-                  base: 63662,
-                  income: 63662,
-                  unassigned: 0,
-                  unassigned_cats: [],
-                  buckets: [
-                    { bucket: 'need', label: 'обязательное', amount: 31800, share: 0.50, norm: 0.50, status: 'ok' },
-                    { bucket: 'want', label: 'хотелки', amount: 19100, share: 0.30, norm: 0.30, status: 'ok' },
-                    { bucket: 'save', label: 'накопления', amount: 12762, share: 0.20, norm: 0.20, status: 'ok' },
-                  ]
-                },
-                compare: {
-                  day: new Date().getDate(),
-                  spent: 55950,
-                  spent_prev_same: 48200,
-                  avg_check: 1850,
-                  avg_check_prev: 1600,
-                  earned: 63662,
-                  earned_prev: 70000,
-                  categories: [
-                    { category: 'Еда', current: 24500, prev_same: 22000, delta: 2500, delta_pct: 0.11 },
-                    { category: 'Транспорт', current: 8200, prev_same: 7500, delta: 700, delta_pct: 0.09 },
-                    { category: 'Подписки', current: 1528, prev_same: 1528, delta: 0, delta_pct: 0 },
-                  ]
-                },
-                runway: {
-                  runway_days: 180,
-                  ok: true,
-                  days_left_to_income: 14,
-                  safe_per_day: 3500,
-                  free: 7816,
-                  per_day_avg: 2028,
-                },
-                annual: {
-                  total_year: 45000,
-                  per_month: 3750,
-                  items: [
-                    { title: 'Страховка авто', amount: 45000, next: new Date(new Date().setMonth(new Date().getMonth() + 5)).toISOString(), months: 5 }
-                  ]
-                },
-                payments: {
-                  days: 30,
-                  need: 15028,
-                  balance: 15761,
-                  short: 0,
-                  payments: [{ title: 'Кредит' }, { title: 'Подписки' }],
-                  incoming: [{ amount: 45000 }]
-                }
-              }}
-              onOpenCat={(c) => { setTxCategory(c); setTab('txs') }}
-            />
+            {techniquesData ? (
+              <Techniques
+                t={techniquesData}
+                onOpenCat={(c) => { setTxCategory(c); setTab('txs') }}
+              />
+            ) : (
+              <Empty
+                glyph="money"
+                text="Техники пока не посчитаны"
+                sub="Нужны операции за месяц — как только появятся, покажу 50/30/20, сравнение с прошлым месяцем и запас"
+                compact
+              />
+            )}
           </section>
         </div>
       )}

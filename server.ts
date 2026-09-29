@@ -1,14 +1,39 @@
 import express from 'express'
 import cors from 'cors'
+import multer from 'multer'
+import { createHmac, timingSafeEqual } from 'crypto'
 import { createServer as createViteServer } from 'vite'
 import path from 'path'
 import fs from 'fs'
 
 const isProd = process.env.NODE_ENV === 'production'
 const PORT = Number(process.env.PORT) || 3000
+// по умолчанию сервер слушает только локально; открыть наружу — явно HOST=0.0.0.0
+const HOST = process.env.HOST || '127.0.0.1'
+
+// страховка: необработанный промис/исключение не должен ронять весь процесс —
+// один HTTP-запрос с неожиданным телом убивал сервер (см. роуты /api/chat)
+process.on('unhandledRejection', (reason) => {
+  console.error('[server] unhandledRejection:', reason)
+})
+process.on('uncaughtException', (err) => {
+  console.error('[server] uncaughtException:', err)
+})
 
 const app = express()
-app.use(cors())
+// CORS не безгранижен: свой веб-сервер отдаётся с того же origin, поэтому по умолчанию
+// разрешены только localhost/127.0.0.1 (порт сервера и vite-dev), остальное — через ALLOWED_ORIGINS
+const localOrigins = ['localhost', '127.0.0.1'].flatMap(h => [
+  `http://${h}:${PORT}`, `https://${h}:${PORT}`, `http://${h}:5173`, `https://${h}:5173`,
+])
+const allowedOrigins = new Set([
+  ...localOrigins,
+  ...(process.env.ALLOWED_ORIGINS || '').split(',').map(s => s.trim()).filter(Boolean),
+])
+app.use(cors({
+  origin: (origin, cb) => cb(null, !origin || allowedOrigins.has(origin)),
+  credentials: false,
+}))
 app.use(express.json({ limit: '10mb' }))
 
 // SSE connections
@@ -25,7 +50,12 @@ function broadcast(kind: string, payload: Record<string, any> = {}) {
 
 // In-Memory Database
 const now = new Date()
-const todayStr = now.toISOString().split('T')[0]
+const dayNow = () => new Date().toISOString().split('T')[0]
+let todayStr = dayNow()
+// «сегодня» должно считаться в рантайме: константа при старте устаревала после полуночи
+// (UTC-срез — как и раньше, чтобы не менять поведение дат)
+app.use((_req, _res, next) => { todayStr = dayNow(); next() })
+setInterval(() => { todayStr = dayNow() }, 60_000).unref()
 
 const state = {
   settings: [
@@ -186,9 +216,63 @@ const state = {
     hourly_rate: 2500,
     late_nudge: true,
   },
+  // зеркало оформления (localStorage) между устройствами — GET/PUT /api/ui-prefs
+  uiPrefs: {} as Record<string, any>,
+  // раньше категории людей были захардкожены в роуте — DELETE ничего не делал
+  peopleKinds: ['клиент', 'коллега', 'друг', 'семья'],
+  // «как вы пишете»: раньше PUT /api/facts/style отбрасывал текст, правка терялась при перезагрузке
+  memoryStyle: { style: '', style_at: null as string | null },
+  // последний отклик PC-клиента (ack/result) — по нему /api/pc/state считает alive
+  pc: { alive: false, mode: 'idle', text: '', at: null as string | null },
 }
 
 let nextId = 100
+
+// ----------------- PERSISTENCE -----------------
+// Состояние жило только в памяти: любой рестарт терял все правки, хотя UI их отмечал
+// как сохранённые. Пишем в data/server-state.json (файл в .gitignore), атомарно.
+const STATE_FILE = path.resolve(process.cwd(), 'data', 'server-state.json')
+let stateDirty = false
+
+function saveState() {
+  if (!stateDirty) return
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true })
+    const tmp = STATE_FILE + '.tmp'
+    fs.writeFileSync(tmp, JSON.stringify({ state, nextId }))
+    fs.renameSync(tmp, STATE_FILE)
+    stateDirty = false
+  } catch (err) {
+    console.error('[server] state save failed:', err)
+  }
+}
+
+function loadState() {
+  if (!fs.existsSync(STATE_FILE)) return
+  try {
+    const parsed = JSON.parse(fs.readFileSync(STATE_FILE, 'utf8'))
+    if (parsed?.state && typeof parsed.state === 'object') {
+      for (const [k, v] of Object.entries(parsed.state)) (state as any)[k] = v
+      if (typeof parsed.nextId === 'number' && parsed.nextId > nextId) nextId = parsed.nextId
+      console.log(`[server] state loaded: ${STATE_FILE}`)
+    }
+  } catch (err) {
+    // битый файл не должен мешать старту — поднимемся на моках
+    console.error('[server] state load failed, using defaults:', err)
+  }
+}
+loadState()
+
+// грязный флаг ставим на любой мутирующий запрос; фоновая запись + запись при выходе
+app.use((req, _res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') stateDirty = true
+  next()
+})
+setInterval(saveState, 5_000).unref()
+for (const sig of ['SIGINT', 'SIGTERM'] as const) {
+  process.on(sig, () => { saveState(); process.exit(0) })
+}
+process.on('exit', saveState)
 
 // Helper to convert task to event
 function taskAsEvent(t: any) {
@@ -285,7 +369,89 @@ app.post('/api/edition', (req, res) => {
 })
 
 // Status & State
-app.get('/api/status', (req, res) => res.json({ ok: true, db: 'ok', uptime: process.uptime() }))
+const PKG_VERSION = (() => {
+  try { return JSON.parse(fs.readFileSync(path.resolve(process.cwd(), 'package.json'), 'utf8')).version || '0.0.0' }
+  catch { return '0.0.0' }
+})()
+
+/** размер каталога данных для карточки «база» (с потолком, чтобы не гонять на каждом запросе) */
+function dirSize(dir: string, limit = 500): number {
+  let total = 0, files = 0
+  const walk = (d: string) => {
+    if (files >= limit) return
+    let entries: fs.Dirent[] = []
+    try { entries = fs.readdirSync(d, { withFileTypes: true }) } catch { return }
+    for (const e of entries) {
+      if (files >= limit) return
+      const p = path.join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else { try { total += fs.statSync(p).size; files++ } catch {} }
+    }
+  }
+  walk(dir)
+  return total
+}
+
+// фронт (src/pages/Settings.jsx) рисует карточки по этой структуре — форма должна совпадать
+// с Python /api/status, иначе страница падает на status.ollama.ok
+app.get('/api/status', (_req, res) => {
+  const dataDir = path.resolve(process.cwd(), 'data')
+  res.json({
+    ok: true,
+    time: new Date().toISOString(),
+    version: PKG_VERSION,
+    uptime: process.uptime(),
+    game_mode: false,
+    vision: '—',
+    pc: {
+      alive: state.pc.at ? Date.now() - new Date(state.pc.at).getTime() < 5 * 60_000 : false,
+      mode: state.pc.mode || 'idle',
+    },
+    ollama: {
+      ok: false,
+      model: '',
+      url: '',
+      diag: 'Node-демо не подключено к Ollama — мозг этого стека не используется, нужен Python (start.bat)',
+      gpu: '',
+      embed: false,
+      embed_model: '',
+      small_model: '',
+      small_ok: false,
+      small_keep_alive: '',
+      small_last: null,
+    },
+    gemini: {
+      enabled: false,
+      provider: 'gemini',
+      title: 'gemini',
+      model: '',
+      proxy: null,
+      last_error: null,
+      providers: {},
+    },
+    telegram: { configured: false, running: false, last_message: null },
+    backup: { enabled: false, last: null, count: 0, dir: 'data/backups' },
+    db: {
+      path: dataDir,
+      size: dirSize(dataDir),
+      events: state.events.length,
+      tasks: state.tasks.length,
+      notes: state.notes.length,
+      links: state.links.length,
+      transactions: state.transactions.length,
+    },
+    errors: [] as { text: string }[],
+  })
+})
+
+// кнопки «проверить» в настройках: Node-демо ничего не проверяет — отвечаем честно,
+// а не молчаливым {ok:true}, как раньше
+app.post('/api/status/small', (_req, res) => {
+  res.json({ ok: false, detail: 'Малая модель не используется в Node-демо', hint: 'настройте мозг в Python-ядре (start.bat)' })
+})
+app.post('/api/status/gemini', (_req, res) => {
+  res.json({ ok: false, detail: 'Ключ Gemini не задан для Node-демо', hint: 'задайте GEMINI_API_KEY в Python-ядре' })
+})
 app.get('/api/state', (req, res) => {
   res.json({
     presence: 'active',
@@ -300,17 +466,38 @@ app.get('/api/state', (req, res) => {
   })
 })
 app.get('/api/pc/state', (req, res) => {
+  const fresh = state.pc.at && Date.now() - new Date(state.pc.at).getTime() < 5 * 60_000
   res.json({
-    alive: false,
-    mode: 'idle',
-    text: '',
+    alive: !!fresh,
+    mode: state.pc.mode || 'idle',
+    text: state.pc.text || '',
   })
 })
-app.post('/api/pc/ack', (req, res) => res.json({ ok: true }))
-app.post('/api/pc/result', (req, res) => res.json({ ok: true }))
+app.post('/api/pc/ack', (req, res) => {
+  // клиент подтверждает получение команды — фиксируем, иначе статус ПК всегда «не запущен»
+  state.pc = { ...state.pc, alive: true, at: new Date().toISOString(), text: String(req.body?.text || '') }
+  broadcast('pc_state')
+  res.json({ ok: true })
+})
+app.post('/api/pc/result', (req, res) => {
+  state.pc = { ...state.pc, alive: true, at: new Date().toISOString(), text: String(req.body?.text || '') }
+  broadcast('pc_state')
+  res.json({ ok: true })
+})
 app.post('/api/pc/clipboard', (req, res) => res.json({ ok: true, text: 'Сохранено' }))
 
 // Dashboard
+/** сколько дней до ближайшего дня рождения (день рождения может быть в этом году уже прошёл) */
+function daysUntilBirthday(iso: string): number {
+  const b = new Date(`${String(iso).slice(0, 10)}T00:00:00`)
+  if (Number.isNaN(b.getTime())) return 0
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  let next = new Date(today.getFullYear(), b.getMonth(), b.getDate())
+  if (next.getTime() < today.getTime()) next = new Date(today.getFullYear() + 1, b.getMonth(), b.getDate())
+  return Math.round((next.getTime() - today.getTime()) / 86_400_000)
+}
+
 app.get('/api/dashboard', (req, res) => {
   const balance = state.accounts.reduce((acc, a) => acc + (a.balance || 0), 0)
   const income_month = state.transactions.filter(t => t.amount > 0).reduce((acc, t) => acc + t.amount, 0)
@@ -321,7 +508,45 @@ app.get('/api/dashboard', (req, res) => {
     income_month,
     expense_month,
     cashflow: income_month - expense_month,
-    runway_days: 180,
+    // Today.jsx считает «к концу месяца» от этих двух чисел — без них страница подставляла выдуманные
+    avg_daily: (() => {
+      const day = new Date().getDate()
+      const spent = state.transactions.filter(t => t.amount < 0 && (t.date || '').slice(0, 7) === new Date().toISOString().slice(0, 7))
+      const total = spent.reduce((s, t) => s + Math.abs(t.amount), 0)
+      return day > 0 ? Math.round(total / day) : 0
+    })(),
+    runway_days: (() => {
+      const day = new Date().getDate()
+      const spent = state.transactions.filter(t => t.amount < 0 && (t.date || '').slice(0, 7) === new Date().toISOString().slice(0, 7))
+      const perDay = day > 0 ? spent.reduce((s, t) => s + Math.abs(t.amount), 0) / day : 0
+      return perDay > 0 ? Math.floor(balance / perDay) : 180
+    })(),
+    // столбики на карточках «траты» и «свободно» — считаем из реальных операций, а не рисуем
+    weekday: (() => {
+      const n = new Date()
+      const sums = [0, 0, 0, 0, 0, 0, 0]   // пн..вс
+      for (const t of state.transactions) {
+        if (t.amount >= 0) continue
+        const d = new Date(t.date)
+        if (Number.isNaN(d.getTime()) || d.getFullYear() !== n.getFullYear() || d.getMonth() !== n.getMonth()) continue
+        sums[(d.getDay() + 6) % 7] += Math.abs(t.amount)
+      }
+      return sums
+    })(),
+    month_days: (() => {
+      const n = new Date()
+      const buckets = [0, 0, 0, 0, 0, 0, 0]   // 1-4, 5-9, 10-14, 15-19, 20-24, 25-29, 30-31
+      const edges = [4, 9, 14, 19, 24, 29, 31]
+      for (const t of state.transactions) {
+        if (t.amount >= 0) continue
+        const d = new Date(t.date)
+        if (Number.isNaN(d.getTime()) || d.getFullYear() !== n.getFullYear() || d.getMonth() !== n.getMonth()) continue
+        const dayN = d.getDate()
+        const idx = edges.findIndex(e => dayN <= e)
+        buckets[idx === -1 ? 6 : idx] += Math.abs(t.amount)
+      }
+      return buckets
+    })(),
     accounts: state.accounts,
   }
 
@@ -352,14 +577,15 @@ app.get('/api/dashboard', (req, res) => {
     memory: state.notes.slice(0, 6).map(n => ({ id: n.id, text: n.text, tags: n.tags, created_at: n.created_at })),
     digest: `Доброе утро, сэр. На сегодня запланировано ${state.events.length} событий и ${state.tasks.filter(t => !t.done).length} невыполненных задач. Баланс составляет ${balance.toLocaleString('ru-RU')} ₽.`,
     streak: { current: 14, max: 28, heatmap },
-    birthdays: state.people.filter(p => p.birthday).map(p => ({ id: p.id, name: p.name, birthday: p.birthday, days_left: 12 })),
+    birthdays: state.people.filter(p => p.birthday).map(p => ({ ...p, days_left: daysUntilBirthday(p.birthday) })),
     forecast,
-    pc: { alive: true, idle: false },
+    // состояние ПК — из последнего отклика клиента, а не захардкоженный true
+    pc: { alive: !!(state.pc.at && Date.now() - new Date(state.pc.at).getTime() < 5 * 60_000), idle: state.pc.mode === 'idle' },
     timer: state.timer,
     orders: {
       open: openOrders.slice(0, 5),
       unpaid,
-      expected: 75000,
+      expected: openOrders.reduce((s, o) => s + (o.total || 0), 0),
       late: [],
     },
     freelance: state.freelanceConfig.enabled,
@@ -383,7 +609,7 @@ app.get('/api/focus', (req, res) => {
 // Events (Calendar)
 app.get('/api/events', (req, res) => {
   const { tasks_too } = req.query
-  let list = [...state.events]
+  let list: any[] = [...state.events]
   if (tasks_too === 'true') {
     const taskEvents = state.tasks.map(taskAsEvent)
     list = [...list, ...taskEvents]
@@ -433,7 +659,7 @@ app.post('/api/events/:id/skip', (req, res) => {
 // Tasks
 app.get('/api/tasks', (req, res) => {
   const { all, events_too } = req.query
-  let list = all === 'true' ? [...state.tasks] : state.tasks.filter(t => !t.done)
+  let list: any[] = all === 'true' ? [...state.tasks] : state.tasks.filter(t => !t.done)
   if (events_too === 'true') {
     const evTasks = state.events.map(e => ({
       id: -e.id,
@@ -712,7 +938,129 @@ app.post('/api/finance/goals/:id/put', (req, res) => {
   res.json({ ok: true })
 })
 app.get('/api/finance/budgets', (req, res) => res.json([]))
-app.get('/api/finance/techniques', (req, res) => res.json({ '50_30_20': { needs: 50, wants: 30, savings: 20 } }))
+// Форма ответа — как в Python-ядре {buckets, compare, annual, payments, runway} (см. core/api/app.py:1435),
+// иначе вкладка «техники» получает чужой объект и показывает пустоту/выдуманные цифры.
+const BUCKET_RULES: { bucket: 'need' | 'save'; label: string; norm: number; cats: string[] }[] = [
+  { bucket: 'need', label: 'обязательное', norm: 0.5, cats: ['Жильё', 'Еда', 'Транспорт', 'Здоровье', 'Аптека', 'Коммунальные', 'Связь', 'Образование', 'Дети', 'Питомцы'] },
+  { bucket: 'save', label: 'накопления', norm: 0.2, cats: ['Накопления', 'Инвестиции', 'Страховка', 'Взнос', 'Подушка'] },
+]
+const bucketOf = (category: string): 'need' | 'want' | 'save' =>
+  (BUCKET_RULES.find(r => r.cats.includes(category))?.bucket as 'need' | 'save' | undefined) || 'want'
+
+app.get('/api/finance/techniques', (_req, res) => {
+  const nowD = new Date()
+  const ym = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  const thisM = ym(nowD)
+  const prevM = ym(new Date(nowD.getFullYear(), nowD.getMonth() - 1, 1))
+  const day = nowD.getDate()
+
+  const tx = state.transactions
+  const inMonth = (m: string) => tx.filter(t => (t.date || '').slice(0, 7) === m)
+  const spentOf = (list: typeof tx) => list.filter(t => t.amount < 0)
+  const incomeOf = (list: typeof tx) => list.filter(t => t.amount > 0)
+  const sumAbs = (list: typeof tx) => list.reduce((s, t) => s + Math.abs(t.amount), 0)
+
+  const spentThis = spentOf(inMonth(thisM))
+  const spentPrev = spentOf(inMonth(prevM))
+  const incomeThis = incomeOf(inMonth(thisM))
+  const incomePrev = incomeOf(inMonth(prevM))
+  const base = sumAbs(spentThis)
+  const income = sumAbs(incomeThis)
+
+  // --- 50/30/20 ---
+  let buckets: any = null
+  if (base > 0) {
+    const by: Record<string, number> = { need: 0, want: 0, save: 0 }
+    for (const t of spentThis) by[bucketOf(t.category)] += Math.abs(t.amount)
+    const wantRule = { bucket: 'want', label: 'хотелки', norm: 0.3 }
+    buckets = {
+      base,
+      income,
+      unassigned: 0,
+      unassigned_cats: [],
+      buckets: [...BUCKET_RULES, wantRule].map(r => {
+        const amount = by[r.bucket] || 0
+        const share = amount / base
+        return {
+          bucket: r.bucket,
+          label: r.label,
+          amount,
+          share,
+          norm: r.norm,
+          status: share > r.norm * 1.15 ? 'over' : share < r.norm * 0.7 ? 'low' : 'ok',
+        }
+      }),
+    }
+  }
+
+  // --- месяц к месяцу ---
+  const perCat = (list: typeof tx) => {
+    const m = new Map<string, number>()
+    for (const t of list) m.set(t.category, (m.get(t.category) || 0) + Math.abs(t.amount))
+    return m
+  }
+  const cur = perCat(spentThis), prev = perCat(spentPrev)
+  const cats = [...new Set([...cur.keys(), ...prev.keys()])].map(name => {
+    const current = cur.get(name) || 0
+    const prev_same = prev.get(name) || 0
+    return { category: name, current, prev_same, delta: current - prev_same, delta_pct: prev_same ? (current - prev_same) / prev_same : 0 }
+  }).sort((a, b) => b.current - a.current)
+  const compare = base || sumAbs(spentPrev) ? {
+    day,
+    spent: base,
+    spent_prev_same: sumAbs(spentPrev),
+    avg_check: spentThis.length ? Math.round(base / spentThis.length) : 0,
+    avg_check_prev: spentPrev.length ? Math.round(sumAbs(spentPrev) / spentPrev.length) : 0,
+    earned: income,
+    earned_prev: sumAbs(incomePrev),
+    categories: cats,
+  } : null
+
+  // --- на сколько хватит ---
+  const balance = state.accounts.reduce((s, a) => s + (a.balance || 0), 0)
+  const perDayAvg = day > 0 ? Math.round(base / day) : 0
+  const freeRec = state.recurring.filter(r => r.active !== false && r.kind === 'expense')
+  const free = balance - freeRec.reduce((s, r) => s + (r.amount || 0), 0)
+  const daysLeftToIncome = 14   // в демо нет даты ближайшего дохода — честно считаем от горизонта
+  const runway_days = perDayAvg > 0 ? Math.floor(balance / perDayAvg) : null
+  const runway = {
+    runway_days,
+    ok: runway_days != null && runway_days >= daysLeftToIncome,
+    days_left_to_income: daysLeftToIncome,
+    safe_per_day: daysLeftToIncome > 0 ? Math.floor(balance / daysLeftToIncome) : balance,
+    free: Math.max(0, free),
+    per_day_avg: perDayAvg,
+  }
+
+  // --- годовые платежи ---
+  const yearly = state.recurring.filter(r => r.active !== false && /year|annual|год/i.test(r.period || ''))
+  const annual = {
+    total_year: yearly.reduce((s, r) => s + (r.amount || 0), 0),
+    per_month: Math.round(yearly.reduce((s, r) => s + (r.amount || 0), 0) / 12),
+    items: yearly.map(r => ({
+      title: r.title,
+      amount: r.amount,
+      next: new Date(nowD.getFullYear(), nowD.getMonth() + 1, r.day_of_month || 1).toISOString(),
+      months: 1,
+    })),
+  }
+
+  // --- хватит ли на платежи ---
+  const horizon = 7
+  const need = freeRec.filter(r => (r.day_of_month || 1) <= day + horizon).reduce((s, r) => s + (r.amount || 0), 0)
+  const incoming = state.recurring.filter(r => r.active !== false && r.kind === 'income')
+    .map(r => ({ amount: r.amount, title: r.title }))
+  const payments = {
+    days: horizon,
+    need,
+    balance,
+    short: Math.max(0, need - balance),
+    payments: freeRec.filter(r => (r.day_of_month || 1) <= day + horizon).map(r => ({ title: r.title })),
+    incoming,
+  }
+
+  res.json({ buckets, compare, annual, payments, runway })
+})
 
 // Notes & Links (Brain)
 app.get('/api/notes', (req, res) => {
@@ -1007,8 +1355,16 @@ app.get('/api/download/marvin.zip', (req, res) => {
 
 // People & Graph
 app.get('/api/people', (req, res) => res.json(state.people))
-app.get('/api/people/kinds', (req, res) => res.json(['клиент', 'коллега', 'друг', 'семья']))
-app.delete('/api/people/kinds/:k', (req, res) => res.json({ ok: true }))
+app.get('/api/people/kinds', (req, res) => res.json(state.peopleKinds))
+app.delete('/api/people/kinds/:k', (req, res) => {
+  const k = req.params.k
+  const before = state.peopleKinds.length
+  state.peopleKinds = state.peopleKinds.filter(x => x !== k)
+  if (state.peopleKinds.length === before) return res.status(404).json({ detail: 'Категории нет' })
+  // людей этой категории не трогаем (как в Python-ядре) — только убираем из списка
+  broadcast('people')
+  res.json({ ok: true })
+})
 app.get('/api/people/today', (req, res) => res.json([]))
 app.get('/api/people/:id', (req, res) => {
   const id = Number(req.params.id)
@@ -1038,21 +1394,74 @@ app.get('/api/graph', (req, res) => {
     ...state.notes.slice(0, 5).map(n => ({ id: `n_${n.id}`, label: n.text.slice(0, 30), kind: 'note' })),
     ...state.orders.map(o => ({ id: `o_${o.id}`, label: o.title, kind: 'order' })),
   ]
-  const links = [
+  const ids = new Set(nodes.map(n => n.id))
+  // фронт читает data.edges (см. src/components/Graph.jsx), а не links
+  const edges = [
     { source: 'p_1', target: 'o_1' },
     { source: 'p_2', target: 'o_2' },
     { source: 'n_1', target: 'o_1' },
-  ]
-  res.json({ nodes, links })
+  ].filter(e => ids.has(e.source) && ids.has(e.target))
+  res.json({
+    nodes,
+    edges,
+    stats: {
+      people: state.people.length,
+      notes: state.notes.length,
+      links: state.links.length,
+      edges: edges.length,
+      // Graph.jsx показывает «без связей: N» — считаем по тем же узлам
+      lonely: nodes.filter(n => !edges.some(e => e.source === n.id || e.target === n.id)).length,
+    },
+  })
 })
 app.get('/api/graph/backlinks/:kind/:id', (req, res) => res.json({ links: [] }))
 
 // Facts, Style & Memory
-app.get('/api/facts', (req, res) => res.json(state.facts))
+// фронт ждёт объект { items, stats, enabled, categories } (src/pages/Memory.jsx), а не массив
+app.get('/api/facts', (req, res) => {
+  const items = state.facts.map(f => ({
+    core: false,
+    updated_at: f.created_at,
+    ...f,
+    layer: f.active === false ? 'archive' : (['short', 'long', 'archive'].includes(f.layer) ? f.layer : 'long'),
+  }))
+  const count = (l: string) => items.filter(f => f.layer === l).length
+  res.json({
+    items,
+    stats: {
+      short: count('short'),
+      long: count('long'),
+      archive: count('archive'),
+      style: state.memoryStyle.style,
+      style_at: state.memoryStyle.style_at,
+    },
+    enabled: true,
+    categories: [],
+  })
+})
 app.post('/api/facts', (req, res) => {
   const f = { id: ++nextId, created_at: new Date().toISOString(), active: true, ...req.body }
   state.facts.push(f)
   res.json(f)
+})
+// «как вы пишете»: раньше PUT молча выбрасывал текст, правка терялась при перезагрузке.
+// Важно: регистрируется ДО /api/facts/:id, иначе Express ловит «style» как id.
+app.put('/api/facts/style', (req, res) => {
+  const text = req.body?.text
+  if (typeof text !== 'string') return res.status(400).json({ detail: 'text must be a string' })
+  state.memoryStyle = { style: text, style_at: new Date().toISOString() }
+  broadcast('settings')
+  res.json({ ok: true, style: state.memoryStyle.style, style_at: state.memoryStyle.style_at })
+})
+// пересборка портрета/стиля и ночной разбор требуют LLM — их в Node-демо нет
+app.post('/api/facts/portrait', (_req, res) => {
+  res.status(501).json({ detail: 'Пересборка портрета работает только в Python-ядре (start.bat)' })
+})
+app.post('/api/facts/nightly', (_req, res) => {
+  res.status(501).json({ detail: 'Ночной разбор памяти работает только в Python-ядре (start.bat)' })
+})
+app.post('/api/facts/style', (_req, res) => {
+  res.status(501).json({ detail: 'Автосборка стиля работает только в Python-ядре (start.bat)' })
 })
 app.put('/api/facts/:id', (req, res) => {
   const id = Number(req.params.id)
@@ -1075,12 +1484,8 @@ app.post('/api/facts/:id/restore', (req, res) => {
   if (f) f.active = true
   res.json({ ok: true })
 })
-app.post('/api/facts/portrait', (req, res) => res.json({ ok: true }))
-app.post('/api/facts/nightly', (req, res) => res.json({ ok: true }))
-app.post('/api/facts/style', (req, res) => res.json({ ok: true }))
-app.put('/api/facts/style', (req, res) => res.json({ ok: true }))
 app.get('/api/lessons', (req, res) => res.json([]))
-app.delete('/api/lessons/:id', (req, res) => res.json({ ok: true }))
+app.delete('/api/lessons/:id', (req, res) => res.status(404).json({ detail: 'Уроков в этом стеке нет' }))
 app.get('/api/memory', (req, res) => {
   res.json([
     ...state.notes.map(n => ({ kind: 'note', ...n })),
@@ -1185,18 +1590,141 @@ app.get('/api/settings', (req, res) => {
 })
 app.put('/api/settings', (req, res) => {
   const changes = req.body.changes || {}
+  const changed: string[] = []
   for (const [key, value] of Object.entries(changes)) {
     const existing = state.settings.find(s => s.key === key)
     if (existing) existing.value = value as any
     else state.settings.push({ key, value: value as any })
+    changed.push(key)
   }
   broadcast('settings')
+  // фронт читает r.changed.length (src/pages/Settings.jsx)
+  res.json({ changed, restart: false })
+})
+
+// ----------------- UI PREFS (зеркало localStorage между устройствами) -----------------
+app.get('/api/ui-prefs', (_req, res) => {
+  res.json({ prefs: state.uiPrefs || {} })
+})
+app.put('/api/ui-prefs', (req, res) => {
+  const prefs = req.body?.prefs
+  if (!prefs || typeof prefs !== 'object' || Array.isArray(prefs)) {
+    return res.status(400).json({ detail: 'prefs must be an object' })
+  }
+  state.uiPrefs = { ...(state.uiPrefs || {}), ...prefs }
+  broadcast('ui_prefs', { prefs: state.uiPrefs, origin: req.header('X-Client-Id') || '' })
   res.json({ ok: true })
 })
 
+// ----------------- EXPORT (раньше ссылки уходили в SPA-fallback и отдавали HTML) -----------------
+function csvText(rows: any[], cols: string[]): string {
+  const esc = (v: any) => {
+    const s = v == null ? '' : Array.isArray(v) ? v.join('; ') : String(v)
+    return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s
+  }
+  return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\r\n')
+}
+function sendCsv(filename: string, getRows: () => any[], cols: string[]) {
+  return (_req: express.Request, res: express.Response) => {
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    res.send('﻿' + csvText(getRows(), cols))   // BOM — чтобы Excel читал кириллицу
+  }
+}
+app.get('/api/export/transactions.csv', sendCsv('transactions.csv', () => state.transactions, ['date', 'amount', 'category', 'account', 'comment']))
+app.get('/api/export/events.csv', sendCsv('events.csv', () => state.events, ['title', 'start', 'end', 'location', 'notes', 'repeat', 'done']))
+app.get('/api/export/tasks.csv', sendCsv('tasks.csv', () => state.tasks, ['title', 'due', 'priority', 'done', 'category']))
+app.get('/api/export/notes.csv', sendCsv('notes.csv', () => state.notes, ['text', 'tags', 'created_at']))
+app.get('/api/export/all.json', (_req, res) => {
+  res.setHeader('Content-Disposition', 'attachment; filename="marvin-export.json"')
+  res.json(state)
+})
+
+// ----------------- BOARD ASSETS (картинки на досках) -----------------
+// Раньше роута не было: FormData уходил в SPA-fallback и фронт получал HTML вместо JSON.
+const ASSET_DIR = path.resolve(process.cwd(), 'data', 'board-assets')
+const assetUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => { fs.mkdirSync(ASSET_DIR, { recursive: true }); cb(null, ASSET_DIR) },
+    filename: (_req, file, cb) => {
+      const ext = (path.extname(file.originalname) || '.png').toLowerCase().replace(/[^.a-z0-9]/g, '')
+      cb(null, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}${ext}`)
+    },
+  }),
+  limits: { fileSize: 8 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => cb(null, file.mimetype.startsWith('image/')),
+})
+
+/** Размеры картинки без сторонних библиотек: PNG (IHDR) и JPEG (SOF-маркеры). */
+function imageSize(buf: Buffer): { w: number; h: number } | null {
+  if (buf.length > 24 && buf.readUInt32BE(0) === 0x89504e47) {
+    return { w: buf.readUInt32BE(16), h: buf.readUInt32BE(20) }   // PNG
+  }
+  if (buf.length > 10 && buf[0] === 0xff && buf[1] === 0xd8) {     // JPEG
+    let i = 2
+    while (i + 9 < buf.length) {
+      if (buf[i] !== 0xff) { i++; continue }
+      const marker = buf[i + 1]
+      if (marker === 0xd8 || marker === 0xd9 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue }
+      if (buf[i + 2] === 0xff) { i += 2; continue }                // заполнитель
+      const len = buf.readUInt16BE(i + 2)
+      const isSOF = marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc
+      if (isSOF) return { h: buf.readUInt16BE(i + 5), w: buf.readUInt16BE(i + 7) }
+      i += 2 + len
+    }
+  }
+  return null
+}
+
+app.post('/api/boards/:id/asset', assetUpload.single('file'), (req, res) => {
+  const board = state.boards.find(b => b.id === Number(req.params.id))
+  if (!board) return res.status(404).json({ detail: 'Доска не найдена' })
+  if (!req.file) return res.status(400).json({ detail: 'Нужен файл-картинка (поле file)' })
+  let dim: { w: number; h: number } | null = null
+  try { dim = imageSize(fs.readFileSync(req.file.path)) } catch {}
+  if (!dim) { try { fs.unlinkSync(req.file.path) } catch {} return res.status(400).json({ detail: 'Не удалось прочитать картинку' }) }
+  res.json({ src: `/api/boards/${board.id}/asset/${req.file.filename}`, w: dim.w, h: dim.h })
+})
+app.get('/api/boards/:id/asset/:name', (req, res) => {
+  const file = path.join(ASSET_DIR, path.basename(req.params.name))
+  if (!fs.existsSync(file)) return res.status(404).json({ detail: 'Файл не найден' })
+  res.sendFile(file)
+})
+
 // Telegram & Device Auth
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || process.env.ASSISTANT_TG_TOKEN || ''
+
+/** Проверка подписи initData по документации Telegram (HMAC-SHA256, ключ «WebAppData»). */
+function verifyTelegramInitData(initData: string, token: string): boolean {
+  const params = new URLSearchParams(initData)
+  const hash = params.get('hash')
+  if (!hash) return false
+  const authDate = Number(params.get('auth_date') || 0)
+  if (authDate && Date.now() / 1000 - authDate > 86400) return false   // старше суток — не принимаем
+  params.delete('hash')
+  params.delete('signature')
+  const check = [...params.entries()].map(([k, v]) => `${k}=${v}`).sort().join('\n')
+  const secret = createHmac('sha256', 'WebAppData').update(token).digest()
+  const calc = createHmac('sha256', secret).update(check).digest('hex')
+  if (calc.length !== hash.length) return false
+  return timingSafeEqual(Buffer.from(calc), Buffer.from(hash))
+}
+
 app.post('/api/tg/login', (req, res) => {
-  res.json({ ok: true, name: 'Владелец' })
+  if (!TG_TOKEN) {
+    // честнее молчаливого «вы вошли»: без токена подпись проверить нечем
+    return res.status(501).json({ detail: 'Telegram-вход не настроен: задайте TELEGRAM_BOT_TOKEN' })
+  }
+  const { init_data } = req.body ?? {}
+  if (typeof init_data !== 'string' || !verifyTelegramInitData(init_data, TG_TOKEN)) {
+    return res.status(401).json({ detail: 'Подпись Telegram не совпала — вход закрыт' })
+  }
+  let name = 'Владелец'
+  try {
+    const user = JSON.parse(new URLSearchParams(init_data).get('user') || '{}')
+    if (user?.first_name) name = user.first_name
+  } catch {}
+  res.json({ ok: true, name })
 })
 
 // Phone access / Tailscale QR
@@ -1327,8 +1855,11 @@ app.get('/api/search/semantic', (req, res) => {
     ...state.notes.filter(n => n.text.toLowerCase().includes(q)).map(n => ({ kind: 'note', id: n.id, title: n.text.slice(0, 40), snippet: n.text })),
     ...state.tasks.filter(t => t.title.toLowerCase().includes(q)).map(t => ({ kind: 'task', id: t.id, title: t.title, snippet: t.category })),
     ...state.events.filter(e => e.title.toLowerCase().includes(q)).map(e => ({ kind: 'event', id: e.id, title: e.title, snippet: e.start })),
+    ...state.links.filter(l => [l.title, l.url, l.domain, l.comment].some(v => (v || '').toLowerCase().includes(q)))
+      .map(l => ({ kind: 'link', id: l.id, title: l.title, url: l.url, snippet: l.comment || l.domain || l.url })),
   ]
-  res.json(results)
+  // фронт читает r.items (src/pages/Mind.jsx, Palette.jsx) — форма как у Python /api/search/semantic
+  res.json({ items: results, total: results.length })
 })
 app.post('/api/search/reindex', (req, res) => res.json({ ok: true, count: 42 }))
 app.post('/api/backup', (req, res) => res.json({ ok: true, file: 'backup-current.zip' }))
@@ -1593,71 +2124,90 @@ function processChatInput(text: string): { reply: string; actions: string[]; via
   }
 }
 
-app.post('/api/chat', async (req, res) => {
-  const { text } = req.body
-  const result = processChatInput(text)
+app.post('/api/chat', async (req, res, next) => {
+  try {
+    const { text } = req.body ?? {}
+    if (typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ error: 'text must be a non-empty string' })
+    }
+    const result = processChatInput(text)
 
-  state.chatHistory.push({
-    id: ++nextId,
-    role: 'user',
-    text,
-    timestamp: new Date().toISOString(),
-    actions: [],
-    via: 'user',
-  })
-  state.chatHistory.push({
-    id: ++nextId,
-    role: 'assistant',
-    text: result.reply,
-    timestamp: new Date().toISOString(),
-    actions: result.actions,
-    via: result.via,
-  })
+    state.chatHistory.push({
+      id: ++nextId,
+      role: 'user',
+      text,
+      timestamp: new Date().toISOString(),
+      actions: [],
+      via: 'user',
+    })
+    state.chatHistory.push({
+      id: ++nextId,
+      role: 'assistant',
+      text: result.reply,
+      timestamp: new Date().toISOString(),
+      actions: result.actions,
+      via: result.via,
+    })
 
-  res.json({ text: result.reply, actions: result.actions, via: result.via })
+    res.json({ text: result.reply, actions: result.actions, via: result.via })
+  } catch (err) {
+    next(err)
+  }
 })
 
-app.post('/api/chat/stream', async (req, res) => {
-  const { text } = req.body
-  const result = processChatInput(text)
+app.post('/api/chat/stream', async (req, res, next) => {
+  try {
+    const { text } = req.body ?? {}
+    if (typeof text !== 'string' || !text.trim()) {
+      return res.status(400).json({ error: 'text must be a non-empty string' })
+    }
+    const result = processChatInput(text)
 
-  state.chatHistory.push({
-    id: ++nextId,
-    role: 'user',
-    text,
-    timestamp: new Date().toISOString(),
-    actions: [],
-    via: 'user',
-  })
-  state.chatHistory.push({
-    id: ++nextId,
-    role: 'assistant',
-    text: result.reply,
-    timestamp: new Date().toISOString(),
-    actions: result.actions,
-    via: result.via,
-  })
+    state.chatHistory.push({
+      id: ++nextId,
+      role: 'user',
+      text,
+      timestamp: new Date().toISOString(),
+      actions: [],
+      via: 'user',
+    })
+    state.chatHistory.push({
+      id: ++nextId,
+      role: 'assistant',
+      text: result.reply,
+      timestamp: new Date().toISOString(),
+      actions: result.actions,
+      via: result.via,
+    })
 
-  res.setHeader('Content-Type', 'text/event-stream')
-  res.setHeader('Cache-Control', 'no-cache')
-  res.setHeader('Connection', 'keep-alive')
-  res.flushHeaders()
+    res.setHeader('Content-Type', 'text/event-stream')
+    res.setHeader('Cache-Control', 'no-cache')
+    res.setHeader('Connection', 'keep-alive')
+    res.flushHeaders()
 
-  // Stream in small word tokens for natural UI typing effect
-  const words = result.reply.split(' ')
-  for (let i = 0; i < words.length; i++) {
-    const chunk = (i === 0 ? '' : ' ') + words[i]
-    res.write(`event: token\ndata: ${JSON.stringify(chunk)}\n\n`)
-    await new Promise(r => setTimeout(r, 25))
+    // Stream in small word tokens for natural UI typing effect
+    const words = result.reply.split(' ')
+    for (let i = 0; i < words.length; i++) {
+      const chunk = (i === 0 ? '' : ' ') + words[i]
+      res.write(`event: token\ndata: ${JSON.stringify(chunk)}\n\n`)
+      await new Promise(r => setTimeout(r, 25))
+    }
+
+    res.write(`event: done\ndata: ${JSON.stringify({ text: result.reply, actions: result.actions, via: result.via })}\n\n`)
+    res.end()
+  } catch (err) {
+    next(err)
   }
-
-  res.write(`event: done\ndata: ${JSON.stringify({ text: result.reply, actions: result.actions, via: result.via })}\n\n`)
-  res.end()
 })
 
 // ----------------- VITE / STATIC SERVING -----------------
 
 async function setupFrontend() {
+  // неизвестный эндпоинт → честный 404 JSON, а не index.html из SPA-fallback
+  app.use('/api', (_req, res) => {
+    res.status(404).json({ detail: 'Неизвестный эндпоинт' })
+  })
+
   if (!isProd) {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -1674,8 +2224,16 @@ async function setupFrontend() {
     }
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Assistant server running at http://0.0.0.0:${PORT} in ${isProd ? 'production' : 'development'} mode`)
+  // последним: ошибка в любом роуте → ответ вместо падения процесса
+  app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[server] route error:', err)
+    if (res.headersSent) return
+    if (err?.name === 'MulterError') return res.status(400).json({ detail: err.message })
+    res.status(500).json({ detail: 'Внутренняя ошибка сервера' })
+  })
+
+  app.listen(PORT, HOST, () => {
+    console.log(`Assistant server running at http://${HOST}:${PORT} in ${isProd ? 'production' : 'development'} mode`)
   })
 }
 

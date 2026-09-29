@@ -163,10 +163,10 @@ export default function Today({ openChat, address = 'вовчик' }) {
   }
 
   // Данные для карточки баланса
-  const balance = d?.finance?.balance ?? 15161
-  const daysLeft = Math.min(30, Math.max(1, Math.round(d?.finance?.runway_days ?? 6)))
-  const avgDaily = d?.finance?.avg_daily ?? 2028
-  const forecastBalance = (d?.finance?.balance ?? 15161) - avgDaily * 30
+  const balance = d?.finance?.balance ?? 0
+  const daysLeft = Math.min(30, Math.max(1, Math.round(d?.finance?.runway_days ?? 0)))
+  const avgDaily = d?.finance?.avg_daily ?? 0
+  const forecastBalance = balance - avgDaily * 30
 
   // 30 дней отсечек
   const startD = new Date(now)
@@ -176,18 +176,22 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const startStr = `${z(startD.getDate())}.${z(startD.getMonth() + 1)}`
   const endStr = `${z(endD.getDate())}.${z(endD.getMonth() + 1)}`
 
-  // Траты 30 дней и столбики по дням недели
-  const expenses30 = fin?.spent || d?.finance?.expense_month || 55950
-  const weekdayHeights = useMemo(() => [55, 80, 40, 95, 60, 30, 70], [])
+  // Траты 30 дней и столбики по дням недели — сервер считает из реальных операций
+  const expenses30 = fin?.spent || d?.finance?.expense_month || 0
+  const toBars = (sums) => {
+    const max = Math.max(1, ...(sums || []))
+    return (sums || []).map((h) => Math.round((h / max) * 100))
+  }
+  const weekdayHeights = toBars(d?.finance?.weekday)
+  const monthDayHeights = toBars(d?.finance?.month_days)
 
   // Свободно в месяц
-  const freeMonth = d?.finance?.cashflow ? Math.max(0, d.finance.cashflow) : 8224
-  const monthDayHeights = [35, 50, 45, 70, 60, 85, 100]
+  const freeMonth = d?.finance?.cashflow ? Math.max(0, d.finance.cashflow) : 0
 
   // Долги
-  const debtTotal = (d?.debts || []).reduce((acc, x) => acc + (x.total - (x.paid || 0)), 0) || 205700
-  const totalOrigDebts = (d?.debts || []).reduce((acc, x) => acc + (x.total || 0), 0) || (debtTotal / 0.62)
-  const debtClosedPct = totalOrigDebts > 0 ? Math.round(((totalOrigDebts - debtTotal) / totalOrigDebts) * 100) : 38
+  const debtTotal = (d?.debts || []).reduce((acc, x) => acc + (x.total - (x.paid || 0)), 0)
+  const totalOrigDebts = (d?.debts || []).reduce((acc, x) => acc + (x.total || 0), 0) || debtTotal
+  const debtClosedPct = totalOrigDebts > 0 ? Math.round(((totalOrigDebts - debtTotal) / totalOrigDebts) * 100) : 0
   const closedSegments = Math.round((debtClosedPct / 100) * 16)
 
   // Сегодня события
@@ -526,18 +530,16 @@ export default function Today({ openChat, address = 'вовчик' }) {
             {renderCardControls('brain', idx)}
             <div className="hd">
               <h2>мозг</h2>
-              <small>{(d?.memory || []).length || 25} {plural((d?.memory || []).length || 25, 'запись', 'записи', 'записей')}</small>
+              <small>{(d?.memory || []).length} {plural((d?.memory || []).length, 'запись', 'записи', 'записей')}</small>
             </div>
-            {(recentNotes.length ? recentNotes : [
-              { id: 1, title: 'Проблема в деньгах', type: 'мысль', date: 'сегодня' },
-              { id: 2, title: 'Опрос про Аполлона', type: 'фото', date: 'сб' },
-              { id: 3, title: 'Купить три бутылки пива', type: 'мысль', date: 'сб' },
-            ]).map((n) => (
+            {recentNotes.length ? recentNotes.map((n) => (
               <div className="note" key={n.id}>
                 <b>{n.title}</b>
                 <small>{n.type} · {n.date}</small>
               </div>
-            ))}
+            )) : (
+              <div className="muted text-[13px]">записей пока нет — скажите в чате «запиши: …»</div>
+            )}
           </section>
         )
 

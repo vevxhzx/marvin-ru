@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Users } from 'lucide-react'
 import { api, money, plural } from '../lib/api'
-import { Sheet, Field, useToast } from '../components/ui'
+import { Sheet, Field, Empty, useToast } from '../components/ui'
 import { useRefresh } from '../App'
 
 const KIND_RU = { person: 'человек', family: 'семья', friend: 'друг', client: 'клиент', company: 'компания' }
@@ -26,17 +27,8 @@ export default function People() {
       .sort((a, b) => (b.open - a.open) || (b.unpaid - a.unpaid) || a.name.localeCompare(b.name, 'ru'))
   }, [list, q, tab])
 
-  const unpaidTotal = (list || []).reduce((s, p) => s + (p.unpaid || 0), 0) || 10800
-  const openCount = (list || []).filter((p) => p.open).length || 2
-
-  const displayItems = items.length ? items : [
-    { id: 1, name: 'кот прод', aliases: 'kotprod', kind: 'company', open: 2, unpaid: 10300 },
-    { id: 2, name: 'илья (монтажер скаммерса)', aliases: '', kind: 'client', open: 1, unpaid: 500 },
-    { id: 3, name: 'камилла', aliases: '', kind: 'friend', open: 0, unpaid: 0 },
-    { id: 4, name: 'Кирилл', aliases: '', tags: ['квартира', 'аренда'], kind: 'person', open: 0, unpaid: 0 },
-    { id: 5, name: 'Мама', aliases: 'она же Наталия', kind: 'семья', open: 0, unpaid: 0 },
-    { id: 6, name: 'папа', aliases: 'он же андрей', kind: 'семья', open: 0, unpaid: 0 },
-  ]
+  const unpaidTotal = (list || []).reduce((s, p) => s + (p.unpaid || 0), 0)
+  const openCount = (list || []).filter((p) => p.open).length
 
   return (
     <div className="pg on" id="p-ppl">
@@ -77,7 +69,13 @@ export default function People() {
 
       {/* Сетка карточек людей */}
       <div className="ppl" style={{ marginTop: '28px' }}>
-        {displayItems.map((p, idx) => (
+        {!items.length ? (
+          <Empty
+            icon={<Users size={38} />}
+            text={list?.length ? 'Никого не нашлось' : 'Никого пока нет'}
+            sub={list?.length ? 'Попробуйте другой запрос или другую вкладку' : 'Добавьте человека кнопкой «+ человек» или скажите в чате «человек: …»'}
+          />
+        ) : items.map((p, idx) => (
           <section className="c r" key={p.id} style={{ '--i': 4 + (idx % 6), cursor: 'pointer' }} onClick={() => setSheet(p)}>
             <div className="pp">
               <span className="av2">{initials(p.name)}</span>
@@ -126,7 +124,7 @@ function PersonSheet({ open, person, onClose, onDone }) {
       if (isNew) {
         await api.chat(`человек: ${name.trim()}${aliases ? `, ${aliases}` : ''}${contact ? `, ${contact}` : ''}`)
       } else {
-        await api.patchPerson(person.id, { name: name.trim(), aliases: aliases.trim(), contact: contact.trim(), kind })
+        await api.updatePerson(person.id, { name: name.trim(), aliases: aliases.trim(), contact: contact.trim(), kind })
       }
       onDone()
     } catch (err) {
