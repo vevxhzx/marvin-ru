@@ -529,6 +529,8 @@ def rules(text: str, channel: str) -> Reply | None:
     # ---- управление ПК: открой / найди / пауза / что на экране / статус костюма ----
     cmd = pc.parse(t)
     if cmd:
+        if not pc.from_trusted_channel(channel):   # ФАЗА 6: пересланный/чужой текст не управляет ПК
+            return Reply(pc.BLOCKED_REPLY, ["pc_blocked"], "rules")
         if cmd.action == "power" and cmd.arg in ("shutdown", "reboot"):
             # необратимое для несохранённой работы — только после «да» (тем же pending-механизмом, что и крупные суммы)
             _pending_set(channel, "confirm|" + json.dumps({"pc": cmd.arg}))

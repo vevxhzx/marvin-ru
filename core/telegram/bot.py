@@ -64,6 +64,18 @@ def _mine(m: Message) -> bool:
     return bool(m.from_user and m.from_user.id == OWNER_ID)
 
 
+def _is_forwarded(m: Message) -> bool:
+    """Пересланное сообщение (aiogram 3 forward_origin + старые поля). Такой текст — не команда владельца."""
+    return bool(getattr(m, "forward_origin", None) or getattr(m, "forward_from", None)
+                or getattr(m, "forward_from_chat", None) or getattr(m, "forward_sender_name", None)
+                or getattr(m, "forward_date", None))
+
+
+def _channel_for(m: Message, base: str = "tg") -> str:
+    """Канал обработки: пересланные сообщения помечаем суффиксом -fwd, чтобы они не управляли ПК (ФАЗА 6)."""
+    return f"{base}-fwd" if _is_forwarded(m) else base
+
+
 @router.message(~F.from_user.id.in_({OWNER_ID}))
 async def stranger(m: Message):
     log.info("Чужой пользователь %s (%s) — игнорирую", m.from_user.id if m.from_user else "?", m.from_user.username if m.from_user else "")
@@ -439,7 +451,7 @@ async def any_text(m: Message):
     log.info("← tg: %r", (m.text or "")[:80])
     typing = asyncio.create_task(_keep_typing(m))
     try:
-        r = await asyncio.wait_for(agent.handle(m.text, channel="tg"), timeout=HANDLE_TIMEOUT)
+        r = await asyncio.wait_for(agent.handle(m.text, channel=_channel_for(m)), timeout=HANDLE_TIMEOUT)
         typing.cancel()
         await send_long(m, r.text or "…")
         await _maybe_send_card(m, r)
@@ -541,7 +553,7 @@ async def _run_voice_command(m: Message, text: str) -> None:
     from core.voice import tts
     typing = asyncio.create_task(_keep_typing(m))
     try:
-        r = await asyncio.wait_for(agent.handle(text, channel="tg-voice"), timeout=HANDLE_TIMEOUT)
+        r = await asyncio.wait_for(agent.handle(text, channel=_channel_for(m, "tg-voice")), timeout=HANDLE_TIMEOUT)
     finally:
         typing.cancel()
     # сверху — расшифровка ЦЕЛИКОМ (сворачиваемой цитатой), снизу — ответ; одно сообщение.
@@ -996,7 +1008,7 @@ async def anything_else(m: Message):
     if m.caption:
         # подпись к фото/файлу — выполняем как текст
         log.info("← tg: но есть подпись — выполняю её: %r", m.caption[:60])
-        r = await asyncio.wait_for(agent.handle(m.caption, channel="tg"), timeout=HANDLE_TIMEOUT)
+        r = await asyncio.wait_for(agent.handle(m.caption, channel=_channel_for(m)), timeout=HANDLE_TIMEOUT)
         await send_long(m, r.text or "…")
         return
     await _send(m, txt, txt)

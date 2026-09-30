@@ -184,9 +184,26 @@ def parse(text: str) -> PcCommand | None:
 
 
 # ---------------------------------------------------------------- доставка в клиент
+# ФАЗА 6: команды управления ПК выполняем только из «своих» каналов владельца (голос, его Telegram, сайт,
+# сам ПК). Текст из пересланных сообщений бот помечает суффиксом -fwd (core/telegram/bot.py::_channel_for),
+# и оттуда команды на ПК (в т.ч. «что на экране») не принимаются — иначе чужой текст мог бы управлять ПК.
+UNTRUSTED_SUFFIX = "-fwd"
+
+
+def from_trusted_channel(channel: str) -> bool:
+    """Канал считается «от владельца», если он не помечен как пересланный/чужой текст."""
+    return not (channel or "").strip().lower().endswith(UNTRUSTED_SUFFIX)
+
+
+BLOCKED_REPLY = "Команды управления компьютером принимаю только от вас напрямую, сэр — не из пересланных сообщений."
+
+
 def dispatch(cmd: PcCommand, channel: str) -> str:
     """Отправить команду ПК-клиенту (через SSE). Вернуть текст ответа пользователю."""
     from ..brain import agent
+    if not from_trusted_channel(channel):
+        log.warning("ПК-команда %s отклонена: канал %r не от владельца", cmd.action, channel)
+        return BLOCKED_REPLY
     if not alive():
         return "ПК-клиент не на связи, сэр: запустите voice.bat на компьютере — тогда смогу открывать программы и файлы."
     if agent.on_change:
