@@ -455,6 +455,16 @@ def anonymize(text: str) -> str:
     return text
 
 
+# Обезличенный текст уходит в облако, и модель в ответе повторяла плейсхолдер («Тратил пока [сумма]»).
+# Говорим прямо: скобки в ответ не тащить, а про цифру — молчать или сказать без конкретики.
+# Значения мы ей всё равно не показываем — приватность не страдает, а мусор в ответе пропадает.
+_ANON_HINT = ("\n\nВажно: в переданном тебе тексте часть данных скрыта плейсхолдерами — "
+              "[сумма], [имя], [телефон], [email], [карта], [ключ], [скрыто]. "
+              "Никогда не повторяй такие скобки в ответе (не пиши «[сумма]» и подобное). "
+              "Если для ответа нужно скрытое значение — обойдись без конкретной цифры "
+              "(«некоторая сумма», «один из контактов») или не упоминай это место.")
+
+
 _names_cache: tuple[float, list[str]] = (0.0, [])
 
 
@@ -743,6 +753,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
     if cfg.brain.gemini.anonymize and not history_retry and MODE != "cloud":
         user_text = anonymize(user_text)
         history = [{**h, "text": anonymize(h["text"])} for h in (history or [])]
+        system = system + _ANON_HINT
     messages = [{"role": "system", "content": system}]
     messages += [{"role": "user" if h["role"] == "user" else "assistant", "content": h["text"]} for h in (history or [])]
     messages.append({"role": "user", "content": user_text})
@@ -1043,6 +1054,7 @@ async def gemini_chat(system: str, user_text: str, history: list[dict] | None = 
     if cfg.brain.gemini.anonymize:
         user_text = anonymize(user_text)
         history = [{**h, "text": anonymize(h["text"])} for h in (history or [])]
+        system = system + _ANON_HINT
     contents = [{"role": "user" if h["role"] == "user" else "model", "parts": [{"text": h["text"]}]} for h in (history or [])]
     contents.append({"role": "user", "parts": [{"text": user_text}]})
     if not model or not model.startswith("gemini"):
