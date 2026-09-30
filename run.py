@@ -87,6 +87,13 @@ async def main(with_tg: bool) -> None:
             log.info("Голос: пакеты не установлены (install_voice.bat) — голосовые в Telegram пока текстом")
     except Exception as e:  # pragma: no cover
         log.warning("Голос не инициализирован: %s", e)
+    # Окружение: ffmpeg нужен не всегда — OGG/Opus из Telegram декодирует PyAV (пакет av).
+    import shutil as _shutil
+    if _shutil.which("ffmpeg"):
+        log.info("Окружение: ffmpeg найден")
+    else:
+        log.info("Окружение: ffmpeg в PATH нет — не страшно, голосовые декодирует PyAV (пакет av). "
+                 "Ставьте ffmpeg, только если какой-то формат не читается.")
     if llm.cloud_enabled():
         log.info("Облако: %s (анонимайзер %s)", llm.cloud_title(), "вкл" if cfg.brain.gemini.anonymize else "выкл")
 

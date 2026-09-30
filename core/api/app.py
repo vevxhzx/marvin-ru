@@ -2118,8 +2118,8 @@ def edition_put(p: EditionIn):
 def client_info():
     """Карточка десктоп-клиента в настройках (WebView2 / App Mode)."""
     import platform as _platform
-    from .. import identity
-    return {"app_name": identity.NAME or "Джарвис", "version": "0.12.0",
+    from .. import identity, VERSION
+    return {"app_name": identity.NAME or "Джарвис", "version": VERSION,
             "platform": _platform.system().lower(), "mode": "desktop_projection",
             "single_instance": True, "tray_enabled": True, "webview2_ready": True}
 
