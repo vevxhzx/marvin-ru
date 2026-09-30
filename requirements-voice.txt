@@ -1,0 +1,5 @@
+vosk>=0.3.45
+sounddevice>=0.4.6
+pystray>=0.19
+pillow>=10
+keyboard>=0.13

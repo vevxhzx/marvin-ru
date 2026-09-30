@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="900" viewBox="0 0 1440 900">
+  <rect width="1440" height="900" fill="#f5f5f7"/>
+  <rect x="24" y="24" width="220" height="852" rx="22" fill="#ffffff" stroke="#e5e5e7"/>
+  <text x="52" y="70" font-family="Inter,Arial,sans-serif" font-size="20" font-weight="700" fill="#171719">Джарвис</text>
+  <text x="52" y="92" font-family="Inter,Arial,sans-serif" font-size="11" fill="#8b8b91">личный локальный помощник</text>
+  <g font-family="Inter,Arial,sans-serif" font-size="14" fill="#4e4e54">
+    <rect x="40" y="132" width="188" height="42" rx="12" fill="#171719"/>
+    <text x="58" y="158" fill="#fff">⌂  Сегодня</text>
+    <text x="58" y="211">◷  Задачи</text><text x="58" y="257">▱  Заказы</text><text x="58" y="303">◌  Календарь</text><text x="58" y="349">♙  Люди</text><text x="58" y="395">□  Память</text><text x="58" y="441">◇  Доска</text>
+  </g>
+  <line x1="52" y1="490" x2="216" y2="490" stroke="#e5e5e7"/>
+  <text x="58" y="532" font-family="Inter,Arial,sans-serif" font-size="12" fill="#9a9aa0">СИСТЕМА</text>
+  <text x="58" y="570" font-family="Inter,Arial,sans-serif" font-size="14" fill="#4e4e54">⚙  Настройки</text>
+  <rect x="52" y="794" width="164" height="42" rx="12" fill="#f1f1f3"/>
+  <circle cx="70" cy="815" r="5" fill="#31a85b"/><text x="84" y="820" font-family="Inter,Arial,sans-serif" font-size="12" fill="#4e4e54">ядро работает</text>
+
+  <text x="286" y="76" font-family="Inter,Arial,sans-serif" font-size="13" fill="#89898f">СРЕДА, 24 СЕНТЯБРЯ 2026</text>
+  <text x="286" y="122" font-family="Inter,Arial,sans-serif" font-size="38" font-weight="700" letter-spacing="-1.2" fill="#171719">Добрый вечер, Вова</text>
+  <text x="286" y="153" font-family="Inter,Arial,sans-serif" font-size="16" fill="#77777d">Коротко: сегодня есть три вещи, которые стоит не потерять.</text>
+  <button/>
+  <rect x="1133" y="84" width="112" height="44" rx="14" fill="#171719"/><text x="1157" y="111" font-family="Inter,Arial,sans-serif" font-size="14" fill="#fff">＋ Спросить</text>
+
+  <rect x="286" y="196" width="720" height="230" rx="24" fill="#ffffff" stroke="#e5e5e7"/>
+  <text x="318" y="235" font-family="Inter,Arial,sans-serif" font-size="12" fill="#89898f">СЕЙЧАС</text>
+  <text x="318" y="278" font-family="Inter,Arial,sans-serif" font-size="26" font-weight="650" fill="#171719">Закрыть монтаж для «Рекламы»</text>
+  <text x="318" y="309" font-family="Inter,Arial,sans-serif" font-size="14" fill="#77777d">Заказ · срок завтра в 12:00 · потрачено 3 ч 20 мин из 5 ч</text>
+  <rect x="318" y="350" width="430" height="8" rx="4" fill="#ededee"/><rect x="318" y="350" width="286" height="8" rx="4" fill="#171719"/>
+  <text x="318" y="389" font-family="Inter,Arial,sans-serif" font-size="13" fill="#77777d">Осталось около 1 ч 40 мин</text>
+  <rect x="826" y="342" width="142" height="44" rx="13" fill="#171719"/><text x="856" y="369" font-family="Inter,Arial,sans-serif" font-size="14" fill="#fff">Продолжить</text>
+
+  <rect x="1030" y="196" width="380" height="230" rx="24" fill="#171719"/>
+  <text x="1062" y="235" font-family="Inter,Arial,sans-serif" font-size="12" fill="#a8a8ad">НАБЛЮДЕНИЕ</text>
+  <text x="1062" y="279" font-family="Inter,Arial,sans-serif" font-size="22" font-weight="650" fill="#fff">Ты давно не открывал</text>
+  <text x="1062" y="309" font-family="Inter,Arial,sans-serif" font-size="22" font-weight="650" fill="#fff">задачи по подарку.</text>
+  <text x="1062" y="348" font-family="Inter,Arial,sans-serif" font-size="14" fill="#bdbdc2">У Маши день рождения через 5 дней.</text>
+  <text x="1062" y="386" font-family="Inter,Arial,sans-serif" font-size="14" fill="#fff">Показать идеи →</text>
+
+  <rect x="286" y="452" width="478" height="324" rx="24" fill="#fff" stroke="#e5e5e7"/>
+  <text x="318" y="492" font-family="Inter,Arial,sans-serif" font-size="12" fill="#89898f">СЕГОДНЯ</text>
+  <text x="318" y="532" font-family="Inter,Arial,sans-serif" font-size="21" font-weight="650" fill="#171719">План на вечер</text>
+  <g font-family="Inter,Arial,sans-serif" font-size="14" fill="#4e4e54">
+    <circle cx="329" cy="579" r="7" fill="#171719"/><text x="352" y="584">Отправить превью клиенту</text><text x="690" y="584" fill="#9a9aa0">18:30</text>
+    <circle cx="329" cy="627" r="7" fill="#fff" stroke="#b8b8bd" stroke-width="2"/><text x="352" y="632">Купить подарок Маше</text><text x="690" y="632" fill="#9a9aa0">завтра</text>
+    <circle cx="329" cy="675" r="7" fill="#fff" stroke="#b8b8bd" stroke-width="2"/><text x="352" y="680">Разобрать входящие</text><text x="690" y="680" fill="#9a9aa0">без срока</text>
+  </g>
+  <text x="318" y="738" font-family="Inter,Arial,sans-serif" font-size="13" fill="#77777d">＋ Добавить задачу</text>
+
+  <rect x="788" y="452" width="298" height="324" rx="24" fill="#fff" stroke="#e5e5e7"/>
+  <text x="820" y="492" font-family="Inter,Arial,sans-serif" font-size="12" fill="#89898f">ВРЕМЯ</text>
+  <text x="820" y="534" font-family="Inter,Arial,sans-serif" font-size="21" font-weight="650" fill="#171719">Сегодня</text>
+  <text x="820" y="598" font-family="Inter,Arial,sans-serif" font-size="43" font-weight="700" fill="#171719">4 ч 12 мин</text>
+  <text x="820" y="628" font-family="Inter,Arial,sans-serif" font-size="13" fill="#77777d">Premiere · 2 ч 48 мин</text>
+  <text x="820" y="654" font-family="Inter,Arial,sans-serif" font-size="13" fill="#77777d">After Effects · 54 мин</text>
+  <text x="820" y="680" font-family="Inter,Arial,sans-serif" font-size="13" fill="#77777d">вручную · 30 мин</text>
+  <text x="820" y="738" font-family="Inter,Arial,sans-serif" font-size="13" fill="#171719">Распределить  →</text>
+
+  <rect x="1110" y="452" width="300" height="324" rx="24" fill="#fff" stroke="#e5e5e7"/>
+  <text x="1142" y="492" font-family="Inter,Arial,sans-serif" font-size="12" fill="#89898f">СИСТЕМА</text>
+  <text x="1142" y="534" font-family="Inter,Arial,sans-serif" font-size="21" font-weight="650" fill="#171719">Всё спокойно</text>
+  <circle cx="1148" cy="580" r="5" fill="#31a85b"/><text x="1164" y="585" font-family="Inter,Arial,sans-serif" font-size="14" fill="#4e4e54">ядро онлайн</text>
+  <circle cx="1148" cy="616" r="5" fill="#31a85b"/><text x="1164" y="621" font-family="Inter,Arial,sans-serif" font-size="14" fill="#4e4e54">локальная модель готова</text>
+  <circle cx="1148" cy="652" r="5" fill="#d99a25"/><text x="1164" y="657" font-family="Inter,Arial,sans-serif" font-size="14" fill="#4e4e54">Telegram не подключён</text>
+  <text x="1142" y="738" font-family="Inter,Arial,sans-serif" font-size="13" fill="#171719">Открыть настройки  →</text>
+</svg>
