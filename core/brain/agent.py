@@ -183,7 +183,7 @@ def _strip_fillers(t: str) -> str:
     return t.strip(" ,.-—:")
 
 
-_Q = r"^\s*(?:а\s+)?(?:что|чё|че|как|какие|каков\w*)\s+(?:там\s+)?(?:у\s+меня\s+)?"
+_Q = r"^\s*(?:а\s+)?(?:что|чё|че|как|какие|каков\w*)\s+(?:там\s+)?(?:у\s+меня\s+)?(?:сегодня\s+|сейчас\s+)?"
 FIN_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:финанс\w*|деньг\w*|денежк\w*|баланс\w*|бюджет\w*|кошельк\w*|бабк\w*|касс\w*)\W*$", re.I)
 TASK_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:задач\w*|делам|дела)\W*$", re.I)
 EVENT_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:встреч\w*|календар\w*|событи\w*|планам)\W*$", re.I)
@@ -423,6 +423,27 @@ _VENT_PREFIX_RX = re.compile(r"^\s*(?:(?:(?:ты|вы)\s+[а-яё]+\s*[?!.,]+|(?
 _NOTE_BUT_EXPENSE_RX = re.compile(r"^\s*(?:запиши|добавь|внеси)\s+(?:трату\s+|расход\s+)?(?=\d)", re.I)
 
 
+# «что там на сегодня», «че там сегодня», «что, что сегодня але», «план на сегодня» — все варианты одного вопроса.
+# Раньше ловил только точный список строк, всё остальное утекало в модель и получалось «Чё там? Запускаю мозги 🧠».
+_BRIEF_DROP = re.compile(r"\b(ну|так|короче|слушай|вообще|там|же|але|ух|го|бро|сэр|дай|дайте|расскажи|покажи|скажи|"
+                         r"что|чё|че|какие|у\s+меня|мне|на|в|во|по\s+плану|запланировано|в\s+планах|дела)\b", re.I)
+_BRIEF_DAYS = ("сегодня", "сегодняшний", "сегодняшняя")
+_DATE_WORDS = re.compile(r"\b(завтра|недел\w*|выходн\w*|понедельник|вторник|сред[уаы]|четверг|пятниц\w*|суббот\w*|воскресен\w*|"
+                         r"вчера|послезавтра|утром|вечером)\b", re.I)
+
+
+def _is_briefing_ask(low: str) -> bool:
+    """Это «покажи день»? Нормализуем воду и сравниваем с маленьким набором; даты кроме сегодня сюда не берём."""
+    t = re.sub(r"[?!.…«»\"',;:()]+", " ", low)
+    t = re.sub(r"^\s*(?:дай|дайте|покажи|выдай|сделай|прими|отдай)\s+", "", t, flags=re.I)   # «дай дайджест»
+    if re.match(r"^(дайджест|бриф\w*)\b", t):
+        return not _DATE_WORDS.search(t)   # «дайджест на завтра» разбирает quick.agenda
+    if not re.match(r"^(что|чё|че|план|планы|дела|расписание)\b", t):
+        return False
+    t = re.sub(r"\s+", " ", _BRIEF_DROP.sub(" ", t)).strip()
+    return t == "" or t in _BRIEF_DAYS
+
+
 def rules(text: str, channel: str) -> Reply | None:
     text = _VENT_PREFIX_RX.sub("", text, count=1) or text
     t = text.strip()
@@ -460,7 +481,7 @@ def rules(text: str, channel: str) -> Reply | None:
         return r_edit
 
     # ---- быстрые отчёты ----
-    if low in ("что сегодня", "что у меня сегодня", "план на сегодня", "сегодня", "дайджест", "бриф", "брифинг"):
+    if low in ("сегодня", "дайджест", "бриф", "брифинг") or _is_briefing_ask(low):
         return Reply(registry.today_briefing(), ["briefing"])
     if re.match(r"^(прогноз|прогноз (по )?(деньгам|кассы|финансов|бюджета)|хватит ли (мне )?(денег|до зарплаты)|до зарплаты хватит|сколько (могу|можно) тратить( в день)?|"
                 r"сколько будет (на счете|на счёте|денег) через (месяц|30 дней)|что с деньгами (через месяц|к концу месяца)|дотяну до зарплаты)\??$", low):
@@ -1192,6 +1213,9 @@ _SAVED_RX = re.compile(r"\b(запис[ая]|записал|сохран[ия]|�
 
 
 _FORCED = [
+    # «что там на сегодня» / «дайджест» — модель без инструмента тут же начинает тянуть воду, день показываем сами
+    (re.compile(r"^\s*(?:ну\s+|так\s+)*(?:что|чё|че)\s*(?:,\s*(?:что|чё|че)\s*)*(?:там\s+)?(?:у\s+меня\s+)?(?:на\s+|в\s+|во\s+)?сегодня\b|"
+                r"^\s*(?:дайджест|бриф\w*|план\s+на\s+сегодня|планы\s+на\s+сегодня)\s*[?!.\s]*$|^\s*что\s+(?:там|ну)\s*\??$", re.I), "today_briefing", {}),
     (re.compile(r"баланс|финанс|сколько\s+(?:у\s+меня\s+)?денег|деньг|бюджет|куда\s+(?:ушл|дел)|как\s+(?:я\s+)?трач", re.I), "finance_summary", {"days": 30}),
     (re.compile(r"долг|кредит|кому\s+(?:я\s+)?должен", re.I), "list_debts", {}),
     (re.compile(r"задач|что\s+(?:мне\s+)?(?:надо|нужно)\s+сделать|мои\s+дела", re.I), "list_tasks", {}),
@@ -1215,6 +1239,48 @@ def _forced_tool(text: str) -> tuple[str, dict] | None:
 
 def _claims_saved(answer: str) -> bool:
     return bool(_SAVED_RX.search(answer or ""))
+
+
+# Вода вместо ответа: «Чё там на сегодня? Запускаю мозги. 🧠» — модель пересказала вопрос и ничего не сделала.
+_FILLER_RX = re.compile(r"\b(запускаю\s+мозги|мозги\s+запуск|секунду|подожди\w*|подождите|момент|анализирую|обрабатываю|"
+                        r"слушаю\s+вас|не\s+совсем\s+понял|не\s+уловил|не\s+понял\s+вопрос|перефразируй|повтори\w*\s+вопрос|"
+                        r"сейчас\s+(?:скажу|подумаю|разберусь|посмотрю)|я\s+сейчас\s+(?:думаю|работаю))\b", re.I)
+
+
+def _weak_answer(ans: str, question: str) -> bool:
+    """Ответ без инструментов, который не является ответом: слишком короткий, водяной или эхо вопроса."""
+    a = (ans or "").strip()
+    if len(a) < 15:
+        return True                      # «…», «Готово.» — на вопрос это не ответ
+    if len(a) < 220 and _FILLER_RX.search(a):
+        return True                      # «Запускаю мозги», «Секунду, думаю»
+    if len(a) < 220 and not re.search(r"\d", a):
+        a_norm = re.sub(r"[^\w\s]", "", a.lower()).strip()
+        q_norm = re.sub(r"[^\w\s]", "", question.lower()).strip()
+        if a_norm and a_norm == q_norm:
+            return True                  # ответ — буквально повторённый вопрос
+        qw = {w for w in re.findall(r"[а-яёa-z]{4,}", question.lower())}
+        aw = set(re.findall(r"[а-яёa-z]{4,}", a.lower()))
+        if qw and len(qw & aw) >= max(2, int(0.8 * len(qw))):
+            return True                  # содержательные слова вопроса вернулись как есть, цифр нет → эхо
+    return False
+
+
+# ретрай, когда ответ вышел водой: инструкция конкретная и короткая, лишних токенов в промпте нет
+_NO_WATER = ("Это не ответ. Отвечай по существу, одной-двумя фразами: не пересказывай мой вопрос и не пиши, что сейчас "
+             "сделаешь («запускаю мозги», «секунду», «думаю»). Если нужен день, деньги, задачи или встречи — сначала вызови "
+             "инструмент (agenda / today_briefing / finance_summary / list_tasks / list_events), потом ответь по его результату.")
+
+
+def _weak_fallback(text: str, channel: str) -> Reply | None:
+    """Последний рубеж, когда и повторный заход модели дал воду: цифры поднимаем сами, инструментом."""
+    forced = _forced_tool(text)
+    if forced:
+        tr = registry.call(forced[0], forced[1], channel)
+        if tr.ok:
+            log.warning("[%s] вода вместо ответа → инструмент %s", channel, forced[0])
+            return Reply(tr.text, [forced[0]], "rules")
+    return None
 
 
 def _looks_like_question(text: str) -> bool:
@@ -1269,7 +1335,8 @@ def _history(channel: str, limit: int = 6, max_chars: int = 600, current: str | 
     _handle) и отдельно идёт последним сообщением, поэтому из истории её убираем — иначе модель видит её дважды."""
     since = datetime.now() - timedelta(hours=HISTORY_MAX_AGE_H)
     with session() as s:
-        rows = s.exec(select(ChatMessage).where(ChatMessage.created_at >= since).order_by(ChatMessage.id.desc()).limit(limit + 1)).all()
+        rows = s.exec(select(ChatMessage).where(ChatMessage.created_at >= since,
+                                                ChatMessage.channel != "digest").order_by(ChatMessage.id.desc()).limit(limit + 1)).all()
     if rows and rows[0].role == "user" and (current is None or (rows[0].text or "").strip() == current.strip()):
         rows = rows[1:]
     rows = rows[:limit]
@@ -1376,7 +1443,20 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
         messages.append({"role": "user", "content": text + "\n" + now_line()})
         try:
             out = await _chat(messages)
-            return Reply((await _russian_only(messages, out)) or "…", [], via)
+            content = (await _russian_only(messages, out)) or "…"
+            if _weak_answer(content, text):
+                fb = _weak_fallback(text, channel)
+                if fb:
+                    return fb
+                try:
+                    out2 = await _chat(messages + [{"role": "assistant", "content": content},
+                                                   {"role": "user", "content": _NO_WATER}])
+                    c2 = (await _russian_only(messages, out2) or "").strip()
+                    if c2 and not _weak_answer(c2, text):
+                        content = c2
+                except Exception as e:  # pragma: no cover
+                    log.debug("ретрай (без инструментов) не удался: %s", e)
+            return Reply(content, [], via)
         except Exception as e:
             log.exception("%s failed: %s", "cloud tools" if cloud_tools else "ollama", e)
             return None
@@ -1403,6 +1483,9 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                  "«на сколько хватит», «хватит ли на платежи», «цели» → finance_report.\n"
                  "• Если непонятно, событие это или задача, — задай ОДИН короткий уточняющий вопрос вместо угадывания.\n"
                  "• Просто вопрос или болтовня — отвечай без инструментов.\n"
+                 "• Вопрос про день/планы («что там на сегодня», «че сегодня», «дайджест», «что у меня на неделе») — "
+                 "вызови today_briefing или agenda и ответь по результату. Отвечать текстом вроде «запускаю мозги», «секунду», "
+                 "«Чё там на сегодня?» ЗАПРЕЩЕНО: это вода, а не ответ.\n"
                  "• ЦИФРЫ ТОЛЬКО ИЗ ИНСТРУМЕНТОВ. Спрашивают про баланс, траты, доходы, долги, задачи, встречи — сначала вызови "
                  "finance_summary / spent / list_debts / list_tasks / list_events / agenda и отвечай по их результату. "
                  "Придумывать суммы, даты и остатки ЗАПРЕЩЕНО. Не вызвал инструмент — значит, не знаешь, так и скажи.\n"
@@ -1442,9 +1525,27 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                     log.warning("[%s] принудительный %s не выполнен: %s", channel, name, tr.error)
                     return Reply(_truth_gate(out.get("content") or "", results) or
                                  "Не смог поднять цифры, сэр — данные не отдались. Попробуйте ещё раз.", actions, via)
+            if not out["tool_calls"] and not actions and not results and _weak_answer(out.get("content") or "", text):
+                # «Чё там на сегодня? Запускаю мозги 🧠» — вода вместо ответа. Один жёсткий ретрай с прямым указанием:
+                # либо модель возьмёт инструмент (тогда путь ниже выполнит его), либо ответит по существу.
+                log.warning("[%s] ответ модели без содержания (%r) — повторяю с указанием", channel, (out.get("content") or "")[:60])
+                try:
+                    out2 = await _chat(messages + [
+                        {"role": "assistant", "content": out.get("content") or ""},
+                        {"role": "user", "content": _NO_WATER}], tools_now if allow_cloud == allow_cloud_pre
+                        else registry.tools_schema(with_cloud=False, text=None if cloud_tools else text))
+                    if out2 and (out2.get("tool_calls") or not _weak_answer(out2.get("content") or "", text)):
+                        out = out2
+                except Exception as e:  # pragma: no cover
+                    log.debug("[%s] ретрай не удался: %s", channel, e)
             if not out["tool_calls"]:
                 content = (await _russian_only(messages, out)) or "…"
                 content = _truth_gate(content, results)
+                if not actions and not results and _weak_answer(content, text):
+                    # и после ретрая вода — данные поднимаем сами, а не отдаём человеку «запускаю мозги»
+                    fb = _weak_fallback(text, channel)
+                    if fb:
+                        return fb
                 # модель не вызвала НИ ОДНОГО инструмента, но пишет «записал» — старый путь: сохраняем сами.
                 # Если инструмент вызывался и провалился, сюда не идём: _truth_gate уже сказал правду,
                 # а угадывать запись за упавшим инструментом — как раз способ записать не то.
@@ -1567,6 +1668,11 @@ async def via_gemini(text: str, channel: str, explicit: bool = True) -> Reply | 
         # облако само поняло, что вопрос личный → не показываем это пользователю, а молча идём в локальную модель
         log.info("[%s] ОБЛАКО: «это личное» → перекидываю в локальную модель", channel)
         return Reply("", [], "local_needed")
+    if _weak_answer(ans, text):
+        # «Чё там на сегодня? Запускаю мозги 🧠» из облака (модель повторила реплику из истории) — не кэшируем и не отдаём:
+        # возвращаем None, и _handle уводит фразу в локальную модель с инструментами
+        log.warning("[%s] ОБЛАКО: ответ без содержания (%r) → локальная модель", channel, ans[:60])
+        return None
     if ck:
         _ANSWER_CACHE[ck] = (time.monotonic(), ans)
         if len(_ANSWER_CACHE) > 300:

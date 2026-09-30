@@ -100,11 +100,11 @@ def due_task_reminders() -> list[tuple[Task, str]]:
             if t.remind_stage < 1 and same_day and nw.hour >= 9:
                 # если до дедлайна уже меньше часа — второе напоминание («остался час») не нужно
                 t.remind_stage = 2 if t.due - nw <= timedelta(hours=1) else 1; s.add(t)
-                out.append((t, f"📌 Сегодня до {t.due:%H:%M} — «{t.title}»."))
+                out.append((t, f"📌 **ЗАДАЧА** · до {t.due:%H:%M} сегодня\n«{t.title}»"))
             elif t.remind_stage < 2 and timedelta(0) <= t.due - nw <= timedelta(hours=1):
                 t.remind_stage = 2; s.add(t)
                 mins = int((t.due - nw).total_seconds() // 60)
-                out.append((t, f"⏳ «{t.title}» — остался {'час' if mins > 50 else f'{mins} мин'} (до {t.due:%H:%M})."))
+                out.append((t, f"⏳ **ОСТАЛОСЬ {'час' if mins > 50 else f'{mins} мин'}** · до {t.due:%H:%M}\n«{t.title}»"))
         s.commit()
     return out
 

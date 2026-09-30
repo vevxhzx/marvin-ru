@@ -404,7 +404,7 @@ async def dashboard():
         "debts": debts,
         "upcoming": [r.model_dump() for r in finance.upcoming_payments(7)],
         "memory": [m.model_dump() for m in brain_notes.memory_feed(3, 15)],
-        "digest": morning_digest_text(),
+        "digest": morning_digest_text(card=False),
         "streak": {**insights.streak(), "heatmap": insights.activity_heatmap(26)},
         "birthdays": insights.upcoming_birthdays(14),
         "forecast": insights.cash_forecast(30),

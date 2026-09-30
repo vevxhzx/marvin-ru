@@ -265,7 +265,7 @@ def test_task_deadline_reminders():
     t = tasks.add_task("Сдать отчёт (тест напоминаний)", datetime.now() + timedelta(minutes=30))
     rem = tasks.due_task_reminders()
     texts = [txt for tk, txt in rem if tk.id == t.id]
-    assert texts and ("Сегодня до" in texts[0] or "остался" in texts[0])
+    assert texts and ("ЗАДАЧА" in texts[0] or "ОСТАЛОСЬ" in texts[0]) and t.title in texts[0]
     assert not [1 for tk, _ in tasks.due_task_reminders() if tk.id == t.id]  # повторно не шлём
     tasks.delete_task(t.id)
 
@@ -577,9 +577,9 @@ def test_analysis_request_not_recorded():
     assert agent.rules("сдача квартиры завтра в 10", "test") is None or "add_event" in agent.rules("сдача квартиры завтра в 10", "test").actions
 
 
-def test_cards_render_and_evening_text_short(tmp_path):
+def test_cards_render_and_evening_text_card_style(tmp_path):
     """Открытки собираются на любых данных (пустая база, длинные заголовки, большие суммы) и не падают;
-    вечерний текст — короткий (≤ 5 строк)."""
+    вечерний текст — карточка в том же стиле, что утренний дайджест (бейдж, секции, футер)."""
     from datetime import datetime, timedelta
     from core.services import cards, calendar, finance, tasks
     tasks.add_task("Очень длинное название задачи, которое точно не влезет в одну строку открытки и должно обрезаться многоточием", datetime.now().replace(hour=23), source="test")
@@ -592,8 +592,8 @@ def test_cards_render_and_evening_text_short(tmp_path):
         im = Image.open(out)
         assert im.width == cards.W and 400 < im.height < 2600
     txt = cards.evening_text()
-    assert 1 <= len(txt.splitlines()) <= 5
-    assert "Вечер" in txt
+    assert "ИТОГИ ДНЯ" in txt and "ЗАКРЫТО" in txt and "джарвис ·" in txt
+    assert len(txt) < 1500          # карточка, а не простыня
 
 
 def test_batch_sorter_splits_and_undoes(monkeypatch):

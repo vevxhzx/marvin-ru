@@ -311,40 +311,65 @@ def evening_data() -> dict:
             "tomorrow": tomorrow, "balance": s["total_balance"], "per_day": safe.get("per_day")}
 
 
+def _footer(d: datetime) -> str:
+    """Подвал карточки — как на сайте: «джарвис · ср 30сен»."""
+    from . import scheduler
+    return scheduler._card_footer(d)
+
+
 def evening_text(data: dict | None = None, first: str | None = None) -> str:
-    """Короткий вечерний итог — 3–4 строки, без воды. first — живая первая строка от персоны (иначе нейтральная)."""
+    """Вечерний итог — карточка в том же стиле, что утренний: заголовок, секции с количеством
+    и теми же пустыми строками, футер. first — живая первая строка от персоны (иначе нейтральная)."""
     d = data or evening_data()
-    addr = _address()
-    parts = [f"🌙 {first}" if first else f"🌙 Вечер, {addr}."]
+    now = datetime.now()
+    out = [f"🌙 **ИТОГИ ДНЯ** · {now:%H:%M}"]
+    out.append("**" + first.strip() + "**" if first else f"**вечер, {_address()}**")
+    out.append(f"{_weekday(now)}, {now.day} {_month(now)}")
+
     n_done, n_due = len(d["done"]), len(d["due"])
-    if n_done or n_due:
-        bits = []
-        if n_done:
-            bits.append(f"закрыто {n_done} {_plural(n_done, 'задача', 'задачи', 'задач')}")
-        if n_due:
-            bits.append(f"осталось {n_due} с дедлайном")
-        parts.append("✅ " + ", ".join(bits) + ".")
-    if d["spent"] or d["earned"]:
-        m = f"💸 За день −{money(d['spent'])}"
-        if d["top"] and d["spent"]:
-            m += f" (больше всего — {d['top'][0].lower()})"
-        if d["earned"]:
-            m += f", +{money(d['earned'])}"
-        parts.append(m + ".")
+    out.append("")
+    out.append(f"✅ **ЗАКРЫТО** · {n_done}")
+    if n_done:
+        out += [f"— {t.title}" + (f" · {t.done_at:%H:%M}" if t.done_at else "") for t in d["done"][:5]]
+        if n_done > 5:
+            out.append(f"…и ещё {n_done - 5}")
+    else:
+        out.append("ничего не закрыто — подозрительно наоборот.")
+
+    out.append("")
+    out.append(f"💸 **РАСХОДЫ ЗА ДЕНЬ** · {money(d['spent'])}")
+    if d["spent"] and d["top"]:
+        out.append(f"больше всего — {d['top'][0].lower()}")
+    if d["earned"]:
+        out.append(f"поступило +{money(d['earned'])}")
+    if not d["spent"] and not d["earned"]:
+        out.append("денег не трогали — редкий день.")
+
+    if n_due:
+        out.append("")
+        out.append(f"⏰ **ОСТАЛОСЬ** · {n_due}")
+        out += [f"— {t.title} · " + ("сегодня" if t.due and t.due.date() == now.date() else f"{t.due:%d.%m}")
+                for t in d["due"][:4] if t.due]
+        if n_due > 4:
+            out.append(f"…и ещё {n_due - 4}")
     try:
         from . import screen
         sl = screen.evening_line(d.get("now"))
         if sl:
-            parts.append(sl)
+            out.append("")
+            out.append(sl)
     except Exception:  # pragma: no cover
         pass
+
+    out.append("")
     if d["tomorrow"]:
-        e = d["tomorrow"][0]
-        more = f" и ещё {len(d['tomorrow']) - 1}" if len(d["tomorrow"]) > 1 else ""
-        parts.append(f"📅 Завтра: {e.start:%H:%M} — {e.title}{more}.")
+        out.append(f"📅 **ЗАВТРА** · {len(d['tomorrow'])}")
+        out += [f"— **{e.start:%H:%M}** {e.title}" for e in d["tomorrow"][:3]]
     else:
-        parts.append("📅 Завтра свободно.")
-    return "\n".join(parts)
+        out.append("📅 завтра свободно.")
+    out.append("")
+    out.append(f"———\n{_footer(now)}")
+    return "\n".join(out)
 
 
 def evening_card(path: Path | None = None, data: dict | None = None) -> Path | None:

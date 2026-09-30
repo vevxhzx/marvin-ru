@@ -197,6 +197,19 @@ def _to_html(text: str) -> str:
     return t
 
 
+def _to_html_cap(text: str, limit: int = 1000) -> str:
+    """HTML для подписи к фото/голосу: Telegram режет подпись на 1000 символов, поэтому обрезаем сами —
+    по строкам и с закрытием тегов, чтобы не отдать «<b>ИТОГИ ДНЯ…» без конца и не упасть."""
+    t = _to_html(text)
+    if len(t) <= limit:
+        return t
+    cut = _re.sub(r"<[^>]*$", "", t[:limit - 4])
+    for tag in ("b", "i", "code", "pre"):
+        if cut.count(f"<{tag}>") > cut.count(f"</{tag}>"):
+            cut += f"</{tag}>"
+    return cut.rstrip() + "…"
+
+
 async def _send(m: Message, html_text: str, plain_text: str) -> bool:
     """Отправить одно сообщение: HTML → при ошибке разметки чистый текст; при сетевой ошибке — 3 попытки.
     Каждый сбой пишется в консоль, чтобы было видно, ПОЧЕМУ ответ не дошёл."""
@@ -829,7 +842,7 @@ async def notify_voice(bot: Bot, text: str, buttons=None) -> bool:
         p = await asyncio.wait_for(tts.speak_to_file(text, out), timeout=60)
         if not p:
             return False
-        await bot.send_voice(OWNER_ID, FSInputFile(p), caption=_to_html(text)[:1000], reply_markup=_kb(buttons))
+        await bot.send_voice(OWNER_ID, FSInputFile(p), caption=_to_html_cap(text), reply_markup=_kb(buttons))
         return True
     except Exception as e:
         log.warning("notify_voice failed: %s", e)
@@ -844,6 +857,6 @@ async def notify_voice(bot: Bot, text: str, buttons=None) -> bool:
 async def notify_photo(bot: Bot, path: str, caption: str = "") -> None:
     from aiogram.types import FSInputFile
     try:
-        await bot.send_photo(OWNER_ID, FSInputFile(path), caption=_to_html(caption)[:1000] if caption else None)
+        await bot.send_photo(OWNER_ID, FSInputFile(path), caption=_to_html_cap(caption) if caption else None)
     except Exception as e:
         log.warning("notify_photo failed: %s", e)

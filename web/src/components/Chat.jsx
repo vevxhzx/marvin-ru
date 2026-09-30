@@ -16,7 +16,7 @@ export const ACT = {
   bulk_delete: ['удалено пачкой', Undo2], game_mode: ['режим переключён', Cpu], voice: ['голос сменён', Sparkles],
 }
 const VIA = { rules: ['правила', Zap], ollama: ['локально', Cpu], llm: ['облако', Cloud], gemini: ['облако', Cloud], none: ['сбой', AlertCircle] }
-const CH = { tg: 'telegram', 'tg-voice': 'telegram · голос', voice: 'голос', web: 'сайт', system: 'авто' }
+const CH = { tg: 'telegram', 'tg-voice': 'telegram · голос', voice: 'голос', web: 'сайт', system: 'авто', digest: 'дайджест' }
 const fromServer = (h) => h.map((m) => ({ id: m.id, role: m.role === 'user' ? 'me' : 'bot', text: m.text, channel: m.channel, at: m.at }))
 
 /* Подсказки под контекст времени суток — 4 штуки, коротко */
@@ -183,7 +183,7 @@ function Message({ m, grouped, showMeta = true, onRetry }) {
       
       {isMorningDigest ? (
         <div className="w-full max-w-[94%] sm:max-w-[420px]">
-          <MorningDigestCard />
+          <MorningDigestCard ownerName={(m.text || '').match(/доброе утро,\s*\**\s*([^\n*]+)/i)?.[1]?.trim()} />
         </div>
       ) : isWeekSummary ? (
         <div className="w-full max-w-[94%] sm:max-w-[420px]">
