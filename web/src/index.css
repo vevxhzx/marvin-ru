@@ -17,7 +17,7 @@
 /* --app-pad — тот же отступ, но как переменная: доска считает от неё свою высоту */
 .app { position: relative; z-index: 1; display: grid; grid-template-columns: 232px 1fr; gap: 20px; padding: 16px; --app-pad: 16px; min-height: 100vh; }
 aside.sidebar-bench, aside { background-image: linear-gradient(180deg, var(--sb-1), var(--sb-2)); position: sticky; top: 16px; height: calc(100vh - 32px); align-self: start; color: var(--sb-ink); border-radius: 30px; box-shadow: var(--sb-shadow), inset 0 1px 0 var(--sb-inset); border: 1px solid var(--sb-line); padding: 20px 12px 14px; display: flex; flex-direction: column; gap: 3px; z-index: 50; }
-.logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -0.02em; padding: 4px 12px 22px; color: var(--sb-ink); }
+.logo { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 17px; letter-spacing: -0.02em; padding: 4px 12px 12px; color: var(--sb-ink); }
 .logo i { width: 10px; height: 10px; border-radius: 50%; background: var(--acc); animation: breathe 3.2s ease-in-out infinite; }
 nav.bench-nav a, aside nav a { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 16px; color: var(--sb-dim); text-decoration: none; font-weight: 500; transition: background 0.3s var(--e), color 0.3s; }
 nav.bench-nav a svg, aside nav a svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
@@ -26,7 +26,9 @@ nav.bench-nav a.on, nav.bench-nav a.active, aside nav a.on, aside nav a.active {
 .sb { margin-top: auto; display: flex; flex-direction: column; gap: 10px; position: relative; }
 /* Меню — по центру сайдбара: логотип остаётся сверху, помодоро и статус снизу,
    а свободное место уходит в равные отступы вокруг навигации. */
-aside nav { margin: auto 0; }
+/* Меню больше не центрируем «в пустоте»: оно идёт сразу под логотипом,
+   а помодоро и статус прижаты к низу. Пустой дыры под логотипом нет. */
+aside nav { margin: 4px 0 0; }
 aside .sb { margin-top: 0; }
 .pomo { display: flex; align-items: center; gap: 12px; padding: 8px 12px; color: var(--sb-dim); font-size: 14px; }
 .pomo b { color: var(--sb-ink); font-weight: 500; font-size: 15px; }
@@ -111,31 +113,32 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .mid { font-size: clamp(28px, 3.2vw, 38px); font-weight: 500; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; line-height: 1.1; }
 
 .hero {
-  background: linear-gradient(135deg, var(--acc) 0%, color-mix(in srgb, var(--acc) 62%, #8a5cff) 55%, #8a5cff 100%) !important;
-  color: var(--accent-ink) !important;
+  /* Один лаймовый герой на экран: деньги / успех. */
+  background: linear-gradient(135deg, #e6ff86 0%, var(--lime) 52%, #a7e22e 100%) !important;
+  color: #101a05 !important;
   display: flex;
   flex-direction: column;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 24px 50px -16px color-mix(in srgb, var(--acc) 55%, transparent) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), 0 24px 50px -16px color-mix(in srgb, var(--lime) 55%, transparent) !important;
 }
 .hero::after {
   content: '';
   position: absolute;
   inset: -50%;
-  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.22) 50%, transparent 58%);
+  background: linear-gradient(105deg, transparent 42%, rgba(255, 255, 255, 0.34) 50%, transparent 58%);
   transform: translateX(-70%);
   animation: sheen 7s 2.5s ease-in-out infinite;
   pointer-events: none;
 }
 .hm { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: 12px; padding-top: 26px; }
-.hm div { padding: 14px 16px; border-radius: 18px; background: rgba(255, 255, 255, 0.15); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.2); }
+.hm div { padding: 14px 16px; border-radius: 18px; background: rgba(16, 26, 5, 0.10); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
 .hm small { display: block; font-size: 12px; opacity: 0.75; }
 .hm b { font-weight: 500; font-size: 19px; letter-spacing: -0.03em; }
-.hero .hd small { color: rgba(255, 255, 255, 0.75); }
-.tag { display: inline-block; margin-top: 14px; padding: 5px 12px; border-radius: 999px; background: rgba(255, 255, 255, 0.2); font-size: 13px; font-weight: 500; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25); }
+.hero .hd small { color: rgba(16, 26, 5, 0.7); }
+.tag { display: inline-block; margin-top: 14px; padding: 5px 12px; border-radius: 999px; background: rgba(16, 26, 5, 0.12); font-size: 13px; font-weight: 500; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
 .days { margin-top: 30px; display: grid; grid-template-columns: repeat(30, 1fr); gap: 3px; }
-.days i { height: 22px; border-radius: 4px; background: rgba(255, 255, 255, 0.2); animation: fade 0.5s both; animation-delay: calc(1s + var(--k) * 30ms); }
-.days i.on { background: #fff; box-shadow: 0 0 10px rgba(255, 255, 255, 0.6); }
-.dl { margin-top: 8px; font-size: 12px; color: rgba(255, 255, 255, 0.7); display: flex; justify-content: space-between; }
+.days i { height: 22px; border-radius: 4px; background: rgba(16, 26, 5, 0.16); animation: fade 0.5s both; animation-delay: calc(1s + var(--k) * 30ms); }
+.days i.on { background: #101a05; box-shadow: 0 0 10px rgba(16, 26, 5, 0.45); }
+.dl { margin-top: 8px; font-size: 12px; color: rgba(16, 26, 5, 0.72); display: flex; justify-content: space-between; }
 
 .chart {
   background: radial-gradient(100% 100% at 85% 10%, rgba(255, 59, 92, 0.14), transparent 55%), radial-gradient(80% 80% at 15% 25%, rgba(25, 179, 74, 0.12), transparent 55%), var(--sf) !important;
@@ -155,17 +158,19 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .lg span { display: inline-flex; align-items: center; gap: 7px; }
 .lg i { width: 8px; height: 8px; border-radius: 50%; }
 
+/* Вторичные карточки: тёмная поверхность + тинт своего цвета 10–12 % + рамка 1px.
+   Больше нет светлых лавандовой (.p1) и мятной (.p2) — они читаются как нейтральные. */
 .p1 {
-  background: radial-gradient(90% 120% at 100% 0%, rgba(138, 92, 255, 0.38), transparent 70%), linear-gradient(155deg, var(--p1), var(--p1b)) !important;
-  color: var(--p1i) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(138, 92, 255, 0.18), 0 20px 45px -18px rgba(138, 92, 255, 0.3) !important;
+  background: color-mix(in srgb, var(--ai) 11%, var(--sf)) !important;
+  color: var(--ink) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px color-mix(in srgb, var(--ai) 30%, transparent), 0 20px 45px -20px rgba(0, 0, 0, 0.45) !important;
 }
 .p2 {
-  background: radial-gradient(90% 120% at 100% 0%, rgba(25, 195, 125, 0.32), transparent 70%), linear-gradient(155deg, var(--p2), var(--p2b)) !important;
-  color: var(--p2i) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(25, 195, 125, 0.18), 0 20px 45px -18px rgba(25, 195, 125, 0.25) !important;
+  background: color-mix(in srgb, var(--lime) 11%, var(--sf)) !important;
+  color: var(--ink) !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), inset 0 0 0 1px color-mix(in srgb, var(--lime) 30%, transparent), 0 20px 45px -20px rgba(0, 0, 0, 0.45) !important;
 }
-.p1 .hd small, .p2 .hd small { color: inherit; opacity: 0.75; }
+.p1 .hd small, .p2 .hd small { color: inherit; opacity: 0.7; }
 .bars { display: flex; align-items: flex-end; gap: 8px; height: 62px; margin-top: 22px; }
 /* высота в процентах: без минимума «0» превращался в невидимую линию и график выглядел пустым */
 .bars i { flex: 1; min-height: 6px; border-radius: 8px; background: linear-gradient(180deg, currentColor, color-mix(in srgb, currentColor 45%, transparent)); height: max(var(--h), 6px); animation: rise 1.2s calc(1s + var(--k) * 80ms) var(--e) both; transform-origin: bottom; }
@@ -777,9 +782,14 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --line: rgba(16, 17, 20, 0.07);
   --line-2: rgba(16, 17, 20, 0.14);
   --acc: #0a3cff;
-  --neg: #ff3b5c;
-  --pos: #19b34a;
-  --warn: #f5a800;
+  /* Смысловые цвета. Лайм — деньги/ок, янтарь — ожидание, красный — просрочка/риск, фиолетовый — ИИ. */
+  --lime: #3f7d12;
+  --amber: #a16207;
+  --red: #d92d4b;
+  --ai: #7c3aed;
+  --neg: var(--red);
+  --pos: var(--lime);
+  --warn: var(--amber);
   --p1: #ece9ff;
   --p1b: #d3cdff;
   --p2: #e3f7ea;
@@ -841,7 +851,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --shadow-2: 0 20px 60px -20px rgba(0, 0, 0, 0.18);
   --shadow-3: 0 34px 56px -36px color-mix(in srgb, var(--acc) 42%, transparent);
 
-  --fs-xs: 11px; --fs-sm: 12px; --fs-md: 13px; --fs-base: 15px; --fs-lg: 16px; --fs-xl: 18px;
+  --fs-xs: 12px; --fs-sm: 12px; --fs-md: 13px; --fs-base: 15px; --fs-lg: 16px; --fs-xl: 18px;
   --ui-zoom: 1;
   --sidebar-w: 232px; --sidebar-w-min: 68px; --topbar-h: 56px; --content-max: 1200px;
 }
@@ -849,20 +859,24 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 /* Тёмная тема «до скриптов»: системная настройка, чтобы не было вспышки светлого при старте */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #050507;
-    --sf: #131317;
-    --sf2: #1e1e24;
+    --bg: #0f1530;
+    --sf: #151c3d;
+    --sf2: #1c2550;
     --ink: #f5f5f7;
     --ink2: #a4a7b0;
-    --ink3: #6c6f78;
+    --ink3: #8b8f9a;
     --ink-2: var(--ink2);
     --ink-3: var(--ink3);
-    --line: rgba(255, 255, 255, 0.08);
-    --line-2: rgba(255, 255, 255, 0.16);
+    --line: rgba(255, 255, 255, 0.10);
+    --line-2: rgba(255, 255, 255, 0.18);
     --acc: #2f57ff;
-    --neg: #ff5b7a;
-    --pos: #30d158;
-    --warn: #f5a800;
+    --lime: #c6f24a;
+    --amber: #f5b400;
+    --red: #ff5b7a;
+    --ai: #a78bfa;
+    --neg: var(--red);
+    --pos: var(--lime);
+    --warn: var(--amber);
     --p1: #26235a;
     --p1b: #1a1840;
     --p2: #173a26;
@@ -872,11 +886,11 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
     --g2: rgba(150, 80, 255, 0.22);
     --p1i: #cfcaff;
     --p2i: #a6ecc0;
-    --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #050507);
-    --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #131317);
-    --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1e1e24);
-    --sb-1: #16161d;
-    --sb-2: #0b0b0f;
+    --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #0f1530);
+    --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #151c3d);
+    --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1c2550);
+    --sb-1: #1c2550;
+    --sb-2: #0f1530;
     --sb-ink: #f5f5f7;
     --sb-dim: #9b9ea8;
     --sb-hover: rgba(255, 255, 255, 0.07);
@@ -902,20 +916,24 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 }
 
 :root[data-theme="dark"], .dark {
-  --bg: #050507;
-  --sf: #131317;
-  --sf2: #1e1e24;
+  --bg: #0f1530;
+  --sf: #151c3d;
+  --sf2: #1c2550;
   --ink: #f5f5f7;
   --ink2: #a4a7b0;
-  --ink3: #6c6f78;
+  --ink3: #8b8f9a;
   --ink-2: var(--ink2);
   --ink-3: var(--ink3);
-  --line: rgba(255, 255, 255, 0.08);
-  --line-2: rgba(255, 255, 255, 0.16);
+  --line: rgba(255, 255, 255, 0.10);
+  --line-2: rgba(255, 255, 255, 0.18);
   --acc: #2f57ff;
-  --neg: #ff5b7a;
-  --pos: #30d158;
-  --warn: #f5a800;
+  --lime: #c6f24a;
+  --amber: #f5b400;
+  --red: #ff5b7a;
+  --ai: #a78bfa;
+  --neg: var(--red);
+  --pos: var(--lime);
+  --warn: var(--amber);
   --p1: #26235a;
   --p1b: #1a1840;
   --p2: #173a26;
@@ -925,11 +943,11 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --g2: rgba(150, 80, 255, 0.22);
   --p1i: #cfcaff;
   --p2i: #a6ecc0;
-  --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #050507);
-  --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #131317);
-  --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1e1e24);
-  --sb-1: #16161d;
-  --sb-2: #0b0b0f;
+  --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #0f1530);
+  --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #151c3d);
+  --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1c2550);
+  --sb-1: #1c2550;
+  --sb-2: #0f1530;
   --sb-ink: #f5f5f7;
   --sb-dim: #9b9ea8;
   --sb-hover: rgba(255, 255, 255, 0.07);
@@ -965,9 +983,14 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --line: rgba(16, 17, 20, 0.07);
   --line-2: rgba(16, 17, 20, 0.14);
   --acc: #0a3cff;
-  --neg: #ff3b5c;
-  --pos: #19b34a;
-  --warn: #f5a800;
+  /* Смысловые цвета. Лайм — деньги/ок, янтарь — ожидание, красный — просрочка/риск, фиолетовый — ИИ. */
+  --lime: #3f7d12;
+  --amber: #a16207;
+  --red: #d92d4b;
+  --ai: #7c3aed;
+  --neg: var(--red);
+  --pos: var(--lime);
+  --warn: var(--amber);
   --p1: #ece9ff;
   --p1b: #d3cdff;
   --p2: #e3f7ea;
@@ -1044,8 +1067,8 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
 .t-sm { font-size: var(--fs-md); line-height: 1.45; }
 .caption { font-size: var(--fs-sm); line-height: 1.4; color: var(--ink-2); }
 .mono { font-family: 'Inter Tight', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; letter-spacing: 0; font-feature-settings: normal; font-variant-numeric: tabular-nums; }
-.label { @apply mono text-[11px] uppercase tracking-[0.08em]; color: var(--ink-3); }
-.idx { @apply mono text-[11px]; color: var(--accent); }
+.label { @apply mono text-[12px] uppercase tracking-[0.08em]; color: var(--ink-3); }
+.idx { @apply mono text-[12px]; color: var(--accent); }
 .num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum', 'cv11', 'ss01'; }
 .h1 .num, .num.big { font-weight: 600; letter-spacing: -.045em; }
 .muted { color: var(--ink-2); }
@@ -1056,7 +1079,7 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
 .text-accent { color: var(--accent) !important; }
 .bg-red { background: var(--neg) !important; } .bg-green { background: var(--pos) !important; } .bg-orange { background: var(--warn) !important; }
 .text-red { color: var(--neg) !important; } .text-green { color: var(--pos) !important; } .text-orange { color: var(--warn) !important; }
-.kbd { @apply mono inline-flex h-5 min-w-[20px] items-center justify-center rounded-md px-1.5 text-[10.5px]; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }
+.kbd { @apply mono inline-flex h-5 min-w-[20px] items-center justify-center rounded-md px-1.5 text-[12px]; border: 1px solid var(--line); color: var(--ink-2); background: var(--surface-2); }
 
 /* ---------- поверхности ---------- */
 .hair { border-color: var(--line); }
@@ -1071,6 +1094,12 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
 .soft-pos { background: var(--pos-soft); color: var(--pos); }
 .soft-neg { background: var(--neg-soft); color: var(--neg); }
 .soft-warn { background: var(--warn-soft); color: var(--warn); }
+/* Вторичные карточки по смыслу: тёмная поверхность + тинт 11 % + рамка 1px. */
+.tint-ok { background: color-mix(in srgb, var(--lime) 11%, var(--sf)) !important; border: 1px solid color-mix(in srgb, var(--lime) 34%, transparent) !important; }
+.tint-warn { background: color-mix(in srgb, var(--amber) 11%, var(--sf)) !important; border: 1px solid color-mix(in srgb, var(--amber) 34%, transparent) !important; }
+.tint-neg { background: color-mix(in srgb, var(--red) 11%, var(--sf)) !important; border: 1px solid color-mix(in srgb, var(--red) 34%, transparent) !important; }
+.tint-ai { background: color-mix(in srgb, var(--ai) 11%, var(--sf)) !important; border: 1px solid color-mix(in srgb, var(--ai) 34%, transparent) !important; }
+.tint-acc { background: color-mix(in srgb, var(--accent) 11%, var(--sf)) !important; border: 1px solid color-mix(in srgb, var(--accent) 34%, transparent) !important; }
 
 /* строка списка */
 .row { @apply flex items-center gap-3.5 py-3; border-bottom: 1px solid var(--line); }
@@ -1606,3 +1635,13 @@ body.board-page .tabbar { display: none; }
 
 .board-ctx { scrollbar-width: none; }
 .board-ctx::-webkit-scrollbar { display: none; }
+
+/* ---------- дизайн-система: минимум 12px и группировка сайдбара ---------- */
+/* Подписи не мельче 12px: точечно поднимаем самые мелкие утилиты (Tailwind arbitrary sizes). */
+.text-\[9px\], .text-\[10px\], .text-\[10\.5px\], .text-\[11px\], .text-\[11\.5px\] { font-size: 12px !important; }
+
+/* Группы навигации в сайдбаре: план · деньги · люди · джарвис */
+.nav-group-title { padding: 12px 12px 5px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sb-dim); opacity: 0.72; }
+.nav-group-title:first-child { padding-top: 2px; }
+.nav-group-sep { height: 1px; margin: 8px 12px; background: var(--sb-line); }
+

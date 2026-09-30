@@ -225,9 +225,9 @@ export function usePageAccent(page) {
       '--accent-dark': accentFor(hex, true),
       '--accent-ink': lumOf(acc) > 0.45 ? '#101114' : '#ffffff',
       '--accent-soft': `color-mix(in srgb, ${acc} 16%, transparent)`,
-      '--bg': paint(dark ? '#050507' : '#e9ecf3', dark ? 2.4 : 1.7),
-      '--sf': paint(dark ? '#131317' : '#ffffff', dark ? 2 : 1),
-      '--sf2': paint(dark ? '#1e1e24' : '#f0f1f6', dark ? 2.4 : 1.4),
+      '--bg': paint(dark ? '#0f1530' : '#e9ecf3', dark ? 2.4 : 1.7),
+      '--sf': paint(dark ? '#151c3d' : '#ffffff', dark ? 2 : 1),
+      '--sf2': paint(dark ? '#1c2550' : '#f0f1f6', dark ? 2.4 : 1.4),
       '--g1': `color-mix(in srgb, ${acc} 30%, transparent)`,
     },
   }
