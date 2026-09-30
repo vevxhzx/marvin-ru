@@ -1,34 +1,82 @@
 name: Ошибка
 description: Что-то не работает
+title: "[bug] "
 labels: [bug]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Спасибо, что сообщаешь. Чем точнее шаги и лог — тем быстрее починю.
+        **Не вставляй сюда токены, ключи и личные данные** — замажь их.
+        Если это уязвимость в безопасности — не публичный issue, а [правила SECURITY.md](../SECURITY.md).
   - type: textarea
     id: what
     attributes:
       label: Что случилось
-      description: Что вы сделали и что пошло не так. Если есть текст ошибки из чёрного окна — вставьте целиком.
+      description: Что ты сделал и что пошло не так. Текст ошибки из окна — целиком.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Чего ожидал
+      description: Как должно было быть.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Как повторить
+      placeholder: |
+        1. Запустил start.bat
+        2. Написал боту «потратил 700 на такси»
+        3. …
     validations:
       required: true
   - type: dropdown
     id: how
     attributes:
-      label: Как запускаете
-      options: [Windows (start.bat), Docker, Другое]
+      label: Как запускаешь
+      options: [Windows (start.bat), Linux/macOS (start.sh / start.command), Docker, Node-стенд (server.ts), Другое]
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Версия
+      description: Из `core/__init__.py` (VERSION) или из шапки релиза.
+      placeholder: "0.13.0"
     validations:
       required: true
   - type: dropdown
     id: mode
     attributes:
       label: Режим мозга
-      options: [local (только Ollama), hybrid (Ollama + облако), cloud (только облако)]
+      options: [local (только Ollama), hybrid (Ollama + облако), cloud (только облако), не знаю]
   - type: input
     id: model
     attributes:
       label: Модель и видеокарта
       placeholder: qwen3.5:4b, GTX 1660 6 ГБ
+  - type: dropdown
+    id: channel
+    attributes:
+      label: Где проявляется
+      multiple: true
+      options: [Telegram, сайт, голос на ПК, Docker, API]
   - type: textarea
     id: log
     attributes:
       label: Лог
-      description: Последние строки из окна start.bat (или `docker compose logs assistant`). Токены и ключи замажьте.
+      description: Последние строки из окна `start.bat` (или `docker compose logs assistant`). Токены и ключи замажь.
       render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверил перед отправкой
+      options:
+        - label: Запустил `doctor.bat` / `./doctor.sh` и прикладываю понятную часть вывода
+        - label: Заглянул в docs/troubleshooting.md
+        - label: В логе нет токенов, ключей и личных данных

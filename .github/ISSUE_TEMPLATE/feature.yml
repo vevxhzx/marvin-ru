@@ -1,11 +1,50 @@
 name: Идея
 description: Предложить улучшение
+title: "[idea] "
 labels: [enhancement]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Опиши словами, как это должно работать. Если речь про фразы ассистенту — пример фразы идеален.
   - type: textarea
     id: idea
     attributes:
       label: Что хотелось бы
-      description: Опишите словами, как это должно работать. Пример фразы ассистенту — идеально.
+      description: Сама идея — без технических деталей, как удобно тебе.
     validations:
       required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Зачем / какую задачу решает
+      description: "Бытовой сценарий: что ты делаешь сейчас руками и как станет."
+  - type: textarea
+    id: phrase
+    attributes:
+      label: Пример фразы (если применимо)
+      placeholder: «кто из клиентов задерживает оплату больше двух недель»
+      render: text
+  - type: dropdown
+    id: area
+    attributes:
+      label: Область
+      options:
+        - Деньги
+        - Задачи и цели
+        - Календарь
+        - Заказы
+        - Мозг / заметки
+        - Люди
+        - Голос
+        - Telegram
+        - Сайт / интерфейс
+        - Доска
+        - Другое
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Проверил
+      options:
+        - label: Похожей идеи нет в открытых issues
+        - label: Понимаю, что это идея, а не гарантия реализации

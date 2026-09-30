@@ -30,7 +30,12 @@
 
 Секреты (токен бота, ключи облака, Google client_secret) API отдаёт **замаскированными** — при сохранении маска не затирает настоящий ключ.
 
-Часть изменений применяется на лету, часть — после перезапуска. Перезапуск нужны для: `server.port`, `telegram.*` (кроме тех, что читаются при отрисовке), `brain.*` (провайдер/ключ/модель), `voice.*`, `google.*`, `backup.*`. Если в настройках есть пометка «нужен перезапуск» — закрой окно `start.bat` и запусти снова. `trace.enabled` и `brain.mode` перечитываются в момент ответа.
+Часть изменений применяется на лету, часть — после перезапуска. Точный признак — что вернул сайт при сохранении (`restart: true/false`):
+
+- **на лету**: `brain.cloud.*`, `brain.gemini.*`, `brain.mode`, `brain.vision.*`, `brain.sorter.*`, `brain.ollama.small_*`, `owner.*`, `persona.*`, `google.*`;
+- **нужен перезапуск**: `telegram.*`, `backup.*`, `brain.ollama.*` (кроме `small_*`), а также `server.port` и `voice.*` (последние — перезапуск `voice.bat` / `start.bat`).
+
+Если сомневаешься — закрой окно `start.bat` и запусти снова: настройки читаются из файла при старте.
 
 А вот эти вещи в `config.yaml` правятся **только руками** (в белый список не входят):
 
@@ -153,10 +158,10 @@
 | `ASSISTANT_TG_TOKEN` | `telegram.token` | нет |
 | `ASSISTANT_TG_OWNER` | `telegram.owner_id` | нет |
 | `OLLAMA_URL` | `brain.ollama.url` (в Docker — `http://ollama:11434`) | нет |
-| `OLLAMA_MODEL` | имя модели Ollama | нет |
-| `GEMINI_API_KEY` | ключ облака (можно `GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `NVIDIA_API_KEY`) | только для `hybrid` / `cloud` |
-| `ASSISTANT_PORT` | порт окна-приложения `desktop_app.py` | нет |
-| `ASSISTANT_HOST` | адрес сервера (по умолчанию только `127.0.0.1`) | нет |
+| `OLLAMA_MODEL` | имя модели Ollama — **по коду ядро его не подхватывает** для основной модели (только `core/pc/organize.py` как запасной вариант): задавай модель в `config.yaml` / на сайте | нет |
+| `GEMINI_API_KEY` | ключ облака. Комментарий в `.env.example` упоминает ещё `GROQ_API_KEY`, `OPENAI_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `NVIDIA_API_KEY`, но **по коду подхватывается только `GEMINI_API_KEY`** — остальные ключи задавай в `config.yaml` / на сайте | только для `hybrid` / `cloud` |
+| `ASSISTANT_PORT` | порт окна-приложения `desktop_app.py` (его читает только оно) | нет |
+| `ASSISTANT_HOST` | **по коду не читается** — адрес сервера берётся из `server.host` в `config.yaml` | нет |
 | `HF_HOME` | куда качать модели распознавания речи (по умолчанию `~/.cache/huggingface`) | нет |
 | `ASSISTANT_NO_VOICE_WARMUP` | не прогревать голос на старте | нет |
 | `ASSISTANT_NO_BROWSER` | не открывать браузер при старте | нет |
