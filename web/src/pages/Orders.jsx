@@ -207,9 +207,9 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, 
   return (
     <Swipe onLeft={!closed ? onDel : undefined} onRight={!closed && NEXT[o.status] ? () => onStatus(o, NEXT[o.status]) : undefined} rightLabel={NEXT_LABEL[o.status] || 'готово'}>
       <div className={`row-slide ${extra} ${closed ? 'opacity-55' : ''}`}>
-        <div className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`} style={{ background: 'var(--sf)', borderRadius: 22 }} onClick={onOpen}>
+        <div className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`} style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', borderRadius: 22, ...(o.overdue ? { boxShadow: 'inset 0 0 0 1.5px var(--neg)' } : null) }} onClick={onOpen}>
           <div className="relative flex items-center gap-3.5 pl-1">
-            <span className="absolute -left-4 bottom-1 top-1 w-1 rounded-full" style={{ background: STATUS_DOT[o.status] }} aria-hidden />
+            <span className="absolute -left-4 bottom-1 top-1 w-1 rounded-full" style={{ background: o.overdue ? 'var(--neg)' : STATUS_DOT[o.status] }} aria-hidden />
             <span className={`badge !hidden shrink-0 sm:!inline-flex ${STATUS_TONE[o.status]}`}>{STATUS[o.status]}</span>
             <span className="h-2 w-2 shrink-0 rounded-full sm:hidden" style={{ background: STATUS_DOT[o.status] }} aria-label={STATUS[o.status]} />
             <div className="min-w-0 flex-1">

@@ -181,6 +181,11 @@ function FactRow({ f, busy, run, cats }) {
   const [text, setText] = useState(f.text)
   const save = () => { const t = text.trim(); if (!t || t === f.text) return setEdit(false); run(() => api.updateFact(f.id, { text: t }), 'Поправил').then(() => setEdit(false)) }
   const color = CATS[f.category] || 'var(--ink-3)'
+  /* метка «возможно устарело» — факт не трогали > 30 дней (только показ, данные не меняем) */
+  const stale = (() => {
+    const ts = f.updated_at || f.created_at
+    return !!ts && f.layer !== 'archive' && (Date.now() - new Date(ts)) / 864e5 > 30
+  })()
   return (
     <div className={`row cursor-pointer !items-start ${open ? '' : 'row-hover'}`} onClick={() => !edit && setOpen((v) => !v)} style={open ? { background: 'var(--fill)' } : {}}>
       <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
@@ -193,6 +198,7 @@ function FactRow({ f, busy, run, cats }) {
         ) : (
           <div className={`text-[14.5px] leading-snug ${open ? '' : 'truncate'}`}>{f.core && <Star size={12} className="mr-1 inline -mt-0.5" style={{ color: 'var(--warn)', fill: 'var(--warn)' }} />}{f.text}</div>
         )}
+        {stale && <span className="soft-warn mt-1 inline-block rounded-full px-2 py-0.5 text-[11px]">возможно устарело</span>}
         {open && !edit && (
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px]" style={{ animation: 'fade .16s ease-out' }} onClick={(e) => e.stopPropagation()}>
             <span className="muted">{f.category}</span>

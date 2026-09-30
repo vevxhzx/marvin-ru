@@ -93,7 +93,7 @@ export default function Finance() {
     income_is_estimate: true,
   }
 
-  const balance = sum?.total_balance ?? (accounts.reduce((acc, a) => acc + (a.balance || 0), 0) || 15161)
+  const balance = sum?.total_balance ?? sum?.balance ?? 0
   const spent = sum?.spent ?? 55950
   const earned = sum?.earned ?? 63662
   const debtsTotal = sum?.debts_total ?? (debts.reduce((acc, d) => acc + ((d.total || 0) - (d.paid || 0)), 0) || 205700)
@@ -287,7 +287,7 @@ export default function Finance() {
             if (id === 'chart') return (
               <section key="chart" className="c chart s8 r" style={st}>{ctl}
                 <div className="hd">
-                  <h2>касса на {days || 'все'} {days === 1 ? 'день' : 'дней'}</h2>
+                  <h2>касса на {days || 'все'} {plural(days, 'день', 'дня', 'дней')}</h2>
                   <small>
                     {forecast ? `баланс сейчас ${money(forecast.balance)} · темп ${money(forecast.avg_day_spent)}/дн` : 'при текущем темпе'}
                   </small>

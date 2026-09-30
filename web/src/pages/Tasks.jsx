@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
-import { api, hhmm, isSameDay, plural } from '../lib/api'
+import { api, hhmm, isSameDay, isAllDay, plural } from '../lib/api'
 import { Num, useToast, useLeave, useArrived, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
@@ -108,6 +108,15 @@ export default function Tasks() {
   /* декоративная карточка «список пуст» — только когда реально пусто:
      ни открытых задач, ни невыполненных встреч (и данные уже загружены) */
   const nothingToDo = tasks !== null && open.length === 0 && !agenda.some((e) => !e.done)
+  /* текст пустого списка зависит от вкладки: если в «сегодня» пусто, а задачи в работе есть —
+     не пишем «список пуст», иначе выглядит так, будто задач нет совсем */
+  const emptyListText = nothingToDo
+    ? 'список пуст'
+    : view === 'today'
+      ? 'на сегодня дел нет' + (open.length ? ` · в работе ${open.length} ${plural(open.length, 'задача', 'задачи', 'задач')}` : '')
+      : view === 'done'
+        ? 'пока ничего не выполнено'
+        : 'открытых задач нет' + (agenda.some((e) => !e.done) ? ' · есть встречи в календаре' : '')
 
   return (
     <div className="pg on" id="p-tasks" style={pageAcc.style}>
@@ -184,7 +193,7 @@ export default function Tasks() {
                   {tasks === null ? (
                     <ListSkeleton n={5} />
                   ) : currentList.length === 0 ? (
-                    <p style={{ color: 'var(--ink3)', paddingTop: '12px' }}>список пуст</p>
+                    <p style={{ color: 'var(--ink3)', paddingTop: '12px' }}>{emptyListText}</p>
                   ) : (
                     <>
                       <p className="label" style={{ marginTop: '-6px', marginBottom: '10px', textTransform: 'none', letterSpacing: 0 }}>
@@ -197,7 +206,7 @@ export default function Tasks() {
                             {t.title}
                             {t.kind === 'event' ? <small>встреча</small> : (t.sub || t.category ? <small>{t.sub || t.category}</small> : null)}
                           </span>
-                          {t.due && <time>{hhmm(t.due)}</time>}
+                          {t.due && !isAllDay(t.due) && <time>{hhmm(t.due)}</time>}
                           <button className="row-open" onClick={() => (t.kind === 'event' ? nav('/calendar') : setSheet(t))} aria-label={t.kind === 'event' ? 'открыть в календаре' : 'открыть задачу'} title={t.kind === 'event' ? 'в календаре' : 'изменить задачу'}><ChevronRight size={16} /></button>
                         </div>
                       ))}

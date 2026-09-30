@@ -162,7 +162,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
   }
 
   // Данные для карточки баланса
-  const balance = d?.finance?.balance ?? 0
+  const balance = d?.finance?.total_balance ?? d?.finance?.balance ?? 0
   const daysLeft = Math.min(30, Math.max(1, Math.round(d?.finance?.runway_days ?? 0)))
   const avgDaily = d?.finance?.avg_daily ?? 0
   // Прогноз на конец периода берём у сервера (реальные операции + регулярные платежи)
@@ -378,7 +378,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
             {renderCardControls('balance', idx)}
             <div className="hd"><h2>баланс</h2><small>хватит на</small></div>
             <div className="big"><Num value={balance} /> ₽</div>
-            <span className="tag">{daysLeft} дней из 30</span>
+            <span className="tag">{daysLeft} {plural(daysLeft, 'день', 'дня', 'дней')} из 30</span>
             <div className="days" id="days">
               {Array.from({ length: 30 }, (_, i) => (
                 <i key={i} className={i < daysLeft ? 'on' : ''} style={{ '--k': i }} />
