@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
 import { api, hhmm, isSameDay, plural } from '../lib/api'
-import { Num, useToast, useLeave, useArrived, PageAccent } from '../components/ui'
+import { Num, useToast, useLeave, useArrived, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
@@ -164,7 +164,9 @@ export default function Tasks() {
                     <h2>{view === 'today' ? 'сегодня по календарю' : view === 'done' ? 'выполнено' : 'задачи в работе'}</h2>
                     <small>{currentList.length}</small>
                   </div>
-                  {currentList.length === 0 ? (
+                  {tasks === null ? (
+                    <ListSkeleton n={5} />
+                  ) : currentList.length === 0 ? (
                     <p style={{ color: 'var(--ink3)', paddingTop: '12px' }}>список пуст</p>
                   ) : (
                     <>

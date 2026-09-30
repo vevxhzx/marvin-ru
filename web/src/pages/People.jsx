@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Users } from 'lucide-react'
 import { api, money, plural } from '../lib/api'
-import { Sheet, Field, Empty, useToast, PageAccent } from '../components/ui'
+import { Sheet, Field, Empty, useToast, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 
@@ -12,7 +12,7 @@ const chip = (on) => ({ background: on ? 'var(--ink)' : 'var(--sf)', color: on ?
 const initials = (name) => (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('')
 
 export default function People() {
-  const [list, setList] = useState([])
+  const [list, setList] = useState(null)
   const pageAcc = usePageAccent('people')
   const [q, setQ] = useState('')
   const [tab, setTab] = useState('all')
@@ -74,7 +74,7 @@ export default function People() {
 
       {/* Сетка карточек людей */}
       <div className="ppl" style={{ marginTop: '28px' }}>
-        {!items.length ? (
+        {list === null ? <ListSkeleton n={6} /> : !items.length ? (
           <Empty
             icon={<Users size={38} />}
             text={list?.length ? 'Никого не нашлось' : 'Никого пока нет'}

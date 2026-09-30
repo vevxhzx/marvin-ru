@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, plural } from '../lib/api'
-import { Sheet, Field, useToast, PageAccent } from '../components/ui'
+import { Sheet, Field, useToast, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
@@ -209,6 +209,7 @@ export default function Calendar() {
   const [linkOrders, setLinkOrders] = useState([])
   const [sheet, setSheet] = useState(null)
   const [view, setView] = useState('month') // 'month' | 'week'
+  const [loaded, setLoaded] = useState(false)
   const { tick, bump } = useRefresh()
   const [, show] = useToast()
 
@@ -220,7 +221,7 @@ export default function Calendar() {
     return [start, end]
   }, [cursor])
 
-  const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([]))
+  const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([])).finally(() => setLoaded(true))
   useEffect(() => { load() }, [range, tick])
   // справочники для привязок «встреча → задача/заказ»: тянем один раз
   useEffect(() => {
@@ -452,7 +453,9 @@ export default function Calendar() {
                 <small>{shortDate(selected)} · {dayEvents.length} {plural(dayEvents.length, 'событие', 'события', 'событий')}</small>
               </div>
               <div className="flex-1 overflow-y-auto pr-1 space-y-1">
-                {dayEvents.length === 0 ? (
+                {!loaded ? (
+                  <ListSkeleton n={4} />
+                ) : dayEvents.length === 0 ? (
                   <div className="py-12 text-center text-sm text-[var(--ink3)] flex flex-col items-center justify-center gap-2">
                     <span>нет событий на этот день</span>
                     <button type="button" className="btn g !h-8 !px-3.5 !text-xs mt-2" onClick={() => setSheet('new')}>

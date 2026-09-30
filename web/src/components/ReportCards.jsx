@@ -327,9 +327,10 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
   const now = new Date()
   const tasks = d.tasks || []
   const events = d.events || []
-  const balance = d.balance ?? 15761
-  const spentToday = d.spentToday ?? 450
-  const dailyBudget = d.dailyBudget ?? 3940
+  // Никаких захардкоженных чисел: если данные ещё не пришли — честный ноль, а не «красивая» выдумка
+  const balance = d.balance ?? 0
+  const spentToday = d.spentToday ?? 0
+  const dailyBudget = d.dailyBudget ?? 0
 
   const openTasks = tasks.filter((t) => !t.done)
   const doneTasks = tasks.filter((t) => t.done)
