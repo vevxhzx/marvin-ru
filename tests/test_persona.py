@@ -45,6 +45,16 @@ def test_system_prompt_contains_character():
     assert ("ХАРАКТЕР." in p) and ("БЕЗОПАСНОСТЬ." in p)
 
 
+def test_persona_does_not_refuse_jokes(monkeypatch):
+    """Персона-«язвительный друг» должна шутить по просьбе и не отбиваться выдуманными «принципами»."""
+    monkeypatch.setattr(persona, "STYLE", "swag")
+    monkeypatch.setattr(persona, "HUMOR", 8)
+    b = persona.character_block()
+    assert "ШУТКИ ПО ЗАПРОСУ" in b and "не умею шутить" in b
+    p = persona.system_prompt()
+    assert "ОТКАЗЫ." in p and "это мой принцип" in p
+
+
 def test_fallback_is_short_and_not_bureaucratic(monkeypatch):
     monkeypatch.setattr(persona, "STYLE", "swag"); monkeypatch.setattr(persona, "HUMOR", 8); monkeypatch.setattr(persona, "OWNER", "Вова")
     for kind, kw in [("stale_task", {"title": "разобрать архив футажей", "days": 3}),
@@ -171,7 +181,10 @@ def test_vibe_candidate_only_when_quiet_and_daytime(monkeypatch):
     assert not [x for x in proactive.candidates(day) if x["key"].startswith("vibe")]
 
 
-def test_character_prompt_defaults_to_short_business_tone():
+def test_character_prompt_defaults_to_short_business_tone(monkeypatch):
+    # спокойный стиль задаём явно — тест не должен зависеть от persona.style в конкретном config.yaml
+    monkeypatch.setattr(persona, "STYLE", "neutral")
+    monkeypatch.setattr(persona, "HUMOR", 2)
     b = persona.character_block()
     assert "короткие фразы" in b and "без шуток" in b
     assert "ОБРАЗЦЫ ТОНА" not in b and "Подкол + плечо" not in b

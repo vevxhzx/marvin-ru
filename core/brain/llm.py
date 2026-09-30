@@ -137,6 +137,7 @@ PROVIDERS: dict[str, dict] = {
     "custom":     {"base_url": "", "model": "", "title": "Свой OpenAI-совместимый", "free": None, "ru_ok": None, "key_url": ""},
 }
 LAST_CLOUD_ERROR: str | None = None
+LAST_CLOUD_MODEL: str = ""          # модель, которая реально ответила в последний раз (после фолбэков) — показываем в настройках
 _CLOUD_RESOLVED: str | None = None
 _VOICE_MODEL_BAD: set[str] = set()   # голосовые модели, которые провайдер отверг (404) — больше не пробуем
 # для OpenRouter «auto» = самая толковая бесплатная модель из живого списка (список меняется каждый месяц)
@@ -740,11 +741,13 @@ def _explain_cloud_error(e: Exception, r: "httpx.Response | None") -> str:
 async def cloud_chat(system: str, user_text: str, history: list[dict] | None = None, _force_model: str | None = None,
                      temperature: float = 0.7) -> str | None:
     """Единая точка входа в облако. Провайдер — из настроек; Gemini — частный случай."""
-    global LAST_CLOUD_ERROR, _CLOUD_RESOLVED
+    global LAST_CLOUD_ERROR, _CLOUD_RESOLVED, LAST_CLOUD_MODEL
     history_retry = _force_model is not None
     if not CLOUD_PROVIDER or CLOUD_PROVIDER == "gemini":
         ans = await gemini_chat(system, user_text, history)
         LAST_CLOUD_ERROR = None if ans else LAST_GEMINI_ERROR
+        if ans:
+            LAST_CLOUD_MODEL = f"gemini:{_RESOLVED_MODEL or GEMINI_MODEL}"
         return ans
     if not cloud_enabled():
         return None
@@ -776,6 +779,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         streamed = await _cloud_stream(body, headers, sink)
         if streamed:
             LAST_CLOUD_ERROR = None
+            LAST_CLOUD_MODEL = body.get("model", "")
             return streamed
         # стрим не удался — обычный запрос ниже
     try:
@@ -818,6 +822,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 LAST_CLOUD_ERROR = f"{cloud_title()}: пустой ответ."
                 return None
             LAST_CLOUD_ERROR = None
+            LAST_CLOUD_MODEL = body.get("model", "")
             return text
     except Exception as e:
         if r is not None and r.status_code in (404, 429) and (CLOUD_MODEL or PROVIDERS.get(CLOUD_PROVIDER, {}).get("model")) == "auto" and _CLOUD_RESOLVED:

@@ -14,6 +14,7 @@ log = logging.getLogger("jarvis.pc")
 
 # состояние ПК-клиента: когда последний раз был на связи и что сейчас делает (idle/listening/thinking/speaking/off)
 LAST_SEEN: float = 0.0
+HEARTBEAT_TIMEOUT = 90            # пульс раз в 20 с; 90 с без пульса = клиент считается отвалившимся
 STATE: dict = {"mode": "offline", "text": ""}
 _pending_results: list[dict] = []   # результаты команд (поиск файлов), которые ещё не показали
 SSE_CLIENTS = 0                     # сколько открытых /api/events/stream (ставит app.py) — по нему видно, слушает ли кто-то команды
@@ -21,7 +22,20 @@ _sent: dict[str, float] = {}        # action → когда отправили �
 
 
 def alive() -> bool:
-    return time.time() - LAST_SEEN < 90
+    return time.time() - LAST_SEEN < HEARTBEAT_TIMEOUT
+
+
+def age_sec() -> float | None:
+    """Сколько секунд назад был последний пульс ПК-клиента. None — ни разу с запуска ядра."""
+    return None if LAST_SEEN <= 0 else max(0.0, time.time() - LAST_SEEN)
+
+
+def last_seen_iso() -> str | None:
+    """Время последнего пульса в ISO (для настроек: «последний раз 14:32»). None — пульса не было."""
+    if LAST_SEEN <= 0:
+        return None
+    from datetime import datetime
+    return datetime.fromtimestamp(LAST_SEEN).isoformat(timespec="seconds")
 
 
 def seen(state: dict | None = None) -> None:

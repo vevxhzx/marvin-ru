@@ -47,6 +47,7 @@ export default function Settings({ health }) {
   const [gem, setGem] = useState(null)
   const [small, setSmall] = useState(null)   // результат проверки малой модели
   const [llm, setLlm] = useState(null)       // внешняя модель из .env (если сервер её умеет)
+  const [pcBusy, setPcBusy] = useState(false) // идёт запуск/перезапуск voice.bat
   const [cat, setCat] = useState(() => (location.hash.replace('#', '') || localStorage.getItem('settings.cat') || 'general'))
   const pick = (id) => { setCat(id); localStorage.setItem('settings.cat', id); history.replaceState(null, '', '#' + id); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
@@ -72,6 +73,15 @@ export default function Settings({ health }) {
   const toggleNotif = async () => {
     if (notifyEnabled()) { disableNotifications(); setNotif('off'); return }
     const p = await enableNotifications(); setNotif(p === 'granted' ? 'granted' : p)
+  }
+
+  const launchPc = async (restart) => {
+    setPcBusy(true)
+    try {
+      const r = await api.post('/api/pc/launch', { restart })
+      if (r?.ok) { show(r.message || (restart ? 'перезапускаю голосовой клиент' : 'запускаю голосовой клиент'), '', 'окно появится через пару секунд'); setTimeout(load, 4000) }
+      else show(r?.error || 'не получилось запустить', 'err', 'вручную: voice.bat рядом с ядром')
+    } catch (e) { show.err(e) } finally { setPcBusy(false) }
   }
 
   const groupBlock = ([prefix, title, hint]) => {
@@ -124,19 +134,29 @@ export default function Settings({ health }) {
               line1={!status.backup.enabled ? 'выключен' : status.backup.last ? `последний ${relTime(status.backup.last)}` : 'ещё не делался (в 03:00)'}
               line2={`${status.backup.count} копий · ${status.backup.dir}${status.backup.extra_dir ? ` + ${status.backup.extra_dir}` : ''}`} />
             <StatusCard ok={status.gemini.enabled && !status.gemini.last_error && gem?.ok !== false} warn={!status.gemini.enabled || (status.gemini.enabled && !status.gemini.last_error && !gem)} title={`облако · ${status.gemini.title || 'gemini'}`}
-              line1={!status.gemini.enabled ? 'выключен' : gem ? (gem.ok ? 'отвечает' : 'ошибка') : status.gemini.last_error ? 'ошибка' : status.gemini.model}
-              line2={gem && !gem.ok ? gem.detail : gem?.ok ? `модель ${gem.model}${status.gemini.proxy ? ' · через прокси' : ''}` : status.gemini.last_error || (status.gemini.enabled ? `${status.gemini.model}${status.gemini.proxy ? ' · через прокси' : ' · напрямую'}` : 'ключ не задан или режим local')}
+              line1={!status.gemini.enabled ? 'выключен' : status.gemini.last_error && gem?.ok === false ? 'ошибка' : gem?.ok ? 'отвечает' : status.gemini.last_error ? 'ошибка' : 'подключено'}
+              line2={gem && !gem.ok ? gem.detail : status.gemini.last_error ? status.gemini.last_error
+                : `настроена ${status.gemini.model}${status.gemini.model_last && status.gemini.model_last !== status.gemini.model ? ` · реально отвечает ${status.gemini.model_last}` : ''}${status.gemini.proxy ? ' · через прокси' : ' · напрямую'}`}
               action={status.gemini.enabled && <button className="btn-ghost btn-sm" onClick={() => { setGem({ pending: true }); api.post('/api/status/gemini').then(setGem).catch((e) => setGem({ ok: false, detail: e.message })) }}>{gem?.pending ? 'проверяю…' : 'проверить'}</button>} />
-            {llm && <StatusCard ok={!!llm.enabled} warn={!llm.enabled} title="внешняя модель · llm"
-              line1={llm.enabled ? `${llm.model} · отвечает через API` : 'ключ не задан'}
-              line2={llm.enabled ? 'ключ лежит в .env · такие ответы помечены в чате как ☁️ облако' : 'впишите LLM_API_KEY (и LLM_URL, LLM_MODEL) в .env — и чат пойдёт во внешнюю модель; без неё работает по правилам'} />}
+            {llm && <StatusCard ok={!!llm.enabled} warn={llm.mode === 'off'} title="какая модель отвечает"
+              line1={llm.mode === 'cloud' ? `только облако · ${status.gemini.model_last || llm.model}`
+                : llm.mode === 'off' ? 'мозг не подключён'
+                : `локально · ${status.ollama?.model || llm.model}`}
+              line2={llm.mode === 'cloud' ? 'режим cloud: все запросы идут в облако'
+                : llm.mode === 'hybrid' ? `правило (без модели) → ${status.ollama?.model || 'локальная модель'} → облако ${status.gemini.title || ''}. Личное — на ПК.`
+                : llm.mode === 'local' ? 'режим local: данные с компьютера не уходят'
+                : 'задайте модель в «мозг» или подключите облако'} />}
             {status.voice && <StatusCard ok={status.voice.stt && status.voice.stt_ready && (!status.voice.tts || status.voice.tts_ready)} warn={status.voice.stt && !status.voice.stt_ready} title="голос"
               line1={!status.voice.stt ? 'не установлен' : !status.voice.stt_ready ? (status.voice.stt_error ? 'ошибка' : 'загружается…') : `whisper-${status.voice.stt_model} · ${status.voice.tts ? status.voice.tts_engine : 'без озвучки'}`}
               line2={status.voice.stt_error || status.voice.tts_error || (!status.voice.stt ? 'запустите update.bat — поставит распознавание и голос' : status.voice.stt_ready ? `голосовые в Telegram работают · ответ голосом: ${{ voice: 'на голосовые', always: 'всегда', never: 'никогда' }[status.voice.reply] || status.voice.reply}` : 'первый запуск качает модели (~600 МБ), подождите пару минут')} />}
-            {status.screen && <StatusCard ok={status.screen.enabled && !!status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000} warn={status.screen.enabled} title="экранное время"
-              line1={!status.screen.enabled ? 'выключено' : status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000 ? `пишется · сегодня ${Math.floor(status.screen.today_min / 60)} ч ${String(status.screen.today_min % 60).padStart(2, '0')}` : 'включено, но данных нет'}
-              line2={!status.screen.enabled ? 'включить: голос и пк → «экранное время»; пишется только имя программы и сайт, локально' : status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000 ? 'блок «время за пк» — на главной; в чате «сколько сидел за компом»' : status.pc?.alive ? 'voice.bat запущен, но старой версии или без перезапуска после включения — перезапустите voice.bat' : 'пульс идёт от voice.bat — запустите его (после включения настройки нужен перезапуск)'} />}
-            <StatusCard ok={!!status.pc?.alive} warn={!status.pc?.alive} title="пк-клиент" line1={status.pc?.alive ? ({ idle: 'ждёт', listening: 'слушает', thinking: 'думает', speaking: 'говорит', off: 'микрофон выкл' }[status.pc.mode] || status.pc.mode) : 'не запущен'} line2={status.pc?.alive ? 'voice.bat на связи' : 'запустите voice.bat — голос в комнате и управление программами'} />
+            {status.screen && <StatusCard ok={status.screen.enabled && !!status.pc?.alive && !!status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000} warn={status.screen.enabled} title="экранное время"
+              line1={!status.screen.enabled ? 'выключено' : !status.pc?.alive ? (status.pc?.seen ? 'клиент молчит' : 'нет пульса') : status.screen.today_min > 0 || (status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000) ? `пишется · сегодня ${Math.floor(status.screen.today_min / 60)} ч ${String(status.screen.today_min % 60).padStart(2, '0')}` : 'ждём данные'}
+              line2={!status.screen.enabled ? 'включить: голос и пк → «экранное время»; применяется на лету (~20 с), перезапуск не нужен' : !status.pc?.alive ? (status.pc?.seen ? `voice.bat молчит с ${relTime(status.pc.seen)} — запустите/перезапустите (кнопка ниже)` : 'пульс идёт от voice.bat — запустите его (кнопка ниже)') : 'блок «время за пк» — на главной; в чате «сколько сидел за компом»'} />}
+            <StatusCard ok={!!status.pc?.alive} warn={!status.pc?.alive} title="пк-клиент"
+              line1={status.pc?.alive ? ({ idle: 'ждёт', listening: 'слушает', thinking: 'думает', speaking: 'говорит', off: 'микрофон выкл' }[status.pc.mode] || status.pc.mode) : 'не запущен'}
+              line2={status.pc?.alive ? `на связи · последний пульс ${status.pc.seen ? relTime(status.pc.seen) : 'только что'}`
+                : status.pc?.seen ? `молчит с ${relTime(status.pc.seen)} — нажмите «перезапустить» или проверьте окно voice.bat` : 'ни разу не выходил на связь — нажмите «запустить»'}
+              action={<div className="flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={pcBusy || status.pc?.alive} onClick={() => launchPc(false)}>запустить</button><button className="btn-ghost btn-sm" disabled={pcBusy} onClick={() => launchPc(true)}>перезапустить</button></div>} />
           </div>
         )}
         {status && (

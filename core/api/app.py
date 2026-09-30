@@ -176,7 +176,15 @@ def pc_ping(p: PcPing):
             state.tick()
     except Exception as e:  # pragma: no cover
         log.warning("pc ping state: %s", e)
-    return {"ok": True}
+    # Возвращаем клиенту актуальное значение «экранное время»: включение настройки применяется на лету (в течение пульса),
+    # а не после перезапуска voice.bat — раньше это была причина «включено, но данных нет».
+    want_screen = False
+    try:
+        from ..services import screen
+        want_screen = screen.enabled()
+    except Exception:  # pragma: no cover
+        pass
+    return {"ok": True, "screen": want_screen}
 
 
 @app.get("/api/screen")
@@ -206,7 +214,21 @@ def pc_ack(a: PcAck):
 @app.get("/api/pc/state")
 def pc_state():
     from ..services import pc
-    return {"alive": pc.alive(), **pc.STATE}
+    return {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE}
+
+
+class PcLaunch(BaseModel):
+    restart: bool = False
+
+
+@app.post("/api/pc/launch")
+def pc_launch(p: PcLaunch, request: Request):
+    """Открыть voice.bat из настроек. Только с самого компьютера — запуск процессов с телефона запрещён."""
+    from .auth import is_local as _is_local
+    if not _is_local(request):
+        raise HTTPException(403, "Запуск голосового клиента доступен только с самого компьютера")
+    from ..pc import launcher
+    return launcher.launch(restart=bool(p.restart))
 
 
 @app.get("/api/pc/organize/log")
@@ -408,7 +430,7 @@ async def dashboard():
         "streak": {**insights.streak(), "heatmap": insights.activity_heatmap(26)},
         "birthdays": insights.upcoming_birthdays(14),
         "forecast": insights.cash_forecast(30),
-        "pc": {"alive": pc.alive(), **pc.STATE},
+        "pc": {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE},
         "timer": orders.timer_state(),
         "orders": {"open": [o for o in orders.list_orders() if o["status"] in ("new", "work", "review")][:5],
                    "unpaid": sum(o["left"] for o in orders.list_orders() if o["status"] not in ("new", "paid", "cancelled")),
@@ -2176,7 +2198,7 @@ async def status():
         "version": VERSION,
         "game_mode": llm.GAME_MODE,
         "voice": _voice_status(),
-        "pc": {"alive": pc.alive(), **pc.STATE},
+        "pc": {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE},
         "screen": {"enabled": screen.enabled(), "today_min": screen.summary()["active_min"] if screen.enabled() else 0,
                    "last": (lambda r: r[-1].end.isoformat() if r else None)(screen.slots())},
         "vision": llm.vision_status(),
@@ -2189,6 +2211,7 @@ async def status():
                    "auto": llm.GEMINI_AUTO, "mode": llm.MODE,
                    "proxy": (llm.CLOUD_PROXY if llm.CLOUD_PROVIDER not in ("", "gemini") else (llm.GEMINI_PROXY or ((getattr(cfg.telegram, "proxy", "") or "").strip() or None))),
                    "last_error": llm.LAST_CLOUD_ERROR or (llm.LAST_GEMINI_ERROR if llm.CLOUD_PROVIDER in ("", "gemini") else None),
+                   "model_last": llm.LAST_CLOUD_MODEL or None,
                    "providers": {k: {"title": v["title"], "model": v["model"], "free": v["free"], "key_url": v["key_url"]} for k, v in llm.PROVIDERS.items()}},
         "telegram": {"configured": tg_enabled, "running": bool(getattr(app.state, "tg_running", False)),
                      "last_message": last_tg.created_at.isoformat() if last_tg else None},

@@ -361,3 +361,31 @@ def test_title_has_no_space_before_comma_after_date_cut():
     from core.brain.dates import parse_datetime
     dt, rest = parse_datetime("встреча с Димой в среду в 15, кофейня на Патриках")
     assert dt is not None and rest == "встреча с Димой, кофейня на Патриках"
+
+
+# ---------------------------------------------------------------- ПК-клиент: возраст пульса
+def test_pc_client_last_seen_helpers(monkeypatch):
+    """Статус ПК-клиента: возраст пульса и время последней связи. Раньше health читал несуществующий STATE['seen']."""
+    import time as _t
+    from core.services import pc
+    monkeypatch.setattr(pc, "LAST_SEEN", 0.0)
+    assert pc.age_sec() is None and pc.last_seen_iso() is None and not pc.alive()
+    monkeypatch.setattr(pc, "LAST_SEEN", _t.time() - 5)
+    assert pc.alive() and 4 <= (pc.age_sec() or 0) <= 8 and pc.last_seen_iso()
+    monkeypatch.setattr(pc, "LAST_SEEN", _t.time() - 3600)
+    assert not pc.alive() and (pc.age_sec() or 0) >= 3599
+
+
+def test_pc_launcher_running_pids_is_list():
+    """Кнопки запуска/перезапуска: определение живых клиентов не должно падать и не должно ничего запускать."""
+    from core.pc import launcher
+    pids = launcher.running_pids()
+    assert isinstance(pids, list) and all(isinstance(p, int) for p in pids)
+
+
+def test_pc_launcher_missing_bat_is_safe(monkeypatch, tmp_path):
+    """Если voice.bat рядом с ядром нет — понятная ошибка, а не падение и не запуск чего попало."""
+    from core.pc import launcher
+    monkeypatch.setattr(launcher, "BAT", tmp_path / "nope.bat")
+    r = launcher.launch(restart=False)
+    assert r["ok"] is False and "nope.bat" in r["error"]
