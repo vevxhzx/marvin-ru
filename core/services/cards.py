@@ -26,10 +26,16 @@ INK = (243, 243, 240)
 INK_2 = (160, 160, 156)
 INK_3 = (110, 110, 106)
 LINE = (44, 44, 43)
-ACCENT = (59, 91, 255)
+ACCENT = (10, 60, 255)         # #0a3cff — фирменный синий
+ACCENT_2 = (120, 150, 255)     # светлый оттенок для градиента
 GREEN = (52, 199, 120)
 RED = (255, 92, 92)
 ORANGE = (240, 160, 40)
+# Пастель для bento-плиток (акцентные суммы/категории)
+PASTEL = {
+    "blue": (30, 46, 92), "green": (24, 62, 48), "orange": (74, 52, 24),
+    "red": (70, 30, 34), "violet": (52, 36, 86),
+}
 
 _BOLD = [
     "C:/Windows/Fonts/segoeuib.ttf", "C:/Windows/Fonts/arialbd.ttf",
@@ -89,6 +95,32 @@ class _Canvas:
         self.img = Image.new("RGB", (W, max_h), BG)
         self.d = ImageDraw.Draw(self.img)
         self.y = PAD
+
+    # фирменный знак (split-asterisk: 8 лучей из центра) и градиентная шапка
+    def asterisk(self, cx: int, cy: int, r: int, color=ACCENT, width: int = 4):
+        import math
+        for k in range(4):
+            a = math.pi * k / 4
+            dx, dy = math.cos(a) * r, math.sin(a) * r
+            self.d.line((cx - dx, cy - dy, cx + dx, cy + dy), fill=color, width=width)
+
+    def header(self, badge: str, color=ACCENT):
+        """Верхняя фирменная полоса-градиент (синий #0a3cff → светлее) + знак и бейдж раздела."""
+        from PIL import Image
+        h = 8
+        grad = Image.new("RGB", (W, h))
+        px = grad.load()
+        c2 = ACCENT_2
+        for x in range(W):
+            t = x / max(1, W - 1)
+            px_col = (int(color[0] + (c2[0] - color[0]) * t), int(color[1] + (c2[1] - color[1]) * t), int(color[2] + (c2[2] - color[2]) * t))
+            for yy in range(h):
+                px[x, yy] = px_col
+        self.img.paste(grad, (0, 0))
+        self.y = PAD + 8
+        self.asterisk(PAD + 12, self.y + 10, 13, color)
+        self.d.text((PAD + 40, self.y), badge.upper(), font=_font(22), fill=color)
+        self.y += 46
 
     # измерения
     def tw(self, text: str, font) -> float:
@@ -471,3 +503,90 @@ def report_card(days: int = 7, path: Path | None = None) -> Path | None:
     except Exception as e:
         log.warning("report card failed: %s", e)
         return None
+
+
+# ---------------------------------------------------------------- карточки действий (единый фирменный стиль)
+# Режим картинок: cards.mode — always (всегда) / important (важные + короткие карточки на траты и задачи) / never.
+_SECTION = getattr(cfg, "cards", None)
+IMAGES_MODE = str(getattr(_SECTION, "mode", "important") or "important")
+_IMPORTANT = {"digest", "evening", "week", "report", "month", "status", "backup", "payday"}
+_SHORT = {"expense", "income", "task", "event", "done", "reminder", "order", "goal", "debt"}
+
+_BADGES = {"expense": "расход", "income": "доход", "task": "задача", "event": "календарь", "done": "сделано",
+           "reminder": "напоминание", "order": "заказ", "goal": "цель", "status": "статус", "debt": "долг"}
+_BADGE_COLOR = {"expense": RED, "income": GREEN, "done": GREEN, "reminder": ORANGE, "debt": ORANGE}
+
+
+def should_send(kind: str) -> bool:
+    """Отправлять ли картинку для этого типа события (см. cards.mode)."""
+    if IMAGES_MODE == "never":
+        return False
+    if IMAGES_MODE == "always":
+        return True
+    return kind in _IMPORTANT or kind in _SHORT
+
+
+def _cache_path(kind: str, title: str, sub: str, tiles, footer: str) -> Path:
+    import hashlib
+    key = "|".join([kind, title, sub, str(tiles), footer]).encode("utf-8")
+    return DATA_DIR / "card_cache" / f"{kind}-{hashlib.sha1(key).hexdigest()[:16]}.png"
+
+
+def action_card(kind: str, title: str, sub: str = "", tiles: list | None = None, footer: str = "",
+                path: Path | None = None, badge: str | None = None) -> Path | None:
+    """Короткая карточка действия в фирменном стиле (синяя градиент-шапка, знак, крупный заголовок, плитки).
+    Кэшируется по содержимому: одну и ту же карточку не рисуем дважды."""
+    try:
+        badge = badge or _BADGES.get(kind, kind)
+        out = path or _cache_path(kind, title, sub, tiles, footer)
+        if out.exists() and out.stat().st_size > 0:
+            return out
+        c = _Canvas(max_h=1500)
+        c.header(badge, _BADGE_COLOR.get(kind, ACCENT))
+        c.title(title, sub or None)
+        if tiles:
+            c.stats(tiles)
+        if footer:
+            c.note(footer)
+        return c.finish(out)
+    except Exception as e:
+        log.warning("action card %s: %s", kind, e)
+        return None
+
+
+def expense_card(tx, balance: float, path: Path | None = None) -> Path | None:
+    """Трата/доход: категория, сумма, остаток бюджета по этой категории (если задан)."""
+    try:
+        income = getattr(tx, "kind", "expense") == "income"
+        cat = getattr(tx, "category", None) or "без категории"
+        signed = ("+" if income else "−") + money(getattr(tx, "amount", 0))
+        tiles = [("сумма", signed, GREEN if income else RED), ("категория", cat, INK), ("баланс", money(balance), INK)]
+        for b in finance.budgets():
+            if b.get("name") == cat and b.get("budget"):
+                left = b.get("left", 0)
+                if left < 0:
+                    tiles.append(("перерасход", money(abs(left)), RED))
+                else:
+                    tiles.append(("остаток лимита", money(left), ORANGE if b.get("pct", 0) >= 0.8 else INK_2))
+                break
+        footer = (getattr(tx, "account", None) or "").strip()
+        return action_card("income" if income else "expense", ("+" if income else "−") + money(getattr(tx, "amount", 0)),
+                           cat + (f" · {footer}" if footer else ""), tiles[:4], path=path)
+    except Exception as e:
+        log.warning("expense card: %s", e)
+        return None
+
+
+def task_card(title: str, when: str = "", path: Path | None = None) -> Path | None:
+    tiles = [("дело", title[:26], INK), ("когда", when or "без срока", INK_2)]
+    return action_card("task", title, when or "без срока", tiles, path=path)
+
+
+def event_card(title: str, when: str = "", path: Path | None = None) -> Path | None:
+    tiles = [("встреча", title[:26], INK), ("когда", when or "—", ACCENT_2)]
+    return action_card("event", title, when or "", tiles, path=path)
+
+
+def done_card(title: str, path: Path | None = None) -> Path | None:
+    return action_card("done", title, "закрыто", [("отлично", "✓", GREEN)], path=path)
+

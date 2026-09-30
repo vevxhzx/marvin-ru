@@ -302,6 +302,7 @@ async def any_text(m: Message):
         r = await asyncio.wait_for(agent.handle(m.text, channel="tg"), timeout=HANDLE_TIMEOUT)
         typing.cancel()
         await send_long(m, r.text or "…")
+        await _maybe_send_card(m, r)
         from core.voice import tts
         if tts.enabled() and tts.REPLY_VOICE == "always":
             await _reply_voice(m, r.text)
@@ -329,6 +330,41 @@ def _record_error(text: str) -> None:
         app.state.errors = errs[-30:]
     except Exception:  # pragma: no cover
         pass
+
+
+async def _maybe_send_card(m: Message, r) -> None:
+    """Короткая карточка-картинка следом за текстом (текст уже ушёл — ответ не задерживается).
+    Молча ничего не делает, если картинки выключены или не получилось. Рендер — на ПК (Pillow), кэшируется."""
+    try:
+        from core.services import cards
+        from aiogram.types import FSInputFile
+        acts = set(getattr(r, "actions", []) or [])
+        path = None
+        if acts & {"add_expense", "add_income"} and cards.should_send("expense"):
+            from core.services import finance
+            tx = finance.last_transaction()
+            if tx:
+                path = await asyncio.to_thread(cards.expense_card, tx, finance.summary(30).get("total_balance", 0))
+        elif "add_task" in acts and cards.should_send("task"):
+            from core.services import tasks as tsk
+            ts = tsk.list_tasks(limit=1)
+            if ts:
+                t = ts[0]
+                when = f"{t.due:%d.%m %H:%M}" if getattr(t, "due", None) else ""
+                path = await asyncio.to_thread(cards.task_card, t.title, when)
+        elif "add_event" in acts and cards.should_send("event"):
+            from core.services import calendar as cal
+            evs = cal.events_today() or []
+            if evs:
+                e = evs[-1]
+                path = await asyncio.to_thread(cards.event_card, e.title, f"{e.start:%H:%M}" if getattr(e, "start", None) else "")
+        elif acts & {"complete_task", "complete_event"} and cards.should_send("done"):
+            title = (r.text or "").split("—")[0].strip().strip("«»").strip()[:60]
+            path = await asyncio.to_thread(cards.done_card, title or "готово")
+        if path:
+            await m.answer_photo(FSInputFile(str(path)))
+    except Exception as e:  # pragma: no cover
+        log.debug("card follow-up: %s", e)
 
 
 @router.message(F.voice | F.audio | F.video_note)
@@ -394,6 +430,7 @@ async def _run_voice_command(m: Message, text: str) -> None:
     shown = text if len(text) <= 3000 else text[:2997].rstrip() + "…"   # лимит одного сообщения Telegram — 4096
     quote = f"<blockquote expandable>🎙 {_html.escape(shown)}</blockquote>" if len(shown) > 140 else f"<blockquote>🎙 {_html.escape(shown)}</blockquote>"
     await send_long(m, f"{quote}\n\n{r.text or '…'}", raw_prefix=True)
+    await _maybe_send_card(m, r)
     if tts.enabled() and tts.REPLY_VOICE in ("voice", "always"):
         await _reply_voice(m, r.text)
 

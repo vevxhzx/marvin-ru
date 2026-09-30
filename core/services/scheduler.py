@@ -517,17 +517,21 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             _agent._log_chat("assistant", text, "digest")
         except Exception as e:  # pragma: no cover
             log.debug("digest chat log: %s", e)
-        path = await asyncio.to_thread(cards.morning_card)
+        path = await asyncio.to_thread(cards.morning_card) if cards.should_send("digest") else None
         if not await _photo(path, text):
             await notify(text)
 
     async def weekly_card():
         from . import cards
+        if not cards.should_send("week"):
+            return
         path = await asyncio.to_thread(cards.report_card, 7)
         await _photo(path, "📊 Итоги недели, сэр.")
 
     async def monthly_card():
         from . import cards
+        if not cards.should_send("month"):
+            return
         path = await asyncio.to_thread(cards.report_card, 30)
         await _photo(path, "📊 Итоги месяца, сэр. Цифры не врут — в отличие от ощущений.")
 
@@ -639,7 +643,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             _a._log_chat("assistant", head, "digest")
         except Exception as e:  # pragma: no cover
             log.debug("evening log: %s", e)
-        path = await asyncio.to_thread(cards.evening_card, None, data)
+        path = await asyncio.to_thread(cards.evening_card, None, data) if cards.should_send("evening") else None
         if first and persona.choose_channel("evening", head) == "voice":
             # вечерний итог голосом — как акцент дня; картинка ниже всё равно приходит
             await _notify(head, kind="evening")
