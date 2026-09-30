@@ -19,22 +19,23 @@ log = logging.getLogger("jarvis.cards")
 W = 1080
 PAD = 56                       # внешний отступ
 CW = W - 2 * PAD               # ширина контента
-BG = (14, 14, 13)
-SURFACE = (27, 27, 26)
-SURFACE_2 = (36, 36, 35)
-INK = (243, 243, 240)
-INK_2 = (160, 160, 156)
-INK_3 = (110, 110, 106)
-LINE = (44, 44, 43)
+# Светлая тема — как «утренний дайджест» на сайте (эталон Jarvis Bento V7) и как тема сайта по умолчанию.
+BG = (243, 245, 249)
+SURFACE = (255, 255, 255)
+SURFACE_2 = (240, 241, 246)
+INK = (16, 17, 20)
+INK_2 = (93, 96, 104)
+INK_3 = (154, 157, 166)
+LINE = (231, 233, 239)
 ACCENT = (10, 60, 255)         # #0a3cff — фирменный синий
-ACCENT_2 = (120, 150, 255)     # светлый оттенок для градиента
-GREEN = (52, 199, 120)
-RED = (255, 92, 92)
-ORANGE = (240, 160, 40)
-# Пастель для bento-плиток (акцентные суммы/категории)
+ACCENT_2 = (138, 92, 255)      # светлее для градиента (синий → фиолетовый, как на сайте)
+GREEN = (25, 179, 74)
+RED = (255, 59, 92)
+ORANGE = (245, 168, 0)
+# Пастель для bento-плиток (акцентные суммы/категории) — светлые заливки
 PASTEL = {
-    "blue": (30, 46, 92), "green": (24, 62, 48), "orange": (74, 52, 24),
-    "red": (70, 30, 34), "violet": (52, 36, 86),
+    "blue": (236, 233, 255), "green": (227, 247, 234), "orange": (255, 244, 224),
+    "red": (255, 235, 238), "violet": (236, 233, 255),
 }
 
 _BOLD = [
@@ -173,8 +174,8 @@ class _Canvas:
         cy = self.y + 27
         if done:
             self.d.ellipse((PAD, cy - 12, PAD + 24, cy + 12), fill=ACCENT)
-            self.d.line((PAD + 6, cy, PAD + 10, cy + 5), fill=INK, width=3)
-            self.d.line((PAD + 10, cy + 5, PAD + 18, cy - 5), fill=INK, width=3)
+            self.d.line((PAD + 6, cy, PAD + 10, cy + 5), fill=(255, 255, 255), width=3)
+            self.d.line((PAD + 10, cy + 5, PAD + 18, cy - 5), fill=(255, 255, 255), width=3)
         else:
             self.d.ellipse((PAD, cy - 12, PAD + 24, cy + 12), outline=RED if urgent else INK_3, width=2)
         self.d.text((PAD + 44, self.y + 12), self.ellipsis(text, f_text, CW - 44 - right_w), font=f_text, fill=INK_3 if done else INK)
@@ -505,15 +506,166 @@ def report_card(days: int = 7, path: Path | None = None) -> Path | None:
         return None
 
 
+# ---------------------------------------------------------------- светлая bento-полоса 21:9
+# Короткие карточки (трата, доход, задача, встреча, заказ, финансы) — узкий прямоугольник 21:9,
+# чтобы это был не «фулл-фотка», а аккуратная плашка под текстом ответа. Стиль — как «утренний дайджест».
+BW, BH = 1260, 540             # 21 : 9
+LT_ACC = ACCENT
+LT_ACC_2 = ACCENT_2
+LT_TINT = {
+    "hero": None, "blue": PASTEL["blue"], "violet": PASTEL["violet"],
+    "green": PASTEL["green"], "orange": PASTEL["orange"], "red": PASTEL["red"], "plain": SURFACE,
+}
+
+
+def _kind_of(color) -> str:
+    """Подобрать пастельную заливку плитки по цвету значения."""
+    if color == ACCENT or color == ACCENT_2:
+        return "blue"
+    if color == GREEN:
+        return "green"
+    if color == RED:
+        return "red"
+    if color == ORANGE:
+        return "orange"
+    return "plain"
+
+
+def _grad_round(img, box, radius, c1, c2, vertical: bool = False):
+    """Залить скруглённый прямоугольник горизонтальным/вертикальным градиентом (Pillow)."""
+    from PIL import Image, ImageDraw
+    x0, y0, x1, y1 = (int(v) for v in box)
+    w, h = max(1, x1 - x0), max(1, y1 - y0)
+    g = Image.new("RGB", (w, h))
+    gp = g.load()
+    for yy in range(h):
+        for xx in range(w):
+            t = (yy / (h - 1)) if vertical else (xx / (w - 1))
+            gp[xx, yy] = (int(c1[0] + (c2[0] - c1[0]) * t),
+                          int(c1[1] + (c2[1] - c1[1]) * t),
+                          int(c1[2] + (c2[2] - c1[2]) * t))
+    mask = Image.new("L", (w, h), 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, w - 1, h - 1), radius=radius, fill=255)
+    img.paste(g, (x0, y0), mask)
+
+
+class _Band:
+    """Светлая bento-карточка 21:9 (1260×540): бейдж, крупный заголовок, плитки, подвал."""
+
+    def __init__(self):
+        from PIL import Image, ImageDraw
+        self.img = Image.new("RGB", (BW, BH), BG)
+        self.d = ImageDraw.Draw(self.img)
+        self.pad = 48
+
+    def tw(self, text: str, font) -> float:
+        return self.d.textlength(text, font=font)
+
+    def ellipsis(self, text: str, font, max_w: float) -> str:
+        if self.tw(text, font) <= max_w:
+            return text
+        while text and self.tw(text + "…", font) > max_w:
+            text = text[:-1]
+        return text.rstrip() + "…"
+
+    def top(self, badge: str, color=LT_ACC):
+        import math
+        f = _font(22)
+        w = self.tw(badge.upper(), f) + 64
+        self.d.rounded_rectangle((self.pad, 40, self.pad + w, 84), radius=22, fill=SURFACE_2)
+        cx, cy = self.pad + 27, 62
+        for k in range(4):
+            a = math.pi * k / 4
+            dx, dy = math.cos(a) * 10, math.sin(a) * 10
+            self.d.line((cx - dx, cy - dy, cx + dx, cy + dy), fill=color, width=3)
+        self.d.text((self.pad + 48, 50), badge.upper(), font=f, fill=INK_2)
+        ts = datetime.now().strftime("%H:%M")
+        f2 = _font(22)
+        self.d.text((BW - self.pad - self.tw(ts, f2), 50), ts, font=f2, fill=INK_3)
+
+    def title(self, text: str, sub: str = ""):
+        f = _font(58)
+        self.d.text((self.pad, 116), self.ellipsis(text, f, BW - 2 * self.pad), font=f, fill=INK)
+        if sub:
+            self.d.text((self.pad + 2, 188), self.ellipsis(sub, _font(26, False), BW - 2 * self.pad),
+                        font=_font(26, False), fill=INK_2)
+
+    def tiles(self, items: list, y: int = 250, h: int = 168):
+        """items: (label, value, color[, kind]) — kind: hero|blue|green|red|orange|plain."""
+        n = max(1, len(items))
+        gap = 16
+        cw = (BW - 2 * self.pad - gap * (n - 1)) // n
+        for i, it in enumerate(items):
+            label, value, color = it[0], it[1], (it[2] if len(it) > 2 and it[2] else INK)
+            kind = it[3] if len(it) > 3 and it[3] else _kind_of(color)
+            if kind == "hero":
+                kind = "hero"
+            x = self.pad + i * (cw + gap)
+            box = (x, y, x + cw, y + h)
+            if kind == "hero":
+                _grad_round(self.img, box, 26, LT_ACC, LT_ACC_2)
+                lbl, val = (255, 255, 255), (255, 255, 255)
+            else:
+                self.d.rounded_rectangle(box, radius=26, fill=LT_TINT.get(kind, SURFACE))
+                lbl, val = INK_2, color
+            self.d.text((x + 24, y + 20), label, font=_font(21, False), fill=lbl)
+            size = 46
+            while size > 24 and self.tw(value, _font(size)) > cw - 48:
+                size -= 2
+            self.d.text((x + 24, y + h - 22 - size), value, font=_font(size), fill=val)
+
+    def stroke(self, text: str, y: int = 250):
+        self.d.rounded_rectangle((self.pad, y, BW - self.pad, y + 52), radius=16, fill=SURFACE)
+        self.d.text((self.pad + 22, y + 12), self.ellipsis(text, _font(24, False), BW - 2 * self.pad - 44),
+                    font=_font(24, False), fill=INK)
+
+    def footer(self):
+        from .. import identity
+        y = BH - 40
+        self.d.line((self.pad, y - 16, BW - self.pad, y - 16), fill=LINE, width=1)
+        f, fb = _font(19, False), _font(19)
+        self.d.text((self.pad, y), identity.NAME.lower(), font=fb, fill=INK_3)
+        stamp = datetime.now().strftime("%d.%m.%Y · %H:%M")
+        self.d.text((BW - self.pad - self.tw(stamp, f), y), stamp, font=f, fill=INK_3)
+
+    def save(self, path: Path) -> Path:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.img.save(path, "PNG", optimize=True)
+        return path
+
+
+def band_card(kind: str, title: str, sub: str = "", tiles: list | None = None, footer: str = "",
+              path: Path | None = None, badge: str | None = None) -> Path | None:
+    """Короткая карточка-полоса 21:9 в стиле утреннего дайджеста. Кэшируется по содержимому."""
+    try:
+        badge = badge or _BADGES.get(kind, kind)
+        out = path or _cache_path(kind, title, sub or "", tiles or [], footer or "")
+        if out.exists() and out.stat().st_size > 0:
+            return out
+        b = _Band()
+        b.top(badge, _BADGE_COLOR.get(kind, LT_ACC))
+        b.title(title, sub or "")
+        if tiles:
+            b.tiles(tiles[:4])
+        if footer:
+            b.stroke(footer)
+        b.footer()
+        return b.save(out)
+    except Exception as e:
+        log.warning("band card %s: %s", kind, e)
+        return None
+
+
 # ---------------------------------------------------------------- карточки действий (единый фирменный стиль)
 # Режим картинок: cards.mode — always (всегда) / important (важные + короткие карточки на траты и задачи) / never.
 _SECTION = getattr(cfg, "cards", None)
 IMAGES_MODE = str(getattr(_SECTION, "mode", "important") or "important")
 _IMPORTANT = {"digest", "evening", "week", "report", "month", "status", "backup", "payday"}
-_SHORT = {"expense", "income", "task", "event", "done", "reminder", "order", "goal", "debt"}
+_SHORT = {"expense", "income", "task", "event", "done", "reminder", "order", "goal", "debt", "finances"}
 
 _BADGES = {"expense": "расход", "income": "доход", "task": "задача", "event": "календарь", "done": "сделано",
-           "reminder": "напоминание", "order": "заказ", "goal": "цель", "status": "статус", "debt": "долг"}
+           "reminder": "напоминание", "order": "заказ", "goal": "цель", "status": "статус", "debt": "долг",
+           "finances": "финансы", "finance": "финансы"}
 _BADGE_COLOR = {"expense": RED, "income": GREEN, "done": GREEN, "reminder": ORANGE, "debt": ORANGE}
 
 
@@ -534,24 +686,8 @@ def _cache_path(kind: str, title: str, sub: str, tiles, footer: str) -> Path:
 
 def action_card(kind: str, title: str, sub: str = "", tiles: list | None = None, footer: str = "",
                 path: Path | None = None, badge: str | None = None) -> Path | None:
-    """Короткая карточка действия в фирменном стиле (синяя градиент-шапка, знак, крупный заголовок, плитки).
-    Кэшируется по содержимому: одну и ту же карточку не рисуем дважды."""
-    try:
-        badge = badge or _BADGES.get(kind, kind)
-        out = path or _cache_path(kind, title, sub, tiles, footer)
-        if out.exists() and out.stat().st_size > 0:
-            return out
-        c = _Canvas(max_h=1500)
-        c.header(badge, _BADGE_COLOR.get(kind, ACCENT))
-        c.title(title, sub or None)
-        if tiles:
-            c.stats(tiles)
-        if footer:
-            c.note(footer)
-        return c.finish(out)
-    except Exception as e:
-        log.warning("action card %s: %s", kind, e)
-        return None
+    """Короткая карточка действия в фирменном стиле — полоса 21:9 (см. band_card). Кэшируется по содержимому."""
+    return band_card(kind, title, sub, tiles, footer, path=path, badge=badge)
 
 
 def expense_card(tx, balance: float, path: Path | None = None) -> Path | None:
@@ -589,4 +725,73 @@ def event_card(title: str, when: str = "", path: Path | None = None) -> Path | N
 
 def done_card(title: str, path: Path | None = None) -> Path | None:
     return action_card("done", title, "закрыто", [("отлично", "✓", GREEN)], path=path)
+
+
+def finances_card(path: Path | None = None, days: int = 30) -> Path | None:
+    """Карточка «финансы»: баланс (hero-градиент), доход и расход за период, дневной лимит. Полоса 21:9."""
+    try:
+        s = finance.summary(days)
+        safe = s.get("safe") or {}
+        spent = s.get("spent", 0)
+        tiles = [
+            ("баланс", money(s.get("total_balance", 0)), INK, "hero"),
+            ("доход за период", money(s.get("earned", 0)), GREEN, "green"),
+            ("расход за период", money(spent), RED if spent else INK_2, "red" if spent else "plain"),
+        ]
+        per_day = safe.get("per_day")
+        if per_day is not None:
+            tiles.append(("можно тратить в день", money(per_day), GREEN if per_day > 0 else RED,
+                          "green" if per_day > 0 else "red"))
+        now = datetime.now()
+        sub = f"за {days} {_plural(days, 'день', 'дня', 'дней')} · {now.day} {_month(now)}"
+        return band_card("finances", "финансы", sub, tiles[:4], path=path, badge="финансы")
+    except Exception as e:
+        log.warning("finances card: %s", e)
+        return None
+
+
+def order_card(title: str, client: str = "", amount: float | None = None, status: str = "",
+               path: Path | None = None) -> Path | None:
+    """Карточка заказа: клиент, сумма, статус. Светлая полоса 21:9."""
+    try:
+        tiles = [("заказ", (title or "заказ")[:28], INK), ("клиент", client or "—", INK_2)]
+        if amount is not None:
+            tiles.append(("сумма", money(amount), GREEN if status in ("paid", "оплачен") else INK,
+                          "green" if status in ("paid", "оплачен") else "plain"))
+        if status:
+            tiles.append(("статус", status, INK_2))
+        return band_card("order", title or "заказ", client, tiles[:4], path=path)
+    except Exception as e:
+        log.warning("order card: %s", e)
+        return None
+
+
+def for_result(actions, text: str = "") -> Path | None:
+    """Карточка для «важного ответа» по списку действий — одна логика и для Telegram, и для сайта.
+    None, когда картинки выключены (cards.mode) или показывать нечего. Рендер синхронный (Pillow)."""
+    try:
+        acts = set(actions or [])
+        if acts & {"add_expense", "add_income"} and should_send("expense"):
+            tx = finance.last_transaction()
+            if tx:
+                return expense_card(tx, finance.summary(30).get("total_balance", 0))
+        if "add_task" in acts and should_send("task"):
+            ts = tasks.list_tasks(limit=1)
+            if ts:
+                t = ts[0]
+                when = f"{t.due:%d.%m %H:%M}" if getattr(t, "due", None) else ""
+                return task_card(t.title, when)
+        if "add_event" in acts and should_send("event"):
+            evs = calendar.events_today() or []
+            if evs:
+                e = evs[-1]
+                return event_card(e.title, f"{e.start:%H:%M}" if getattr(e, "start", None) else "")
+        if acts & {"complete_task", "complete_event"} and should_send("done"):
+            title = (text or "").split("—")[0].strip().strip("«»").strip()[:60]
+            return done_card(title or "готово")
+        if acts & {"finance_summary", "summary"} and should_send("finances"):
+            return finances_card()
+    except Exception as e:
+        log.warning("for_result: %s", e)
+    return None
 

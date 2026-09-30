@@ -430,29 +430,7 @@ async def _maybe_send_card(m: Message, r) -> None:
     try:
         from core.services import cards
         from aiogram.types import FSInputFile
-        acts = set(getattr(r, "actions", []) or [])
-        path = None
-        if acts & {"add_expense", "add_income"} and cards.should_send("expense"):
-            from core.services import finance
-            tx = finance.last_transaction()
-            if tx:
-                path = await asyncio.to_thread(cards.expense_card, tx, finance.summary(30).get("total_balance", 0))
-        elif "add_task" in acts and cards.should_send("task"):
-            from core.services import tasks as tsk
-            ts = tsk.list_tasks(limit=1)
-            if ts:
-                t = ts[0]
-                when = f"{t.due:%d.%m %H:%M}" if getattr(t, "due", None) else ""
-                path = await asyncio.to_thread(cards.task_card, t.title, when)
-        elif "add_event" in acts and cards.should_send("event"):
-            from core.services import calendar as cal
-            evs = cal.events_today() or []
-            if evs:
-                e = evs[-1]
-                path = await asyncio.to_thread(cards.event_card, e.title, f"{e.start:%H:%M}" if getattr(e, "start", None) else "")
-        elif acts & {"complete_task", "complete_event"} and cards.should_send("done"):
-            title = (r.text or "").split("—")[0].strip().strip("«»").strip()[:60]
-            path = await asyncio.to_thread(cards.done_card, title or "готово")
+        path = await asyncio.to_thread(cards.for_result, getattr(r, "actions", []) or [], r.text or "")
         if path:
             await m.answer_photo(FSInputFile(str(path)))
     except Exception as e:  # pragma: no cover

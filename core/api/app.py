@@ -89,10 +89,39 @@ class ChatIn(BaseModel):
     channel: str = Field("web", max_length=20)
 
 
+def _card_for(r) -> str | None:
+    """URL карточки-картинки для важного ответа (или None). Одна логика с Telegram — cards.for_result."""
+    try:
+        from pathlib import Path
+        from ..services import cards
+        p = cards.for_result(getattr(r, "actions", []) or [], getattr(r, "text", "") or "")
+        if p and Path(p).exists():
+            return f"/api/cards/{Path(p).name}"
+    except Exception:
+        pass
+    return None
+
+
+@app.get("/api/cards/{name}")
+def card_file(name: str):
+    """PNG карточки из кэша. Принимаем только имя файла — защита от обхода каталога."""
+    import re
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    from ..config import DATA_DIR
+    if not re.fullmatch(r"[A-Za-z0-9_\-]+\.png", name or ""):
+        raise HTTPException(status_code=404, detail="нет такой карточки")
+    p = Path(DATA_DIR) / "card_cache" / name
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="нет такой карточки")
+    return FileResponse(str(p), media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+
+
 @app.post("/api/chat")
 async def chat(inp: ChatIn):
     r = await agent.handle(inp.text, inp.channel)
-    return {"text": r.text, "actions": r.actions, "via": r.via}
+    card = await _asyncio.to_thread(_card_for, r)
+    return {"text": r.text, "actions": r.actions, "via": r.via, "card": card}
 
 
 @app.post("/api/chat/stream")
@@ -108,7 +137,8 @@ async def chat_stream(inp: ChatIn):
         token = llm.token_sink.set(sink)
         try:
             r = await agent.handle(inp.text, inp.channel)
-            await q.put(("done", {"text": r.text, "actions": r.actions, "via": r.via}))
+            card = await _asyncio.to_thread(_card_for, r)
+            await q.put(("done", {"text": r.text, "actions": r.actions, "via": r.via, "card": card}))
         except Exception as e:  # pragma: no cover
             await q.put(("done", {"text": f"Ошибка: {e}", "actions": [], "via": "none"}))
         finally:

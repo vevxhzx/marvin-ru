@@ -69,7 +69,7 @@ export default function Chat({ open, onClose, seed }) {
           return [...m, { role: 'bot', text: piece, channel: 'web', streaming: true, at: new Date().toISOString() }]
         })
       })
-      setMsgs((m) => (streamed && m[m.length - 1]?.streaming ? m.slice(0, -1) : m).concat({ role: 'bot', text: r.text, via: r.via, actions: r.actions, channel: 'web', at: new Date().toISOString() }))
+      setMsgs((m) => (streamed && m[m.length - 1]?.streaming ? m.slice(0, -1) : m).concat({ role: 'bot', text: r.text, via: r.via, actions: r.actions, card: r.card, channel: 'web', at: new Date().toISOString() }))
       if (r.actions?.length) bump()
     } catch (e) {
       const denied = e?.status === 401
@@ -196,8 +196,13 @@ function Message({ m, grouped, showMeta = true, onRetry }) {
         </div>
       )}
 
-      {(acts.length > 0 || clarify) && (
+      {(m.card || acts.length > 0 || clarify) && (
         <div className="mt-1.5 flex max-w-[88%] flex-col gap-1.5">
+          {m.card && (
+            <a href={m.card} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-2xl border hair" style={{ boxShadow: '0 12px 28px -16px rgba(0,0,0,.4)' }}>
+              <img src={m.card} alt="карточка" className="block w-full" loading="lazy" />
+            </a>
+          )}
           {acts.map((a) => { const [label, I] = ACT[a]; return (
             <div key={a} className="act-card bubble-in">
               <span className="act-ic"><Check size={14} strokeWidth={2.6} /></span>

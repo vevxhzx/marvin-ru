@@ -60,3 +60,34 @@ def test_quick_templates_and_find_mapping():
     assert tb._QUICK_MAP["task"].startswith("задача:") and tb._QUICK_MAP["event"].startswith("встреча")
     assert tb._QUICK_CANON["exp"] == "расход"
     assert tb._quick_enabled() in (True, False)
+
+
+def test_band_card_is_21_9(tmp_path, monkeypatch):
+    """Короткие карточки — узкая полоса 21:9 (не «фулл-фотка»), в стиле утреннего дайджеста."""
+    from core.services import cards
+    from PIL import Image
+    monkeypatch.setattr(cards, "DATA_DIR", tmp_path)
+    p = cards.band_card("task", "сдать отчёт", "10.09 15:00",
+                        [("дело", "отчёт", cards.INK), ("когда", "10.09", cards.INK_2)])
+    assert p and p.exists()
+    im = Image.open(p)
+    assert im.size == (1260, 540)
+    assert abs(im.size[0] / im.size[1] - 21 / 9) < 0.01
+
+
+def test_for_result_picks_card(tmp_path, monkeypatch):
+    """«Важный ответ» → одна карточка (та же логика для сайта и Telegram)."""
+    from core.services import cards
+    monkeypatch.setattr(cards, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(cards, "IMAGES_MODE", "important")
+
+    class Tx:
+        kind, amount, category, account = "expense", 700.0, "Еда", "Основной"
+
+    monkeypatch.setattr(cards.finance, "last_transaction", lambda: Tx())
+    monkeypatch.setattr(cards.finance, "summary", lambda days=30: {"total_balance": 1000.0})
+    monkeypatch.setattr(cards.finance, "budgets", lambda: [])
+    p = cards.for_result(["add_expense"], "потратил 700 на еду")
+    assert p and p.exists()
+    # на простое действие карточку не рисуем
+    assert cards.for_result(["add_note"], "просто мысль") is None
