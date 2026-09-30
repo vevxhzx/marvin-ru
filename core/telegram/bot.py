@@ -47,6 +47,18 @@ def _voice_kb():
         InlineKeyboardButton(text="✏️ Исправить", callback_data="vc:fix"),
     ]])
 
+# Нажатые кнопки напоминаний: повторный клик не должен откладывать/закрывать дважды.
+_CB_DONE: dict[tuple, float] = {}
+
+
+def _evening() -> datetime:
+    """Куда отложить «вечером»: сегодня 19:00, а если уже позже — завтра 19:00."""
+    from datetime import timedelta
+    e = datetime.now().replace(hour=19, minute=0, second=0, microsecond=0)
+    if e <= datetime.now():
+        e += timedelta(days=1)
+    return e
+
 
 def _mine(m: Message) -> bool:
     return bool(m.from_user and m.from_user.id == OWNER_ID)
@@ -441,32 +453,58 @@ async def cb_stranger(cq: CallbackQuery):
     await cq.answer("Это личный ассистент.", show_alert=False)
 
 
-@router.callback_query(F.data.regexp(r"^(ev|task):\d+:(ok|done|hour|tomorrow)$"))
+@router.callback_query(F.data.regexp(r"^(ev|task):\d+:(ok|done|hour|min15|evening|tomorrow)$"))
 async def cb_reminder(cq: CallbackQuery):
-    """Кнопки под напоминанием: ✅ / ⏰ через час / 📅 завтра."""
+    """Кнопки под напоминанием: сделано / отложить (15 мин / вечером / +1 час / завтра). Сообщение редактируется,
+    кнопки убираются, показывается итог. Повторное нажатие не выполняется дважды."""
     from datetime import datetime, timedelta
     from core.services import calendar as cal, tasks as tsk
+    ckey = (cq.message.chat.id, cq.message.message_id, cq.data)
+    if ckey in _CB_DONE and time.time() - _CB_DONE[ckey] < 3600:
+        await cq.answer("Уже нажато — принято.")
+        return
+    _CB_DONE[ckey] = time.time()
     kind, sid, act = cq.data.split(":")
     oid = int(sid)
+
+    def when_due():
+        if act == "min15":
+            return datetime.now() + timedelta(minutes=15)
+        if act == "evening":
+            return _evening()
+        if act == "hour":
+            return datetime.now() + timedelta(hours=1)
+        return (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+
+    msg = "Готово."
     try:
         if kind == "task":
-            t = None
             if act == "done":
-                t = tsk.complete_task(oid); msg = f"✅ «{t.title}» — сделано. Красавчик, сэр." if t else "Задача уже закрыта."
-            elif act == "hour":
-                with_due = datetime.now() + timedelta(hours=1)
-                t = tsk.update_task(oid, due=with_due); msg = f"⏰ Напомню про «{t.title}» в {with_due:%H:%M}." if t else "Задача не найдена."
-            else:
+                t = tsk.complete_task(oid)
+                msg = f"✅ «{t.title}» — сделано. Красавчик, сэр." if t else "Задача уже закрыта."
+            elif act == "tomorrow":
                 from core.brain.dates import is_all_day
                 t = tsk.postpone_to_tomorrow(oid)
                 msg = (f"📅 «{t.title}» — перенёс на завтра" + ("." if is_all_day(t.due) else f", {t.due:%H:%M}.")) if t else "Задача не найдена."
+            else:
+                due = when_due()
+                t = tsk.update_task(oid, due=due)
+                msg = f"⏰ «{t.title}» — напомню в {due:%H:%M}." if t else "Задача не найдена."
         else:
             if act == "ok":
                 msg = "Принято, сэр. Не опаздывайте."
-            elif act == "hour":
-                e = cal.move_event(oid, datetime.now() + timedelta(hours=1)); msg = f"⏰ «{e.title}» — теперь в {e.start:%H:%M}." if e else "Событие не найдено."
             else:
-                e = cal.move_event(oid, (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)); msg = f"📅 «{e.title}» — перенёс на завтра, {e.start:%H:%M}." if e else "Событие не найдено."
+                e = cal.move_event(oid, when_due())
+                if not e:
+                    msg = "Событие не найдено."
+                elif act == "tomorrow":
+                    msg = f"📅 «{e.title}» — перенёс на завтра, {e.start:%H:%M}."
+                elif act == "evening":
+                    msg = f"🌆 «{e.title}» — вечером, {e.start:%H:%M}."
+                elif act == "min15":
+                    msg = f"⏱ «{e.title}» — в {e.start:%H:%M}."
+                else:
+                    msg = f"⏰ «{e.title}» — теперь в {e.start:%H:%M}."
         if agent.on_change:
             agent.on_change("chat", {"channel": "tg", "actions": ["reminder_action"]})
     except Exception as ex:
@@ -889,11 +927,13 @@ async def run_polling_forever(bot: Bot, dp: Dispatcher, on_connected=None) -> No
         delay = min(delay * 2, 120)
 
 
-def _kb(buttons):
+def _kb(buttons, per_row: int = 2):
+    """Инлайн-кнопки; по 2 в ряд — ряды одинаковой ширины, подписи не обрезаются."""
     if not buttons:
         return None
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in buttons]])
+    rows = [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in rows])
 
 
 async def notify(bot: Bot, text: str, buttons=None) -> None:

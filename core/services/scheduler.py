@@ -443,12 +443,14 @@ def build(notify: Notifier) -> AsyncIOScheduler:
                     f"**«{e.title}»** — {when}"
                     + (f"\n{e.location}" if e.location else ""))
             ping("reminder", text=text, id=f"ev{e.id}-{e.start:%Y%m%d%H%M}")
-            await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏰ +1 час", f"ev:{e.id}:hour"), ("📅 Завтра", f"ev:{e.id}:tomorrow")], urgent=True)
+            await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏱ 15 мин", f"ev:{e.id}:min15"),
+                                  ("🌆 Вечером", f"ev:{e.id}:evening"), ("📅 Завтра", f"ev:{e.id}:tomorrow")], urgent=True)
 
     async def task_reminders():
         for t, text in tasks.due_task_reminders():
             ping("reminder", text=text, id=f"task{t.id}-{t.remind_stage}")
-            await _notify(text, [("✅ Сделал", f"task:{t.id}:done"), ("⏰ +1 час", f"task:{t.id}:hour"), ("📅 Завтра", f"task:{t.id}:tomorrow")], urgent=True)
+            await _notify(text, [("✅ Сделано", f"task:{t.id}:done"), ("⏱ 15 мин", f"task:{t.id}:min15"),
+                                  ("🌆 Вечером", f"task:{t.id}:evening"), ("📅 Завтра", f"task:{t.id}:tomorrow")], urgent=True)
 
     async def semantic_job():
         from . import relations, semantic
@@ -632,6 +634,11 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             log.debug("evening opener: %s", e); first = ""
         head = cards.evening_text(data, first or None)
         ping("reminder", text=head, id=key)
+        try:   # вечерний итог — в общую историю чата, чтобы карточка была и на сайте (как утренний дайджест)
+            from ..brain import agent as _a
+            _a._log_chat("assistant", head, "digest")
+        except Exception as e:  # pragma: no cover
+            log.debug("evening log: %s", e)
         path = await asyncio.to_thread(cards.evening_card, None, data)
         if first and persona.choose_channel("evening", head) == "voice":
             # вечерний итог голосом — как акцент дня; картинка ниже всё равно приходит
@@ -642,7 +649,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         n = len(due)
         for t in due[:5]:
             when = "сегодня" if t.due.date() == datetime.now().date() else f"было {t.due:%d.%m}"
-            await _notify(f"• «{t.title}» — {when}", [("✅ Сделал", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow")])
+            await _notify(f"• «{t.title}» — {when}", [("✅ Сделано", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow")])
         if n > 5:
             await _notify(f"…и ещё {n - 5}. Полный список — «мои задачи».")
 
