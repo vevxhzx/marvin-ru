@@ -1,27 +1,52 @@
-# личное — никогда не коммитить
+# --- секреты и личные данные (никогда в git) ---
+.env
+.env.*
+!.env.example
 config.yaml
 data/
 *.db
-*.db-shm
+*.db-journal
 *.db-wal
-.env
-.env.local
+*.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-*
+backups/
+*.bak
+*.orig
+*.rej
 
-# окружение и сборка
-.venv/
-__pycache__/
-*.pyc
-.pytest_cache/
+# --- мусор/архив на диске (не в git) ---
+_trash*/
+
+# --- архив (всё старое лежит на диске, но не версионируется) ---
+_archive/
+
+# --- зависимости и артефакты сборки ---
 node_modules/
 web/node_modules/
 dist/
 web/dist/
-*.log
-*.zip
+*.tsbuildinfo
+
+# --- кэши Python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# --- кэши и мелочи IDE/системы ---
+.idea/
+.vscode/
 .DS_Store
 Thumbs.db
+*.log
+logs/
+shots/
 
-# черновики патчей
-*.orig
-*.rej
-*.bak
+# --- локальные скриншоты/временные файлы ---
+*.tmp
+*.swp
