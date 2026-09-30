@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Джарвис — Автономный запуск в отдельном окне приложения (Windows / macOS / Linux)
+ * Марвин — Автономный запуск в отдельном окне приложения (Windows / macOS / Linux)
  * Запускает локальный сервер и открывает проекцию веб-интерфейса в изолированном
  * нативном окне приложения без вкладок и адресной строки браузера (WebView2 / App Mode).
  */
@@ -20,7 +20,7 @@ function checkServerReady(timeout = 15000) {
       })
       req.on('error', () => {
         if (Date.now() - start > timeout) {
-          reject(new Error('Таймаут ожидания запуска сервера Джарвиса'))
+          reject(new Error('Таймаут ожидания запуска сервера Марвина'))
         } else {
           setTimeout(check, 300)
         }
@@ -31,7 +31,7 @@ function checkServerReady(timeout = 15000) {
 }
 
 function launchWindow() {
-  console.log(`[Джарвис] Открытие изолированного окна приложения: ${URL}`)
+  console.log(`[Марвин] Открытие изолированного окна приложения: ${URL}`)
 
   const platform = process.platform
   let cmd = ''
@@ -40,7 +40,7 @@ function launchWindow() {
   if (platform === 'win32') {
     // Windows: Edge или Chrome в режиме отдельного автономного окна
     cmd = 'msedge'
-    args = [`--app=${URL}`, '--window-size=1280,840', '--window-position=center', '--app-id=jarvis-assistant']
+    args = [`--app=${URL}`, '--window-size=1280,840', '--window-position=center', '--app-id=marvin-assistant']
   } else if (platform === 'darwin') {
     // macOS
     cmd = 'open'
@@ -54,7 +54,7 @@ function launchWindow() {
   const child = spawn(cmd, args, { detached: true, stdio: 'ignore' })
   child.on('error', () => {
     // Fallback на стандартное открытие
-    console.log('[Джарвис] Запуск через стандартный браузер...')
+    console.log('[Марвин] Запуск через стандартный браузер...')
     if (platform === 'win32') spawn('cmd', ['/c', 'start', URL], { detached: true, stdio: 'ignore' })
     else if (platform === 'darwin') spawn('open', [URL], { detached: true, stdio: 'ignore' })
     else spawn('xdg-open', [URL], { detached: true, stdio: 'ignore' })
@@ -63,14 +63,14 @@ function launchWindow() {
 
 async function main() {
   console.log('--------------------------------------------------')
-  console.log('🤖 Джарвис — Персональный ассистент')
+  console.log('🤖 Марвин — Персональный ассистент')
   console.log('--------------------------------------------------')
 
   try {
     await checkServerReady(3000)
     launchWindow()
   } catch {
-    console.log('[Джарвис] Ожидание готовности сервера...')
+    console.log('[Марвин] Ожидание готовности сервера...')
     try {
       await checkServerReady(15000)
       launchWindow()

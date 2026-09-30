@@ -2609,7 +2609,7 @@ def export(what: str, fmt: str):
     stamp = datetime.now().strftime("%Y%m%d")
     if fmt == "json":
         body = _json.dumps(data if what == "all" else data[what], ensure_ascii=False, default=str, indent=1)
-        return Response(body, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="jarvis-{what}-{stamp}.json"'})
+        return Response(body, media_type="application/json", headers={"Content-Disposition": f'attachment; filename="marvin-{what}-{stamp}.json"'})
     if fmt == "csv":
         buf = io.StringIO()
         buf.write("\ufeff")  # BOM — чтобы Excel открыл кириллицу
@@ -2623,7 +2623,7 @@ def export(what: str, fmt: str):
                     w.writerow({k: (str(v).replace("T", " ")[:19] if isinstance(v, datetime) else v) for k, v in r.items()})
             buf.write("\n")
         return Response(buf.getvalue(), media_type="text/csv; charset=utf-8",
-                        headers={"Content-Disposition": f'attachment; filename="jarvis-{what}-{stamp}.csv"'})
+                        headers={"Content-Disposition": f'attachment; filename="marvin-{what}-{stamp}.csv"'})
     raise HTTPException(400, "fmt: csv или json")
 
 
