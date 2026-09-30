@@ -36,10 +36,24 @@ export default function Chat({ open, onClose, seed }) {
   const { tick, bump } = useRefresh()
   const hints = useMemo(suggestions, [open])
 
-  // одна история с Telegram: подгружаем при открытии и при каждом живом обновлении
+  // одна история с Telegram: подгружаем при открытии и при каждом живом обновлении.
+  // В истории карточек нет (их отдаёт только живой ответ) — переносим их по совпадению роли и текста.
   useEffect(() => {
     if (!open) return
-    api.chatHistory(60).then((h) => { setMsgs(fromServer(h)); setLoaded(true) }).catch(() => setLoaded(true))
+    const key = (m) => `${m.role}|${String(m.text || '').replace(/\s*(⚡|🧠|☁️)\s*$/u, '').trim()}`
+    api.chatHistory(60).then((h) => {
+      setMsgs((prev) => {
+        const cards = new Map()
+        for (const p of prev) if (p.card) cards.set(key(p), p.card)
+        return fromServer(h).map((m) => (m)).reverse().map((m) => {
+          const k = key(m)
+          const card = cards.has(k) ? cards.get(k) : undefined
+          if (card) cards.delete(k)          // карточку вешаем только на последнее подходящее сообщение
+          return { ...m, card }
+        }).reverse()
+      })
+      setLoaded(true)
+    }).catch(() => setLoaded(true))
   }, [open, tick])
   useEffect(() => { box.current?.scrollTo({ top: 1e9, behavior: loaded ? 'smooth' : 'auto' }) }, [msgs, open, busy])
   useEffect(() => { if (open) setTimeout(() => inp.current?.focus(), 60) }, [open])

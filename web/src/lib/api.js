@@ -47,6 +47,7 @@ export const api = {
 
   health: () => req('GET', '/api/health'),
   dashboard: () => req('GET', '/api/dashboard'),
+  missed: () => req('GET', '/api/missed'),
   chat: (text) => req('POST', '/api/chat', { text, channel: 'web' }, 120000),   // ответ ядра (LLM) может идти долго
   chatHistory: (limit = 40) => req('GET', `/api/chat/history?limit=${limit}`),
 
@@ -121,6 +122,7 @@ export const api = {
   orders: (all = false) => req('GET', `/api/orders${all ? '?all=true' : ''}`),
   order: (id) => req('GET', `/api/orders/${id}`),
   addOrder: (o) => req('POST', '/api/orders', o),
+  ordersSuggest: (title, clientId) => req('GET', `/api/orders/suggest?title=${encodeURIComponent(title)}${clientId ? `&client_id=${clientId}` : ''}`),
   updateOrder: (id, p) => req('PUT', `/api/orders/${id}`, p),
   delOrder: (id) => req('DELETE', `/api/orders/${id}`),
   payOrder: (id, amount, extra = {}) => req('POST', `/api/orders/${id}/payments`, { amount, ...extra }),

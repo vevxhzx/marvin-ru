@@ -474,6 +474,30 @@ async def dashboard():
     }
 
 
+@app.get("/api/missed")
+def missed_endpoint():
+    """«Что я упускаю»: один экран упущений (просроченные оплаты, долги, дела без срока, цели без движения). Read-only."""
+    from ..services import missed as _missed
+    return _missed.missed()
+
+
+@app.get("/api/snapshot/month.png", include_in_schema=False)
+async def snapshot_month():
+    """Экспорт-снимок «как я жил в этом месяце» одной картинкой (открывается в новой вкладке)."""
+    from fastapi.responses import FileResponse
+    from ..services import cards
+    p = await _asyncio.to_thread(cards.month_snapshot_card)
+    if not p:
+        raise HTTPException(status_code=500, detail="не смог нарисовать снимок месяца")
+    return FileResponse(str(p), media_type="image/png")
+
+
+@app.get("/api/orders/suggest")
+def orders_suggest(title: str = "", client_id: Optional[int] = None):
+    """Подсказка цены/часов для нового заказа по похожим прошлым (read-only)."""
+    return orders.suggestion(title, client_id)
+
+
 # ---------------- календарь ----------------
 class EventIn(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
@@ -2633,6 +2657,13 @@ def manifest():
         "background_color": "#f4f3f0", "theme_color": "#f4f3f0", "lang": "ru",
         "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}],
+        # Ярлыки PWA (долгое нажатие на иконку на телефоне): быстрая запись без блужданий по меню
+        "shortcuts": [
+            {"name": "Трата", "short_name": "Трата", "url": "/?quick=exp", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+            {"name": "Доход", "short_name": "Доход", "url": "/?quick=inc", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+            {"name": "Задача", "short_name": "Задача", "url": "/?quick=task", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+            {"name": "Мысль", "short_name": "Мысль", "url": "/?quick=note", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+        ],
     }
 
 

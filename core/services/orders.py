@@ -482,6 +482,40 @@ def due_timer_ping() -> dict | None:
 
 
 # ---------------------------------------------------------------- статистика
+def suggestion(title: str, client_id: int | None = None, limit: int = 5) -> dict:
+    """Подсказка цены/часов по похожим прошлым заказам (похожесть — по словам в названии).
+    Ничего не меняет: только читает историю. Пустой ответ {"count": 0} — если похожего нет."""
+    import re
+    words = {w for w in re.split(r"[^\w]+", (title or "").lower()) if len(w) >= 4}
+    if not words:
+        return {"count": 0}
+    with session() as s:
+        rows = list(s.exec(select(Order)))
+    scored = []
+    for o in rows:
+        ow = {w for w in re.split(r"[^\w]+", (o.title or "").lower()) if len(w) >= 4}
+        inter = len(words & ow)
+        if inter == 0:
+            continue
+        same_client = client_id is not None and o.client_id == client_id
+        score = inter / max(1, len(words | ow)) + (0.5 if same_client else 0)
+        scored.append((score, o))
+    scored.sort(key=lambda x: -x[0])
+    picked = [o for sc, o in scored[:limit] if sc > 0]
+    if not picked:
+        return {"count": 0}
+    prices = [o.price for o in picked if o.price]
+    hours = [h for h in (hours_for(o.id) for o in picked) if h >= 0.25]
+    out: dict = {"count": len(picked), "sample": [o.title for o in picked[:3]]}
+    if prices:
+        out["price"] = round(sum(prices) / len(prices))
+    if hours:
+        out["hours"] = round(sum(hours) / len(hours), 1)
+        if out.get("price") and out["hours"]:
+            out["rate"] = round(out["price"] / out["hours"])
+    return out
+
+
 def stats(months: int = 6) -> dict:
     nowd = datetime.now()
     since = (nowd.replace(day=1) - timedelta(days=31 * (months - 1))).replace(day=1, hour=0, minute=0, second=0, microsecond=0)

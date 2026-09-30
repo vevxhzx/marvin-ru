@@ -34,10 +34,11 @@ const ALL_WIDGET_DEFS = {
   brain: { id: 'brain', name: 'мозг', desc: 'Последние сохранённые мысли и заметки', defaultCol: 's4' },
   pomo: { id: 'pomo', name: 'помодоро', desc: 'Виджет фокус-сессии и таймера', defaultCol: 's4' },
   orders: { id: 'orders', name: 'заказы в работе', desc: 'Активные заказы и дедлайны', defaultCol: 's8' },
+  missed: { id: 'missed', name: 'что я упускаю', desc: 'Просроченные оплаты, дела без срока, цели без движения', defaultCol: 's8' },
 }
 
 const DEFAULT_ORDER = ['summary', 'screen', 'balance', 'chart', 'expenses', 'free', 'debts', 'today', 'calendar', 'brain']
-const DEFAULT_WIDTHS = { summary: 8, screen: 4, balance: 4, chart: 8, expenses: 4, free: 4, debts: 4, today: 4, calendar: 4, brain: 4, pomo: 4, orders: 8 }
+const DEFAULT_WIDTHS = { summary: 8, screen: 4, balance: 4, chart: 8, expenses: 4, free: 4, debts: 4, today: 4, calendar: 4, brain: 4, pomo: 4, orders: 8, missed: 8 }
 
 export default function Today({ openChat, address = 'вовчик' }) {
   const nav = useNavigate()
@@ -45,6 +46,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const [fin, setFin] = useState(null)
   const [fc, setFc] = useState(null)
   const [screenData, setScreenData] = useState(null)
+  const [missed, setMissed] = useState(null)
   const { tick, bump } = useRefresh()
   const [prefs, setPrefs] = usePrefs()
   const [, show] = useToast()
@@ -75,11 +77,13 @@ export default function Today({ openChat, address = 'вовчик' }) {
       api.finSummary(30).catch(() => null),
       api.finForecast(30).catch(() => null),
       api.get('/api/screen?days=1').catch(() => null),
-    ]).then(([dash, f, fe, sc]) => {
+      api.missed().catch(() => null),
+    ]).then(([dash, f, fe, sc, ms]) => {
       if (dash) setD(dash)
       if (f) setFin(f)
       if (fe) setFc(fe)
       if (sc) setScreenData(sc)
+      if (ms) setMissed(ms)
     })
   }
 
@@ -315,6 +319,37 @@ export default function Today({ openChat, address = 'вовчик' }) {
             <ScreenTimeBentoWidget data={screenData} />
           </section>
         )
+
+      case 'missed': {
+        const m = missed || {}
+        const rows = [
+          ...(m.unpaid || []).map((o) => ({ k: 'unpaid', t: o.title, s: o.client || '', v: `${money(o.left)} ₽` })),
+          ...(m.overdue_debts || []).map((d) => ({ k: 'debt', t: d.title, s: `платёж ${d.pay_day}-го`, v: `${money(d.payment)} ₽` })),
+          ...(m.tasks_no_due || []).map((t) => ({ k: 'task', t: t.title, s: 'без срока', v: '' })),
+          ...(m.goals_stale || []).map((g) => ({ k: 'goal', t: g.title, s: `${g.pct}%`, v: g.left ? `${money(g.left)} ₽` : '' })),
+        ]
+        return (
+          <section key="missed" className={`c s8 r ${isWig}`} style={animStyle} {...dragProps}>
+            {renderCardControls('missed', idx)}
+            <div className="hd"><h2>что я упускаю</h2><small>{rows.length ? `${rows.length} пункт(ов)` : 'чисто'}</small></div>
+            {!missed ? (
+              <div className="muted py-3 text-[13px]">считаю…</div>
+            ) : rows.length === 0 ? (
+              <div className="muted py-3 text-[13.5px]">Ничего не упускаете, сэр. Редкое и подозрительное состояние.</div>
+            ) : (
+              <div className="mt-1 space-y-1.5">
+                {rows.slice(0, 8).map((r, i) => (
+                  <div key={i} className="flex items-center gap-3 rounded-xl px-3 py-2" style={{ background: 'var(--sf2)' }}>
+                    <span className="flex-1 truncate text-[13.5px] font-medium">{r.t}</span>
+                    {r.s && <span className="faint shrink-0 text-[12px]">{r.s}</span>}
+                    {r.v && <span className="shrink-0 text-[13.5px] font-semibold" style={{ color: (r.k === 'debt' || r.k === 'unpaid') ? 'var(--neg)' : 'var(--ink2)' }}>{r.v}</span>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+        )
+      }
 
       case 'balance':
         return (
@@ -637,6 +672,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
         <span onClick={() => { setIsTypingManual(true); setInputVal('мысль: ') }}>мысль</span>
         <span onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: 'доброе утро', send: true } }))}>☀️ дайджест</span>
         <span onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: 'итоги недели', send: true } }))}>📊 итоги недели</span>
+        <span onClick={() => window.open('/api/snapshot/month.png', '_blank')}>🗓 снимок месяца</span>
       </div>
 
       {/* Панель режима правки главной страницы */}

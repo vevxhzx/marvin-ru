@@ -436,20 +436,29 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             agent.on_change(kind, payload)
 
     async def reminders():
+        from . import habits
+        hint = habits.hint()
         for e in calendar.due_reminders():
             mins = max(0, int((e.start - datetime.now()).total_seconds() // 60))
             when = "уже сейчас" if mins == 0 else f"через {mins} мин"
             text = (f"⏰ **НАПОМИНАНИЕ** · {e.start:%H:%M}\n"
                     f"**«{e.title}»** — {when}"
-                    + (f"\n{e.location}" if e.location else ""))
+                    + (f"\n{e.location}" if e.location else "")
+                    + (f"\n{hint}" if hint else ""))
             ping("reminder", text=text, id=f"ev{e.id}-{e.start:%Y%m%d%H%M}")
             await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏱ 15 мин", f"ev:{e.id}:min15"),
+                                  ("⏰ По привычке", f"ev:{e.id}:habit"),
                                   ("🌆 Вечером", f"ev:{e.id}:evening"), ("📅 Завтра", f"ev:{e.id}:tomorrow")], urgent=True)
 
     async def task_reminders():
+        from . import habits
+        hint = habits.hint()
         for t, text in tasks.due_task_reminders():
+            if hint:
+                text = text + "\n" + hint
             ping("reminder", text=text, id=f"task{t.id}-{t.remind_stage}")
             await _notify(text, [("✅ Сделано", f"task:{t.id}:done"), ("⏱ 15 мин", f"task:{t.id}:min15"),
+                                  ("⏰ По привычке", f"task:{t.id}:habit"),
                                   ("🌆 Вечером", f"task:{t.id}:evening"), ("📅 Завтра", f"task:{t.id}:tomorrow")], urgent=True)
 
     async def semantic_job():

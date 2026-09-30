@@ -327,11 +327,23 @@ const blank = { title: '', price: '', client: '', deadline: '', notes: '', estim
 export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   const [f, setF] = useState(blank)
   const [clients, setClients] = useState([])
+  const [hint, setHint] = useState(null)
   useEffect(() => {
     if (!open) return
     api.clients().then(setClients).catch(() => {})
     setF(order ? { title: order.title, price: order.price ? String(order.price) : '', client: order.client || '', deadline: order.deadline ? toLocalISO(new Date(order.deadline)).slice(0, 16) : '', notes: order.notes || '', estimate_h: order.estimate_h ? String(order.estimate_h) : '', status: order.status } : blank)
   }, [open, order])
+  // Подсказка цены/часов по похожим прошлым заказам (только для нового заказа, с задержкой ввода)
+  useEffect(() => {
+    if (!open || order) { setHint(null); return }
+    const t = f.title.trim()
+    if (t.length < 4) { setHint(null); return }
+    let on = true
+    const id = setTimeout(() => {
+      api.ordersSuggest(t).then((s) => { if (on) setHint(s && s.count ? s : null) }).catch(() => {})
+    }, 450)
+    return () => { on = false; clearTimeout(id) }
+  }, [f.title, open, order])
   const submit = async (e) => {
     e.preventDefault()
     const body = { title: f.title.trim(), price: Number(String(f.price).replace(/\s/g, '').replace(',', '.')) || 0, client: f.client.trim() || null, deadline: f.deadline || null, notes: f.notes.trim() || null, estimate_h: Number(f.estimate_h) || 0, status: f.status }
@@ -344,6 +356,14 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
     <Sheet open={open} onClose={onClose} title={order ? 'заказ' : 'новый заказ'} sub={order ? undefined : 'или скажите ассистенту: «заказ: ролик для Пятёрочки, 25к, до пятницы»'}>
       <form onSubmit={submit} className="space-y-4">
         <Field label="что делаем"><input autoFocus className="input !text-[17px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder="Монтаж ролика" /></Field>
+        {hint && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: 'var(--sf2)' }}>
+            <span className="muted">похожие: {hint.sample?.slice(0, 2).join(', ')}</span>
+            {hint.price ? <span>обычно <b>{money(hint.price)}</b></span> : null}
+            {hint.hours ? <span className="muted">≈{hint.hours} ч{hint.rate ? ` · ${money(hint.rate)}/ч` : ''}</span> : null}
+            <button type="button" className="btn-ghost btn-sm !h-6 ml-auto" onClick={() => setF((x) => ({ ...x, ...(hint.price ? { price: String(hint.price) } : {}), ...(hint.hours ? { estimate_h: String(hint.hours) } : {}) }))}>подставить</button>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="сумма"><Money value={f.price} onChange={(v) => setF({ ...f, price: v })} /></Field>
           <Field label="клиент"><input className="input" list="clients-list" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} placeholder="Пятёрочка" /><datalist id="clients-list">{clients.map((c) => <option key={c.id} value={c.name} />)}</datalist></Field>

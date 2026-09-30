@@ -200,6 +200,12 @@ async def orders_cmd(m: Message):
     await m.answer(orders.summary_text())
 
 
+@router.message(Command("missed", "упускаю"))
+async def missed_cmd(m: Message):
+    from ..services import missed as _missed
+    await m.answer(_missed.missed_text())
+
+
 @router.message(Command("pomo"))
 async def pomo_cmd(m: Message):
     """/pomo — 25 мин без заказа; /pomo ролик — по заказу; /pomo stop."""
@@ -560,7 +566,7 @@ async def cb_stranger(cq: CallbackQuery):
     await cq.answer("Это личный ассистент.", show_alert=False)
 
 
-@router.callback_query(F.data.regexp(r"^(ev|task):\d+:(ok|done|hour|min15|evening|tomorrow)$"))
+@router.callback_query(F.data.regexp(r"^(ev|task):\d+:(ok|done|hour|min15|evening|tomorrow|habit)$"))
 async def cb_reminder(cq: CallbackQuery):
     """Кнопки под напоминанием: сделано / отложить (15 мин / вечером / +1 час / завтра). Сообщение редактируется,
     кнопки убираются, показывается итог. Повторное нажатие не выполняется дважды."""
@@ -581,6 +587,9 @@ async def cb_reminder(cq: CallbackQuery):
             return _evening()
         if act == "hour":
             return datetime.now() + timedelta(hours=1)
+        if act == "habit":
+            from core.services import habits
+            return habits.next_habit()
         return (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
 
     msg = "Готово."
@@ -709,6 +718,17 @@ async def report_cmd(m: Message):
     if not path:
         await m.answer("Не смог нарисовать отчёт, сэр — смотрите лог."); return
     await m.answer_photo(BufferedInputFile(path.read_bytes(), filename=path.name), caption="📊 Итоги недели" if days == 7 else "📊 Итоги месяца")
+
+
+@router.message(Command("month", "месяц"))
+async def month_cmd(m: Message):
+    """Снимок «как я жил в этом месяце» — одной карточкой (деньги, работа, привычки)."""
+    from aiogram.types import BufferedInputFile
+    from core.services import cards
+    path = await asyncio.to_thread(cards.month_snapshot_card)
+    if not path:
+        await m.answer("Не смог собрать снимок месяца, сэр — смотрите лог."); return
+    await m.answer_photo(BufferedInputFile(path.read_bytes(), filename=path.name), caption="🗓 Как я жил в этом месяце")
 
 
 @router.message(Command("forecast"))
@@ -984,10 +1004,12 @@ async def check_connection(bot: Bot) -> bool:
             BotCommand(command="debts", description="Долги"),
             BotCommand(command="forecast", description="Прогноз кассы на месяц"),
             BotCommand(command="orders", description="Заказы: дедлайны и кто должен"),
+            BotCommand(command="missed", description="Что я упускаю: оплаты, долги, цели"),
             BotCommand(command="pomo", description="Помодоро 25 мин (/pomo ролик · /pomo stop)"),
             BotCommand(command="goals", description="Цели и конверты"),
             BotCommand(command="week", description="Обзор недели: мысли и задачи"),
             BotCommand(command="report", description="Открытка-отчёт за неделю (/report 30 — месяц)"),
+            BotCommand(command="month", description="Как я жил в этом месяце — снимок"),
             BotCommand(command="summary", description="Итог дня одной карточкой"),
             BotCommand(command="find", description="Поиск по «второму мозгу»"),
             BotCommand(command="exp", description="Трата одним тапом: /exp 700 такси"),

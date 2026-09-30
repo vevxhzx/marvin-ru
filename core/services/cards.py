@@ -795,3 +795,38 @@ def for_result(actions, text: str = "") -> Path | None:
         log.warning("for_result: %s", e)
     return None
 
+
+def month_snapshot_card(path: Path | None = None) -> Path | None:
+    """Снимок «как я жил в этом месяце»: деньги, работа, привычки — одной карточкой (экспорт-итог)."""
+    try:
+        now = datetime.now()
+        s = finance.summary(30)
+        st, streak = {}, {}
+        try:
+            from . import insights as _ins
+            from . import orders as _o
+            st = _o.stats(1)
+            streak = _ins.streak()
+        except Exception as e:  # pragma: no cover
+            log.debug("snapshot extras: %s", e)
+        c = _Canvas()
+        c.header("снимок месяца")
+        c.title(f"как я жил в {_month(now)}", f"на {now.day} {_month(now)} {now.year}")
+        c.stats([("заработал", money(s.get("earned", 0)), GREEN),
+                 ("потратил", money(s.get("spent", 0)), RED),
+                 ("на счетах", money(s.get("total_balance", 0)), INK)])
+        c.label("работа")
+        c.row("часы", "по таймеру", f"{st.get('total_hours', 0)} ч", left_w=150)
+        if st.get("rate"):
+            c.row("ставка", "выходит в среднем", money(st["rate"]) + " /ч", left_w=150)
+        c.row("заказы", "открыто сейчас", str(st.get("open", 0)), left_w=150)
+        if st.get("unpaid"):
+            c.row("заказы", "ждут оплаты", money(st["unpaid"]), right_color=RED, left_w=150)
+        c.label("привычки")
+        c.row("подряд", "дней вели записи", str(streak.get("current", 0)), left_w=150)
+        c.row("рекорд", "лучший стрик, дней", str(streak.get("best", 0)), left_w=150)
+        return c.finish(_out("month_snapshot.png", path))
+    except Exception as e:
+        log.warning("month snapshot failed: %s", e)
+        return None
+
