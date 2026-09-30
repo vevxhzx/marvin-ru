@@ -51,3 +51,12 @@ def test_expense_card_renders(tmp_path, monkeypatch):
 
     p = cards.expense_card(_Tx(), 12345.0)
     assert p and p.exists() and p.stat().st_size > 1000
+
+
+def test_quick_templates_and_find_mapping():
+    """Быстрые шаблоны Telegram: латиница/кириллица → правильные фразы (выключаются настройкой telegram.quick)."""
+    from core.telegram import bot as tb
+    assert tb._QUICK_MAP["exp"] == "потратил {x}" and tb._QUICK_MAP["расход"] == "потратил {x}"
+    assert tb._QUICK_MAP["task"].startswith("задача:") and tb._QUICK_MAP["event"].startswith("встреча")
+    assert tb._QUICK_CANON["exp"] == "расход"
+    assert tb._quick_enabled() in (True, False)

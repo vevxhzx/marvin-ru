@@ -84,7 +84,99 @@ async def start(m: Message):
                    "• «сколько потратил на еду за неделю», «куда ушли деньги»\n"
                    "• «заплатил Диме 2000», «перевёл 5000 на сбер», «снял 3000 наличных»\n"
                    "• «подписка яндекс плюс 399 25-го», «лимит на еду 20000»\n"
-                   "• «отмени последнюю» — откатить трату")
+                   "• «отмени последнюю» — откатить трату\n"
+                   "• /summary — итог дня · /find — поиск по Мозгу · /exp 700 такси — трата одним тапом")
+
+
+_QUICK_HINT = {"расход": "700 такси", "доход": "15000 аванс", "задача": "сдать отчёт в пятницу", "встреча": "в среду в 15:00 с Димой"}
+_QUICK_MAP = {"расход": "потратил {x}", "exp": "потратил {x}", "доход": "доход {x}", "inc": "доход {x}",
+              "задача": "задача: {x}", "task": "задача: {x}", "встреча": "встреча {x}", "event": "встреча {x}"}
+_QUICK_CANON = {"exp": "расход", "inc": "доход", "task": "задача", "event": "встреча"}
+
+
+def _quick_enabled() -> bool:
+    try:
+        return bool(getattr(cfg.telegram, "quick", True))
+    except Exception:  # pragma: no cover
+        return True
+
+
+@router.message(Command("расход", "exp", "доход", "inc", "задача", "task", "встреча", "event"))
+async def cmd_quick(m: Message):
+    """Быстрые шаблоны в один тап: /расход 700 такси, /доход 15000 аванс, /задача …, /встреча … — офлайн-правилами."""
+    if not _quick_enabled():
+        await m.answer("Быстрые шаблоны выключены: ⚙ Настройки → telegram → «быстрые шаблоны».")
+        return
+    parts = (m.text or "").split(maxsplit=1)
+    cmd = parts[0].lstrip("/").split("@")[0]
+    if cmd not in _QUICK_MAP:
+        return
+    canon = _QUICK_CANON.get(cmd, cmd)
+    body = parts[1].strip() if len(parts) > 1 else ""
+    if not body:
+        await m.answer(f"Напишите так: /{cmd} {_QUICK_HINT[canon]}")
+        return
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        r = await asyncio.wait_for(agent.handle(_QUICK_MAP[cmd].format(x=body), channel="tg"), timeout=HANDLE_TIMEOUT)
+    finally:
+        typing.cancel()
+    await send_long(m, r.text or "…")
+    await _maybe_send_card(m, r)
+
+
+@router.message(Command("find", "найди", "поиск"))
+async def cmd_find(m: Message):
+    """Поиск по «второму мозгу» (заметки и ссылки) прямо из Telegram."""
+    parts = (m.text or "").split(maxsplit=1)
+    q = parts[1].strip() if len(parts) > 1 else ""
+    if not q:
+        await m.answer("Что искать? Например: /найди договор аренды")
+        return
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        from core.services import semantic
+        res = await semantic.search(q, limit=6)
+    except Exception as e:
+        log.warning("find failed: %s", e)
+        await m.answer("Поиск не сработал, сэр. Попробуйте ещё раз.")
+        return
+    finally:
+        typing.cancel()
+    items = res.get("items") or []
+    if not items:
+        await m.answer("В Мозге ничего не нашёл, сэр. Либо не скидывали, либо названо иначе.")
+        return
+    lines = [f"🧠 В Мозге по «{q}»:"]
+    for it in items[:6]:
+        if it.get("kind") == "link":
+            lines.append("— " + (it.get("title") or it.get("url") or "ссылка"))
+            if it.get("url"):
+                lines.append("  " + it["url"])
+        else:
+            lines.append("— " + (it.get("title") or (it.get("text") or "").strip()[:80]))
+    await send_long(m, "\n".join(lines))
+
+
+@router.message(Command("итог", "итоги", "summary", "evening"))
+async def cmd_summary(m: Message):
+    """Итог дня одной карточкой (текст сразу, картинка — если включена в настройках)."""
+    from core.services import cards
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        data = await asyncio.to_thread(cards.evening_data)
+        text = cards.evening_text(data)
+    finally:
+        typing.cancel()
+    await send_long(m, text)
+    if cards.should_send("evening"):
+        try:
+            from aiogram.types import FSInputFile
+            path = await asyncio.to_thread(cards.evening_card, None, data)
+            if path:
+                await m.answer_photo(FSInputFile(str(path)))
+        except Exception as e:  # pragma: no cover
+            log.debug("итог card: %s", e)
 
 
 @router.message(Command("today"))
@@ -918,6 +1010,10 @@ async def check_connection(bot: Bot) -> bool:
             BotCommand(command="goals", description="Цели и конверты"),
             BotCommand(command="week", description="Обзор недели: мысли и задачи"),
             BotCommand(command="report", description="Открытка-отчёт за неделю (/report 30 — месяц)"),
+            BotCommand(command="summary", description="Итог дня одной карточкой"),
+            BotCommand(command="find", description="Поиск по «второму мозгу»"),
+            BotCommand(command="exp", description="Трата одним тапом: /exp 700 такси"),
+            BotCommand(command="task", description="Задача одним тапом: /task сдать отчёт"),
             BotCommand(command="voice", description="Голосовые ответы: на голосовые / всегда / никогда"),
             BotCommand(command="game", description="Игровой режим вкл/выкл (освободить видеокарту)"),
             BotCommand(command="diag", description="Диагностика мозга и облака"),

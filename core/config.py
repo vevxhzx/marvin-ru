@@ -94,6 +94,7 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "notifications.proactive_per_day": ("int", "Не больше стольких инициативных сообщений в день (5)", False),
     "notifications.proactive_vibe": ("bool", "Просто написать днём (как дела / шутка), если тихо 5+ часов", False),
     "telegram.proxy": ("str", "Прокси для Telegram (если api.telegram.org недоступен)", False),
+    "telegram.quick": ("bool", "Быстрые шаблоны в Telegram: /exp 700 такси, /inc 15000 аванс, /task …, /event …", False),
     "telegram.webapp_url": ("str", "Адрес сайта для приложения в Telegram (https://…ts.net из funnel.bat)", False),
     "brain.mode": ("str", "Режим мозга: local / hybrid / cloud", False),
     "brain.ollama.url": ("str", "Адрес Ollama", False),
