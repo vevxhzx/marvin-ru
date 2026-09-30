@@ -12,7 +12,7 @@ AUDIO={".wav",".mp3",".flac",".m4a",".aac",".aiff",".aif",".ogg",".opus"}
 IMAGE={".jpg",".jpeg",".png",".tif",".tiff",".psd",".psb",".ai",".svg",".webp",".dng",".raw"}
 PROJECT={".prproj",".aep",".drp",".fcpxml",".fcpbundle",".veg",".c4d",".blend"}
 
-# Порядок важен: сначала узкие названия, потом общие. Поддерживаются ru/en и разделители _-. 
+# Порядок важен: сначала узкие названия, потом общие. Поддерживаются ru/en и разделители _-.
 SOUND_RULES = [
  ("02_Музыка", r"music|музык|song|track|theme|score|мелод|саундтрек|ost|loop|луп"),
  ("03_Голоса", r"voice|vox|speech|dialog|dialogue|vocal|говор|голос|реплик|фраз|шёпот|шепот|laugh|смех|cry|крик"),

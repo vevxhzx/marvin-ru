@@ -1,4 +1,5 @@
 #!/bin/sh
+# создаём config.yaml из примера, если его ещё нет (первый запуск) — дальше мастер в браузере
 set -e
 cd /app
 if [ ! -s config.yaml ]; then

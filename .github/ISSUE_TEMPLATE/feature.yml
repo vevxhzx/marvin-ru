@@ -1,0 +1,11 @@
+name: Идея
+description: Предложить улучшение
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: Что хотелось бы
+      description: Опишите словами, как это должно работать. Пример фразы ассистенту — идеально.
+    validations:
+      required: true

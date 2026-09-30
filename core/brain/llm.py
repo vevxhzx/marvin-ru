@@ -4,6 +4,7 @@ from __future__ import annotations
 import contextvars
 import json
 import logging
+import os
 import re
 import time
 from typing import Any, Awaitable, Callable
@@ -589,6 +590,12 @@ def reload_cloud_settings() -> str:
     CLOUD_PROXY = (str(getattr(cc, "proxy", "") or "")).strip() or None
     MODE = _c.cfg.brain.mode
     GEMINI_AUTO = bool(getattr(_c.cfg.brain.gemini, "auto", True))
+    global OLLAMA_MODEL, OLLAMA_URL, VISION_MODEL
+    OLLAMA_MODEL = str(_c.cfg.brain.ollama.model or "")
+    OLLAMA_URL = str(os.getenv("OLLAMA_URL") or _c.cfg.brain.ollama.url or OLLAMA_URL).rstrip("/").replace("://localhost", "://127.0.0.1")
+    VISION_MODEL = str(getattr(_c.cfg.brain.ollama, "vision_model", "") or "")
+    if not VISION_MODEL and re.search(r"qwen3\.5|qwen3\.6|gemma3|gemma4|llava|minicpm-v|qwen2\.5vl|moondream|llama3\.2-vision", OLLAMA_MODEL, re.I):
+        VISION_MODEL = OLLAMA_MODEL
     global VISION_WHERE, VISION_CLOUD_OK, _VISION_LOCAL_OK
     _vc = getattr(_c.cfg.brain, "vision", None)
     VISION_WHERE = str(getattr(_vc, "where", "auto") or "auto").lower()
@@ -602,8 +609,8 @@ def reload_cloud_settings() -> str:
     _OR_AVOID_RUNTIME.clear()
     LAST_CLOUD_ERROR = None
     log.info("Облако перечитано: %s, модель %s, ключ %s, режим %s", cloud_title(), _cloud_model() or "по умолчанию",
-             ("…" + CLOUD_KEY[-4:]) if CLOUD_KEY else "НЕ ЗАДАН", MODE)
-    return f"{cloud_title()} · модель {_cloud_model() or 'по умолчанию'} · ключ {('…' + CLOUD_KEY[-4:]) if CLOUD_KEY else 'не задан'} · режим {MODE}"
+             "задан" if CLOUD_KEY else "НЕ ЗАДАН", MODE)
+    return f"{cloud_title()} · модель {_cloud_model() or 'по умолчанию'} · ключ {'задан' if CLOUD_KEY else 'не задан'} · режим {MODE}"
 
 
 def _cloud_client(timeout: float, proxy: str | None = None) -> httpx.AsyncClient:
@@ -741,7 +748,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
     messages.append({"role": "user", "content": user_text})
     headers = {"Authorization": f"Bearer {CLOUD_KEY}", "Content-Type": "application/json"}
     if CLOUD_PROVIDER == "openrouter":
-        headers["HTTP-Referer"] = "https://github.com/jarvis-local"; headers["X-Title"] = "Jarvis"
+        headers["HTTP-Referer"] = "https://github.com/local-assistant"; headers["X-Title"] = "Local Assistant"
     model = _force_model or await resolve_cloud_model()
     main_model = model
     if short_mode.get() and not _force_model and model not in _VOICE_MODEL_BAD:
@@ -859,7 +866,7 @@ async def cloud_tools_chat(messages: list[dict], tools: list[dict], temperature:
         return None
     headers = {"Authorization": f"Bearer {CLOUD_KEY}", "Content-Type": "application/json"}
     if CLOUD_PROVIDER == "openrouter":
-        headers["HTTP-Referer"] = "https://github.com/jarvis-local"; headers["X-Title"] = "Jarvis"
+        headers["HTTP-Referer"] = "https://github.com/local-assistant"; headers["X-Title"] = "Local Assistant"
     model = await resolve_cloud_model()
     if CLOUD_PROVIDER == "groq" and (not CLOUD_MODEL or "compound" in model):
         model = await groq_tools_model()   # compound свои tools не принимает; явная brain.cloud.model — уважается
@@ -1105,7 +1112,7 @@ _VISION_CHECKED_AT = 0.0
 
 async def _local_vision_available() -> bool:
     """Есть ли локальная модель зрения. Отрицательный ответ перепроверяем раз в минуту —
-    Ollama могли поднять или модель докачать уже после старта Джарвиса."""
+    Ollama могли поднять или модель докачать уже после старта ассистента."""
     global _VISION_LOCAL_OK, _VISION_CHECKED_AT
     if not VISION_MODEL or GAME_MODE:
         return False

@@ -5,7 +5,7 @@
 через ПК-клиент. Отдельного пароля не вводим: токен генерируется сам и один раз попадает в браузер телефона
 через ссылку/QR из ⚙ Настроек → «с телефона» (query ?t=… → cookie на год).
 
-Как передавать токен: cookie `jarvis_session` (браузер) или заголовок `X-Auth-Token` (скрипты, голосовой клиент
+Как передавать токен: cookie `assistant_session` (браузер) или заголовок `X-Auth-Token` (скрипты, голосовой клиент
 на другой машине; на самом ПК он ходит на 127.0.0.1 и токен ему не нужен).
 
 Второй способ входа — Telegram Mini App (tg_auth.py): подписанные Telegram данные → отдельная короткоживущая сессия.
@@ -30,7 +30,7 @@ from ..config import DATA_DIR
 log = logging.getLogger("jarvis.auth")
 
 TOKEN_FILE = DATA_DIR / "api_token"
-COOKIE = "jarvis_session"
+COOKIE = "assistant_session"
 HEADER = "x-auth-token"
 QUERY = "t"
 
@@ -86,7 +86,7 @@ def rotate() -> str:
 
 # В Docker браузер хоста приходит из сети моста (172.x), а не с loopback — «свой компьютер» там определяется токеном,
 # ссылку с ним контейнер печатает в лог при старте (как Jupyter).
-IN_DOCKER = bool(os.getenv("JARVIS_DOCKER"))
+IN_DOCKER = bool(os.getenv("ASSISTANT_DOCKER") or os.getenv("JARVIS_DOCKER"))
 
 
 def behind_proxy(request: Request) -> bool:
@@ -141,7 +141,7 @@ def _host_ok(request: Request) -> bool:
         return True  # HTTP/1.0-клиенты и скрипты без Host — не браузер, rebinding им не грозит
     if host in ("localhost", "127.0.0.1", "::1") or host.endswith((".ts.net", ".local", ".localhost", ".internal")):
         return True
-    if host == "testserver" and os.getenv("JARVIS_TEST"):
+    if host == "testserver" and (os.getenv("ASSISTANT_TEST") or os.getenv("JARVIS_TEST")):
         return True
     try:
         ipaddress.ip_address(host)

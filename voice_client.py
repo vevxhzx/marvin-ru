@@ -1,6 +1,6 @@
-"""Голосовой клиент Джарвиса для ПК (запуск: voice.bat).
+"""Голосовой клиент ассистента для ПК (запуск: voice.bat).
 
-Слушает микрофон → ждёт «Джарвис» (Vosk, офлайн) → записывает команду до паузы → Whisper (офлайн) →
+Слушает микрофон → ждёт «ассистент» (Vosk, офлайн) → записывает команду до паузы → Whisper (офлайн) →
 отправляет текст ядру (http://127.0.0.1:8765/api/chat, то же, что сайт и Telegram) → озвучивает ответ
 (Silero, офлайн) в наушники. Иконка в трее: серая — сплю, синяя — слушаю, жёлтая — думаю, зелёная — говорю.
 
@@ -35,7 +35,7 @@ _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S",
                     handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(_LOG_FILE, encoding="utf-8")])
 logging.getLogger("httpx").setLevel(logging.WARNING)
-log = logging.getLogger("jarvis.pc")
+log = logging.getLogger("assistant.pc")
 
 
 def _fatal(msg: str, exc: BaseException | None = None) -> None:
@@ -50,13 +50,14 @@ def _fatal(msg: str, exc: BaseException | None = None) -> None:
 try:
     import numpy as np
 except ImportError as _e:
-    _fatal("Не установлен numpy — запустите update.bat (или voice.bat ещё раз, он доставит пакеты).", _e)
+    _fatal("Не установлен numpy — запустите install_voice.bat.", _e)
     sys.exit(2)
 
 try:
     from core.config import cfg, DATA_DIR
+    from core import identity
 except Exception as _e:
-    _fatal("Не удалось прочитать config.yaml или папку core/ — проверьте, что voice.bat лежит в папке Джарвиса рядом с core/.", _e)
+    _fatal("Не удалось прочитать config.yaml или папку core/ — проверьте, что voice.bat лежит в папке ассистента рядом с core/.", _e)
     sys.exit(2)
 
 _V = getattr(cfg, "voice", None)
@@ -82,8 +83,8 @@ MIC = getattr(_PC, "mic", None) or None                     # имя/номер 
 SILENCE_SEC = float(getattr(_PC, "silence_sec", 1.5) or 1.5)   # пауза, после которой команда считается законченной
 MAX_CMD_SEC = float(getattr(_PC, "max_command_sec", 20) or 20)
 CONFIRM_SOUND = bool(getattr(_PC, "beep", True)) if _PC is not None else True
-FOLLOWUP_SEC = float(getattr(_PC, "followup_sec", 6) or 6)     # после ВОПРОСА Джарвиса столько секунд слушаем без «Джарвис»
-CONVO_SEC = float(getattr(_PC, "conversation_sec", 12) or 0)    # после ЛЮБОГО ответа столько секунд можно продолжать без «Джарвис» (0 — выкл)
+FOLLOWUP_SEC = float(getattr(_PC, "followup_sec", 6) or 6)     # после ВОПРОСА ассистента столько секунд слушаем без «ассистент»
+CONVO_SEC = float(getattr(_PC, "conversation_sec", 12) or 0)    # после ЛЮБОГО ответа столько секунд можно продолжать без «ассистент» (0 — выкл)
 CONVO_MODE_SEC = float(getattr(_PC, "conversation_mode_sec", 120) or 120)   # «режим беседы»: окно после каждой реплики
 _CONVO_ON_RX = re.compile(r"^\W*(режим беседы|давай поболтаем|поболтаем|поговорим|режим разговора|слушай меня|не отключайся)\W*$", re.I)
 _CONVO_OFF_RX = re.compile(r"^\W*(хватит болтать|конец беседы|конец разговора|отбой|свободен|спасибо,? свободен|всё,? спасибо|все,? спасибо)\W*$", re.I)
@@ -121,12 +122,12 @@ def set_state(mode: str, text: str = "") -> None:
     if _tray is not None:
         try:
             _tray.icon = _icon(mode)
-            _tray.title = f"Джарвис · {_TITLES.get(mode, mode)}" + (f" · {text[:40]}" if text else "")
+            _tray.title = f"{identity.title()} · {_TITLES.get(mode, mode)}" + (f" · {text[:40]}" if text else "")
         except Exception:
             pass
 
 
-_TITLES = {"idle": "жду «Джарвис»", "listening": "слушаю", "thinking": "думаю", "speaking": "говорю", "off": "микрофон выключен"}
+_TITLES = {"idle": f"жду «{identity.title()}»", "listening": "слушаю", "thinking": "думаю", "speaking": "говорю", "off": "микрофон выключен"}
 _COLORS = {"idle": (142, 142, 147), "listening": (10, 132, 255), "thinking": (255, 159, 10), "speaking": (48, 209, 88), "off": (255, 69, 58)}
 
 
@@ -170,7 +171,7 @@ def _start_tray():
         pystray.Menu.SEPARATOR,
         pystray.MenuItem("Выход", quit_),
     )
-    _tray = pystray.Icon("jarvis", _icon("idle"), "Джарвис · запуск", menu)
+    _tray = pystray.Icon("assistant", _icon("idle"), f"{identity.title()} · запуск", menu)
     threading.Thread(target=_tray.run, daemon=True, name="tray").start()
 
 
@@ -187,14 +188,14 @@ _stop_q: "queue.Queue[bytes]" = queue.Queue()
 def _mic_callback(indata, frames, t, status):
     if status:
         log.debug("mic status: %s", status)
-    if not _speaking.is_set():   # пока Джарвис говорит — микрофон не слушаем (иначе услышит сам себя)
+    if not _speaking.is_set():   # пока ассистент говорит — микрофон не слушаем (иначе услышит сам себя)
         _audio_q.put(bytes(indata))
     else:
         _stop_q.put(bytes(indata))   # …кроме слова «стоп» — его ловим отдельным лёгким детектором
 
 
 class _StopWatcher:
-    """Пока Джарвис говорит, второй распознаватель Vosk слушает только «стоп/хватит» и поднимает _interrupt."""
+    """Пока ассистент говорит, второй распознаватель Vosk слушает только «стоп/хватит» и поднимает _interrupt."""
 
     def __init__(self, wake):
         self._wake = wake
@@ -204,7 +205,7 @@ class _StopWatcher:
     def start(self):
         import vosk
         try:
-            self._rec = vosk.KaldiRecognizer(self._wake._model, SR, '["стоп", "хватит", "джарвис стоп", "джарвис хватит", "тихо", "замолчи", "[unk]"]')
+            self._rec = vosk.KaldiRecognizer(self._wake._model, SR, json.dumps(["стоп", "хватит", f"{identity.NAME.lower()} стоп", f"{identity.NAME.lower()} хватит", "тихо", "замолчи", "[unk]"], ensure_ascii=False))
         except Exception:
             self._rec = None
         while not _stop_q.empty():
@@ -351,7 +352,10 @@ class _Speaker:
 
     def say(self, text: str) -> None:
         if text and text.strip() and not _interrupt.is_set():
-            self._q.put(self._pool.submit(_synth, text.strip()))
+            try:
+                self._q.put(self._pool.submit(_synth, text.strip()))
+            except RuntimeError:
+                pass   # пул уже остановлен в finish() — поздняя фраза из таймера-заглушки
 
     def say_now(self, text: str) -> None:
         """Озвучить немедленно вне очереди (заглушка «Секунду», пока мозг думает)."""
@@ -361,6 +365,8 @@ class _Speaker:
         self._q.put(None)
         if self._thread:
             self._thread.join()
+        # _Speaker() создаётся заново на каждом цикле: без shutdown поток пула остаётся до конца процесса
+        self._pool.shutdown(wait=True)
         time.sleep(0.15)
         _drain_mic()
         _speaking.clear()
@@ -428,11 +434,11 @@ def _record_command(prefix_pcm: bytes = b"", noise_floor: float = 300.0, silence
         if lvl > thresh:
             last_voice = time.time()
         elif last_voice is None and time.time() - started > 4.0:
-            break   # 4 секунды тишины после «Джарвис» — передумали
+            break   # 4 секунды тишины после «ассистент» — передумали
         elif last_voice is not None and time.time() - last_voice > SILENCE_SEC_:
             break
     if last_voice is None:
-        log.info("Тишина после «Джарвис»: макс. громкость %.0f при пороге %.0f%s", peak, thresh,
+        log.info("Тишина после «ассистент»: макс. громкость %.0f при пороге %.0f%s", peak, thresh,
                  " — микрофон очень тихий: в Windows → Звук → Ввод поднимите уровень до 80–100%" if 0 < peak < thresh else "")
         return None
     return np.concatenate(buf) if buf else None
@@ -509,7 +515,7 @@ def _ask_core_stream(text: str, on_sentence) -> tuple[str, float | None]:
     return final or "Готово, сэр.", first_at
 
 
-_say_q: queue.Queue = queue.Queue()   # фразы, которые Джарвис говорит сам (напоминания из ядра)
+_say_q: queue.Queue = queue.Queue()   # фразы, которые ассистент говорит сам (напоминания из ядра)
 
 
 def _reminder_listener() -> None:
@@ -590,7 +596,7 @@ def main() -> None:
     from core.voice import stt, tts
     from core.voice.wake import WakeDetector
 
-    print("  J.A.R.V.I.S. — голосовой клиент. Скажите «Джарвис, …» или нажмите", HOTKEY)
+    print(f"  {identity.title()} — голосовой клиент. Скажите «{identity.title()}, …» или нажмите", HOTKEY)
     _start_tray()
     set_state("thinking", "загрузка моделей")
 
@@ -658,7 +664,7 @@ def main() -> None:
 
     with sd.RawInputStream(samplerate=SR, blocksize=CHUNK, dtype="int16", channels=1, device=dev, callback=_mic_callback):
         set_state("idle")
-        log.info("Готов. Жду «Джарвис»…")
+        log.info("Готов. Жду «%s»…", identity.title())
         followup_until = 0.0
         noise_samples: list[float] = []
         while _running:
@@ -697,9 +703,9 @@ def main() -> None:
                     noise_samples.append(_rms(pcm))
                     if len(noise_samples) == 15:
                         noise = max(60.0, float(np.median(noise_samples)))
-                        log.info("Фоновый шум: %.0f%s", noise, " (тихо — если Джарвис вас не слышит, поднимите уровень микрофона в Windows)" if noise < 80 else "")
+                        log.info("Фоновый шум: %.0f%s", noise, " (тихо — если ассистент вас не слышит, поднимите уровень микрофона в Windows)" if noise < 80 else "")
                 if time.time() < followup_until and _rms(pcm) > max(noise * 2.5, 500.0):
-                    tail = ""          # продолжение разговора без «Джарвис»
+                    tail = ""          # продолжение разговора без «ассистент»
                     prefix = chunk
                 else:
                     tail = wake.feed(chunk)
@@ -707,7 +713,7 @@ def main() -> None:
             if tail is None:
                 continue
 
-            # --- услышали «Джарвис» ---
+            # --- услышали «ассистент» ---
             followup_until = 0.0
             set_state("listening")
             _beep(880, 90)
@@ -731,7 +737,7 @@ def main() -> None:
             from core.brain.agent import normalize_spoken
             text = normalize_spoken(text)
             if _STOP_RX.match(text):
-                wake.reset(); set_state("idle"); continue          # «Джарвис, стоп» в тишине — просто молчим
+                wake.reset(); set_state("idle"); continue          # «ассистент, стоп» в тишине — просто молчим
             global _convo_mode
             if _CONVO_ON_RX.match(text) or _CONVO_OFF_RX.match(text):
                 _convo_mode = bool(_CONVO_ON_RX.match(text))
@@ -741,7 +747,7 @@ def main() -> None:
                 followup_until = time.time() + CONVO_MODE_SEC if _convo_mode else 0.0
                 set_state("idle", "режим беседы" if _convo_mode else ""); continue
             if _DICTATE_RX.match(text):
-                # «Джарвис, запиши мысль» → говорим до минуты, пауза 2.5 с завершает
+                # «ассистент, запиши мысль» → говорим до минуты, пауза 2.5 с завершает
                 sp = _Speaker(); sp.start(); sp.say("Слушаю, диктуйте."); sp.finish()
                 set_state("listening", "диктовка")
                 _beep(660, 80)

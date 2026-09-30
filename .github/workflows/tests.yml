@@ -30,6 +30,8 @@ jobs:
       - run: python -m pytest tests -q
 
   web:
+    # web/site лежит в репозитории, чтобы пользователю не ставить Node. Здесь проверяем, что его не забыли
+    # пересобрать после правок web/src (build_web.bat): сборка должна совпасть с закоммиченной.
     name: web/site up to date
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -47,7 +49,24 @@ jobs:
       - name: fail if web/site differs from the build
         run: |
           if [ -n "$(git status --porcelain -- web/site)" ]; then
-            echo "::error::web/site устарел — запустите build_web.bat и закоммитьте web/site"
+            echo "::error::web/site устарел — запустите build_web.bat (или cd web && npm run build) и закоммитьте web/site"
             git status --short -- web/site
             exit 1
           fi
+
+  server:
+    # server.ts — второй (Node) стек проекта: его контракты проверяет npm test,
+    # типы — tsc, а сборка — vite build.
+    name: server.ts (tsc, build, test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: npm test

@@ -19,7 +19,7 @@ export default function Memory() {
   const st = data?.stats || {}
   const counts = { short: st.short, long: st.long, archive: st.archive }
   return (
-    <div className="bento-page space-y-8">
+    <div className="space-y-8">
       <PageHead kicker={`что ${aName().toLowerCase()} о вас знает и помнит`} title="память" />
       <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 animate-rise">
         {TABS.map(([id, l]) => (

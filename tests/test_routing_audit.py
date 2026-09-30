@@ -3,7 +3,7 @@
 import json
 import os
 
-os.environ.setdefault("JARVIS_TEST", "1")
+os.environ.setdefault("ASSISTANT_TEST", "1")
 
 import pytest  # noqa: E402
 

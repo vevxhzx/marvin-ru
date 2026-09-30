@@ -1,0 +1,8 @@
+{
+  "name": "Джарвис — Персональный ассистент",
+  "description": "Деньги, календарь, задачи, заказы и второй мозг — персональный ассистент Джарвис",
+  "permissions": [],
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

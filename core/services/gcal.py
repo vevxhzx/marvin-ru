@@ -1,6 +1,6 @@
-"""Google Календарь — синхронизация в одну сторону: Джарвис → Google.
+"""Google Календарь — синхронизация в одну сторону: ассистент → Google.
 
-Всё, что появляется в календаре Джарвиса (с сайта, из Telegram, голосом), зеркалится в Google Календарь,
+Всё, что появляется в календаре ассистента (с сайта, из Telegram, голосом), зеркалится в Google Календарь,
 чтобы видеть его на телефоне/часах/в любом приложении. Обратно из Google ничего не читаем — источник правды один.
 
 Как устроено:
@@ -187,7 +187,7 @@ def _body(ev: Event) -> dict:
         "start": {"dateTime": ev.start.replace(microsecond=0).isoformat(), "timeZone": TZ},
         "end": {"dateTime": end.replace(microsecond=0).isoformat(), "timeZone": TZ},
         "reminders": {"useDefault": False, "overrides": [{"method": "popup", "minutes": int(ev.remind_minutes or 0)}]},
-        "extendedProperties": {"private": {"jarvis_id": str(ev.id)}},
+        "extendedProperties": {"private": {"assistant_id": str(ev.id)}},
     }
     if ev.location:
         body["location"] = ev.location

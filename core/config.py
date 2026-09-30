@@ -26,6 +26,30 @@ class _Node:
         return f"_Node({self.__dict__})"
 
 
+def _load_env_file() -> None:
+    """Подгрузить .env в переменные окружения.
+
+    Файл никогда не читался автоматически, поэтому задокументированные в .env.example
+    переменные молча не работали. Правила: только пустые (не заданные в системе) ключи,
+    уже установленное окружение всегда важнее файла.
+    """
+    path = ROOT / ".env"
+    if not path.exists():
+        return
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        if key and key not in os.environ:
+            os.environ[key] = val.strip().strip('"').strip("'")
+
+
 def _load() -> _Node:
     path = ROOT / "config.yaml"
     if not path.exists():
@@ -33,18 +57,22 @@ def _load() -> _Node:
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     # переменные окружения перекрывают файл (удобно для тестов и сервера)
-    env_token = os.getenv("JARVIS_TG_TOKEN")
+    env_token = os.getenv("ASSISTANT_TG_TOKEN") or os.getenv("JARVIS_TG_TOKEN")
     if env_token:
         raw.setdefault("telegram", {})["token"] = env_token
-    env_owner = os.getenv("JARVIS_TG_OWNER")
+    env_owner = os.getenv("ASSISTANT_TG_OWNER") or os.getenv("JARVIS_TG_OWNER")
     if env_owner:
         raw.setdefault("telegram", {})["owner_id"] = int(env_owner)
+    env_ollama = os.getenv("OLLAMA_URL")  # docker-compose: http://ollama:11434
+    if env_ollama:
+        raw.setdefault("brain", {}).setdefault("ollama", {})["url"] = env_ollama
     env_gemini = os.getenv("GEMINI_API_KEY")
     if env_gemini:
         raw.setdefault("brain", {}).setdefault("gemini", {})["api_key"] = env_gemini
     return _Node(raw)
 
 
+_load_env_file()
 cfg = _load()
 DB_PATH = DATA_DIR / "jarvis.db"
 TZ = cfg.owner.timezone if hasattr(cfg, "owner") else "Europe/Moscow"
@@ -53,18 +81,14 @@ TZ = cfg.owner.timezone if hasattr(cfg, "owner") else "Europe/Moscow"
 # ---------------------------------------------------------------- редактирование config.yaml с сайта
 # Какие ключи можно менять через страницу настроек: путь → (тип, подпись, секрет?)
 EDITABLE: dict[str, tuple[str, str, bool]] = {
+    "assistant.name": ("str", "Имя ассистента (так он представляется и откликается голосом)", False),
+    "assistant.name_latin": ("str", "Имя латиницей (заголовки окон, логи)", False),
+    "assistant.aliases": ("str", "Другие варианты имени через запятую", False),
     "owner.name": ("str", "Как к вам обращаться («сэр», «босс», имя; пусто — без обращения)", False),
-    "owner.timezone": ("str", "Часовой пояс (Europe/Moscow)", False),
-    "persona.display_name": ("str", "Как подписан на сайте и во вкладке браузера («Джарвис»)", False),
-    "persona.style": ("str", "Характер: swag (с юмором и подколами) / neutral (мягко, по делу)", False),
-    "persona.humor_level": ("int", "Уровень юмора 0–10 (0–2 без шуток, 6–8 сарказм по делу, 9–10 жёстко)", False),
-    "persona.nicknames": ("str", "Как ещё вас звать, через запятую («Вовчик, шеф, босс»)", False),
-    "persona.where": ("str", "Кто формулирует инициативные фразы: cloud / auto / local", False),
-    "persona.voice_accents": ("bool", "Итог дня и подколы иногда голосовым (не чаще раза в день)", False),
     "telegram.token": ("str", "Токен Telegram-бота (от @BotFather)", True),
     "telegram.owner_id": ("int", "Ваш Telegram ID (от @userinfobot)", False),
     "telegram.morning_digest": ("str", "Утренний дайджест (ЧЧ:ММ, пусто — выключить)", False),
-    "notifications.quiet_from": ("int", "Тихие часы: с (час 0–23) — ночью Джарвис сам не пишет", False),
+    "notifications.quiet_from": ("int", "Тихие часы: с (час 0–23) — ночью ассистент сам не пишет", False),
     "notifications.quiet_to": ("int", "Тихие часы: до (час 0–23)", False),
     "notifications.proactive_enabled": ("bool", "Сам напоминает о том, что заметил (просрочка оплаты, дело без срока, самочувствие)", False),
     "notifications.proactive_per_day": ("int", "Не больше стольких инициативных сообщений в день (5)", False),
@@ -73,7 +97,6 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "telegram.webapp_url": ("str", "Адрес сайта для приложения в Telegram (https://…ts.net из funnel.bat)", False),
     "brain.mode": ("str", "Режим мозга: local / hybrid / cloud", False),
     "brain.ollama.url": ("str", "Адрес Ollama", False),
-    "brain.ollama.num_ctx": ("int", "Окно контекста модели (8192; больше — медленнее и больше видеопамяти)", False),
     "brain.ollama.model": ("str", "Модель Ollama", False),
     "brain.ollama.embed_model": ("str", "Модель эмбеддингов (смысловой поиск)", False),
     "brain.ollama.small_model": ("str", "Малая модель для мини-задач (судья «трата или заказ», уборка памяти): qwen2.5:1.5b — пусто = основная", False),
@@ -101,7 +124,6 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "brain.memory.short_days": ("int", "Сколько дней факт живёт в «сейчас», прежде чем стать постоянным или уйти в архив", False),
     "brain.relations.enabled": ("bool", "Связи между записями в Мозге («связано:» в карточке, смысловые линии в графе)", False),
     "brain.relations.where": ("str", "Кто решает, связаны ли записи: cloud (облако, при сбое ПК) / auto (ПК, при сбое облако) / local (только ПК). Кандидатов всегда отбирает ПК", False),
-    "voice.enabled": ("bool", "Голосовые сообщения в Telegram распознавать (выкл — только текст)", False),
     "voice.stt.model": ("str", "Модель распознавания Whisper: tiny / base / small / medium (точнее, но медленнее)", False),
     "voice.stt.cloud": ("bool", "Распознавать речь через Groq Whisper (~1 с, но голос уходит в облако; нужен провайдер groq)", False),
     "voice.tts.engine": ("str", "Голос: silero (офлайн) / edge (онлайн, Microsoft) / off", False),
@@ -112,8 +134,8 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "voice.pc.mic": ("str", "Голос на ПК: микрофон (пусто — по умолчанию; номер из «voice.bat --mics»)", False),
     "voice.pc.silence_sec": ("str", "Голос на ПК: пауза в речи (сек), после которой команда считается сказанной. 0.8 — быстро, 1.5–2 — если обрывает на раздумьях", False),
     "voice.pc.max_command_sec": ("int", "Голос на ПК: максимальная длина одной команды, секунд", False),
-    "voice.pc.conversation_sec": ("int", "Голос на ПК: сколько секунд после ответа можно говорить без «Джарвис» (0 — только после его вопросов)", False),
-    "voice.pc.conversation_mode_sec": ("int", "Голос на ПК: окно в «режиме беседы» («Джарвис, режим беседы» / «хватит болтать»), секунд", False),
+    "voice.pc.conversation_sec": ("int", "Голос на ПК: сколько секунд после ответа можно говорить без имени ассистента (0 — только после его вопросов)", False),
+    "voice.pc.conversation_mode_sec": ("int", "Голос на ПК: окно в «режиме беседы» («<имя>, режим беседы» / «хватит болтать»), секунд", False),
     "voice.pc.morning_report": ("bool", "Голос на ПК: утренний доклад вслух, когда впервые сели за компьютер", False),
     "voice.pc.night_from": ("int", "Ночной режим с (час): тише и без лишних напоминаний вслух", False),
     "voice.pc.night_to": ("int", "Ночной режим до (час)", False),
@@ -125,16 +147,27 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "voice.pc.tidy_downloads_days": ("int", "Ночная уборка «Загрузок» (voice.bat): файлы старше N дней — в Загрузки/Разобрано; 0 — выключено. Рабочий стол — только по команде", False),
     "voice.pc.games": ("str", "Свои игры для авто-игрового режима: имена exe через запятую (популярные знаю сам)", False),
     "finance.main_account": ("str", "Основной счёт", False),
-    "google.enabled": ("bool", "Отправлять события в Google Календарь (только Джарвис → Google)", False),
+    "persona.style": ("str", "Характер: swag (с юмором) / neutral (по делу)", False),
+    "persona.humor_level": ("int", "Уровень юмора 0–10 (0–2 без шуток, 6–8 сарказм по делу, 9–10 жёстко)", False),
+    "persona.nicknames": ("str", "Как ещё вас звать, через запятую («шеф, босс»)", False),
+    "persona.where": ("str", "Кто формулирует инициативные фразы: cloud / auto / local", False),
+    "persona.voice_accents": ("bool", "Итог дня и подколы иногда голосовым (не чаще раза в день)", False),
+    "server.port": ("int", "Порт сайта (нужен перезапуск)", False),
+    "google.enabled": ("bool", "Отправлять события в Google Календарь (только ассистент → Google)", False),
     "google.client_id": ("str", "Google OAuth Client ID (…apps.googleusercontent.com) — см. README «Google Календарь»", False),
     "google.client_secret": ("str", "Google OAuth Client secret", True),
     "google.calendar_id": ("str", "ID календаря в Google (пусто — основной)", False),
     "google.proxy": ("str", "Прокси для Google (пусто — берётся прокси Telegram, если задан)", False),
-    "server.port": ("int", "Порт сайта (нужен перезапуск; у второй копии на том же ПК — другой)", False),
     "backup.enabled": ("bool", "Ежедневный бэкап базы", False),
     "backup.dir": ("str", "Папка бэкапов", False),
     "backup.extra_dir": ("str", "Вторая копия (другой диск / папка Яндекс.Диска)", False),
     "backup.keep_days": ("int", "Хранить бэкапы, дней", False),
+    "setup.done": ("bool", "Мастер первого запуска пройден", False),
+    "brain.ollama.num_ctx": ("int", "Размер контекста локальной модели", False),
+    "brain.ollama.keep_alive": ("str", "Держать модель в памяти после ответа (2h / 0)", False),
+    "voice.enabled": ("bool", "Голосовые сообщения в Telegram распознавать", False),
+    "voice.stt.device": ("str", "Устройство Whisper: cpu / cuda", False),
+    "owner.timezone": ("str", "Часовой пояс (Europe/Moscow)", False),
 }
 
 
@@ -252,3 +285,16 @@ def write_settings(changes: dict[str, object]) -> list[str]:
         changed.append(key)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return changed
+
+
+def setup_done() -> bool:
+    """Мастер первого запуска пройден? Критерий: есть config.yaml и в нём заполнен режим мозга и (токен ИЛИ явный отказ от Telegram)."""
+    path = ROOT / "config.yaml"
+    if not path.exists():
+        return False
+    try:
+        with open(path, encoding="utf-8") as f:
+            raw = yaml.safe_load(f) or {}
+    except Exception:
+        return False
+    return bool(_get_path(raw, "setup.done", False))

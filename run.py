@@ -19,6 +19,7 @@ if _vendor.exists() and str(_vendor) not in sys.path:
 import uvicorn
 
 from core.config import cfg
+from core import identity
 from core.db import init_db
 from core.services import scheduler
 
@@ -27,19 +28,9 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 log = logging.getLogger("jarvis")
 
-BANNER = r"""
-     ██╗   █████╗   ██████╗  ██╗   ██╗ ██╗ ███████╗
-     ██║  ██╔══██╗  ██╔══██╗ ██║   ██║ ██║ ██╔════╝
-     ██║  ███████║  ██████╔╝ ██║   ██║ ██║ ███████╗
-██   ██║  ██╔══██║  ██╔══██╗ ╚██╗ ██╔╝ ██║ ╚════██║
-╚█████╔╝  ██║  ██║  ██║  ██║  ╚████╔╝  ██║ ███████║
- ╚════╝   ╚═╝  ╚═╝  ╚═╝  ╚═╝   ╚═══╝   ╚═╝ ╚══════╝
-"""
-
-
 def _instance_label() -> str:
     """Чем эта копия отличается от «главной»: имя папки + порт. Вторая копия («jarvis-mama», 8766) — видно в заголовке окна,
-    в первой строке лога и в диспетчере задач, иначе два одинаковых окна «J.A.R.V.I.S.» не различить."""
+    в первой строке лога и в диспетчере задач, иначе два одинаковых окна не различить."""
     from core.config import ROOT
     port = int(getattr(getattr(cfg, "server", None), "port", 8765) or 8765)
     name = ROOT.name
@@ -49,7 +40,7 @@ def _instance_label() -> str:
 
 
 def _set_console_title(label: str) -> None:
-    title = "J.A.R.V.I.S." + (f" — {label}" if label else "")
+    title = identity.title() + (f" — {label}" if label else "")
     try:
         if sys.platform == "win32":
             import ctypes
@@ -60,13 +51,20 @@ def _set_console_title(label: str) -> None:
         pass
 
 
+def _banner() -> str:
+    name = identity.title().upper()
+    line = "\u2500" * (len(name) + 27)
+    return "\n  \u256d" + line + "\u256e\n  \u2502   " + name + "  \u00b7  \u043b\u0438\u0447\u043d\u044b\u0439 \u0430\u0441\u0441\u0438\u0441\u0442\u0435\u043d\u0442   \u2502\n  \u2570" + line + "\u256f\n"
+
+
 async def main(with_tg: bool) -> None:
-    print(BANNER)
+    print(_banner())
     init_db()
     from core import VERSION
     label = _instance_label()
     _set_console_title(label)
-    log.info("J.A.R.V.I.S. v%s%s · база готова: data/jarvis.db", VERSION, f" · копия {label}" if label else "")
+    log.info("%s v%s%s · база готова: data/jarvis.db", identity.title(), VERSION,
+             f" · копия {label}" if label else "")
 
     from core.brain import llm
     if await llm.ollama_available():
@@ -77,16 +75,16 @@ async def main(with_tg: bool) -> None:
     else:
         log.warning("Мозг: Ollama не отвечает — пока работают только команды-шаблоны.")
         log.warning("Диагностика: %s", await llm.ollama_diagnose())
-        log.warning("Как только Ollama поднимется, Джарвис подхватит её сам, перезапуск не нужен.")
+        log.warning("Как только Ollama поднимется, ассистент подхватит её сам, перезапуск не нужен.")
     try:
         from core.voice import stt, tts
-        if os.getenv("JARVIS_NO_VOICE_WARMUP"):
-            log.info("Голос: прогрев моделей отключён (JARVIS_NO_VOICE_WARMUP)")
+        if os.getenv("ASSISTANT_NO_VOICE_WARMUP") or os.getenv("JARVIS_NO_VOICE_WARMUP"):
+            log.info("Голос: прогрев моделей отключён (ASSISTANT_NO_VOICE_WARMUP)")
         elif stt.available():
             log.info("Голос: распознавание whisper-%s, озвучка %s — прогреваю в фоне (первый раз качает модели)", stt.STT_MODEL, tts.ENGINE)
             stt.warmup(); tts.warmup()
         else:
-            log.info("Голос: пакеты не установлены (update.bat) — голосовые в Telegram пока текстом")
+            log.info("Голос: пакеты не установлены (install_voice.bat) — голосовые в Telegram пока текстом")
     except Exception as e:  # pragma: no cover
         log.warning("Голос не инициализирован: %s", e)
     if llm.cloud_enabled():
@@ -94,10 +92,22 @@ async def main(with_tg: bool) -> None:
 
     bot = None
     notify = None
+    from core.config import setup_done
+    first_run = not setup_done()
+    if first_run:
+        with_tg = False
+        if os.getenv("ASSISTANT_DOCKER"):
+            from core.api.auth import token as _tok
+            log.info("Первый запуск: мастер настройки → http://localhost:%s/setup?t=%s  (ссылка с ключом доступа)", cfg.server.port, _tok())
+        else:
+            log.info("Первый запуск: открываю мастер настройки http://localhost:%s/setup", cfg.server.port)
+        if not os.getenv("ASSISTANT_NO_BROWSER") and not os.getenv("JARVIS_NO_BROWSER"):
+            import webbrowser
+            asyncio.get_event_loop().call_later(1.5, lambda: webbrowser.open(f"http://localhost:{cfg.server.port}/setup"))
     if with_tg:
         token = str(cfg.telegram.token or "")
         if ":" not in token or "ВСТАВЬ" in token:
-            log.warning("Telegram-токен не заполнен в config.yaml — бот не запущен. API работает.")
+            log.warning("Telegram-токен не заполнен — бот не запущен. Подключите в ⚙ Настройках на сайте. API и сайт работают.")
             with_tg = False
     if with_tg:
         from core.telegram import bot as tgbot
@@ -133,14 +143,14 @@ async def main(with_tg: bool) -> None:
     if not _st["first_run"] and _st["gap_min"] is not None:
         log.info("Перезапуск: пауза %d мин (до этого: %s)", _st["gap_min"], _st["was"])
 
-    # порт занят = Джарвис уже запущен (второе окно / автозагрузка). Второй экземпляр отберёт у первого Telegram.
+    # порт занят = ассистент уже запущен (второе окно / автозагрузка). Второй экземпляр отберёт у первого Telegram.
     import socket
     probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     try:
         probe.bind(("0.0.0.0", int(cfg.server.port)))
     except OSError:
-        log.error("Порт %s уже занят — Джарвис УЖЕ ЗАПУЩЕН (другое окно или автозагрузка в трее/фоне).", cfg.server.port)
-        log.error("Второе окно не нужно: закройте это. Если хотите перезапустить — закройте ВСЕ окна Джарвиса и запустите start.bat снова.")
+        log.error("Порт %s уже занят — ассистент УЖЕ ЗАПУЩЕН (другое окно или автозагрузка в трее/фоне).", cfg.server.port)
+        log.error("Второе окно не нужно: закройте это. Если хотите перезапустить — закройте ВСЕ окна ассистента и запустите start.bat снова.")
         log.error("Найти скрытый экземпляр: Диспетчер задач → «python» → снять задачу.")
         sys.exit(3)
     finally:
@@ -152,6 +162,11 @@ async def main(with_tg: bool) -> None:
     from core.config import ROOT
     if (ROOT / "web" / "site" / "index.html").exists() or (ROOT / "web" / "dist" / "index.html").exists():
         log.info("Сайт: http://localhost:%s  (открой в браузере)", cfg.server.port)
+        if os.getenv("ASSISTANT_DOCKER"):
+            # в Docker браузер приходит не с loopback → нужна ссылка с ключом доступа (см. core/api/auth.py)
+            from core.api.auth import token as _tok
+            log.info("Docker: открывайте сайт по ссылке с ключом → http://localhost:%s/?t=%s  (ключ в data/api_token)",
+                     cfg.server.port, _tok())
     else:
         log.warning("Папка web/site не найдена (%s) — показываю пробную страницу. "
                     "Скачай папку web/site из проекта и положи в web\\", ROOT / "web" / "site")
@@ -195,4 +210,4 @@ if __name__ == "__main__":
         with asyncio.Runner(loop_factory=loop_factory) as runner:
             runner.run(main(with_tg="--no-tg" not in sys.argv))
     except KeyboardInterrupt:
-        print("\nДжарвис выключен. До связи, сэр.")
+        print(f"\n{identity.title()} выключен. До связи.")

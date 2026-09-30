@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta
 from typing import Optional
 
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 import asyncio
 import logging
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -433,6 +433,8 @@ class EventIn(BaseModel):
     repeat: str = ""                       # "" / daily / weekly / monthly / yearly
     repeat_days: list[int] = []            # для weekly: 0=пн … 6=вс
     repeat_until: Optional[datetime] = None
+    task_id: Optional[int] = None          # привязать встречу к задаче — галочка закроет и её
+    order_id: Optional[int] = None         # привязать к заказу — галочка закроет заказ
 
     @field_validator("title")
     @classmethod
@@ -493,13 +495,15 @@ def events(start: Optional[datetime] = None, end: Optional[datetime] = None, tas
 @app.post("/api/events")
 def create_event(e: EventIn):
     return _ev_out(calendar.add_event(e.title, e.start, e.duration_min, e.location, e.notes, e.remind_minutes, "web",
-                                      repeat=e.repeat, repeat_days=e.repeat_days, repeat_until=e.repeat_until))
+                                      repeat=e.repeat, repeat_days=e.repeat_days, repeat_until=e.repeat_until,
+                                      task_id=e.task_id, order_id=e.order_id))
 
 
 @app.put("/api/events/{event_id}")
 def update_event(event_id: int, e: EventIn):
     ev = calendar.update_event(event_id, title=e.title, start=e.start, duration_min=e.duration_min, location=e.location, notes=e.notes,
-                               remind_minutes=e.remind_minutes, repeat=e.repeat, repeat_days=e.repeat_days, repeat_until=e.repeat_until)
+                               remind_minutes=e.remind_minutes, repeat=e.repeat, repeat_days=e.repeat_days, repeat_until=e.repeat_until,
+                               task_id=e.task_id, order_id=e.order_id)
     if not ev:
         raise HTTPException(404)
     return _ev_out(ev)
@@ -516,14 +520,66 @@ class EventDoneIn(BaseModel):
 
 @app.post("/api/events/{event_id}/done")
 def done_event(event_id: int, p: EventDoneIn):
-    """Галочка на событии — как на задаче. Одна запись: видна и в календаре, и в «Делах», и в Google (✓ в названии)."""
+    """Галочка на событии — как на задаче. Одна запись: видна и в календаре, и в «Делах», и в Google (✓ в названии).
+
+    Отрицательный id — проекция: `-id` = задача, `-(100000 + id)` = дедлайн заказа. В ответе `linked` —
+    что ещё закрылось вместе с этим событием: одна галочка отражается и в задачах, и в заказах."""
+    linked: list[str] = []
+
+    # дедлайн заказа: «сдал» / обратно «снова в работе»
+    if event_id <= -100000:
+        order_id = -(event_id + 100000)
+        o = orders.get_order(order_id)
+        if not o:
+            raise HTTPException(404)
+        if p.done and o.status not in ("paid", "cancelled"):
+            orders.update_order(order_id, status="done")
+            linked.append(f"заказ «{o.title}» — сдан")
+        elif not p.done and o.status == "done":
+            orders.update_order(order_id, status="work")
+            linked.append(f"заказ «{o.title}» — снова в работе")
+        return {"ok": True, "linked": linked}
+
+    # задача из списка, показанная в календаре
+    if event_id < 0:
+        with session() as s:
+            t = s.get(Task, -event_id)
+            if not t:
+                raise HTTPException(404)
+            t.done = bool(p.done)
+            t.done_at = datetime.now() if p.done else None
+            s.add(t)
+            s.commit()
+        return {"ok": True, "linked": linked}
+
     ev = calendar.set_done(event_id, p.done, p.date)
     if not ev:
         raise HTTPException(404)
+
+    # каскад по привязкам встречи
+    if ev.task_id:
+        with session() as s:
+            t = s.get(Task, ev.task_id)
+            if t:
+                t.done = bool(p.done)
+                t.done_at = datetime.now() if p.done else None
+                s.add(t)
+                s.commit()
+                linked.append(f"задача «{t.title}»")
+    if ev.order_id:
+        o = orders.get_order(ev.order_id)
+        if o:
+            if p.done and o.status not in ("paid", "cancelled"):
+                orders.update_order(ev.order_id, status="done")
+                linked.append(f"заказ «{o.title}»")
+            elif not p.done and o.status == "done":
+                orders.update_order(ev.order_id, status="work")
+                linked.append(f"заказ «{o.title}» — снова в работе")
+
     d = _ev_out(ev)
     if ev.repeat and p.date:
         d["done"] = calendar.is_done(ev, p.date)
-    return d
+    return {"ok": True, "linked": linked, **d}
 
 
 @app.post("/api/events/{event_id}/skip")
@@ -812,6 +868,48 @@ def fin_summary(days: int = 30):
 @app.get("/api/finance/daily")
 def fin_daily(days: int = 30):
     return finance.daily_series(days)
+
+
+@app.get("/api/finance/forecast")
+def fin_forecast(days: int = 30):
+    """График «касса» на сайте и в разделе «финансы»: прошлые дни — по реальным операциям,
+    будущие — по регулярным платежам и среднему темпу. Формат (points / kind / min_balance)
+    совпадает с тем, что ждёт фронтенд, — иначе график молча показывал бы пустоту."""
+    horizon = max(7, min(int(days or 30), 365))
+    hist = max(30, min(horizon, 90))
+    balance = sum(a.balance for a in finance.list_accounts() if a.kind != "debt_only")
+    today = datetime.now().date()
+
+    txs = [t for t in finance.list_transactions(hist + 1, 100_000) if t.date]
+    deltas: dict = {}
+    spent = income = 0.0
+    for t in txs:
+        d0 = t.date.date()
+        deltas[d0] = deltas.get(d0, 0.0) + (t.amount if t.kind == "income" else -t.amount)
+        if t.kind == "expense":
+            spent += float(t.amount)
+        else:
+            income += float(t.amount)
+
+    # баланс на конец прошедшего дня = текущий баланс − всё, что случилось после него
+    points: list[dict] = []
+    after = 0.0
+    for i in range(hist, -1, -1):
+        d = today - timedelta(days=i)
+        points.append({"date": d.isoformat(), "balance": round(balance - after), "kind": "past"})
+        after += deltas.get(d, 0.0)
+
+    fc = insights.cash_forecast(horizon)
+    points.extend({"date": p["date"], "balance": p["balance"], "kind": "future", "events": p.get("events") or []}
+                  for p in fc["points"][1:])
+
+    fut = [p for p in points if p["kind"] == "future"]
+    low = min((p["balance"] for p in fut), default=balance)
+    low_date = next((p["date"] for p in fut if p["balance"] == low), today.isoformat())
+    runway = next((i + 1 for i, p in enumerate(fut) if p["balance"] <= 0), None)
+    return {"points": points, "horizon_days": horizon, "avg_day_spent": round(spent / hist),
+            "avg_day_income": round(income / hist), "runway_days": runway, "min_balance": round(low),
+            "min_date": low_date, "balance": round(balance)}
 
 
 @app.get("/api/finance/transactions")
@@ -2445,6 +2543,13 @@ if (web_dist / "index.html").exists():
 
     @app.get("/{path:path}", include_in_schema=False)
     def spa(path: str):
+        # До завершения мастера не отдаём приложение наружу: auth middleware
+        # закроет /setup для проксированных клиентов, а локальный ПК увидит мастер.
+        from ..config import setup_done
+        if path == "setup":
+            return HTMLResponse((ROOT / "core" / "api" / "setup.html").read_text(encoding="utf-8"))
+        if not setup_done() and not path.startswith(("api", "media", "assets")):
+            return RedirectResponse("/setup")
         # любой не-API маршрут (/finance, /calendar…) → index.html, роутинг делает React
         f = web_dist / path
         if path and f.is_file():

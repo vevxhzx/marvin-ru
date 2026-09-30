@@ -1,5 +1,5 @@
 @echo off
-title J.A.R.V.I.S. - Telegram Mini App (Tailscale Funnel)
+title Marvin - Telegram Mini App (Tailscale Funnel)
 cd /d "%~dp0"
 echo.
 echo  === Telegram Mini App: public HTTPS address via Tailscale Funnel ===

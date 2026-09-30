@@ -1,4 +1,4 @@
-"""Включает Tailscale Funnel для сайта Джарвиса и записывает публичный адрес в config.yaml (telegram.webapp_url).
+"""Включает Tailscale Funnel для сайта ассистента и записывает публичный адрес в config.yaml (telegram.webapp_url).
 
 Запускается из funnel.bat. Ничего не ставит и не требует прав администратора.
   python funnel_setup.py          — включить/проверить и записать адрес
@@ -105,7 +105,7 @@ def main() -> int:
         if cur != url:
             write_settings({"telegram.webapp_url": url})
             print(f"  Записал в config.yaml: telegram.webapp_url = {url}")
-            print("  ! Перезапустите Джарвиса (start.bat), чтобы в боте появилась кнопка приложения.")
+            print("  ! Перезапустите ассистента (start.bat), чтобы в боте появилась кнопка приложения.")
         else:
             print("  В config.yaml адрес уже такой же.")
     except Exception as e:

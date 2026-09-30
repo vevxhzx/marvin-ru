@@ -1,4 +1,4 @@
-"""Этап А: задачи ⇄ календарь одна сущность, ночные часы «в 4», имя ассистента в интерфейсе."""
+"""Этап А: задачи ⇄ календарь одна сущность, ночные часы «в 4», имя ассистента в интерфейсе (identity)."""
 import os
 from datetime import datetime, timedelta
 
@@ -124,11 +124,11 @@ def test_night_hours_are_not_taken_literally():
 
 
 def test_display_name_in_health_and_manifest():
-    from core.brain import persona
+    from core import identity
     c = _client()
     h = _j(c.get("/api/health"))
-    assert h["name"] == persona.display_name() == "Джарвис"
-    assert _j(c.get("/manifest.json"))["short_name"] == "Джарвис"
+    assert h["name"] == identity.title()
+    assert _j(c.get("/manifest.json"))["short_name"] == identity.title()
 
 
 def test_task_with_day_only_is_all_day_not_ten_am():

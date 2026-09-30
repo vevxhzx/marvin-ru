@@ -38,6 +38,9 @@ class Event(SQLModel, table=True):
     done: bool = Field(default=False, index=True)
     done_at: Optional[datetime] = None
     done_dates: str = ""               # для повторов: какие именно разы отмечены "2026-09-10,2026-09-17"
+    # привязки: встреча «вместо» задачи или заказа — галочка в календаре закрывает и их
+    task_id: Optional[int] = Field(default=None, index=True)
+    order_id: Optional[int] = Field(default=None, index=True)
 
 
 # ---------- Задачи ----------
@@ -458,7 +461,8 @@ def _migrate() -> None:
         "category": {"budget": "FLOAT DEFAULT 0", "custom": "BOOLEAN DEFAULT 0", "bucket": "VARCHAR DEFAULT ''"},
         "event": {"repeat": "VARCHAR DEFAULT ''", "repeat_days": "VARCHAR DEFAULT ''", "repeat_until": "DATETIME",
                   "skip_dates": "VARCHAR DEFAULT ''", "reminded_for": "VARCHAR DEFAULT ''",
-                  "done": "BOOLEAN DEFAULT 0", "done_at": "DATETIME", "done_dates": "VARCHAR DEFAULT ''"},
+                  "done": "BOOLEAN DEFAULT 0", "done_at": "DATETIME", "done_dates": "VARCHAR DEFAULT ''",
+                  "task_id": "INTEGER", "order_id": "INTEGER"},
         "task": {"remind_stage": "INTEGER DEFAULT 0", "aim_id": "INTEGER", "milestone_id": "INTEGER", "blocked_by": "VARCHAR DEFAULT ''"},
         "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''",
                    "pay_mode": "VARCHAR DEFAULT 'each'", "pay_every": "INTEGER DEFAULT 14", "pay_days": "VARCHAR DEFAULT ''"},

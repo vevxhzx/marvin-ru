@@ -153,7 +153,8 @@ def expand(events: list[Event], start: datetime, end: datetime) -> list[Event]:
 # ---------------------------------------------------------------- CRUD
 def add_event(title: str, start: datetime, duration_min: int = 60, location: str | None = None,
               notes: str | None = None, remind_minutes: int = 30, source: str = "tg",
-              repeat: str = "", repeat_days: list[int] | None = None, repeat_until: datetime | None = None) -> Event:
+              repeat: str = "", repeat_days: list[int] | None = None, repeat_until: datetime | None = None,
+              task_id: int | None = None, order_id: int | None = None) -> Event:
     repeat = repeat if repeat in REPEATS else ""
     with session() as s:
         # защита от дублей: то же название в тот же час (сказал дважды / из TG и с сайта)
@@ -164,7 +165,7 @@ def add_event(title: str, start: datetime, duration_min: int = 60, location: str
         ev = Event(title=title, start=start, end=start + timedelta(minutes=duration_min),
                    location=location, notes=notes, remind_minutes=remind_minutes, source=source,
                    repeat=repeat, repeat_days=",".join(str(d) for d in sorted(set(repeat_days or []))) if repeat == "weekly" else "",
-                   repeat_until=repeat_until)
+                   repeat_until=repeat_until, task_id=task_id, order_id=order_id)
         s.add(ev)
         s.commit()
         s.refresh(ev)
@@ -195,6 +196,10 @@ def update_event(event_id: int, **fields) -> Event | None:
         for k in ("location", "notes"):
             if k in fields:
                 setattr(ev, k, (fields[k] or "").strip() or None)
+        # привязки к задаче или заказу: галочка на встрече закроет и их
+        for k in ("task_id", "order_id"):
+            if k in fields:
+                setattr(ev, k, int(fields[k]) if fields[k] else None)
         if fields.get("remind_minutes") is not None:
             ev.remind_minutes = int(fields["remind_minutes"]); ev.reminded = False
         if "repeat" in fields:

@@ -253,7 +253,7 @@ def budget_alerts() -> list[str]:
 
 
 def subscriptions_nudge() -> str | None:
-    """Раз в месяц: найденные подписки, о которых Джарвис ещё не говорил."""
+    """Раз в месяц: найденные подписки, о которых ассистент ещё не говорил."""
     subs = detect_subscriptions()
     if not subs:
         return None

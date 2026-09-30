@@ -1,4 +1,4 @@
-"""Характер Джарвиса: системный промпт и готовые реплики."""
+"""Характер ассистента: системный промпт и готовые реплики. Имя — из core.identity."""
 from __future__ import annotations
 
 import logging
@@ -7,19 +7,19 @@ import re
 from datetime import datetime
 
 from ..config import cfg
+from .. import identity
 
 _log = logging.getLogger("jarvis.persona")
 
-OWNER = str(getattr(getattr(cfg, "owner", None), "name", "Сэр") or "").strip()
-DISPLAY_NAME = str(getattr(getattr(cfg, "persona", None), "display_name", "") or "Джарвис").strip()
+OWNER = identity.OWNER
+NAME = identity.title()
 
 
 def display_name() -> str:
-    """Как ассистент подписан на сайте и во вкладке (persona.display_name). Логи, окна и файлы остаются J.A.R.V.I.S."""
-    return DISPLAY_NAME or "Джарвис"
+    """Имя ассистента для API/PWA без дублирования логики identity."""
+    return identity.title()
 
 
-# По умолчанию — коротко и по делу. Более живой тон включается только явно в настройках.
 STYLE = getattr(getattr(cfg, "persona", None), "style", "neutral")
 HUMOR = int(getattr(getattr(cfg, "persona", None), "humor_level", 2))
 # persona.nicknames — как ещё можно звать хозяина (через запятую): «Вовчик, шеф, босс». Пусто — только owner.name
@@ -31,13 +31,12 @@ WHERE = str(getattr(getattr(cfg, "persona", None), "where", "cloud") or "cloud")
 def reload_persona() -> str:
     """Перечитать owner.name / persona.* из config.yaml без перезапуска (Настройки → сохранить → сразу новое обращение
     и на сайте, и в Telegram). Раньше имя менялось только после перезапуска start.bat."""
-    global OWNER, STYLE, HUMOR, DISPLAY_NAME, NICKNAMES, WHERE, VOICE_ACCENTS
+    global OWNER, STYLE, HUMOR, NICKNAMES, WHERE, VOICE_ACCENTS
     import importlib
     from .. import config as _c
     importlib.reload(_c)
     c = _c.cfg
     OWNER = str(getattr(getattr(c, "owner", None), "name", "Сэр") or "").strip()
-    DISPLAY_NAME = str(getattr(getattr(c, "persona", None), "display_name", "") or "Джарвис").strip()
     STYLE = getattr(getattr(c, "persona", None), "style", "neutral")
     HUMOR = int(getattr(getattr(c, "persona", None), "humor_level", 2))
     NICKNAMES = [x.strip() for x in str(getattr(getattr(c, "persona", None), "nicknames", "") or "").split(",") if x.strip()]
@@ -66,7 +65,7 @@ def now_line() -> str:
 def system_prompt(compact: bool = False) -> str:
     """compact — для локальной модели с инструментами (короче характер, см. character_block)."""
     base = (
-        f"Ты — Джарвис, личный ассистент. Твой хозяин — {OWNER}. Текущие дата и время будут в конце сообщения пользователя.\n"
+        f"Ты — {NAME}, личный ассистент. Твой хозяин — {OWNER}. Текущие дата и время будут в конце сообщения пользователя.\n"
         "Отвечай ТОЛЬКО по-русски.\n"
     )
     if STYLE == "swag":

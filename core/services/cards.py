@@ -210,9 +210,10 @@ class _Canvas:
             self.y += 34
 
     def finish(self, path: Path) -> Path:
+        from .. import identity
         self.y += 36
         f, fb = _font(20, False), _font(20)
-        self.d.text((PAD, self.y), "джарвис", font=fb, fill=INK_3)
+        self.d.text((PAD, self.y), identity.NAME.lower(), font=fb, fill=INK_3)
         stamp = datetime.now().strftime("%d.%m.%Y · %H:%M")
         self.d.text((W - PAD - self.tw(stamp, f), self.y), stamp, font=f, fill=INK_3)
         self.y += 24 + PAD

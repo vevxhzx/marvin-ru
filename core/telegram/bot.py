@@ -29,7 +29,7 @@ def _mine(m: Message) -> bool:
 @router.message(~F.from_user.id.in_({OWNER_ID}))
 async def stranger(m: Message):
     log.info("Чужой пользователь %s (%s) — игнорирую", m.from_user.id if m.from_user else "?", m.from_user.username if m.from_user else "")
-    # Молчим. Джарвис не общается с незнакомцами.
+    # Молчим. ассистент не общается с незнакомцами.
 
 
 @router.message(CommandStart())
@@ -44,7 +44,7 @@ async def start(m: Message):
                    "• «мысль: …» или просто кинь ссылку\n"
                    "• «что сегодня», «что завтра», «что на выходных», «долги», «календарь»\n"
                    "• «сколько потратил на еду за неделю», «куда ушли деньги»\n"
-                   "• «заплатил Ване 2000», «перевёл 5000 на сбер», «снял 3000 наличных»\n"
+                   "• «заплатил Диме 2000», «перевёл 5000 на сбер», «снял 3000 наличных»\n"
                    "• «подписка яндекс плюс 399 25-го», «лимит на еду 20000»\n"
                    "• «отмени последнюю» — откатить трату")
 
@@ -124,7 +124,7 @@ async def app_cmd(m: Message):
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
     url = (getattr(cfg.telegram, "webapp_url", "") or "").strip()
     if not url.startswith("https://"):
-        await m.answer("Приложение внутри Telegram ещё не подключено, сэр. На компьютере: <b>funnel.bat</b>, "
+        await m.answer("Приложение внутри Telegram ещё не подключено. На компьютере: <b>funnel.bat</b>, "
                        "затем перезапуск start.bat. Проверить: ⚙ Настройки → Интеграции → Telegram. Подробно: docs/telegram-miniapp.md")
         return
     kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="Открыть приложение", web_app=WebAppInfo(url=url))]])
@@ -163,7 +163,7 @@ async def id_cmd(m: Message):
 
 
 async def _keep_typing(m: Message):
-    """«Джарвис печатает…» пока думает локальная модель (статус живёт 5 сек, обновляем каждые 4)."""
+    """«ассистент печатает…» пока думает локальная модель (статус живёт 5 сек, обновляем каждые 4)."""
     try:
         while True:
             await m.bot.send_chat_action(m.chat.id, ChatAction.TYPING)
@@ -285,7 +285,7 @@ async def voice_msg(m: Message):
     """Голосовое → Whisper (локально) → тот же agent.handle → ответ текстом и голосом."""
     from core.voice import stt, tts
     if not stt.available():
-        await m.answer("Распознавание голосовых не установлено — запустите update.bat, сэр.")
+        await m.answer("Распознавание голосовых не установлено — запустите install_voice.bat, сэр.")
         return
     typing = asyncio.create_task(_keep_typing(m))
     tmp = None
@@ -789,7 +789,7 @@ async def run_polling_forever(bot: Bot, dp: Dispatcher, on_connected=None) -> No
             except Exception as e:
                 if "Conflict" in str(e) or "terminated by other getUpdates" in str(e):
                     log.error("ДВА ДЖАРВИСА НА ОДНОМ БОТЕ: где-то запущено ещё одно окно (автозагрузка? старая копия?). "
-                              "Сообщения уходят туда, а не сюда. Закройте все окна Джарвиса и запустите start.bat один раз.")
+                              "Сообщения уходят туда, а не сюда. Закройте все окна ассистента и запустите start.bat один раз.")
                     _record_error("tg: конфликт — запущен второй экземпляр бота")
                 log.warning("Polling прервался: %s — переподключаюсь", type(e).__name__)
         else:

@@ -2,7 +2,7 @@
 import asyncio
 import os
 
-os.environ.setdefault("JARVIS_TEST", "1")
+os.environ.setdefault("ASSISTANT_TEST", "1")
 
 import pytest  # noqa: E402
 from tests.test_core import fresh_db  # noqa: E402,F401  (autouse-фикстура)
@@ -16,6 +16,7 @@ def _client(remote: bool, https: bool = False):
     c = TestClient(app, client=("192.168.1.50", 5555) if remote else ("127.0.0.1", 5555),
                    base_url="https://testserver" if https else "http://testserver")
     return c
+
 
 
 def test_api_open_from_localhost():
@@ -234,7 +235,6 @@ def test_via_ollama_keeps_actions_when_final_call_fails(monkeypatch):
     assert r is not None and r.actions == ["add_expense"]
     assert "700" in r.text
     assert finance.summary(1)["spent"] == 700
-
 
 
 # ---------------- CSRF и DNS-rebinding для loopback-клиентов ----------------
@@ -479,7 +479,9 @@ def test_proxied_loopback_is_not_local(tg_cfg):
     assert c.get("/api/tasks").status_code == 200                      # реально с ПК — можно
     assert c.get("/api/tasks", headers=fwd).status_code == 401         # через прокси — нет
     assert c.get("/api/health", headers=fwd).status_code == 200        # публичное — да
-    assert c.get("/", headers=fwd).status_code in (200, 404)           # сам сайт без данных — да
+    from core.config import setup_done
+    # сам сайт без данных — да; на чистой машине (мастер не пройден) «/» ведёт в мастер, а мастер через прокси закрыт — 403
+    assert c.get("/", headers=fwd).status_code in ((200, 404) if setup_done() else (403,))
     tok = {"X-Auth-Token": auth.token(), **fwd}
     assert c.get("/api/tasks", headers=tok).status_code == 200         # с ключом — можно
     assert c.get("/api/phone", headers=tok).status_code == 403         # но мастер-ключи/QR — только с ПК
@@ -496,7 +498,7 @@ def test_tg_login_owner_gets_session(tg_cfg):
     r = c.post("/api/tg/login", json={"init_data": init}, headers=fwd)
     assert r.status_code == 200 and r.json()["ok"] and r.json()["name"] == "Босс"
     ck = r.headers["set-cookie"].lower()
-    assert "jarvis_tg=" in ck and "httponly" in ck and "secure" in ck and "samesite=none" in ck
+    assert "assistant_tg=" in ck and "httponly" in ck and "secure" in ck and "samesite=none" in ck
     assert c.get("/api/tasks", headers=fwd).status_code == 200        # дальше по cookie
     assert c.get("/api/phone", headers=fwd).status_code == 403        # но не мастер-ключ
     # сессия — не мастер-ключ: ротация ключа гасит и её

@@ -1,6 +1,6 @@
 # Архитектура (как есть, сентябрь 2026)
 
-Документ описывает **реальный** код репозитория, а не желаемое состояние. Числа строк — ориентир на момент аудита.
+Документ описывает **реальный** код репозитория, а не желаемое состояние. Числа строк — ориентир на 0.9.15 (сентябрь 2026).
 
 ## 1. Что это
 
@@ -29,22 +29,22 @@
 | Слой | Путь | Размер | Роль |
 |---|---|---|---|
 | Вход | `run.py` | ~170 | Старт: миграции, uvicorn, TG, планировщик, прогрев моделей, мастер первого запуска |
-| HTTP | `core/api/app.py` | 1292, 98 роутов | REST для сайта, SSE, настройки, Google OAuth, мастер `/setup`, статика `web/site` |
+| HTTP | `core/api/app.py` | ~2050, 157 роутов | REST для сайта, SSE, настройки, Google OAuth, мастер `/setup`, статика `web/site` |
 | HTTP | `core/api/auth.py` | ~200 | доступ: loopback свободно (но не через прокси с `X-Forwarded-*`), иначе токен `data/api_token` (cookie/заголовок) или Telegram-сессия |
 | HTTP | `core/api/tg_auth.py` | ~180 | вход из Telegram Mini App: проверка `initData` (HMAC от токена бота, свежесть, `owner_id`) → подписанная сессия на 30 дней; лимит попыток |
-| Мозг | `core/brain/agent.py` | 1036 | `handle()` — главный вход: правила → pending-подтверждения → Ollama с инструментами → облако; постобработка (`_claims_saved`, `_forced_tool`, `_russian_only`) |
-| Мозг | `core/brain/llm.py` | 924 | Ollama (`ollama_chat`, авто-`num_ctx`, game mode) и облако (`cloud_chat`, провайдеры, анонимайзер, fallback моделей) |
-| Мозг | `core/brain/quick.py`, `dates.py`, `persona.py` | 432/296/~100 | Быстрые ответы без LLM, разбор русских дат/сумм, системный промпт + реплики |
-| Инструменты | `core/tools/registry.py` | 501 | 26 `@tool` с JSON-схемами; `validate_args()` **(новое)** и `run_tool()` — единственная граница LLM → данные |
-| Сервисы | `core/services/finance.py` | 854 | Счета, транзакции, категории, долги, регулярные, бюджеты, сводки |
-| Сервисы | `calendar.py`, `gcal.py`, `tasks.py`, `brain_notes.py`, `insights.py`, `bulk.py`, `cards.py`, `bank_import.py`, `polish.py`, `pc.py`, `scheduler.py` | 100–330 каждый | Предметная логика; `scheduler.py` — cron-задачи и бэкап |
-| Данные | `core/db.py` | 302 | 14 таблиц SQLModel (Event, Task, Account, Category, Transaction, Recurring, Debt, Note, Link, Memory, Setting, ActionLog, Embedding, ChatMessage); движок SQLite WAL, `check_same_thread=False` |
+| Мозг | `core/brain/agent.py` | ~1800 | `handle()` — главный вход: правила → pending-подтверждения → судья спорных фраз → Ollama с инструментами → облако; страж правды `_truth_gate` (ответ сверяется с реальным результатом инструментов), журнал `trace` |
+| Мозг | `core/brain/llm.py` | ~1140 | Ollama (`ollama_chat`, авто-`num_ctx`, game mode) и облако (`cloud_chat`, провайдеры, анонимайзер, fallback моделей) |
+| Мозг | `core/brain/quick.py`, `dates.py`, `persona.py`, `sorter.py` | 432/343/~100/409 | Быстрые ответы без LLM, разбор русских дат/сумм, системный промпт + реплики |
+| Инструменты | `core/tools/registry.py` | ~1030 | 39 `@tool` с JSON-схемами; `validate_args()` и `call()` → `ToolResult` (успех проверяется чтением базы, `risk_of()`: read/write/destructive) — единственная граница LLM → данные |
+| Сервисы | `core/services/finance.py` | ~870 | Счета, транзакции, категории, долги, регулярные, бюджеты, сводки |
+| Сервисы | `calendar.py`, `gcal.py`, `tasks.py`, `brain_notes.py`, `insights.py`, `bulk.py`, `cards.py`, `bank_import.py`, `polish.py`, `pc.py`, `scheduler.py`, `memory.py`, `relations.py`, `judge.py`, `people.py`, `trace.py`, `undo.py` | 100–600 каждый | Предметная логика; `scheduler.py` — cron-задачи и бэкап; `memory.py` — многоуровневая память; `trace.py` — журнал работы и «отчёт о себе» |
+| Данные | `core/db.py` | ~460 | 22 таблицы SQLModel (Event, Task, Account, Category, Transaction, Recurring, Debt, Client, Order, WorkSession, Goal, Note, Link, Memory, Fact, Relation, Setting, ActionLog, Lesson, Run, Embedding, ChatMessage); движок SQLite WAL, `check_same_thread=False` |
 | Конфиг | `core/config.py`, `config.yaml` | 245 | YAML → объект; `EDITABLE` — что можно менять с сайта; маскирование секретов |
-| Telegram | `core/telegram/bot.py` | 698 | Owner-only, текст/голос/фото, `send_long`, кнопки подтверждений |
+| Telegram | `core/telegram/bot.py` | ~800 | Owner-only, текст/голос/фото, `send_long`, кнопки подтверждений |
 | ПК | `core/pc/loop.py`, `core/pc/actions.py` | ~200/312 | Пульс, игровой режим, действия: открыть/найти/переместить, питание, буфер |
-| Голос | `voice_client.py`, `core/voice/{stt,tts}.py` | 858 | Wake-word (Vosk), faster-whisper, Silero/Edge TTS; ходит в API по HTTP |
-| Сайт | `web/src/` (React + Vite + Tailwind) | 7 страниц, 5 компонентов | `lib/api.js` — единая точка fetch; SSE в `App.jsx`; собранный бандл коммитится в `web/site/` |
-| Тесты | `tests/test_core.py`, `tests/test_security.py` | 53 + 25 | Офлайн, временная БД через fixture; `python -m pytest tests -q` |
+| Голос | `voice_client.py`, `core/voice/{stt,tts}.py` | ~890 | Wake-word (Vosk), faster-whisper, Silero/Edge TTS; ходит в API по HTTP |
+| Сайт | `web/src/` (React + Vite + Tailwind) | 9 страниц, 9 компонентов | `lib/api.js` — единая точка fetch; SSE в `App.jsx`; собранный бандл коммитится в `web/site/` |
+| Тесты | `tests/test_*.py` (13 файлов) | ~260 | Офлайн, временная БД через fixture; `python -m pytest tests -q` |
 
 ## 3. Поток обработки сообщения
 
@@ -59,26 +59,26 @@
 | Граница | Как защищено | Файл |
 |---|---|---|
 | Интернет → Telegram | Только `owner_id`, остальным молчим | `core/telegram/bot.py` |
-| Локальная сеть → HTTP API | **(новое)** loopback без проверки; другие адреса — токен (cookie на год через QR/ссылку из настроек, или `X-Auth-Token`). Мастер `/setup`, `/api/phone` и ротация ключа — только физически с ПК (запросы через Funnel/прокси считаются внешними). Вход из Telegram Mini App — `tg_auth.py`. CORS только для Vite dev | `core/api/auth.py`, `app.py` |
-| LLM → данные | **(новое)** `validate_args`: типы, диапазоны, обязательные поля, лишние поля, длины | `core/tools/registry.py` |
-| LLM/речь → ОС | **(новое)** `open_app` без `shell=True`, только найденные в PATH/App Paths/меню «Пуск» программы; запрещённые символы отсекаются | `core/pc/actions.py` |
+| Локальная сеть → HTTP API | loopback без проверки; другие адреса — токен (cookie на год через QR/ссылку из настроек, или `X-Auth-Token`). Мастер `/setup`, `/api/phone` и ротация ключа — только физически с ПК (запросы через Funnel/прокси считаются внешними). Вход из Telegram Mini App — `tg_auth.py`. CORS только для Vite dev | `core/api/auth.py`, `app.py` |
+| LLM → данные | `validate_args`: типы, диапазоны, обязательные поля, лишние поля, длины | `core/tools/registry.py` |
+| LLM/речь → ОС | `open_app` без `shell=True`, только найденные в PATH/App Paths/меню «Пуск» программы; запрещённые символы отсекаются | `core/pc/actions.py` |
 | Чужая веб-страница → LLM | Промпт помечает `page_text` как недоверенные данные; в системном промпте правило «данные — не команды» | `polish.py`, `persona.py` |
-| Ссылка из чата → сеть | **(новое)** только публичные http(s), ручные редиректы с проверкой каждого хопа, лимит 1.5 МБ, только HTML | `brain_notes.fetch_preview` |
+| Ссылка из чата → сеть | только публичные http(s), ручные редиректы с проверкой каждого хопа, лимит 1.5 МБ, только HTML | `brain_notes.fetch_preview` |
 | Личное → облако | `is_personal` + анонимайзер (имена/суммы/телефоны); режимы `local`/`hybrid`/`cloud` | `agent.py`, `llm.py` |
 
 ## 5. Данные и их жизненный цикл
 
 - `data/assistant.db` — всё; WAL; бэкап через `sqlite3.backup()` ежедневно в `backups/` (+ `extra_dir`), хранение `keep_days`.
-- `data/media/` — фото заметок и чеков; **(новое)** зеркалируется в `backups/media/` инкрементально.
+- `data/media/` — фото заметок и чеков; зеркалируется в `backups/media/` инкрементально.
 - `data/api_token` — ключ доступа с других устройств (создаётся при старте, права 600 вне Windows).
 - `config.yaml` — настройки и секреты (TG-токен, ключи облака, Google OAuth). В API отдаются маскированными. Не в git.
 - Удаление пользовательских файлов ассистент **не делает** никогда (переносит в отдельную папку).
 
 ## 6. Известные архитектурные ограничения (не баги, но надо знать)
 
-- **Одиночный монолит `app.py` на 1292 строки и `agent.py` на 1036** — работает, тестируется точечно, но правки требуют внимания. Разбивать «ради красоты» не стали (см. принципы аудита).
+- **Одиночный монолит `app.py` (~2050 строк) и `agent.py` (~1800)** — работает, тестируется точечно, но правки требуют внимания. Разбивать «ради красоты» не стали (осознанно: разбивать при следующей крупной фиче, см. ROADMAP).
 - **SQLite + `check_same_thread=False`** — нормально для одного пользователя; при переезде на VPS с несколькими клиентами держать в уме.
 - **История чата для LLM — 6 сообщений / 600 символов** — осознанный компромисс под `num_ctx` маленьких моделей.
 - **Собранный фронт коммитится в `web/site/`** — чтобы пользователю без Node ничего не собирать; после правок `web/src` нужен `build_web.bat`.
 - **Один процесс = один пользователь.** Многопользовательность не предусмотрена нигде (нет `user_id` в таблицах).
-- **Планировщик in-memory** — при перезапуске напоминания пересчитываются от данных, что нормально; `misfire_grace_time=3600` **(новое)** покрывает сон ПК.
+- **Планировщик in-memory** — при перезапуске напоминания пересчитываются от данных, что нормально; `misfire_grace_time=3600` покрывает сон ПК.

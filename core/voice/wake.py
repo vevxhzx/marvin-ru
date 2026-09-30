@@ -1,13 +1,12 @@
-"""Wake word «Джарвис» — Vosk small-ru (офлайн, ~45 МБ, потоковое распознавание на CPU без нагрузки).
+"""Wake word «ассистент» — Vosk small-ru (офлайн, ~45 МБ, потоковое распознавание на CPU без нагрузки).
 
-Vosk постоянно слушает микрофон и переводит речь в текст. Как только в тексте встречается «джарвис»
+Vosk постоянно слушает микрофон и переводит речь в текст. Как только в тексте встречается имя ассистента
 (с вариациями — джервис, джарвиз, жарвис…), запускается запись команды для Whisper.
 """
 from __future__ import annotations
 
 import json
 import logging
-import re
 import zipfile
 
 from ..config import DATA_DIR
@@ -18,8 +17,9 @@ MODEL_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ru-0.22.zip"
 MODEL_DIR = DATA_DIR / "models" / "vosk-model-small-ru-0.22"
 SAMPLE_RATE = 16000
 
-# как Vosk может расслышать «Джарвис»
-WAKE_RX = re.compile(r"\b(?:дж|ж|ч|дз)[аеэя]р?в[ие][сзш]\w*|\bджар\b|\bжарвиз\b|\bджервиз\b", re.I)
+# как Vosk может расслышать имя (строится из assistant.name)
+from .. import identity
+WAKE_RX = identity.VOSK_WAKE_RX
 
 
 def _download() -> None:
@@ -38,7 +38,7 @@ def _download() -> None:
 
 
 class WakeDetector:
-    """Потоковый детектор: скармливаем 16 кГц int16 кусками, .feed() возвращает текст, если услышал «Джарвис»."""
+    """Потоковый детектор: скармливаем 16 кГц int16 кусками, .feed() возвращает текст, если услышал «ассистент»."""
 
     def __init__(self):
         import vosk
@@ -51,7 +51,7 @@ class WakeDetector:
         self.last_partial = ""
 
     def feed(self, pcm_bytes: bytes) -> str | None:
-        """Возвращает распознанный хвост фразы после «Джарвис» (может быть пустым ''), либо None если слова не было."""
+        """Возвращает распознанный хвост фразы после «ассистент» (может быть пустым ''), либо None если слова не было."""
         if self._rec.AcceptWaveform(pcm_bytes):
             text = json.loads(self._rec.Result()).get("text", "")
             self.last_partial = ""

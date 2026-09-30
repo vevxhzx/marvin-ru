@@ -1,4 +1,7 @@
-# Linux / macOS / VPS. Голос на Windows остаётся в voice.bat.
+# Ядро ассистента: API + сайт + Telegram + планировщик.
+# Голос на ПК (микрофон/озвучка) в контейнере не работает — это отдельный voice.bat на Windows.
+
+# --- 1. собираем сайт (если web/site уже есть в архиве, этот шаг просто пересоберёт его) ---
 FROM node:20-alpine AS web
 WORKDIR /web
 COPY web/package*.json ./
@@ -6,8 +9,9 @@ RUN npm ci --no-audit --no-fund
 COPY web/ ./
 RUN npm run build
 
+# --- 2. ядро ---
 FROM python:3.12-slim
-ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 JARVIS_NO_BROWSER=1 JARVIS_DOCKER=1
+ENV PYTHONUNBUFFERED=1 PIP_DISABLE_PIP_VERSION_CHECK=1 ASSISTANT_NO_BROWSER=1 ASSISTANT_DOCKER=1
 WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .

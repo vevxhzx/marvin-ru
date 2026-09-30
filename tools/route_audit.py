@@ -1,9 +1,9 @@
-"""Стенд маршрутизации: куда уйдёт фраза БЕЗ вызова моделей. Запуск: JARVIS_TEST=1 python tools/route_audit.py
+"""Стенд маршрутизации: куда уйдёт фраза БЕЗ вызова моделей. Запуск: ASSISTANT_TEST=1 python tools/route_audit.py
 Печатает таблицу: правило / судья / сортировщик / облако / локальная-с-инструментами, и размер промпта для локальной."""
 from __future__ import annotations
 import json, sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("JARVIS_TEST", "1")
+os.environ.setdefault("ASSISTANT_TEST", "1")
 from core import db
 db.init_db()   # свежая схема (миграции), иначе на старой базе упадёт guess_category
 from core.brain import agent, sorter, persona, llm

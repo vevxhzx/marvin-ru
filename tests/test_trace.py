@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-os.environ["JARVIS_TEST"] = "1"
+os.environ["ASSISTANT_TEST"] = "1"
 
 from core import db  # noqa: E402
 from core.services import trace  # noqa: E402

@@ -12,6 +12,7 @@ import re
 import threading
 from pathlib import Path
 
+from .. import identity
 from ..config import DATA_DIR, cfg
 
 log = logging.getLogger("jarvis.voice")
@@ -43,7 +44,7 @@ _REPL = [
     (re.compile(r"\bмлн(?![а-яё])\.?"), " миллионов"), (re.compile(r"[−](?=\s*\d)"), "минус "), (re.compile(r"(?<=\s)-(?=\d)"), "минус "), (re.compile(r"[()\[\]\"«»]"), " "), (re.compile(r"\bт\.к\."), "так как"), (re.compile(r"\bт\.е\."), "то есть"),
     (re.compile(r"\bнапр\."), "например"), (re.compile(r"(\d)%"), r"\1 процентов"), (re.compile(r"\+"), " плюс "),
     (re.compile(r"[—–]"), ","), (re.compile(r"·"), ","), (re.compile(r"\bТ-Банк\w*"), "Ти-Банк"),
-    (re.compile(r"\bJ\.?A\.?R\.?V\.?I\.?S\.?", re.I), "Джарвис"), (re.compile(r"\bOllama\b", re.I), "Оллама"),
+    (re.compile(r"\bJ\.?A\.?R\.?V\.?I\.?S\.?", re.I), identity.NAME), (re.compile(r"\bOllama\b", re.I), "Оллама"),
     (re.compile(r"\bGroq\b", re.I), "Грок"), (re.compile(r"\bTelegram\b", re.I), "Телеграм"), (re.compile(r"\bOK\b", re.I), "окей"),
 ]
 
@@ -134,7 +135,7 @@ def _load_silero():
         try:
             import torch
         except ImportError:
-            LAST_ERROR = "Пакет torch не установлен — запустите update.bat."
+            LAST_ERROR = "Пакет torch не установлен — запустите install_voice.bat (пункт Silero)."
             raise RuntimeError(LAST_ERROR)
         if not MODEL_PATH.exists():
             _download_model()

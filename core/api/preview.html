@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Джарвис</title>
+<title>J.A.R.V.I.S.</title>
 <style>
   :root { color-scheme: light dark; }
   * { box-sizing: border-box; }
@@ -60,7 +60,7 @@
 <script>
 const $ = s => document.querySelector(s);
 const log = $("#log");
-const hints = ["что сегодня","потратил 700 на такси","встреча в среду в 15:00 с Ваней","надо купить молоко","долг Сберу 120к плачу 8к 25-го","финансы","долги","мысль: сделать джарвису голос","отмени последнюю"];
+const hints = ["что сегодня","потратил 700 на такси","встреча в среду в 15:00 с Димой","надо купить молоко","долг Сберу 120к плачу 8к 25-го","финансы","долги","мысль: идея для проекта","отмени последнюю"];
 $("#hints").innerHTML = hints.map(h => `<span onclick="send('${h.replace(/'/g,"\\'")}')">${h}</span>`).join("");
 function add(text, cls, via) {
   const d = document.createElement("div"); d.className = "msg " + cls; d.textContent = text;

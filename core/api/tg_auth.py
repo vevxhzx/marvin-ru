@@ -49,7 +49,7 @@ TG_MAX_AGE = 10 * 60             # initData считаем свежим 10 ми�
 TG_SESSION_DAYS = 30             # сессия из Telegram живёт 30 дней, потом Telegram молча выдаст новый initData
 TG_LOGIN_BURST = 8               # не больше 8 неудачных логинов…
 TG_LOGIN_WINDOW = 10 * 60        # …за 10 минут с одного адреса
-SESSION_COOKIE = "jarvis_tg"
+SESSION_COOKIE = "assistant_tg"
 SECRET_FILE = DATA_DIR / "session_secret"
 
 _SECRET: bytes | None = None

@@ -28,7 +28,7 @@ def _num(x, name: str = "Сумма", min_: float | None = 0, max_: float | None
     if max_ is not None and v > max_:
         raise FinanceError(f"{name} не может быть больше {money(max_)}")
     if abs(v) > 1e9:
-        raise FinanceError(f"{name}: {v:,.0f} — слишком большое число, проверьте сумму".replace(",", " "))
+        raise FinanceError(f"{name}: {money(v)} — неправдоподобно много. Если это не опечатка, разбейте на части.")
     return round(v, 2)
 
 
@@ -500,12 +500,38 @@ def summary(days: int = 30) -> dict:
     by_cat = dict(sorted(by_cat.items(), key=lambda kv: -kv[1]))
     accounts = list_accounts()
     debts = list_debts()
+    balance = sum(a.balance for a in accounts if a.kind != "debt_only")
+
+    # Столбики для главной («траты» по дням недели и по дням месяца) — из реальных
+    # операций текущего календарного месяца. Раньше этих полей в сводке не было и
+    # фронт подставлял захардкоженные высоты.
+    weekday = [0] * 7
+    month_days = [0] * 7
+    edges = [4, 9, 14, 19, 24, 29, 31]
+    today = datetime.now()
+    spent_month = 0.0
+    for t in txs:
+        if t.kind != "expense" or t.date is None:
+            continue
+        if t.date.year != today.year or t.date.month != today.month:
+            continue
+        weekday[t.date.weekday()] += t.amount
+        month_days[next((i for i, e in enumerate(edges) if t.date.day <= e), 6)] += t.amount
+        spent_month += t.amount
+
+    avg_daily = round(spent_month / today.day) if today.day else 0
     return {
         "days": days,
         "spent": spent,
         "earned": earned,
         "by_category": by_cat,
-        "total_balance": sum(a.balance for a in accounts if a.kind != "debt_only"),
+        "total_balance": balance,
+        # алиасы, которые читает Today.jsx (иначе страница подставляла выдуманные числа)
+        "balance": balance,
+        "avg_daily": avg_daily,
+        "runway_days": math.floor(balance / avg_daily) if avg_daily else None,
+        "weekday": weekday,
+        "month_days": month_days,
         "accounts": [{"name": a.name, "balance": a.balance, "is_main": a.is_main} for a in accounts],
         "debts_total": sum(d.remaining for d in debts if not d.closed),
         "monthly_debt_payments": sum(d.payment for d in debts if not d.closed),

@@ -1,13 +1,18 @@
+# Запуск на Linux / Mac / VPS:   docker compose up -d
+# Затем откройте http://localhost:8765 — при первом запуске появится мастер настройки.
+#
+# Ollama (локальная модель) поднимается вторым контейнером. Если видеокарты нет —
+# в мастере выберите режим «только облако», контейнер ollama можно удалить из этого файла.
 services:
-  jarvis:
+  assistant:
     build: .
-    container_name: jarvis
+    container_name: assistant
     restart: unless-stopped
     ports:
       - "8765:8765"
     volumes:
-      - ./data:/app/data
-      - ./config.yaml:/app/config.yaml
+      - ./data:/app/data              # база, бэкапы, картинки — всё здесь
+      - ./config.yaml:/app/config.yaml # перед первым запуском: cp config.example.yaml config.yaml
     environment:
       - TZ=Europe/Moscow
       - OLLAMA_URL=http://ollama:11434
@@ -16,10 +21,18 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-    container_name: jarvis-ollama
+    container_name: ollama
     restart: unless-stopped
     volumes:
       - ollama:/root/.ollama
+    # Для NVIDIA раскомментируйте (нужен nvidia-container-toolkit):
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
 
 volumes:
   ollama:

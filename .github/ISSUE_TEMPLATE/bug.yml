@@ -1,0 +1,34 @@
+name: Ошибка
+description: Что-то не работает
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось
+      description: Что вы сделали и что пошло не так. Если есть текст ошибки из чёрного окна — вставьте целиком.
+    validations:
+      required: true
+  - type: dropdown
+    id: how
+    attributes:
+      label: Как запускаете
+      options: [Windows (start.bat), Docker, Другое]
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Режим мозга
+      options: [local (только Ollama), hybrid (Ollama + облако), cloud (только облако)]
+  - type: input
+    id: model
+    attributes:
+      label: Модель и видеокарта
+      placeholder: qwen3.5:4b, GTX 1660 6 ГБ
+  - type: textarea
+    id: log
+    attributes:
+      label: Лог
+      description: Последние строки из окна start.bat (или `docker compose logs assistant`). Токены и ключи замажьте.
+      render: text

@@ -1,34 +1,82 @@
-# Где что лежит
+# Разработка и структура проекта
+
+## Где что лежит
 
 
 ```
-jarvis/
-├─ start.bat / install.bat / autostart.bat   ← твои кнопки
-├─ setup.py                                  ← логика установки (вызывается из install.bat)
-├─ config.yaml                               ← настройки (токен, режим мозга, характер)
-├─ data/jarvis.db                            ← ВСЯ база (один файл; скопировал = сделал бэкап)
-├─ data/backups/                             ← автобэкапы
-├─ run.py                                    ← точка входа
-├─ core/
-│  ├─ db.py            модели базы (события, задачи, финансы, долги, заметки, ссылки, память)
-│  ├─ brain/           мозг: правила, даты, персона, Ollama/облако (Groq), агент
-│  ├─ tools/           инструменты, которые вызывает LLM
-│  ├─ services/        логика: календарь, задачи, финансы, второй мозг, планировщик
-│  ├─ telegram/        бот
-│  └─ api/             HTTP API (для сайта и голосового клиента)
-├─ web/site/           ← собранный сайт (раздаётся ядром)
-├─ web/src/            ← исходники сайта (React), build_web.bat — пересобрать
-└─ tests/              ← python -m pytest tests -q
+├─ install.bat / start.bat / update.bat     ← установка, запуск (держать открытым), обновление пакетов
+├─ install_voice.bat / voice.bat            ← голосовой аддон и его запуск
+├─ autostart.bat / phone.bat / build_web.bat
+├─ config.example.yaml → config.yaml        ← настройки (мастер и сайт пишут сюда сами)
+├─ data/assistant.db                        ← ВСЯ база; data/backups/, data/media/
+├─ run.py                                   ← ядро: API + сайт + Telegram + планировщик
+├─ voice_client.py                          ← голосовой клиент ПК
+├─ core/                                    ← мозг (brain/), инструменты (tools/), сервисы, API, Telegram, голос, setup_wizard.py
+├─ web/                                     ← сайт (React + Vite); собранный сайт — web/site/
+├─ tests/                                   ← pytest
+└─ Dockerfile, docker-compose.yml
 ```
 
-## Разработка
+`web/site` (собранный сайт) лежит в репозитории — Node.js для запуска не нужен. Если меняли фронт — `build_web.bat` (нужен [Node.js](https://nodejs.org)) или `cd web && npm ci && npm run build`.
+
+---
+
+## Публикация на GitHub одной командой
+
+`publish.bat` — вместо ручного «залить архив, потом ещё раз, потом тег»:
+
+1. Один раз: поставить [git](https://git-scm.com/download/win) и [GitHub CLI](https://cli.github.com), выполнить `gh auth login`.
+2. Поднять версию в `core/__init__.py` и дописать раздел `## X.Y.Z` в начало `CHANGELOG.md` — он и станет текстом релиза.
+   Первой строкой раздела — `**Коротко:** …` (одно-два предложения): из этих строк собирается сводка «Что изменилось, коротко»
+   в шапке релиза на GitHub.
+3. Запустить `publish.bat`. Первый запуск спросит адрес **существующего** репозитория (`https://github.com/вы/marvin-ru.git`)
+   и сядет на его историю (Enter — создаст новый); имя/почта для git берутся из аккаунта GitHub сами. Дальше он: соберёт
+   сайт (если есть `web/node_modules`), закоммитит всё, запушит в ветку репозитория (main или master), поставит тег `vX.Y.Z`,
+   соберёт архив **из git** (только то, что не в `.gitignore` — без `config.yaml`, `data/`, `.venv`) и создаст релиз с этим
+   архивом и текстом из `CHANGELOG.md`.
+
+Текст релиза — **все** разделы `CHANGELOG.md` от текущей версии до предыдущего опубликованного тега (если между
+релизами прошло несколько версий, в заметки попадут они все, с пометкой «изменения с vA по vB»). Если GitHub успел уйти
+вперёд (правили README на сайте, публиковали из другой папки) — `publish.bat` сам подтянет и сольёт эти изменения,
+файлы из папки при конфликте побеждают.
+
+Тот же тег второй раз не публикуется — поднимите версию. Скачавшим достаточно распаковать архив релиза поверх папки.
+Переписать текст уже опубликованного релиза: `tools\fix_release_notes.bat 0.10.1` (второй аргумент — с какого тега считать,
+например `v0.9.15`; без него берётся предыдущий тег).
+
+## Локальный запуск
 
 ```bash
-python -m venv .venv && .venv\Scripts\activate
+python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt pytest
-python -m pytest tests -q          # 94 теста, без сети
-python run.py --no-tg              # ядро без Telegram, сайт на :8765
-cd web && npm ci && npm run dev    # фронт с hot reload на :5173
+python -m pytest tests -q                         # ~320 тестов, без сети
+python run.py --no-tg                             # ядро без Telegram, сайт на :8765
+cd web && npm ci && npm run dev                   # фронт с hot reload на :5173 (проксирует /api на :8765)
 ```
 
-Архитектура — [`ARCHITECTURE.md`](../ARCHITECTURE.md), дизайн-система сайта — [`web/DESIGN.md`](../web/DESIGN.md).
+Дизайн-система сайта — [`web/DESIGN.md`](../web/DESIGN.md). Архитектура — [`ARCHITECTURE.md`](../ARCHITECTURE.md). Планы — [`ROADMAP.md`](../ROADMAP.md).
+
+## Стенд на Node (тот же сайт без Python)
+
+```bash
+npm ci && npx tsx server.ts     # сайт на :3000, своё состояние в data/server-state.json
+npm test                        # 17 API-тестов на :3999 — не запускайте их рядом со стендом на :3000
+```
+
+Чат этого стенда умеет ходить в настоящую модель: ключ кладётся в `.env` в корне (файл в `.gitignore`,
+новых зависимостей не нужно — запрос уходит обычным `fetch`).
+
+```bash
+LLM_API_KEY=sk-...                                   # или OPENAI_API_KEY / DASHSCOPE_API_KEY
+LLM_URL=https://api.openai.com/v1/chat/completions    # любой OpenAI-совместимый адрес
+LLM_MODEL=gpt-4o-mini                                # модель; по умолчанию gpt-4o-mini
+```
+
+С ключом ответы в чате помечены ☁️ облако, без него — ⚡ правила; если модель не ответила, чат честно
+отвечает по правилам, а не молчит. Проверить: `GET /api/llm` → `{"enabled":true,"model":"…"}` — то же видно
+в ⚙ Настройки → система → состояние («внешняя модель»). Работа с облаком и локальной моделью описана в
+[`brain.md`](brain.md); секреты — в `config.yaml` / `.env`, они не попадают в git.
+
+Стек: Python 3.11+ · FastAPI · SQLite (SQLModel) · aiogram 3 · APScheduler · Ollama · faster-whisper · Vosk · Silero/edge-tts · React + Vite + Tailwind.
+
+Лицензия — [Apache 2.0](../LICENSE): свободное использование и форки, с сохранением авторства (`NOTICE`, ссылка на оригинал) и пометкой изменённых файлов. Pull request'ы приветствуются — особенно новые фразы-шаблоны в `core/brain/quick.py` и тесты к ним.

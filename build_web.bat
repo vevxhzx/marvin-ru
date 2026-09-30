@@ -1,5 +1,5 @@
 @echo off
-title J.A.R.V.I.S. - build web
+title Assistant - build web
 cd /d "%~dp0web"
 where npm >nul 2>nul || (echo Node.js not found: https://nodejs.org && pause && exit /b 1)
 call npm install

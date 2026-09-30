@@ -178,7 +178,7 @@ async def fetch_preview(url: str) -> dict:
         return meta
     try:
         async with httpx.AsyncClient(timeout=8, follow_redirects=False,
-                                     headers={"User-Agent": "Mozilla/5.0 (compatible; JarvisBot)"}) as c:
+                                     headers={"User-Agent": "Mozilla/5.0 (compatible; AssistantBot/1.0)"}) as c:
             # редиректы проходим сами, проверяя каждый адрес (иначе публичный домен мог бы прыгнуть на 127.0.0.1)
             cur, html = url, ""
             for _ in range(5):
