@@ -4,24 +4,41 @@
 
 ## Принципы
 - Ассистент — центр. На главной сверху: контекст дня и композер; ниже — задачи и события; деньги свёрнуты.
-- Спокойно: один акцент (`--accent`), плоские поверхности, тонкие линии, без градиентов/свечения/blur.
+- **Три ступени фона одного тёмно-синего.** Тёмная тема строится на `--bg`/`--sf`/`--sf2` (#0f1530 / #151c3d / #1c2550 — surface-1/2/3): страница — самая тёмная, карточка светлее, вложенная поверхность ещё светлее. Светлая тема сохраняется (`--bg #e9ecf3`, `--sf #ffffff`), ступени те же токены.
+- **Один лаймовый градиент-герой на экран.** `.hero` — лаймовый градиент (`--lime`), только для денег/успеха. Не ставим два героя на одну страницу.
+- **Цвет только по смыслу.** Лайм = деньги/ok, янтарь = ожидание, красный = просрочка/риск, фиолетовый = ИИ. Всё остальное — нейтральные поверхности. Ярких «светлых» карточек (лавандовая `.p1`, мятная `.p2`) больше нет: это тёмные карточки с тинтом своего цвета (10–12 %) и рамкой 1px.
+- Плоские поверхности, тонкие линии, тени только для приподнятых слоёв.
 - Действия ассистента показываются карточкой результата (`.act-card`), а не техническим логом.
-- Каждая пустота объясняет, что делать (`Empty` с подсказкой → фраза уходит в чат).
+- Каждая пустота объясняет, что делать (`Empty` с подсказкой → фраза уходит в чат). Пустые виджеты (нет данных) делаем компактными, а не «полупустыми на пол-экрана».
+- Минимальный размер текста — 12px, подписи (`--ink-3`) — с достаточным контрастом.
+
+## Палитра
+| смысл | токен | тёмная | светлая |
+|---|---|---|---|
+| поверхность 1 (страница) | `--bg` | `#0f1530` | `#e9ecf3` |
+| поверхность 2 (карточка) | `--sf` | `#151c3d` | `#ffffff` |
+| поверхность 3 (вложенная) | `--sf2` | `#1c2550` | `#f0f1f6` |
+| деньги / ok | `--lime` / `--pos` | `#c6f24a` | `#3f7d12` |
+| ожидание | `--amber` / `--warn` | `#f5b400` | `#a16207` |
+| просрочка / риск | `--red` / `--neg` | `#ff5b7a` | `#d92d4b` |
+| ИИ | `--ai` | `#a78bfa` | `#7c3aed` |
+| акцент (бренд) | `--accent` / `--acc` | настройка | настройка |
+
+Тёмная тема — те же токены, переопределены в `.dark` / `:root[data-theme="dark"]`.
 
 ## Токены
 | группа | токены |
 |---|---|
-| фон и поверхности | `--bg` `--bg-2` `--surface` `--surface-2` `--fill` `--fill-2` |
+| фон и поверхности | `--bg` `--bg-2` `--surface` `--surface-2` `--sf` `--sf2` `--fill` `--fill-2` |
 | текст | `--ink` (основной) `--ink-2` (вторичный) `--ink-3` (приглушённый) |
 | линии | `--line` `--line-2` |
-| смысл | `--accent` `--pos` `--neg` `--warn` (+ `-soft` для подложек) |
+| смысл | `--lime` `--amber` `--red` `--ai` и алиасы `--pos` `--neg` `--warn` (+ `-soft` для подложек) |
+| карточки-тинты | `.tint-ok .tint-warn .tint-neg .tint-ai .tint-acc` (тёмный фон + тинт 10–12 % + рамка 1px) |
 | тени | `--shadow-1..3` |
 | радиусы | `--r-sm` `--r-md` `--r-lg` `--r-xl` |
 | отступы | `--s-1..10` (4px-сетка) |
 | раскладка | `--sidebar-w` `--sidebar-w-min` `--topbar-h` `--content-max` |
 | движение | `--t-fast` `--t-base`, `--ease-out` `--ease-io` `--ease-spring` |
-
-Тёмная тема — те же токены, переопределены в `.dark`.
 
 ## Компоненты (классы)
 - Текст: `.display .h1 .h2 .h3 .h4 .t-body .t-sm .caption .label .idx .num .mono .muted .faint`
@@ -73,14 +90,20 @@
 
 The current visual target is the supplied `джарвис · сегодня.html` reference. The shared CSS keeps the same tokens across every route:
 
-- light `#e9ecf3`, dark `#050507` backgrounds;
-- 232px dark sidebar, 30px radius, 16px outer inset;
-- white active navigation item;
+- light `#e9ecf3`, dark `#0f1530` background (surface-1), cards `#151c3d` (surface-2) / `#1c2550` (surface-3);
+- 232px dark-navy sidebar, 30px radius, 16px outer inset;
+- active navigation item in the accent colour (default — настройка «тема и цвет»);
 - 12-column bento utilities with 16px gaps and no content max-width;
-- 28–30px cards, 26px padding, thin inset border, restrained shadows;
-- signal blue `#0a3cff` / dark `#2f57ff`;
-- Inter Tight-style display hierarchy and JetBrains Mono for data labels;
+- 28–30px cards, 26px padding, thin 1px border, restrained shadows;
+- hero — lime gradient `--lime`; brand accent — `--accent` (в настройках);
+- Inter Tight-style display hierarchy and tabular numerals for data labels;
 - reference easing `cubic-bezier(.16,1,.3,1)` and reduced-motion fallbacks;
-- empty states use `Empty` and a chat chip rather than a dead blank panel.
+- empty states use `Empty` and a chat chip rather than a dead blank panel; a widget with no data is compact and honest.
+
+## Навигация и пояснения (2026)
+- Сайдбар сгруппирован: **план** (сегодня/задачи/календарь), **деньги** (финансы/заказы), **люди**, **джарвис** (мозг/память/настройки). Пустой дыры под логотипом нет — меню начинается сразу под ним, помодоро и статус прижаты к низу.
+- Помодоро живёт **только в сайдбаре** (и в шапке на телефоне, когда активен). На странице заказов он не дублируется.
+- Цвет вкладки (`.PageAccent`) больше не кнопка в шапке — выбор в «Настройки → тема и цвет». `pageAccents` и `usePageAccent` работают как раньше.
+- Длинные пояснения в разделах прячем в тултип (`Section tip=…`), а не в текст под заголовком.
 
 Routes and components use the same primitives from `src/index.css` and `components/ui.jsx`; page logic, API calls, hooks, storage and tests remain separate from the visual layer.
