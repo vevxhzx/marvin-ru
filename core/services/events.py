@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Callable
 
-log = logging.getLogger("marvin.events")
+log = logging.getLogger("assistant.events")
 
 # kind → человеческое описание для журнала (что писать в ленту). Нет в словаре — пишем kind как есть.
 LABELS = {

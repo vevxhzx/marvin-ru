@@ -301,18 +301,20 @@ export default function Finance() {
                     )}
                     <svg ref={svRef} viewBox="0 0 600 200" role="img" aria-label="график баланса и прогноза">
                       <defs>
-                        <linearGradient id="gaFin" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0" style={{ stopColor: 'var(--acc)', stopOpacity: 0.35 }} />
-                          <stop offset="1" style={{ stopColor: 'var(--acc)', stopOpacity: 0 }} />
+                        <linearGradient id="grad-cash-30-fill" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0" style={{ stopColor: 'var(--acc)', stopOpacity: 0.38 }} />
+                          <stop offset="0.5" style={{ stopColor: '#8a5cff', stopOpacity: 0.18 }} />
+                          <stop offset="1" style={{ stopColor: '#8a5cff', stopOpacity: 0 }} />
                         </linearGradient>
-                        <linearGradient id="glFin" x1="0" x2="1">
+                        <linearGradient id="grad-cash-30-line" x1="0" x2="1">
                           <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
-                          <stop offset="1" style={{ stopColor: 'var(--acc)' }} />
+                          <stop offset="0.5" style={{ stopColor: 'var(--acc)' }} />
+                          <stop offset="1" style={{ stopColor: '#8a5cff' }} />
                         </linearGradient>
                       </defs>
                       <line className="zero" x1="0" x2="600" y1={geo.zero} y2={geo.zero} />
-                      <path className="ar" fill="url(#gaFin)" d={geo.area} />
-                      <path className="ln" stroke="url(#glFin)" pathLength="1" d={geo.line} />
+                      <path className="ar" fill="url(#grad-cash-30-fill)" d={geo.area} />
+                      <path className="ln" stroke="url(#grad-cash-30-line)" pathLength="1" d={geo.line} />
                       {geo.iNow > 0 && (
                         <line className="sl" x1={geo.X(geo.iNow)} x2={geo.X(geo.iNow)} y1="0" y2="200" style={{ opacity: 0.3, strokeDasharray: '4 6' }} />
                       )}
@@ -387,7 +389,7 @@ export default function Finance() {
                           <div className="h-1.5 rounded-full bg-[var(--sf2)] overflow-hidden">
                             <div className="h-full rounded-full transition-all" style={{
                               width: `${Math.min(100, b.pct)}%`,
-                              background: b.status === 'over' ? 'var(--neg)' : b.status === 'warn' ? 'var(--warn)' : 'linear-gradient(90deg, var(--acc), #8a5cff)',
+                              background: b.status === 'over' ? 'linear-gradient(90deg, #ff3b5c, #ff8a3d)' : b.status === 'warn' ? 'linear-gradient(90deg, #ffb020, #ff8a3d)' : 'linear-gradient(90deg, var(--acc), #8a5cff)',
                             }}></div>
                           </div>
                         </div>
@@ -428,8 +430,8 @@ export default function Finance() {
               <section key="flow" className="c s12 r" style={st}>{ctl}
                 <div className="hd"><h2>поток в месяц</h2><small>доход минус обязательные платежи — то, чем реально можно распоряжаться</small></div>
                 <div className="flow">
-                  <i style={{ width: `${flowRecurringPct}%`, background: 'var(--ink)' }}></i>
-                  <i style={{ width: `${flowDebtPct}%`, background: 'var(--ink3)' }}></i>
+                  <i style={{ width: `${flowRecurringPct}%`, background: 'linear-gradient(90deg, var(--ink), #4b4b55)' }}></i>
+                  <i style={{ width: `${flowDebtPct}%`, background: 'linear-gradient(90deg, #b9bcc6, var(--ink3))' }}></i>
                   <i style={{ width: `${flowFreePct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }}></i>
                 </div>
                 <div className="fl">
@@ -657,7 +659,7 @@ export default function Finance() {
                 </div>
                 <div className="mid"><Num value={left} /> ₽</div>
                 <div className="w-full bg-white/10 rounded-full h-2 mt-4 overflow-hidden">
-                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #a07bff)' }}></div>
+                  <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }}></div>
                 </div>
                 <div className="flex items-center justify-between mt-3 text-xs text-[#8b8e98] num">
                   <span>выплачено {money(paid)} ({pct}%)</span>
@@ -785,7 +787,7 @@ export default function Finance() {
                   </div>
                   <div className="mid font-semibold"><Num value={current} /> ₽</div>
                   <div className="w-full bg-[var(--line)] rounded-full h-2 mt-4 overflow-hidden">
-                    <div className="bg-[var(--pos)] h-full rounded-full transition-all" style={{ width: `${pct}%` }}></div>
+                    <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #19b34a, #14b8a6)' }}></div>
                   </div>
                   <div className="flex items-center justify-between mt-2.5 text-xs text-[var(--ink2)] num">
                     <span>{pct}% накоплено</span>

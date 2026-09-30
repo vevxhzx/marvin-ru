@@ -207,11 +207,12 @@ async def weekly_digest() -> str | None:
     data += [f"ВЫПОЛНЕНО ЗА НЕДЕЛЮ: {len(done_week)}"]
     from . import pulse
     tail = "".join("\n" + x for x in pulse.weekly_block())   # цифры фриланса — отдельными строками, модели не доверяем их пересказывать
+    root = f"✨ **ИТОГИ НЕДЕЛИ** · по {datetime.now():%d.%m}"
     if not await llm.ollama_available() and llm.MODE == "cloud" and llm.cloud_enabled():
         try:
             txt = await llm.cloud_chat(_weekly_prompt(), "\n".join(data))
             if txt:
-                return "🗓 **Неделя в мыслях**\n" + txt.strip() + tail
+                return root + "\n" + txt.strip() + tail
         except Exception as e:
             log.warning("weekly digest (cloud) failed: %s", e)
     if not await llm.ollama_available():
@@ -221,12 +222,12 @@ async def weekly_digest() -> str | None:
             for t in filter(None, n.tags.split(",")):
                 tags[t] += 1
         top = ", ".join(k for k, _ in sorted(tags.items(), key=lambda kv: -kv[1])[:3]) or "без тегов"
-        return (f"🗓 **Неделя в мыслях**: {len(notes)} заметок, {len(links)} ссылок, закрыто задач — {len(done_week)}.\n"
+        return (f"{root}\n{len(notes)} заметок, {len(links)} ссылок, закрыто задач — {len(done_week)}.\n"
                 f"Темы: {top}. Открытых задач: {len(open_tasks)}" + (f", самая старая — «{open_tasks[0].title}»." if open_tasks else ".") + tail)
     try:
         out = await llm.ollama_chat([{"role": "system", "content": _weekly_prompt()}, {"role": "user", "content": "\n".join(data)}], temperature=0.5)
         txt = (out.get("content") or "").strip()
-        return ("🗓 **Неделя в мыслях**\n" + txt + tail) if txt else None
+        return (root + "\n" + txt + tail) if txt else None
     except Exception as e:
         log.warning("weekly digest failed: %s", e)
         return None

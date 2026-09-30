@@ -401,6 +401,19 @@ function Shell({ inbox }) {
     return () => { window.removeEventListener('assistant:chat', h); window.removeEventListener('assistant:busy', b) }
   }, [])
 
+  // Ярлык PWA (?quick=exp и т.п.): открываем чат с готовым началом фразы и чистим адрес.
+  useEffect(() => {
+    const usp = new URLSearchParams(window.location.search)
+    const q = usp.get('quick')
+    if (q == null) return
+    const MAP = { exp: 'потратил ', inc: 'получил ', task: 'задача: ', note: 'мысль: ', event: 'встреча: ', money: 'баланс' }
+    setChatSeed({ text: MAP[q] ?? '', n: Date.now(), send: false })
+    setChatOpen(true)
+    usp.delete('quick')
+    const qs = usp.toString()
+    window.history.replaceState({}, '', window.location.pathname + (qs ? `?${qs}` : ''))
+  }, [])
+
   // 401 от любого запроса: чужое устройство / истёкшая сессия Telegram — вместо вечных скелетонов честный экран
   const [denied, setDenied] = useState(null)
   useEffect(() => {

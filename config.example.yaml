@@ -22,6 +22,7 @@ telegram:
   webapp_url: ""
   morning_digest: "08:30"     # утренний дайджест ЧЧ:ММ; пусто — выключить
   proxy: ""                   # если api.telegram.org недоступен: "socks5://логин:пароль@хост:1080" или "http://хост:8080"
+  quick: true                 # быстрые шаблоны одним тапом: /exp 700 такси, /inc 15000 аванс, /task …, /event …
 
 notifications:
   quiet_from: 23              # тихие часы: с этого часа ассистент сам ничего не пишет (бюджет, подписки, вечерний обзор)…
@@ -91,13 +92,17 @@ trace:
 
 
 persona:
-  style: "neutral"            # по умолчанию коротко и по делу; swag — только если нужен юмор
+  style: "neutral"            # neutral — спокойный, по делу (по умолчанию) · swag — живой, с подколами (включите, если хочется характера)
   humor_level: 2              # 0–2 без шуток · 3–5 мягкая ирония · 6–8 сухой сарказм по конкретике · 9–10 жёстко, без смягчений
   nicknames: ""               # как ещё звать вас, через запятую: "шеф, босс". Пусто — только owner.name
   where: "cloud"              # кто формулирует инициативные фразы и первую строку дайджестов: cloud — облако, при сбое ПК |
                               # auto — ПК (малая модель), при сбое облако | local — только ПК. Без обоих — короткие шаблоны
   voice_accents: false        # true — итог дня и «разнос» по висящему делу иногда приходят голосовым (не чаще раза в день;
                               # нужен /voice ≠ never в Telegram и включённый TTS)
+
+# Картинки-карточки к действиям (в Telegram). Рисуются на ПК (Pillow), в облако не уходят; кэшируются.
+cards:
+  mode: "important"           # always — всегда · important — важные (дайджесты, отчёты, итоги) + короткие карточки на траты и задачи · never
 
 finance:
   currency: "RUB"
@@ -110,15 +115,18 @@ files:
 voice:
   enabled: true
   stt:
-    model: "small"            # whisper: tiny / base / small / medium
-    device: "cpu"             # cuda — если поставили gpu.bat
+    # tiny / base / small (баланс ~500 МБ) / medium (точно ~1.5 ГБ) / large-v3-turbo (лучшее качество; нужен gpu.bat)
+    model: "small"
+    device: "cpu"             # cuda — после gpu.bat; иначе CPU (int8)
     fast: true
-    cloud: false              # распознавать голос через Groq Whisper (быстро, но голос уходит в облако)
+    # hybrid/cloud: распознавать через Groq whisper-large-v3-turbo (быстро, точно, но голос уходит в облако).
+    # false — всегда локально. В режиме local облако не используется никогда.
+    cloud: false
   tts:
-    engine: "edge"            # edge (онлайн, голоса Microsoft) / silero (офлайн, ставится silero.bat) / off
-    speaker: "eugene"
+    engine: "edge"            # edge (онлайн, голоса Microsoft) / silero (офлайн, silero.bat) / off
+    speaker: "eugene"         # silero: eugene, aidar (муж.), baya, kseniya, xenia (жен.)
     edge_voice: "ru-RU-DmitryNeural"
-    reply_in_telegram: "never"
+    reply_in_telegram: "voice"  # voice — голосом отвечать на голосовые (по умолчанию) · always — на всё · never — только текст
   pc:
     # api: "http://192.168.1.10:8765"   # если ядро крутится на другой машине (по умолчанию — этот же ПК)
     # api_token: ""                      # тогда же: ключ из data/api_token на той машине

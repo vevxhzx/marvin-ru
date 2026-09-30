@@ -19,7 +19,7 @@ from sqlmodel import select
 from ..config import cfg
 from ..db import ScreenSlot, session
 
-log = logging.getLogger("jarvis.screen")
+log = logging.getLogger("assistant.screen")
 
 # --------------------------------------------------------------- настройки
 def _node():
@@ -261,8 +261,8 @@ def text(day: datetime | None = None, days: int = 1) -> str:
     """Ответ в чат: «сколько сидел за компом», «на что ушёл день»."""
     d = summary(day, days)
     if not d["recording"]:
-        return ("Экранное время выключено. Включить: настройки → голос и ПК → «экранное время», потом перезапустить voice.bat. "
-                "Пишется только имя программы и сайт, всё остаётся на ПК.")
+        return ("Экранное время выключено. Включить: настройки → голос и ПК → «экранное время» — применяется само, "
+                "в течение примерно 20 секунд (перезапуск voice.bat не нужен). Пишется только имя программы и сайт, всё остаётся на ПК.")
     if not d["active_min"] and not d["idle_min"]:
         return "За этот период данных нет: voice.bat не был запущен (пульс идёт от него)." if days == 1 else "За этот период данных нет."
     when = "сегодня" if days == 1 and (day is None or day.date() == datetime.now().date()) else (f"{day:%d.%m}" if days == 1 else f"за {days} дн.")

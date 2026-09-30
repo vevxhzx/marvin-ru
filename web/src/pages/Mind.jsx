@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Graph from '../components/Graph'
-import { api, relTime, plural } from '../lib/api'
-import { useToast, PageAccent } from '../components/ui'
+import { api, relTime, plural, listOf } from '../lib/api'
+import { useToast, PageAccent, Empty, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 
@@ -17,17 +17,18 @@ export default function Mind() {
   const [links, setLinks] = useState([])
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
 
   const load = () => {
-    if (q.trim().length >= 3) {
-      return api.semantic(q, 30).then((r) => {
-        setNotes(r.items.filter((x) => x.kind === 'note'))
-        setLinks(r.items.filter((x) => x.kind === 'link'))
-      }).catch(() => Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => {}))
-    }
-    return Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => {})
+    const p = q.trim().length >= 3
+      ? api.semantic(q, 30).then((r) => {
+          setNotes(r.items.filter((x) => x.kind === 'note'))
+          setLinks(r.items.filter((x) => x.kind === 'link'))
+        }).catch(() => Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => {}))
+      : Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => {})
+    return p.finally(() => setLoaded(true))
   }
 
   useEffect(() => {
@@ -127,64 +128,46 @@ export default function Mind() {
         </div>
       ) : (
         <div className="mas" style={{ marginTop: '28px' }}>
-          {(items.length ? items : [
-            {
-              id: 'mock-1',
-              text: 'что теперь надо переплачивать за пельмени: разница в 100 рублей не такая существенная. лучше качество, чем дешевить. как говорится, скупой платит дважды. запиши это в мысль',
-              tags: ['решение'],
-              created_at: new Date().toISOString(),
-            },
-            {
-              id: 'mock-2',
-              title: 'Опрос про Аполлона',
-              text: 'На скриншоте опрос тестировщиков: «Насколько весело играть против героя Apollo?» со шкалой оценки от 1 до 5.',
-              image: true,
-              imgVariant: '',
-              tags: ['игры', 'тестирование', 'apollo'],
-              created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-            },
-            {
-              id: 'mock-3',
-              title: 'Купить три бутылки пива',
-              text: 'Хочу купить три бутылочки пива.',
-              tags: ['покупки', 'развлечения', 'дом'],
-              created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-            },
-            {
-              id: 'mock-4',
-              title: 'Проблема в деньгах',
-              text: 'Всё сводится к тварственным деньгам.',
-              tags: ['деньги', 'проблемы', 'мысли'],
-              created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-            },
-            {
-              id: 'mock-5',
-              title: 'Тест пельменей Мираторг',
-              text: 'Будем тестировать пельмени Мираторг с говядиной. Делать вид, что не жалко, потому что просадил косарь.',
-              tags: [],
-              created_at: new Date(Date.now() - 86400000 * 2).toISOString(),
-            },
-            {
-              id: 'mock-6',
-              text: 'На фото — мужчина в костюме в кресле, заголовок «ЭТИ ПРИВЫЧКИ СДЕЛАЮТ ТЕБЯ БОГАТЫМ» и список абсурдных пунктов.',
-              image: true,
-              imgVariant: 'b',
-              tags: [],
-              created_at: new Date(Date.now() - 86400000 * 10).toISOString(),
-            },
-          ]).map((it, idx) => (
+          {!loaded ? (
+            <ListSkeleton n={6} />
+          ) : !items.length ? (
+            <div className="c p2" style={{ gridColumn: '1 / -1' }}>
+              <Empty glyph="mind" text={q ? 'Ничего не нашлось' : 'Второй мозг пока пуст'}
+                sub={q ? 'Попробуйте другой запрос' : 'Скиньте мысль, ссылку или фото — сохраню и найду по смыслу'}
+                hint={q ? null : 'мысль: идея для ролика'} />
+            </div>
+          ) : items.map((it, idx) => (
             // id у заметок и ссылок начинаются с 1 — ключ составной, иначе дубли
             <section className="c r" key={`${it._t}-${it.id}`} style={{ '--i': 4 + (idx % 6) }}>
+              {/* Превью показываем только когда картинка есть (иначе карточка остаётся текстовой) */}
               {it.image && (
-                <div className={`img ${it.imgVariant === 'b' ? 'b' : ''}`}>
-                  {it.imgVariant === 'b' ? 'фото' : 'скриншот'}
+                <div style={{
+                  position: 'relative', width: '100%', aspectRatio: '16 / 9',
+                  borderRadius: '18px', overflow: 'hidden', border: '1px solid var(--line)',
+                  background: 'var(--sf2)', marginBottom: '14px',
+                }}>
+                  <img
+                    src={it.image.startsWith('http') ? it.image : '/media/' + it.image}
+                    alt={it.title || it.text || it.summary || it.url || ''}
+                    loading="lazy"
+                    onError={(e) => { const box = e.currentTarget.parentElement; if (box) box.style.display = 'none' }}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                  {it._t === 'link' && it.domain && (
+                    <span style={{
+                      position: 'absolute', left: '8px', bottom: '8px', maxWidth: 'calc(100% - 16px)',
+                      padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 17, 20, 0.55)', color: '#fff',
+                      font: '11px "Inter Tight", "Inter", sans-serif',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{it.domain}</span>
+                  )}
                 </div>
               )}
               {it.title && <h3>{it.title}</h3>}
               <p>{it.text || it.summary || it.body || it.url}</p>
               <div className="tg">
                 <small>{relTime(it.created_at)}</small>
-                {it.tags?.map((t) => <span key={t}>#{t}</span>)}
+                {listOf(it.tags).map((t) => <span key={t}>#{t}</span>)}
               </div>
             </section>
           ))}

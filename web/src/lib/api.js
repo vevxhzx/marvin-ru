@@ -47,6 +47,7 @@ export const api = {
 
   health: () => req('GET', '/api/health'),
   dashboard: () => req('GET', '/api/dashboard'),
+  missed: () => req('GET', '/api/missed'),
   chat: (text) => req('POST', '/api/chat', { text, channel: 'web' }, 120000),   // ответ ядра (LLM) может идти долго
   chatHistory: (limit = 40) => req('GET', `/api/chat/history?limit=${limit}`),
 
@@ -121,6 +122,7 @@ export const api = {
   orders: (all = false) => req('GET', `/api/orders${all ? '?all=true' : ''}`),
   order: (id) => req('GET', `/api/orders/${id}`),
   addOrder: (o) => req('POST', '/api/orders', o),
+  ordersSuggest: (title, clientId) => req('GET', `/api/orders/suggest?title=${encodeURIComponent(title)}${clientId ? `&client_id=${clientId}` : ''}`),
   updateOrder: (id, p) => req('PUT', `/api/orders/${id}`, p),
   delOrder: (id) => req('DELETE', `/api/orders/${id}`),
   payOrder: (id, amount, extra = {}) => req('POST', `/api/orders/${id}/payments`, { amount, ...extra }),
@@ -247,6 +249,13 @@ export const relTime = (s) => {
   return shortDate(s)
 }
 export const plural = (n, one, few, many) => { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many }
+
+// Теги из API приходят строкой ("а,б") — приводим к массиву, чтобы .map не падал.
+export const listOf = (v) => {
+  if (Array.isArray(v)) return v
+  if (typeof v === 'string') return v.split(',').map((s) => s.trim().replace(/^#/, '')).filter(Boolean)
+  return []
+}
 
 export const parseNum = (v) => {
   if (v === '' || v == null) return NaN

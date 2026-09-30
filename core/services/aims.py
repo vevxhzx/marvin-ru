@@ -25,7 +25,7 @@ from ..db import Aim, Milestone, Order, Task, log_action, now, remember, session
 from . import events
 from .match import score
 
-log = logging.getLogger("marvin.aims")
+log = logging.getLogger("assistant.aims")
 
 STALE_DAYS = 7           # по цели ничего не закрывали столько дней → «давно не возвращался»
 FOCUS_MAX = 3            # больше действий на день не даём — меньше задач, больше сделанных

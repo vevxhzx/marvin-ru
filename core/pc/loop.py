@@ -11,7 +11,7 @@ from pathlib import Path
 
 from . import actions
 
-log = logging.getLogger("jarvis.pc")
+log = logging.getLogger("assistant.pc")
 
 API = ""
 DATA_DIR = Path(".")
@@ -57,8 +57,9 @@ def _post(path: str, body: dict, timeout: float = 20):
 
 # ---------------------------------------------------------------- пульс + игровой режим
 def heartbeat_loop(get_state, running) -> None:
-    """Каждые 20 с: POST /api/pc/ping (состояние клиента) и проверка игр."""
-    global _game_on, _game_seen_at
+    """Каждые 20 с: POST /api/pc/ping (состояние клиента) и проверка игр. Ответ ядра несёт актуальный флаг
+    «экранное время» — так настройка применяется на лету, без перезапуска voice.bat."""
+    global _game_on, _game_seen_at, SCREEN_TIME
     while running():
         try:
             st = get_state()
@@ -66,7 +67,13 @@ def heartbeat_loop(get_state, running) -> None:
             if SCREEN_TIME:
                 app, title = actions.active_window()
                 body.update({"app": app, "title": title, "idle_sec": int(actions.idle_seconds()), "screen": True})
-            _post("/api/pc/ping", body, timeout=5)
+            r = _post("/api/pc/ping", body, timeout=5)
+            try:
+                want = r.json().get("screen")
+                if isinstance(want, bool):
+                    SCREEN_TIME = want
+            except Exception:
+                pass
         except Exception as e:
             log.debug("ping: %s", e)
         try:

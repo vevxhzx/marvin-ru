@@ -20,7 +20,7 @@ from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring,
 from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, people, pulse, relations, tasks, screen
 from ..services.scheduler import morning_digest_text
 
-log = logging.getLogger("jarvis.api")
+log = logging.getLogger("assistant.api")
 
 app = FastAPI(title="J.A.R.V.I.S. Core", version="0.1")
 # CORS: сайт живёт на том же origin, что и API, — чужим сайтам доступ не нужен. Разрешаем только dev-сервер Vite.
@@ -89,10 +89,39 @@ class ChatIn(BaseModel):
     channel: str = Field("web", max_length=20)
 
 
+def _card_for(r) -> str | None:
+    """URL карточки-картинки для важного ответа (или None). Одна логика с Telegram — cards.for_result."""
+    try:
+        from pathlib import Path
+        from ..services import cards
+        p = cards.for_result(getattr(r, "actions", []) or [], getattr(r, "text", "") or "")
+        if p and Path(p).exists():
+            return f"/api/cards/{Path(p).name}"
+    except Exception:
+        pass
+    return None
+
+
+@app.get("/api/cards/{name}")
+def card_file(name: str):
+    """PNG карточки из кэша. Принимаем только имя файла — защита от обхода каталога."""
+    import re
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+    from ..config import DATA_DIR
+    if not re.fullmatch(r"[A-Za-z0-9_\-]+\.png", name or ""):
+        raise HTTPException(status_code=404, detail="нет такой карточки")
+    p = Path(DATA_DIR) / "card_cache" / name
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="нет такой карточки")
+    return FileResponse(str(p), media_type="image/png", headers={"Cache-Control": "public, max-age=31536000"})
+
+
 @app.post("/api/chat")
 async def chat(inp: ChatIn):
     r = await agent.handle(inp.text, inp.channel)
-    return {"text": r.text, "actions": r.actions, "via": r.via}
+    card = await _asyncio.to_thread(_card_for, r)
+    return {"text": r.text, "actions": r.actions, "via": r.via, "card": card}
 
 
 @app.post("/api/chat/stream")
@@ -108,7 +137,8 @@ async def chat_stream(inp: ChatIn):
         token = llm.token_sink.set(sink)
         try:
             r = await agent.handle(inp.text, inp.channel)
-            await q.put(("done", {"text": r.text, "actions": r.actions, "via": r.via}))
+            card = await _asyncio.to_thread(_card_for, r)
+            await q.put(("done", {"text": r.text, "actions": r.actions, "via": r.via, "card": card}))
         except Exception as e:  # pragma: no cover
             await q.put(("done", {"text": f"Ошибка: {e}", "actions": [], "via": "none"}))
         finally:
@@ -176,7 +206,15 @@ def pc_ping(p: PcPing):
             state.tick()
     except Exception as e:  # pragma: no cover
         log.warning("pc ping state: %s", e)
-    return {"ok": True}
+    # Возвращаем клиенту актуальное значение «экранное время»: включение настройки применяется на лету (в течение пульса),
+    # а не после перезапуска voice.bat — раньше это была причина «включено, но данных нет».
+    want_screen = False
+    try:
+        from ..services import screen
+        want_screen = screen.enabled()
+    except Exception:  # pragma: no cover
+        pass
+    return {"ok": True, "screen": want_screen}
 
 
 @app.get("/api/screen")
@@ -206,7 +244,21 @@ def pc_ack(a: PcAck):
 @app.get("/api/pc/state")
 def pc_state():
     from ..services import pc
-    return {"alive": pc.alive(), **pc.STATE}
+    return {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE}
+
+
+class PcLaunch(BaseModel):
+    restart: bool = False
+
+
+@app.post("/api/pc/launch")
+def pc_launch(p: PcLaunch, request: Request):
+    """Открыть voice.bat из настроек. Только с самого компьютера — запуск процессов с телефона запрещён."""
+    from .auth import is_local as _is_local
+    if not _is_local(request):
+        raise HTTPException(403, "Запуск голосового клиента доступен только с самого компьютера")
+    from ..pc import launcher
+    return launcher.launch(restart=bool(p.restart))
 
 
 @app.get("/api/pc/organize/log")
@@ -404,11 +456,11 @@ async def dashboard():
         "debts": debts,
         "upcoming": [r.model_dump() for r in finance.upcoming_payments(7)],
         "memory": [m.model_dump() for m in brain_notes.memory_feed(3, 15)],
-        "digest": morning_digest_text(),
+        "digest": morning_digest_text(card=False),
         "streak": {**insights.streak(), "heatmap": insights.activity_heatmap(26)},
         "birthdays": insights.upcoming_birthdays(14),
         "forecast": insights.cash_forecast(30),
-        "pc": {"alive": pc.alive(), **pc.STATE},
+        "pc": {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE},
         "timer": orders.timer_state(),
         "orders": {"open": [o for o in orders.list_orders() if o["status"] in ("new", "work", "review")][:5],
                    "unpaid": sum(o["left"] for o in orders.list_orders() if o["status"] not in ("new", "paid", "cancelled")),
@@ -420,6 +472,30 @@ async def dashboard():
         "runway": goals.runway(),
         "payments": goals.payment_check(7),
     }
+
+
+@app.get("/api/missed")
+def missed_endpoint():
+    """«Что я упускаю»: один экран упущений (просроченные оплаты, долги, дела без срока, цели без движения). Read-only."""
+    from ..services import missed as _missed
+    return _missed.missed()
+
+
+@app.get("/api/snapshot/month.png", include_in_schema=False)
+async def snapshot_month():
+    """Экспорт-снимок «как я жил в этом месяце» одной картинкой (открывается в новой вкладке)."""
+    from fastapi.responses import FileResponse
+    from ..services import cards
+    p = await _asyncio.to_thread(cards.month_snapshot_card)
+    if not p:
+        raise HTTPException(status_code=500, detail="не смог нарисовать снимок месяца")
+    return FileResponse(str(p), media_type="image/png")
+
+
+@app.get("/api/orders/suggest")
+def orders_suggest(title: str = "", client_id: Optional[int] = None):
+    """Подсказка цены/часов для нового заказа по похожим прошлым (read-only)."""
+    return orders.suggestion(title, client_id)
 
 
 # ---------------- календарь ----------------
@@ -542,14 +618,9 @@ def done_event(event_id: int, p: EventDoneIn):
 
     # задача из списка, показанная в календаре
     if event_id < 0:
-        with session() as s:
-            t = s.get(Task, -event_id)
-            if not t:
-                raise HTTPException(404)
-            t.done = bool(p.done)
-            t.done_at = datetime.now() if p.done else None
-            s.add(t)
-            s.commit()
+        t = tasks.update_task(-event_id, done=bool(p.done))   # с координацией: закрывается и привязанная встреча
+        if not t:
+            raise HTTPException(404)
         return {"ok": True, "linked": linked}
 
     ev = calendar.set_done(event_id, p.done, p.date)
@@ -684,13 +755,11 @@ def patch_task(task_id: int, p: TaskPatch):
 
 @app.post("/api/tasks/{task_id}/undone")
 def undone_task(task_id: int):
-    with session() as s:
-        t = s.get(Task, task_id)
-        if not t:
-            raise HTTPException(404)
-        t.done, t.done_at = False, None
-        s.add(t); s.commit(); s.refresh(t)
-        return t
+    # через сервис, а не напрямую: сработает координация со встречей (вернём и её)
+    t = tasks.update_task(task_id, done=False)
+    if not t:
+        raise HTTPException(404)
+    return t
 
 
 @app.post("/api/tasks/{task_id}/done")
@@ -2062,6 +2131,53 @@ def ui_prefs_put(p: UiPrefsIn, request: Request):
     return {"ok": True, "updated_at": now_iso}
 
 
+# ---------------- профиль издания, LLM-ключ, карточка клиента ----------------
+# Раньше этих роутов в Python-сервере не было (они есть в Node-стенде server.ts),
+# и раздел «Настройки → Windows-клиент» показывал ошибку. Формы — как в server.ts.
+def _edition_payload() -> dict:
+    """Публичная сборка Marvin — один профиль. Раньше тут был выбор «личный/публичный»;
+    в открытом репозитории он не нужен: наружу уходит только публичная сборка."""
+    from .. import identity
+    return {"edition": "marvin", "name": identity.NAME, "name_latin": "Marvin", "is_marvin": True}
+
+
+@app.get("/api/edition")
+def edition_get():
+    return _edition_payload()
+
+
+class EditionIn(BaseModel):
+    edition: str
+
+
+@app.post("/api/edition")
+def edition_put(p: EditionIn):
+    if p.edition != "marvin":
+        raise HTTPException(400, "edition: marvin")
+    return _edition_payload()
+
+
+@app.get("/api/client/info")
+def client_info():
+    """Карточка десктоп-клиента в настройках (WebView2 / App Mode)."""
+    import platform as _platform
+    from .. import identity, VERSION
+    return {"app_name": identity.NAME or "Марвин", "version": VERSION,
+            "platform": _platform.system().lower(), "mode": "desktop_projection",
+            "single_instance": True, "tray_enabled": True, "webview2_ready": True}
+
+
+@app.get("/api/llm")
+async def llm_info():
+    """Статус LLM-ключа для карточки «Подключить LLM» (ожидает {enabled, model})."""
+    from ..brain import llm
+    on = await llm.ollama_available() if llm.OLLAMA_MODEL else False
+    cloud = llm.cloud_enabled()
+    model = llm.OLLAMA_MODEL if on else (llm.cloud_title() if cloud else None)
+    return {"enabled": bool(on or cloud), "model": model,
+            "mode": ("cloud" if cloud and not on else "hybrid" if cloud else "local" if on else "off")}
+
+
 @app.get("/api/settings")
 def settings_get():
     from ..config import read_settings
@@ -2125,7 +2241,7 @@ async def status():
         "version": VERSION,
         "game_mode": llm.GAME_MODE,
         "voice": _voice_status(),
-        "pc": {"alive": pc.alive(), **pc.STATE},
+        "pc": {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE},
         "screen": {"enabled": screen.enabled(), "today_min": screen.summary()["active_min"] if screen.enabled() else 0,
                    "last": (lambda r: r[-1].end.isoformat() if r else None)(screen.slots())},
         "vision": llm.vision_status(),
@@ -2138,6 +2254,7 @@ async def status():
                    "auto": llm.GEMINI_AUTO, "mode": llm.MODE,
                    "proxy": (llm.CLOUD_PROXY if llm.CLOUD_PROVIDER not in ("", "gemini") else (llm.GEMINI_PROXY or ((getattr(cfg.telegram, "proxy", "") or "").strip() or None))),
                    "last_error": llm.LAST_CLOUD_ERROR or (llm.LAST_GEMINI_ERROR if llm.CLOUD_PROVIDER in ("", "gemini") else None),
+                   "model_last": llm.LAST_CLOUD_MODEL or None,
                    "providers": {k: {"title": v["title"], "model": v["model"], "free": v["free"], "key_url": v["key_url"]} for k, v in llm.PROVIDERS.items()}},
         "telegram": {"configured": tg_enabled, "running": bool(getattr(app.state, "tg_running", False)),
                      "last_message": last_tg.created_at.isoformat() if last_tg else None},
@@ -2252,7 +2369,7 @@ async def tg_login(body: TgLogin, request: Request):
 @app.post("/api/tg/logout")
 def tg_logout():
     resp = JSONResponse({"ok": True})
-    resp.delete_cookie("jarvis_tg", path="/")
+    resp.delete_cookie("marvin_tg", path="/")
     return resp
 
 
@@ -2410,7 +2527,7 @@ def google_connect():
 @app.get("/api/google/callback", response_class=HTMLResponse)
 async def google_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     gcal = _gcal_reload()
-    page = "<html><head><meta charset='utf-8'><title>Джарвис · Google</title></head><body style='font-family:-apple-system,Segoe UI,sans-serif;background:#f4f3f1;color:#1d1d1f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center;max-width:520px;padding:32px'>{}</div></body></html>"
+    page = "<html><head><meta charset='utf-8'><title>Марвин · Google</title></head><body style='font-family:-apple-system,Segoe UI,sans-serif;background:#f4f3f1;color:#1d1d1f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center;max-width:520px;padding:32px'>{}</div></body></html>"
     if error or not code:
         return page.format(f"<h1 style='font-weight:500'>Не вышло</h1><p>{error or 'Google не вернул код'}.</p><p><a href='/settings'>← назад в настройки</a></p>")
     try:
@@ -2463,7 +2580,7 @@ class BackupRestoreIn(BaseModel):
 
 @app.post("/api/backups/restore")
 def backups_restore(body: BackupRestoreIn):
-    """Восстановить data/jarvis.db из выбранного backup-*.db. После — перезапуск start.bat."""
+    """Восстановить data/assistant.db из выбранного backup-*.db. После — перезапуск start.bat."""
     from ..services.scheduler import restore_backup
     try:
         return restore_backup(body.name)
@@ -2529,6 +2646,13 @@ def manifest():
         "background_color": "#f4f3f0", "theme_color": "#f4f3f0", "lang": "ru",
         "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
                   {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}],
+        # Ярлыки PWA (долгое нажатие на иконку на телефоне): быстрая запись без блужданий по меню
+        "shortcuts": [
+            {"name": "Трата", "short_name": "Трата", "url": "/?quick=exp", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+            {"name": "Доход", "short_name": "Доход", "url": "/?quick=inc", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+            {"name": "Задача", "short_name": "Задача", "url": "/?quick=task", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+            {"name": "Мысль", "short_name": "Мысль", "url": "/?quick=note", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
+        ],
     }
 
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json, time, uuid, os, logging, re, urllib.request
 from pathlib import Path
 
-log = logging.getLogger("jarvis.organize")
+log = logging.getLogger("assistant.organize")
 SKIP_DIRS = {"SFX", "01_Архивы", "02_Музыка", "03_Голоса", "04_Атмосферы", "05_Шаги", "06_Удары", "07_Переходы", "08_Интерфейс", "09_Фоли", "10_Природа", "11_Транспорт", "12_Оружие", "13_Магия", "14_Реверсы", "15_Рендеры", "99_Прочее", "Организовано"}
 VIDEO={".mp4",".mov",".mkv",".avi",".webm",".mxf",".mts",".m4v",".wmv"}
 AUDIO={".wav",".mp3",".flac",".m4a",".aac",".aiff",".aif",".ogg",".opus"}
@@ -60,7 +60,7 @@ def _ai_pack_names(root: Path, packs: dict[str, list[str]]) -> tuple[dict[str, s
     """Qwen только предлагает названия крупных исходных паков; правила и безопасность остаются локальными."""
     if not packs:
         return {}, "не требовался"
-    model = os.environ.get("JARVIS_OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL") or "qwen3.5:4b"
+    model = os.environ.get("ASSISTANT_OLLAMA_MODEL") or os.environ.get("OLLAMA_MODEL") or "qwen3.5:4b"
     payload = {"model": model, "stream": False, "format": "json", "prompt": (
         "Ты помощник по организации библиотеки SFX. Верни только JSON вида "
         "{\\\"names\\\":{\\\"исходная папка\\\":\\\"короткое понятное имя\\\"}}. "

@@ -6,12 +6,15 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import logging
 import threading
+import time
 from pathlib import Path
 
 from ..config import cfg
+from .. import identity
 
 log = logging.getLogger("assistant.voice")
 
@@ -37,6 +40,17 @@ def _groq_key() -> str | None:
     return None
 
 
+def _cloud_ok() -> bool:
+    """Можно ли распознавать в облаке: включено в настройках И режим не local (в local в облако не уходит ничего)."""
+    if not STT_CLOUD:
+        return False
+    try:
+        from ..brain import llm
+        return llm.MODE in ("hybrid", "cloud")
+    except Exception:  # pragma: no cover
+        return False
+
+
 def _transcribe_cloud(pcm_or_path) -> str | None:
     """Groq Whisper. Принимает путь к файлу или float32-массив 16 кГц. None = не вышло (упадём на локальный)."""
     key = _groq_key()
@@ -56,17 +70,71 @@ def _transcribe_cloud(pcm_or_path) -> str | None:
             fname = "a.wav"; data = buf.getvalue()
         r = httpx.post("https://api.groq.com/openai/v1/audio/transcriptions", headers={"Authorization": f"Bearer {key}"},
                        files={"file": (fname, data)}, data={"model": "whisper-large-v3-turbo", "language": "ru", "temperature": "0",
-                                                            "prompt": "Джарвис, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00."},
+                                                            "prompt": _hotwords()},
                        timeout=20)
         r.raise_for_status()
-        global LAST_CONFIDENCE, LAST_VIA
-        LAST_CONFIDENCE = 0.9; LAST_VIA = "cloud"
+        global LAST_CONFIDENCE, LAST_VIA, LAST_NO_SPEECH
+        LAST_CONFIDENCE = 0.9; LAST_VIA = "cloud"; LAST_NO_SPEECH = 0.0
         return (r.json().get("text") or "").strip()
     except Exception as e:
         log.warning("Groq Whisper не ответил (%s) — распознаю локально", str(e)[:100])
         return None
 LAST_ERROR: str | None = None
 LAST_CONFIDENCE: float = 1.0   # 0..1 — насколько Whisper уверен в последней расшифровке
+LAST_NO_SPEECH: float = 0.0    # 0..1 — вероятность, что в записи вообще не было речи (мусор/шум)
+MIN_CONFIDENCE = 0.50          # ниже — считаем, что «расслышал так себе»: расшифровку показываем, действие не выполняем
+MAX_NO_SPEECH = 0.60           # выше — в записи скорее шум, чем речь
+
+# Словарь из своих же данных (имена, заказы, задачи, цели): Whisper точнее слышит «Пятёрочку» и «Хедвей».
+# Строится локально, кэш 5 минут. initial_prompt — только подсказка лексики, никаких чужих данных никуда не уходит.
+_HINT_CACHE: tuple[float, str] | None = None
+_BASE_HINT = (f"{identity.title() or 'Ассистент'}, что у меня сегодня? Потратил 700 рублей на такси. Задача: сдать отчёт. "
+              "Встреча в среду в 15:00. Долг Сберу. Баланс Т-Банк. Напомни завтра. Мысль: идея для проекта. Отмени последнюю.")
+
+
+def _hotwords(limit_chars: int = 420) -> str:
+    """Подсказка-словарь для Whisper из реальных данных пользователя (имена людей/клиентов, названия заказов,
+    активные задачи, цели, недавние заметки). Локально и с кэшем, чтобы не читать базу на каждую реплику."""
+    global _HINT_CACHE
+    now = time.time()
+    if _HINT_CACHE and now - _HINT_CACHE[0] < 300:
+        return _HINT_CACHE[1]
+    words: list[str] = []
+    try:
+        words += [identity.NAME, identity.OWNER]
+    except Exception:  # pragma: no cover
+        pass
+    try:
+        from ..db import session, Client, Order, Task, Note, Goal
+        from sqlmodel import select
+        with session() as s:
+            words += [c.name for c in s.exec(select(Client).limit(40)).all() if getattr(c, "name", None)]
+            for c in s.exec(select(Client).limit(40)).all():
+                words += [a.strip() for a in (getattr(c, "aliases", "") or "").split(",") if a.strip()]
+            words += [o.title for o in s.exec(select(Order).order_by(Order.id.desc()).limit(20)).all() if getattr(o, "title", None)]
+            words += [t.title for t in s.exec(select(Task).where(Task.done == False).order_by(Task.id.desc()).limit(20)).all() if getattr(t, "title", None)]  # noqa: E712
+            words += [g.title for g in s.exec(select(Goal).limit(20)).all() if getattr(g, "title", None) and not getattr(g, "closed", False)]
+            words += [n.title for n in s.exec(select(Note).order_by(Note.id.desc()).limit(15)).all() if getattr(n, "title", None)]
+    except Exception as e:  # pragma: no cover
+        log.debug("hotwords: %s", e)
+    seen: set[str] = set()
+    uniq: list[str] = []
+    for w in words:
+        w = (w or "").strip()
+        if 1 < len(w) <= 42 and w.lower() not in seen:
+            seen.add(w.lower())
+            uniq.append(w)
+    hint = _BASE_HINT + (" Слова: " + ", ".join(uniq)[:limit_chars] if uniq else "")
+    _HINT_CACHE = (now, hint)
+    return hint
+
+
+def looks_unsure(confidence: float | None = None, no_speech: float | None = None) -> bool:
+    """Стоит ли переспросить: низкая уверенность или похоже на шум. Действие по такой расшифровке не выполняем."""
+    c = LAST_CONFIDENCE if confidence is None else confidence
+    ns = LAST_NO_SPEECH if no_speech is None else no_speech
+    return c < MIN_CONFIDENCE or ns > MAX_NO_SPEECH
+
 
 # слова-паразиты Whisper на тишине/шуме
 _HALLUCINATIONS = {"субтитры", "продолжение следует", "редактор субтитров", "спасибо за просмотр", "дима торжок",
@@ -178,18 +246,17 @@ def _safe_load():
 def _transcribe_sync(path) -> str:
     """path — файл (любой формат) или numpy-массив float32 16 кГц (ПК-клиент: без записи на диск)."""
     global LAST_VIA
-    if STT_CLOUD:
+    # hybrid/cloud: сначала облако (Groq whisper-large-v3-turbo — быстро и точно), при сбое локально; local — только локально
+    if _cloud_ok():
         txt = _transcribe_cloud(path)
         if txt is not None:
             low = txt.lower().strip(" .!")
             return "" if (not txt or low in _HALLUCINATIONS) else txt
     LAST_VIA = "local"
     model = _load()
-    # подсказка словаря: Whisper точнее слышит частые команды Джарвиса
-    hint = ("Джарвис, что у меня сегодня? Потратил 700 рублей на такси. Задача: сдать отчёт. Встреча в среду в 15:00. "
-            "Долг Сберу. Баланс Т-Банк. Напомни завтра. Мысль: идея для проекта. Отмени последнюю.")
+    # подсказка словаря: Whisper точнее слышит имена, заказы и частые команды Марвина (из моих же данных)
+    hint = _hotwords(limit_chars=160 if STT_FAST else 420)
     if STT_FAST:
-        hint = "Джарвис, потратил 700 рублей. Задача: сдать отчёт. Встреча в среду в 15:00. Долг Сберу, Т-Банк."   # короче подсказка — быстрее декодер
         segments, info = model.transcribe(path, language="ru", beam_size=1, best_of=1, temperature=0.0,
                                           vad_filter=True, initial_prompt=hint,
                                           vad_parameters={"min_silence_duration_ms": 300},
@@ -199,15 +266,17 @@ def _transcribe_sync(path) -> str:
                                           vad_filter=True, initial_prompt=hint,
                                           vad_parameters={"min_silence_duration_ms": 400},
                                           condition_on_previous_text=False, no_speech_threshold=0.6, log_prob_threshold=-1.0)
-    global LAST_CONFIDENCE
+    global LAST_CONFIDENCE, LAST_NO_SPEECH
     segs = list(segments)
     text = " ".join(s.text.strip() for s in segs).strip()
     if segs:
         import math
         lp = sum(s.avg_logprob * max(1, len(s.text)) for s in segs) / max(1, sum(max(1, len(s.text)) for s in segs))
         LAST_CONFIDENCE = max(0.0, min(1.0, math.exp(lp)))   # avg_logprob −0.2 → 0.82, −0.7 → 0.5, −1.2 → 0.3
+        LAST_NO_SPEECH = max(0.0, min(1.0, max(getattr(s, "no_speech_prob", 0.0) or 0.0 for s in segs)))
     else:
         LAST_CONFIDENCE = 0.0
+        LAST_NO_SPEECH = 1.0
     text = strip_credits(text)
     low = text.lower().strip(" .!")
     if not text or low in _HALLUCINATIONS or any(h in low for h in _HALLUCINATIONS if len(low) < 40):
@@ -244,3 +313,16 @@ def transcribe_pcm(pcm16) -> str:
     """int16-массив 16 кГц (микрофон ПК) → текст, синхронно и без файла."""
     import numpy as np
     return _transcribe_sync(np.asarray(pcm16, dtype=np.float32) / 32768.0)
+
+
+async def transcribe_detailed(path) -> dict:
+    """Как transcribe(), но с уверенностью и признаком шума — вызывающий решает, выполнять ли действие
+    по расшифровке или переспросить («расслышал так себе»)."""
+    text = await transcribe(path)
+    return {"text": text, "confidence": LAST_CONFIDENCE, "no_speech": LAST_NO_SPEECH, "via": LAST_VIA}
+
+
+def transcribe_detailed_pcm(pcm16) -> dict:
+    """То же для микрофона ПК: int16 16 кГц → {text, confidence, no_speech}."""
+    text = transcribe_pcm(pcm16)
+    return {"text": text, "confidence": LAST_CONFIDENCE, "no_speech": LAST_NO_SPEECH, "via": LAST_VIA}

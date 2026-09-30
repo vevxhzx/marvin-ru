@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-os.environ["JARVIS_TEST"] = "1"
+os.environ["ASSISTANT_TEST"] = "1"
 
 from core import db  # noqa: E402
 from core.brain import persona  # noqa: E402
@@ -24,17 +24,17 @@ def fresh_db(tmp_path, monkeypatch):
 def test_character_block_scales_with_humor(monkeypatch):
     monkeypatch.setattr(persona, "STYLE", "swag")
     monkeypatch.setattr(persona, "OWNER", "Вова")
-    monkeypatch.setattr(persona, "NICKNAMES", ["Вовчик", "шеф"])
+    monkeypatch.setattr(persona, "NICKNAMES", ["Шеф", "шеф"])
     monkeypatch.setattr(persona, "HUMOR", 8)
     b = persona.character_block()
-    assert "ГРАДАЦИЯ." in b and "ЗАПРЕЩЕНО" in b and "«Вовчик»" in b and "Напоминаю, что" in b.replace("…", "")
+    assert "ГРАДАЦИЯ." in b and "ЗАПРЕЩЕНО" in b and "«Шеф»" in b and "Напоминаю, что" in b.replace("…", "")
     monkeypatch.setattr(persona, "HUMOR", 10)
     assert "без тормозов" in persona.character_block()
     monkeypatch.setattr(persona, "HUMOR", 4)
     assert "мягкий" in persona.character_block().lower()
     monkeypatch.setattr(persona, "HUMOR", 0)
     b0 = persona.character_block()
-    assert "без шуток" in b0 and "Вовчик" not in b0 and "сарказм" not in b0.lower()
+    assert "без шуток" in b0 and "Шеф" not in b0 and "сарказм" not in b0.lower()
     # нейтральный стиль — тоже без подколов, что бы ни стояло в humor
     monkeypatch.setattr(persona, "STYLE", "neutral"); monkeypatch.setattr(persona, "HUMOR", 10)
     assert "без шуток" in persona.character_block()
@@ -45,10 +45,20 @@ def test_system_prompt_contains_character():
     assert ("ХАРАКТЕР." in p) and ("БЕЗОПАСНОСТЬ." in p)
 
 
+def test_persona_does_not_refuse_jokes(monkeypatch):
+    """Персона-«язвительный друг» должна шутить по просьбе и не отбиваться выдуманными «принципами»."""
+    monkeypatch.setattr(persona, "STYLE", "swag")
+    monkeypatch.setattr(persona, "HUMOR", 8)
+    b = persona.character_block()
+    assert "ШУТКИ ПО ЗАПРОСУ" in b and "не умею шутить" in b
+    p = persona.system_prompt()
+    assert "ОТКАЗЫ." in p and "это мой принцип" in p
+
+
 def test_fallback_is_short_and_not_bureaucratic(monkeypatch):
     monkeypatch.setattr(persona, "STYLE", "swag"); monkeypatch.setattr(persona, "HUMOR", 8); monkeypatch.setattr(persona, "OWNER", "Вова")
     for kind, kw in [("stale_task", {"title": "разобрать архив футажей", "days": 3}),
-                     ("late_pay", {"who": "Headway", "money": "25 000 ₽", "title": "ролик", "days": 9}),
+                     ("late_pay", {"who": "Acme", "money": "25 000 ₽", "title": "ролик", "days": 9}),
                      ("today_task", {"title": "рендер"}), ("health", {"text": "болит горло"}), ("plan", {"text": "надо съездить в Стрельцы"})]:
         t = persona.nudge_fallback(kind, **kw)
         assert 10 < len(t) < 200, t
@@ -171,7 +181,10 @@ def test_vibe_candidate_only_when_quiet_and_daytime(monkeypatch):
     assert not [x for x in proactive.candidates(day) if x["key"].startswith("vibe")]
 
 
-def test_character_prompt_defaults_to_short_business_tone():
+def test_character_prompt_defaults_to_short_business_tone(monkeypatch):
+    # спокойный стиль задаём явно — тест не должен зависеть от persona.style в конкретном config.yaml
+    monkeypatch.setattr(persona, "STYLE", "neutral")
+    monkeypatch.setattr(persona, "HUMOR", 2)
     b = persona.character_block()
     assert "короткие фразы" in b and "без шуток" in b
     assert "ОБРАЗЦЫ ТОНА" not in b and "Подкол + плечо" not in b
@@ -224,7 +237,7 @@ def test_opinion_question_goes_to_cloud_and_not_to_sorter():
     assert agent.is_personal("как думаешь, стоит ли брать кредит 300000") is False
     assert agent.is_personal("запиши: позвонить маме в 15:00") is True
     assert sorter.looks_like_batch(BREAKFAST + " Субтитры субтитров Н.Новикова.") is False
-    assert sorter.looks_like_batch("купить хлеб, позвонить маме, отправить инвойс Headway") is True
+    assert sorter.looks_like_batch("купить хлеб, позвонить маме, отправить инвойс Acme") is True
 
 
 def test_compact_prompt_for_local_model(monkeypatch):

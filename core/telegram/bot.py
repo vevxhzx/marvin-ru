@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import logging
+import time
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatAction, ParseMode
@@ -20,6 +21,43 @@ router = Router()
 OWNER_ID = int(cfg.telegram.owner_id)
 from ..config import DATA_DIR
 VOICE_DIR = DATA_DIR / "voice_tmp"
+
+# Незавершённые голосовые: расшифровка, которую ждём подтвердить («Верно»). И защита от повторной доставки апдейта.
+_VOICE_PENDING: dict[int, str] = {}
+_VOICE_SEEN: dict[int, float] = {}
+
+
+def _once(m: Message) -> bool:
+    """True — обрабатываем впервые. Telegram иногда доставляет апдейт дважды (после рестарта/сети) —
+    во второй раз молчим, чтобы не выполнить команду и не списать деньги дважды."""
+    now = time.time()
+    if m.message_id in _VOICE_SEEN and now - _VOICE_SEEN[m.message_id] < 180:
+        return False
+    _VOICE_SEEN[m.message_id] = now
+    for k in [k for k, v in _VOICE_SEEN.items() if now - v > 600]:
+        _VOICE_SEEN.pop(k, None)
+    return True
+
+
+def _voice_kb():
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Верно", callback_data="vc:ok"),
+        InlineKeyboardButton(text="🔁 Повторить", callback_data="vc:again"),
+        InlineKeyboardButton(text="✏️ Исправить", callback_data="vc:fix"),
+    ]])
+
+# Нажатые кнопки напоминаний: повторный клик не должен откладывать/закрывать дважды.
+_CB_DONE: dict[tuple, float] = {}
+
+
+def _evening() -> datetime:
+    """Куда отложить «вечером»: сегодня 19:00, а если уже позже — завтра 19:00."""
+    from datetime import timedelta
+    e = datetime.now().replace(hour=19, minute=0, second=0, microsecond=0)
+    if e <= datetime.now():
+        e += timedelta(days=1)
+    return e
 
 
 def _mine(m: Message) -> bool:
@@ -46,28 +84,131 @@ async def start(m: Message):
                    "• «сколько потратил на еду за неделю», «куда ушли деньги»\n"
                    "• «заплатил Диме 2000», «перевёл 5000 на сбер», «снял 3000 наличных»\n"
                    "• «подписка яндекс плюс 399 25-го», «лимит на еду 20000»\n"
-                   "• «отмени последнюю» — откатить трату")
+                   "• «отмени последнюю» — откатить трату\n"
+                   "• /summary — итог дня · /find — поиск по Мозгу · /exp 700 такси — трата одним тапом")
+
+
+_QUICK_HINT = {"расход": "700 такси", "доход": "15000 аванс", "задача": "сдать отчёт в пятницу", "встреча": "в среду в 15:00 с Димой"}
+_QUICK_MAP = {"расход": "потратил {x}", "exp": "потратил {x}", "доход": "доход {x}", "inc": "доход {x}",
+              "задача": "задача: {x}", "task": "задача: {x}", "встреча": "встреча {x}", "event": "встреча {x}"}
+_QUICK_CANON = {"exp": "расход", "inc": "доход", "task": "задача", "event": "встреча"}
+
+
+def _quick_enabled() -> bool:
+    try:
+        return bool(getattr(cfg.telegram, "quick", True))
+    except Exception:  # pragma: no cover
+        return True
+
+
+@router.message(Command("расход", "exp", "доход", "inc", "задача", "task", "встреча", "event"))
+async def cmd_quick(m: Message):
+    """Быстрые шаблоны в один тап: /расход 700 такси, /доход 15000 аванс, /задача …, /встреча … — офлайн-правилами."""
+    if not _quick_enabled():
+        await m.answer("Быстрые шаблоны выключены: ⚙ Настройки → telegram → «быстрые шаблоны».")
+        return
+    parts = (m.text or "").split(maxsplit=1)
+    cmd = parts[0].lstrip("/").split("@")[0]
+    if cmd not in _QUICK_MAP:
+        return
+    canon = _QUICK_CANON.get(cmd, cmd)
+    body = parts[1].strip() if len(parts) > 1 else ""
+    if not body:
+        await m.answer(f"Напишите так: /{cmd} {_QUICK_HINT[canon]}")
+        return
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        r = await asyncio.wait_for(agent.handle(_QUICK_MAP[cmd].format(x=body), channel="tg"), timeout=HANDLE_TIMEOUT)
+    finally:
+        typing.cancel()
+    await send_long(m, r.text or "…")
+    await _maybe_send_card(m, r)
+
+
+@router.message(Command("find", "найди", "поиск"))
+async def cmd_find(m: Message):
+    """Поиск по «второму мозгу» (заметки и ссылки) прямо из Telegram."""
+    parts = (m.text or "").split(maxsplit=1)
+    q = parts[1].strip() if len(parts) > 1 else ""
+    if not q:
+        await m.answer("Что искать? Например: /найди договор аренды")
+        return
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        from core.services import semantic
+        res = await semantic.search(q, limit=6)
+    except Exception as e:
+        log.warning("find failed: %s", e)
+        await m.answer("Поиск не сработал, сэр. Попробуйте ещё раз.")
+        return
+    finally:
+        typing.cancel()
+    items = res.get("items") or []
+    if not items:
+        await m.answer("В Мозге ничего не нашёл, сэр. Либо не скидывали, либо названо иначе.")
+        return
+    lines = [f"🧠 В Мозге по «{q}»:"]
+    for it in items[:6]:
+        if it.get("kind") == "link":
+            lines.append("— " + (it.get("title") or it.get("url") or "ссылка"))
+            if it.get("url"):
+                lines.append("  " + it["url"])
+        else:
+            lines.append("— " + (it.get("title") or (it.get("text") or "").strip()[:80]))
+    await send_long(m, "\n".join(lines))
+
+
+@router.message(Command("итог", "итоги", "summary", "evening"))
+async def cmd_summary(m: Message):
+    """Итог дня одной карточкой (текст сразу, картинка — если включена в настройках)."""
+    from core.services import cards
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        data = await asyncio.to_thread(cards.evening_data)
+        text = cards.evening_text(data)
+    finally:
+        typing.cancel()
+    await send_long(m, text)
+    if cards.should_send("evening"):
+        try:
+            from aiogram.types import FSInputFile
+            path = await asyncio.to_thread(cards.evening_card, None, data)
+            if path:
+                await m.answer_photo(FSInputFile(str(path)))
+        except Exception as e:  # pragma: no cover
+            log.debug("итог card: %s", e)
 
 
 @router.message(Command("today"))
 async def today(m: Message):
-    await m.answer(registry.today_briefing())
+    await _answer_md(m, registry.today_briefing())
+    await _send_card(m, "today")
 
 
 @router.message(Command("money"))
 async def money_cmd(m: Message):
-    await m.answer(registry.finance_summary(30))
+    await _answer_md(m, registry.finance_summary(30))
+    await _send_card(m, "money")
 
 
 @router.message(Command("tasks"))
 async def tasks_cmd(m: Message):
-    await m.answer(registry.list_tasks())
+    await _answer_md(m, registry.list_tasks())
+    await _send_card(m, "tasks")
 
 
 @router.message(Command("orders"))
 async def orders_cmd(m: Message):
     from ..services import orders
-    await m.answer(orders.summary_text())
+    await _answer_md(m, orders.summary_text())
+    await _send_card(m, "orders")
+
+
+@router.message(Command("missed", "упускаю"))
+async def missed_cmd(m: Message):
+    from ..services import missed as _missed
+    await _answer_md(m, _missed.missed_text())
+    await _send_card(m, "missed")
 
 
 @router.message(Command("pomo"))
@@ -75,26 +216,29 @@ async def pomo_cmd(m: Message):
     """/pomo — 25 мин без заказа; /pomo ролик — по заказу; /pomo stop."""
     arg = (m.text or "").split(maxsplit=1)[1].strip() if len((m.text or "").split(maxsplit=1)) > 1 else ""
     if arg.lower() in ("stop", "стоп"):
-        await m.answer(registry.pomodoro("stop", _channel="tg"))
+        await _answer_md(m, registry.pomodoro("stop", _channel="tg"))
         return
-    await m.answer(registry.pomodoro("start", query=arg or None, minutes=None, _channel="tg"),
-                   reply_markup=_kb([("⏹ Стоп", "pomo:0:stop")]))
+    await _answer_md(m, registry.pomodoro("start", query=arg or None, minutes=None, _channel="tg"),
+                     reply_markup=_kb([("⏹ Стоп", "pomo:0:stop")]))
 
 
 @router.message(Command("goals"))
 async def goals_cmd(m: Message):
     from ..services import goals
-    await m.answer(goals.goals_text())
+    await _answer_md(m, goals.goals_text())
+    await _send_card(m, "goals")
 
 
 @router.message(Command("events"))
 async def events_cmd(m: Message):
-    await m.answer(registry.list_events(7))
+    await _answer_md(m, registry.list_events(7))
+    await _send_card(m, "events")
 
 
 @router.message(Command("debts"))
 async def debts_cmd(m: Message):
-    await m.answer(registry.list_debts())
+    await _answer_md(m, registry.list_debts())
+    await _send_card(m, "debts")
 
 
 @router.message(Command("voice"))
@@ -197,6 +341,19 @@ def _to_html(text: str) -> str:
     return t
 
 
+def _to_html_cap(text: str, limit: int = 1000) -> str:
+    """HTML для подписи к фото/голосу: Telegram режет подпись на 1000 символов, поэтому обрезаем сами —
+    по строкам и с закрытием тегов, чтобы не отдать «<b>ИТОГИ ДНЯ…» без конца и не упасть."""
+    t = _to_html(text)
+    if len(t) <= limit:
+        return t
+    cut = _re.sub(r"<[^>]*$", "", t[:limit - 4])
+    for tag in ("b", "i", "code", "pre"):
+        if cut.count(f"<{tag}>") > cut.count(f"</{tag}>"):
+            cut += f"</{tag}>"
+    return cut.rstrip() + "…"
+
+
 async def _send(m: Message, html_text: str, plain_text: str) -> bool:
     """Отправить одно сообщение: HTML → при ошибке разметки чистый текст; при сетевой ошибке — 3 попытки.
     Каждый сбой пишется в консоль, чтобы было видно, ПОЧЕМУ ответ не дошёл."""
@@ -240,6 +397,40 @@ async def send_long(m: Message, text: str, raw_prefix: bool = False) -> None:
         await _send(m, html_text, _re.sub(r"<[^>]+>", "", chunk))
 
 
+async def _answer_md(m: Message, text: str, **kw) -> None:
+    """Команды отдают markdown (**жирный**). Шлём HTML-разметкой, при сбое — чистым текстом."""
+    if kw.get("reply_markup"):
+        try:
+            await m.answer(_to_html(text), parse_mode=ParseMode.HTML, **kw)
+            return
+        except Exception as e:  # pragma: no cover
+            log.debug("md answer с клавиатурой: %s", e)
+    await _send(m, _to_html(text), text)
+
+
+# Команда → функция красивой карточки (core.services.cards)
+_CMD_CARDS = {"today": "today_card", "money": "finances_card", "tasks": "tasks_card", "orders": "orders_card",
+              "missed": "missed_card", "goals": "goals_card", "events": "events_card", "debts": "debts_card",
+              "forecast": "forecast_card"}
+
+
+async def _send_card(m: Message, kind: str) -> None:
+    """Красивая карточка-картинка к ответу команды (уважает cards.mode). Молчит при любом сбое."""
+    from core.services import cards
+    try:
+        if not cards.should_send("finances" if kind == "money" else kind):
+            return
+        fn = getattr(cards, _CMD_CARDS.get(kind, ""), None)
+        if not fn:
+            return
+        from aiogram.types import FSInputFile
+        path = await asyncio.to_thread(fn)
+        if path:
+            await m.answer_photo(FSInputFile(str(path)))
+    except Exception as e:  # pragma: no cover
+        log.debug("карточка команды %s: %s", kind, e)
+
+
 HANDLE_TIMEOUT = 120  # сек: дольше этого «печатает…» крутиться не будет — ответим, что зависли
 
 
@@ -251,6 +442,7 @@ async def any_text(m: Message):
         r = await asyncio.wait_for(agent.handle(m.text, channel="tg"), timeout=HANDLE_TIMEOUT)
         typing.cancel()
         await send_long(m, r.text or "…")
+        await _maybe_send_card(m, r)
         from core.voice import tts
         if tts.enabled() and tts.REPLY_VOICE == "always":
             await _reply_voice(m, r.text)
@@ -280,12 +472,28 @@ def _record_error(text: str) -> None:
         pass
 
 
+async def _maybe_send_card(m: Message, r) -> None:
+    """Короткая карточка-картинка следом за текстом (текст уже ушёл — ответ не задерживается).
+    Молча ничего не делает, если картинки выключены или не получилось. Рендер — на ПК (Pillow), кэшируется."""
+    try:
+        from core.services import cards
+        from aiogram.types import FSInputFile
+        path = await asyncio.to_thread(cards.for_result, getattr(r, "actions", []) or [], r.text or "")
+        if path:
+            await m.answer_photo(FSInputFile(str(path)))
+    except Exception as e:  # pragma: no cover
+        log.debug("card follow-up: %s", e)
+
+
 @router.message(F.voice | F.audio | F.video_note)
 async def voice_msg(m: Message):
-    """Голосовое → Whisper (локально) → тот же agent.handle → ответ текстом и голосом."""
+    """Голосовое → Whisper (локально) → agent.handle → ответ текстом и голосом.
+    Если уверенность низкая — показываем расшифровку и спрашиваем: Верно / Повторить / Исправить."""
     from core.voice import stt, tts
     if not stt.available():
         await m.answer("Распознавание голосовых не установлено — запустите install_voice.bat, сэр.")
+        return
+    if not _once(m):
         return
     typing = asyncio.create_task(_keep_typing(m))
     tmp = None
@@ -294,22 +502,23 @@ async def voice_msg(m: Message):
         VOICE_DIR.mkdir(parents=True, exist_ok=True)
         tmp = VOICE_DIR / f"in_{m.message_id}.ogg"
         await m.bot.download(media, destination=tmp)
-        text = await asyncio.wait_for(stt.transcribe(tmp), timeout=120)
-        if not text:
-            typing.cancel()
-            await m.answer("Не разобрал ни слова, сэр. Ближе к микрофону или текстом.")
-            return
-        log.info("← tg voice: %r", text[:80])
-        r = await asyncio.wait_for(agent.handle(text, channel="tg-voice"), timeout=HANDLE_TIMEOUT)
+        res = await asyncio.wait_for(stt.transcribe_detailed(tmp), timeout=120)
+        text = (res.get("text") or "").strip()
         typing.cancel()
-        unsure = " <i>(расслышал так себе — если не то, повторите чётче или текстом)</i>" if stt.LAST_CONFIDENCE < 0.45 else ""
-        # сверху — расшифровка ЦЕЛИКОМ (сворачиваемой цитатой: длинная показывается первыми строками и «развернуть»),
-        # снизу — ответ; одно сообщение. Раньше резали до 140 символов — казалось, что услышал только начало.
-        shown = text if len(text) <= 3000 else text[:2997].rstrip() + "…"   # лимит одного сообщения Telegram — 4096
-        quote = f"<blockquote expandable>🎙 {_html.escape(shown)}</blockquote>" if len(shown) > 140 else f"<blockquote>🎙 {_html.escape(shown)}</blockquote>"
-        await send_long(m, f"{quote}{unsure}\n\n{r.text or '…'}", raw_prefix=True)
-        if tts.enabled() and tts.REPLY_VOICE in ("voice", "always"):
-            await _reply_voice(m, r.text)
+        if not text:
+            await m.answer("Не разобрал ни слова, сэр. Ближе к микрофону или текстом.",
+                           reply_markup=_kb([("🎙 повторить", "vc:again")]))
+            return
+        log.info("← tg voice: %r (conf %.2f, no_speech %.2f, via %s)", text[:80],
+                 res.get("confidence", 0), res.get("no_speech", 0), res.get("via"))
+        if stt.looks_unsure(res.get("confidence"), res.get("no_speech")):
+            # Мусорную расшифровку в LLM НЕ отправляем: сначала подтверждение от человека.
+            _VOICE_PENDING[m.chat.id] = text
+            shown = text if len(text) <= 2800 else text[:2797].rstrip() + "…"
+            await m.answer(f"🎙 Расслышал так — <b>так себе</b>:\n<blockquote>{_html.escape(shown)}</blockquote>\n\nВерно понял?",
+                           reply_markup=_voice_kb())
+            return
+        await _run_voice_command(m, text)
     except asyncio.TimeoutError:
         typing.cancel()
         await m.answer("Слишком долго думал над голосовым, сэр. Попробуйте ещё раз или текстом.")
@@ -325,6 +534,54 @@ async def voice_msg(m: Message):
                 tmp.unlink(missing_ok=True)
             except Exception:
                 pass
+
+
+async def _run_voice_command(m: Message, text: str) -> None:
+    """Выполнить распознанную команду и ответить: сверху расшифровка цитатой, снизу ответ; голосом — по настройке."""
+    from core.voice import tts
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        r = await asyncio.wait_for(agent.handle(text, channel="tg-voice"), timeout=HANDLE_TIMEOUT)
+    finally:
+        typing.cancel()
+    # сверху — расшифровка ЦЕЛИКОМ (сворачиваемой цитатой), снизу — ответ; одно сообщение.
+    shown = text if len(text) <= 3000 else text[:2997].rstrip() + "…"   # лимит одного сообщения Telegram — 4096
+    quote = f"<blockquote expandable>🎙 {_html.escape(shown)}</blockquote>" if len(shown) > 140 else f"<blockquote>🎙 {_html.escape(shown)}</blockquote>"
+    await send_long(m, f"{quote}\n\n{r.text or '…'}", raw_prefix=True)
+    await _maybe_send_card(m, r)
+    if tts.enabled() and tts.REPLY_VOICE in ("voice", "always"):
+        await _reply_voice(m, r.text)
+
+
+@router.callback_query(F.from_user.id == OWNER_ID, F.data.regexp(r"^vc:(ok|again|fix)$"))
+async def cb_voice_confirm(cq: CallbackQuery):
+    """Подтверждение расшифровки: Верно — выполняем; Повторить — ждём новое голосовое; Исправить — текстом."""
+    act = cq.data.split(":")[1]
+    chat = cq.message.chat.id
+    text = _VOICE_PENDING.pop(chat, None)
+    if act == "again":
+        await cq.answer("Жду голосовое")
+        await _drop_kb(cq, "🎙 Хорошо — запишите ещё раз, я слушаю.")
+        return
+    if act == "fix":
+        await cq.answer("Напишите текстом")
+        await _drop_kb(cq, "✏️ Напишите, что имели в виду, обычным сообщением — выполню.")
+        return
+    await cq.answer("Ок, выполняю")
+    await _drop_kb(cq, f"🎙 {text}" if text else "Уже не помню эту фразу — повторите, пожалуйста.")
+    if text:
+        await _run_voice_command(cq.message, text)
+
+
+async def _drop_kb(cq: CallbackQuery, note: str) -> None:
+    """Убрать кнопки у сообщения и оставить итог (если редактировать нельзя — просто новое сообщение)."""
+    try:
+        await cq.message.edit_text(note, reply_markup=None)
+    except Exception:
+        try:
+            await cq.message.answer(note)
+        except Exception:  # pragma: no cover
+            pass
 
 
 async def _reply_voice(m: Message, text: str) -> None:
@@ -351,32 +608,61 @@ async def cb_stranger(cq: CallbackQuery):
     await cq.answer("Это личный ассистент.", show_alert=False)
 
 
-@router.callback_query(F.data.regexp(r"^(ev|task):\d+:(ok|done|hour|tomorrow)$"))
+@router.callback_query(F.data.regexp(r"^(ev|task):\d+:(ok|done|hour|min15|evening|tomorrow|habit)$"))
 async def cb_reminder(cq: CallbackQuery):
-    """Кнопки под напоминанием: ✅ / ⏰ через час / 📅 завтра."""
+    """Кнопки под напоминанием: сделано / отложить (15 мин / вечером / +1 час / завтра). Сообщение редактируется,
+    кнопки убираются, показывается итог. Повторное нажатие не выполняется дважды."""
     from datetime import datetime, timedelta
     from core.services import calendar as cal, tasks as tsk
+    ckey = (cq.message.chat.id, cq.message.message_id, cq.data)
+    if ckey in _CB_DONE and time.time() - _CB_DONE[ckey] < 3600:
+        await cq.answer("Уже нажато — принято.")
+        return
+    _CB_DONE[ckey] = time.time()
     kind, sid, act = cq.data.split(":")
     oid = int(sid)
+
+    def when_due():
+        if act == "min15":
+            return datetime.now() + timedelta(minutes=15)
+        if act == "evening":
+            return _evening()
+        if act == "hour":
+            return datetime.now() + timedelta(hours=1)
+        if act == "habit":
+            from core.services import habits
+            return habits.next_habit()
+        return (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)
+
+    msg = "Готово."
     try:
         if kind == "task":
-            t = None
             if act == "done":
-                t = tsk.complete_task(oid); msg = f"✅ «{t.title}» — сделано. Красавчик, сэр." if t else "Задача уже закрыта."
-            elif act == "hour":
-                with_due = datetime.now() + timedelta(hours=1)
-                t = tsk.update_task(oid, due=with_due); msg = f"⏰ Напомню про «{t.title}» в {with_due:%H:%M}." if t else "Задача не найдена."
-            else:
+                t = tsk.complete_task(oid)
+                msg = f"✅ «{t.title}» — сделано. Красавчик, сэр." if t else "Задача уже закрыта."
+            elif act == "tomorrow":
                 from core.brain.dates import is_all_day
                 t = tsk.postpone_to_tomorrow(oid)
                 msg = (f"📅 «{t.title}» — перенёс на завтра" + ("." if is_all_day(t.due) else f", {t.due:%H:%M}.")) if t else "Задача не найдена."
+            else:
+                due = when_due()
+                t = tsk.update_task(oid, due=due)
+                msg = f"⏰ «{t.title}» — напомню в {due:%H:%M}." if t else "Задача не найдена."
         else:
             if act == "ok":
                 msg = "Принято, сэр. Не опаздывайте."
-            elif act == "hour":
-                e = cal.move_event(oid, datetime.now() + timedelta(hours=1)); msg = f"⏰ «{e.title}» — теперь в {e.start:%H:%M}." if e else "Событие не найдено."
             else:
-                e = cal.move_event(oid, (datetime.now() + timedelta(days=1)).replace(second=0, microsecond=0)); msg = f"📅 «{e.title}» — перенёс на завтра, {e.start:%H:%M}." if e else "Событие не найдено."
+                e = cal.move_event(oid, when_due())
+                if not e:
+                    msg = "Событие не найдено."
+                elif act == "tomorrow":
+                    msg = f"📅 «{e.title}» — перенёс на завтра, {e.start:%H:%M}."
+                elif act == "evening":
+                    msg = f"🌆 «{e.title}» — вечером, {e.start:%H:%M}."
+                elif act == "min15":
+                    msg = f"⏱ «{e.title}» — в {e.start:%H:%M}."
+                else:
+                    msg = f"⏰ «{e.title}» — теперь в {e.start:%H:%M}."
         if agent.on_change:
             agent.on_change("chat", {"channel": "tg", "actions": ["reminder_action"]})
     except Exception as ex:
@@ -474,6 +760,17 @@ async def report_cmd(m: Message):
     if not path:
         await m.answer("Не смог нарисовать отчёт, сэр — смотрите лог."); return
     await m.answer_photo(BufferedInputFile(path.read_bytes(), filename=path.name), caption="📊 Итоги недели" if days == 7 else "📊 Итоги месяца")
+
+
+@router.message(Command("month", "месяц"))
+async def month_cmd(m: Message):
+    """Снимок «как я жил в этом месяце» — одной карточкой (деньги, работа, привычки)."""
+    from aiogram.types import BufferedInputFile
+    from core.services import cards
+    path = await asyncio.to_thread(cards.month_snapshot_card)
+    if not path:
+        await m.answer("Не смог собрать снимок месяца, сэр — смотрите лог."); return
+    await m.answer_photo(BufferedInputFile(path.read_bytes(), filename=path.name), caption="🗓 Как я жил в этом месяце")
 
 
 @router.message(Command("forecast"))
@@ -749,10 +1046,16 @@ async def check_connection(bot: Bot) -> bool:
             BotCommand(command="debts", description="Долги"),
             BotCommand(command="forecast", description="Прогноз кассы на месяц"),
             BotCommand(command="orders", description="Заказы: дедлайны и кто должен"),
+            BotCommand(command="missed", description="Что я упускаю: оплаты, долги, цели"),
             BotCommand(command="pomo", description="Помодоро 25 мин (/pomo ролик · /pomo stop)"),
             BotCommand(command="goals", description="Цели и конверты"),
             BotCommand(command="week", description="Обзор недели: мысли и задачи"),
             BotCommand(command="report", description="Открытка-отчёт за неделю (/report 30 — месяц)"),
+            BotCommand(command="month", description="Как я жил в этом месяце — снимок"),
+            BotCommand(command="summary", description="Итог дня одной карточкой"),
+            BotCommand(command="find", description="Поиск по «второму мозгу»"),
+            BotCommand(command="exp", description="Трата одним тапом: /exp 700 такси"),
+            BotCommand(command="task", description="Задача одним тапом: /task сдать отчёт"),
             BotCommand(command="voice", description="Голосовые ответы: на голосовые / всегда / никогда"),
             BotCommand(command="game", description="Игровой режим вкл/выкл (освободить видеокарту)"),
             BotCommand(command="diag", description="Диагностика мозга и облака"),
@@ -788,7 +1091,7 @@ async def run_polling_forever(bot: Bot, dp: Dispatcher, on_connected=None) -> No
                 return
             except Exception as e:
                 if "Conflict" in str(e) or "terminated by other getUpdates" in str(e):
-                    log.error("ДВА ДЖАРВИСА НА ОДНОМ БОТЕ: где-то запущено ещё одно окно (автозагрузка? старая копия?). "
+                    log.error("ДВА МАРВИНА НА ОДНОМ БОТЕ: где-то запущено ещё одно окно (автозагрузка? старая копия?). "
                               "Сообщения уходят туда, а не сюда. Закройте все окна ассистента и запустите start.bat один раз.")
                     _record_error("tg: конфликт — запущен второй экземпляр бота")
                 log.warning("Polling прервался: %s — переподключаюсь", type(e).__name__)
@@ -799,11 +1102,13 @@ async def run_polling_forever(bot: Bot, dp: Dispatcher, on_connected=None) -> No
         delay = min(delay * 2, 120)
 
 
-def _kb(buttons):
+def _kb(buttons, per_row: int = 2):
+    """Инлайн-кнопки; по 2 в ряд — ряды одинаковой ширины, подписи не обрезаются."""
     if not buttons:
         return None
     from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in buttons]])
+    rows = [buttons[i:i + per_row] for i in range(0, len(buttons), per_row)]
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=t, callback_data=d) for t, d in row] for row in rows])
 
 
 async def notify(bot: Bot, text: str, buttons=None) -> None:
@@ -829,7 +1134,7 @@ async def notify_voice(bot: Bot, text: str, buttons=None) -> bool:
         p = await asyncio.wait_for(tts.speak_to_file(text, out), timeout=60)
         if not p:
             return False
-        await bot.send_voice(OWNER_ID, FSInputFile(p), caption=_to_html(text)[:1000], reply_markup=_kb(buttons))
+        await bot.send_voice(OWNER_ID, FSInputFile(p), caption=_to_html_cap(text), reply_markup=_kb(buttons))
         return True
     except Exception as e:
         log.warning("notify_voice failed: %s", e)
@@ -844,6 +1149,6 @@ async def notify_voice(bot: Bot, text: str, buttons=None) -> bool:
 async def notify_photo(bot: Bot, path: str, caption: str = "") -> None:
     from aiogram.types import FSInputFile
     try:
-        await bot.send_photo(OWNER_ID, FSInputFile(path), caption=_to_html(caption)[:1000] if caption else None)
+        await bot.send_photo(OWNER_ID, FSInputFile(path), caption=_to_html_cap(caption) if caption else None)
     except Exception as e:
         log.warning("notify_photo failed: %s", e)

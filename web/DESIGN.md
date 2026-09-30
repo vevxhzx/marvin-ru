@@ -71,7 +71,7 @@
 
 ## Reference page pass · 2026
 
-The current visual target is the supplied `джарвис · сегодня.html` reference. The shared CSS keeps the same tokens across every route:
+The current visual target is the supplied `марвин · сегодня.html` reference. The shared CSS keeps the same tokens across every route:
 
 - light `#e9ecf3`, dark `#050507` backgrounds;
 - 232px dark sidebar, 30px radius, 16px outer inset;

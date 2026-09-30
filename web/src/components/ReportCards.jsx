@@ -1,25 +1,43 @@
-import { useMemo } from 'react'
-import { money, plural, shortDate } from '../lib/api'
+import { useEffect, useMemo, useState } from 'react'
+import { api, money, plural, shortDate, hhmm } from '../lib/api'
 import { Num } from './ui'
 import { Check, Sparkles, AlertCircle, Calendar, ArrowUpRight, ArrowDownRight, Wallet, Target, Clock } from 'lucide-react'
 
 /**
- * Премиальные интерактивные карточки отчётов в точном стиле эталона Jarvis Bento V7.
+ * Премиальные интерактивные карточки отчётов в стиле эталонной Bento-вёрстки.
  * Заменяют скучные текстовые и монохромные телеграм-карточки на богатый Bento-дизайн:
  * - Градиентные Hero-плитки
  * - Акцентные сине-фиолетовые и изумрудные карточки p1, p2, blk
  * - Прогресс-бары, чипсы, бейджи и аккуратные шрифты Inter Tight / Inter
  */
 
-export function MorningDigestCard({ data, ownerName = 'вовчик' }) {
-  const d = data || {}
+export function MorningDigestCard({ data, ownerName }) {
+  // Настоящие цифры дня из /api/dashboard: раньше карточка рисовала захардкоженные 15 761 / 3 940,
+  // поэтому на сайте и в Telegram (там дайджест из базы) были разные числа. Теперь источник один.
+  const [live, setLive] = useState(null)
+  useEffect(() => {
+    if (data) return
+    let on = true
+    api.dashboard().then((r) => {
+      if (!on) return
+      setLive({
+        balance: r?.finance?.total_balance,
+        dailyBudget: r?.finance?.safe?.per_day,
+        events: (r?.today || []).map((e) => ({ time: hhmm(e.start), title: e.title })),
+        tasks: (r?.tasks || []).map((t) => ({ title: t.title })),
+      })
+    }).catch(() => {})
+    return () => { on = false }
+  }, [data])
+  const d = data || live || {}
   const now = new Date()
   const WD_RU = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
   const MONTHS_RU = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
   const dateStr = `${WD_RU[now.getDay()]}, ${now.getDate()} ${MONTHS_RU[now.getMonth()]}`
 
-  const balance = d.balance ?? 15761
-  const dailyBudget = d.dailyBudget ?? 3940
+  const who = String(ownerName || '').trim()
+  const balance = d.balance ?? 0
+  const dailyBudget = d.dailyBudget ?? null
   const events = d.events || []
   const tasks = d.tasks || []
 
@@ -36,7 +54,7 @@ export function MorningDigestCard({ data, ownerName = 'вовчик' }) {
             {('0' + now.getHours()).slice(-2)}:{('0' + now.getMinutes()).slice(-2)}
           </span>
         </div>
-        <h2 className="report-title">доброе утро, {ownerName}</h2>
+        <h2 className="report-title">доброе утро{who ? `, ${who}` : ''}</h2>
         <p className="report-subtitle">{dateStr}</p>
       </div>
 
@@ -58,7 +76,7 @@ export function MorningDigestCard({ data, ownerName = 'вовчик' }) {
             <small>в день</small>
           </div>
           <div className="text-[26px] font-semibold tracking-[-0.03em] text-[var(--pos)]">
-            <Num value={dailyBudget} /> ₽
+            <Num value={dailyBudget ?? 0} /> ₽
           </div>
         </div>
       </div>
@@ -105,38 +123,65 @@ export function MorningDigestCard({ data, ownerName = 'вовчик' }) {
 
       {/* Подвал карточки с брендингом */}
       <div className="report-footer mt-4 pt-3 flex items-center justify-between text-[11.5px] opacity-40">
-        <span>джарвис</span>
+        <span>марвин</span>
         <span className="mono">{shortDate(now)}</span>
       </div>
     </div>
   )
 }
 
-export function WeekSummaryCard({ data, ownerName = 'вовчик' }) {
-  const d = data || {}
+export function WeekSummaryCard({ data, ownerName }) {
+  // Реальные цифры недели: раньше карточка рисовала выдуманные 6 589 ₽ / 205 700 ₽ и категории «алкоголь 605 ₽».
+  const [live, setLive] = useState(null)
+  useEffect(() => {
+    if (data) return
+    let on = true
+    const weekAgo = new Date(Date.now() - 7 * 864e5)
+    Promise.all([
+      api.finSummary(7).catch(() => null),
+      api.finSummary(14).catch(() => null),
+      api.debts().catch(() => []),
+      api.dashboard().catch(() => null),
+      api.tasks(true).catch(() => []),
+      api.notes().catch(() => []),
+    ]).then(([w7, w14, debts, dash, tasks, notes]) => {
+      if (!on) return
+      const spent = w7?.spent || 0
+      const earned = w7?.earned || 0
+      const prev = Math.max(0, (w14?.spent || 0) - spent)
+      const cats = Object.entries(w7?.by_category || {}).slice(0, 5).map(([name, amount]) => ({
+        name, amount, pct: spent ? Math.round((amount / spent) * 100) : 0, color: '#3b5bff',
+      }))
+      const budgets = w7?.budgets || []
+      setLive({
+        spent, earned,
+        balance: w7?.total_balance ?? w7?.balance ?? 0,
+        debts: (debts || []).reduce((s, x) => s + (x.amount || x.left || 0), 0),
+        deltaSpent: prev > 0 ? Math.round(((spent - prev) / prev) * 100) : 0,
+        categories: cats,
+        limits: budgets.filter((b) => (b.pct || 0) >= 80)
+          .map((b) => ({ name: b.name, pct: Math.min(100, Math.round(b.pct)), status: b.pct >= 100 ? 'over' : 'warn' })),
+        habits: {
+          tasksDone: (tasks || []).filter((t) => t.done && t.done_at && new Date(t.done_at) >= weekAgo).length,
+          notesSaved: (notes || []).filter((n) => n.created_at && new Date(n.created_at) >= weekAgo).length,
+          streakDays: dash?.streak?.current ?? null,
+        },
+      })
+    }).catch(() => {})
+    return () => { on = false }
+  }, [data])
+  const d = data || live || {}
   const now = new Date()
-  const spent = d.spent ?? 6589
+  const spent = d.spent ?? 0
   const earned = d.earned ?? 0
-  const balance = d.balance ?? 15761
-  const debts = d.debts ?? 205700
-  const deltaSpent = d.deltaSpent ?? -5
+  const balance = d.balance ?? 0
+  const debts = d.debts ?? 0
+  const deltaSpent = d.deltaSpent ?? 0
 
-  const categories = d.categories || [
-    { name: 'Еда', amount: 3047, pct: 46, color: '#3b5bff' },
-    { name: 'Другое', amount: 2638, pct: 40, color: '#3b5bff' },
-    { name: 'алкоголь', amount: 605, pct: 9, color: '#3b5bff' },
-    { name: 'Подписки', amount: 299, pct: 5, color: '#3b5bff' },
-  ]
-
-  const habits = d.habits || {
-    tasksDone: 2,
-    notesSaved: 1,
-    streak: '8 из 7 дней с записями',
-  }
-
-  const limits = d.limits || [
-    { name: 'Еда', pct: 90, status: 'warn' },
-  ]
+  const categories = d.categories || []
+  const habits = d.habits || { tasksDone: 0, notesSaved: 0, streakDays: null }
+  const limits = d.limits || []
+  const from = new Date(Date.now() - 6 * 864e5)
 
   return (
     <div className="report-card week-summary r">
@@ -152,7 +197,7 @@ export function WeekSummaryCard({ data, ownerName = 'вовчик' }) {
           </span>
         </div>
         <h2 className="report-title">итоги недели</h2>
-        <p className="report-subtitle">20.09 — 27.09.2026</p>
+        <p className="report-subtitle">{`${from.getDate()}.${('0' + (from.getMonth() + 1)).slice(-2)} — ${now.getDate()}.${('0' + (now.getMonth() + 1)).slice(-2)}.${now.getFullYear()}`}</p>
       </div>
 
       {/* Верхние плитки метрик расходов и доходов */}
@@ -217,7 +262,7 @@ export function WeekSummaryCard({ data, ownerName = 'вовчик' }) {
           </span>
           <span className="report-pill active-glow">
             <span className="w-2 h-2 rounded-full bg-white shrink-0"></span>
-            {habits.streak}
+            {habits.streakDays ? `${habits.streakDays} ${plural(habits.streakDays, 'день', 'дня', 'дней')} подряд с записями` : 'пока без стрика'}
           </span>
         </div>
       </div>
@@ -265,8 +310,8 @@ export function WeekSummaryCard({ data, ownerName = 'вовчик' }) {
 
       {/* Подвал карточки */}
       <div className="report-footer mt-4 pt-3 flex items-center justify-between text-[11.5px] opacity-40">
-        <span>джарвис</span>
-        <span className="mono">27.09.2026 · 19:02</span>
+        <span>марвин</span>
+        <span className="mono">{shortDate(now)}</span>
       </div>
     </div>
   )
@@ -282,9 +327,10 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
   const now = new Date()
   const tasks = d.tasks || []
   const events = d.events || []
-  const balance = d.balance ?? 15761
-  const spentToday = d.spentToday ?? 450
-  const dailyBudget = d.dailyBudget ?? 3940
+  // Никаких захардкоженных чисел: если данные ещё не пришли — честный ноль, а не «красивая» выдумка
+  const balance = d.balance ?? 0
+  const spentToday = d.spentToday ?? 0
+  const dailyBudget = d.dailyBudget ?? 0
 
   const openTasks = tasks.filter((t) => !t.done)
   const doneTasks = tasks.filter((t) => t.done)
@@ -378,7 +424,7 @@ export function ScreenTimeBentoWidget({ data }) {
     active_min: 342,
     hours: [0, 0, 0, 0, 0, 0, 0, 0, 15, 45, 55, 60, 40, 50, 58, 42, 30, 0, 0, 0, 0, 0, 0, 0],
     apps: [
-      ['Premiere Pro', 200, 'работа', 'Монтаж узбекам2'],
+      ['Premiere Pro', 200, 'работа', 'Монтаж ролика'],
       ['After Effects', 72, 'работа', 'Анимация титров'],
       ['Telegram', 35, 'общение', 'Чат с клиентом'],
       ['Chrome', 25, 'браузер', 'YouTube'],

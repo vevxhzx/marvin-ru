@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-os.environ.setdefault("JARVIS_TEST", "1")
+os.environ.setdefault("ASSISTANT_TEST", "1")
 
 
 @pytest.fixture(autouse=True)

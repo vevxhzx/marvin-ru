@@ -1,18 +1,22 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Check, Play, Square, Coffee, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard } from 'lucide-react'
+import { Plus, Check, Play, Square, Coffee, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api, money, moneyShort, dayLabel, shortDate, hhmm, plural, toLocalISO } from '../lib/api'
-import { Section, Empty, Sheet, Field, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Stat, Num, PageAccent } from '../components/ui'
+import { Section, Empty, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Num, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 
 const VIEWS = [['open', 'в работе'], ['unpaid', 'ждут оплаты'], ['all', 'все']]
 const STATUS = { new: 'новый', work: 'в работе', review: 'на правках', done: 'сдан', paid: 'оплачен', cancelled: 'отменён' }
 const STATUS_TONE = { new: '', work: 'accent', review: 'warn', done: 'pos', paid: 'pos', cancelled: '' }
+const STATUS_DOT = { new: 'var(--accent)', work: 'var(--accent)', review: 'var(--warn)', done: 'var(--pos)', paid: 'var(--pos)', cancelled: 'var(--ink-3)' }
 const NEXT = { new: 'work', work: 'done', review: 'done', done: 'paid' }
 const NEXT_LABEL = { new: 'в работу', work: 'сдан', review: 'сдан', done: 'оплачен' }
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
 const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ч` : h > 0 ? `${Math.round(h * 60)} мин` : '—')
+
+/* Мягкая карточка строки: нейтральная тень, на hover — чуть сильнее (и подъём через hover:-translate-y-px) */
+const CARD_SHADOW = 'shadow-[inset_0_0_0_1px_var(--line),0_16px_34px_-24px_rgba(16,17,20,0.35)] hover:shadow-[inset_0_0_0_1px_var(--line),0_22px_42px_-24px_rgba(16,17,20,0.5)]'
 
 /* Таймер помодоро: одна активная сессия на всю систему (сайт + Telegram + голос). Тикает локально, сверяется по SSE. */
 export function useTimer() {
@@ -73,8 +77,10 @@ export default function Orders() {
   const stop = async () => { try { await api.stopTimer(); load() } catch (e) { show.err(e) } }
 
   const kicker = overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : openN ? `${openN} ${plural(openN, 'заказ в работе', 'заказа в работе', 'заказов в работе')}` : 'свободен'
+  const month = stats?.months?.at(-1)?.income || 0
+  const prevMonth = stats?.months?.at(-2)
   return (
-    <div className="bento-page space-y-10" style={pageAcc.style}>
+    <div className="bento-page space-y-8 pt-4" style={{ ...pageAcc.style, '--acc2': 'color-mix(in srgb, var(--acc) 55%, #8a5cff)' }}>
       <PageHead kicker={kicker} title="заказы" idx={openN}
         right={<><Seg value={view} onChange={setView} options={VIEWS} /><PageAccent page="orders" /><button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button></>} />
 
@@ -84,15 +90,26 @@ export default function Orders() {
         <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label="Добавить"><Plus size={16} /></button>
       </form>
 
-      {/* таймер + деньги — одна спокойная полоса */}
-      <div className="grid grid-cols-1 gap-8 sm:grid-cols-[auto_1fr] sm:items-start sm:gap-12">
-        <TimerCard timer={timer} left={left} onStart={() => start(null)} onStop={stop} onBreak={() => api.startTimer(timer?.order_id || null, null, 'break').then(load).catch(show.err)} />
-        <div className="grid grid-cols-2 gap-x-6 gap-y-6 sm:grid-cols-4">
-          <button type="button" className="text-left" onClick={() => setView('unpaid')} data-tip={unpaid ? 'показать, кто не заплатил' : undefined}><Stat label="ждут оплаты" value={<Num value={unpaid} fmt={money} />} tone={unpaid ? 'accent' : ''} /></button>
-          <Stat label="за этот месяц" value={stats ? <Num value={stats.months.at(-1)?.income || 0} fmt={money} /> : '—'} sub={stats?.months.at(-2) ? `прошлый · ${money(stats.months.at(-2).income)}` : undefined} />
-          <Stat label="ставка в час" value={stats?.rate ? money(stats.rate) : '—'} sub={stats?.total_hours ? `${hours(stats.total_hours)} по таймеру` : 'запускайте таймер по заказу'} />
-          <Stat label="средний чек" value={stats?.avg_check ? money(stats.avg_check) : '—'} sub={stats?.avg_lead_days ? `~${stats.avg_lead_days} дн. на заказ` : undefined} />
-        </div>
+      {/* сводка: таймер + градиентные hero-плитки в одной bento-сетке */}
+      <div className="bento" style={{ marginTop: 26 }}>
+        <section className="c s4 flex items-center" style={{ borderRadius: 26 }}>
+          <TimerCard timer={timer} left={left} onStart={() => start(null)} onStop={stop} onBreak={() => api.startTimer(timer?.order_id || null, null, 'break').then(load).catch(show.err)} />
+        </section>
+        <Tile span="s4" glow="color-mix(in srgb, var(--acc) 60%, transparent)" gradient="linear-gradient(135deg, var(--acc) 0%, var(--acc2) 100%)" ink="var(--accent-ink)" icon={<Play size={16} />}
+          label="в работе" value={<Num value={openN} />}
+          sub={overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : 'всё под контролем'} />
+        <Tile span="s4" glow="rgba(255,59,92,0.5)" gradient="linear-gradient(135deg,#ff3b5c 0%,#ff5f3b 55%,#ff9f0a 100%)" icon={<Wallet size={16} />}
+          label="ждут оплаты" value={<Num value={unpaid} fmt={money} />} onClick={() => setView('unpaid')} tip={unpaid ? 'показать, кто не заплатил' : undefined}
+          sub={unpaid ? 'нажмите, чтобы найти должников' : 'все рассчитались'} />
+        <Tile span="s4" glow="rgba(25,179,74,0.5)" gradient="linear-gradient(135deg,#19b34a 0%,#12b08a 55%,#10b3a3 100%)" icon={<TrendingUp size={16} />}
+          label="за этот месяц" value={stats ? <Num value={month} fmt={money} /> : '—'}
+          sub={prevMonth ? `прошлый · ${money(prevMonth.income)}` : 'первый месяц в работе'} />
+        <Tile span="s4" ink="#2a2470" glow="rgba(116,92,255,0.28)" gradient="linear-gradient(140deg,#eef0ff 0%,#ddd6ff 100%)" icon={<Clock size={16} />}
+          label="ставка в час" value={stats?.rate ? money(stats.rate) : '—'}
+          sub={stats?.total_hours ? `${hours(stats.total_hours)} по таймеру` : 'запускайте таймер по заказу'} />
+        <Tile span="s4" ink="#0f5a2b" glow="rgba(25,179,74,0.26)" gradient="linear-gradient(140deg,#e9f8ef 0%,#d2f1e6 100%)" icon={<Coins size={16} />}
+          label="средний чек" value={stats?.avg_check ? money(stats.avg_check) : '—'}
+          sub={stats?.avg_lead_days ? `~${stats.avg_lead_days} дн. на заказ` : 'по закрытым заказам'} />
       </div>
 
       {pulse?.enabled && (pulse.late?.length > 0 || pulse.tax?.tax_total > 0) && (
@@ -110,7 +127,7 @@ export default function Orders() {
       {!orders ? <ListSkeleton n={4} /> : (
         <Section title={VIEWS.find((v) => v[0] === view)[1]} idx={list.length}
           hint="как закрыть заказ: кнопка со статусом справа в строке, либо раскройте заказ (стрелка) — там «сдан», оплата и удаление. На телефоне — свайп вправо: следующий статус, влево: удалить.">
-          <div className="rule stagger">
+          <div className="stagger space-y-2.5">
             {list.length === 0 && (
               view === 'open' ? <Empty glyph="tasks" text="Заказов в работе нет" sub="Как возьмёте — скажите мне, я запомню дедлайн и буду ждать оплату" hint="заказ: монтаж свадьбы для Иванова, 60к, до 30 сентября" />
                 : view === 'unpaid' ? <Empty glyph="money" text="Все оплатили" sub="Приятная пустота" />
@@ -131,14 +148,30 @@ export default function Orders() {
   )
 }
 
+/* Градиентная hero-плитка сводки: крупная цифра, мелкая подпись, мягкая цветная тень */
+function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.5)', icon, label, value, sub, onClick, tip }) {
+  const inner = (
+    <>
+      {icon && <span className="pointer-events-none absolute right-5 top-5 opacity-70" aria-hidden>{icon}</span>}
+      <div className="label" style={{ color: 'inherit', opacity: 0.72 }}>{label}</div>
+      <div className="num mt-3 text-[32px] font-medium leading-none tracking-[-0.045em] sm:text-[38px]">{value}</div>
+      {sub && <div className="mt-2 max-w-[94%] text-[12.5px] leading-snug" style={{ opacity: 0.82 }}>{sub}</div>}
+    </>
+  )
+  const style = { background: gradient, color: ink, borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 18px 40px -22px ${glow}` }
+  return onClick
+    ? <button type="button" onClick={onClick} data-tip={tip} className={`c ${span} relative block w-full text-left transition duration-300 hover:-translate-y-0.5`} style={style}>{inner}</button>
+    : <section className={`c ${span} relative block`} style={style}>{inner}</section>
+}
+
 function TimerCard({ timer, left, onStart, onStop, onBreak }) {
   const active = timer?.active
   const total = active ? timer.planned_min * 60 : 25 * 60
   const pct = active ? 1 - left / total : 0
   const R = 30, C = 2 * Math.PI * R
   return (
-    <div className="flex items-center gap-4">
-      <div className="relative grid h-[76px] w-[76px] place-items-center">
+    <div className="flex w-full items-center gap-4">
+      <div className="relative grid h-[76px] w-[76px] shrink-0 place-items-center">
         <svg width="76" height="76" viewBox="0 0 76 76" className="-rotate-90">
           <circle cx="38" cy="38" r={R} fill="none" stroke="var(--fill-2)" strokeWidth="3" />
           {active && <circle cx="38" cy="38" r={R} fill="none" stroke={timer.kind === 'break' ? 'var(--pos)' : 'var(--accent)'} strokeWidth="3" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} style={{ transition: 'stroke-dashoffset 1s linear' }} />}
@@ -170,37 +203,49 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, 
   const closed = ['paid', 'cancelled'].includes(o.status)
   const running = timer?.active && timer.order_id === o.id && timer.kind === 'focus'
   const dl = o.deadline ? (o.overdue ? `просрочен · ${dayLabel(o.deadline).toLowerCase()}` : o.past_due ? `срок был ${shortDate(o.deadline).toLowerCase()}` : o.days_left === 0 ? 'сегодня' : o.days_left === 1 ? 'завтра' : `до ${shortDate(o.deadline).toLowerCase()}`) : null
+  const pct = o.price > 0 ? Math.min(100, Math.round((o.paid / o.price) * 100)) : 0
   return (
     <Swipe onLeft={!closed ? onDel : undefined} onRight={!closed && NEXT[o.status] ? () => onStatus(o, NEXT[o.status]) : undefined} rightLabel={NEXT_LABEL[o.status] || 'готово'}>
-      <div className={`row-slide done-fade ${extra} ${closed ? 'opacity-55' : ''}`}>
-        <div className="row group cursor-pointer" onClick={onOpen}>
-          <span className={`badge !hidden shrink-0 sm:!inline-flex ${STATUS_TONE[o.status]}`}>{STATUS[o.status]}</span>
-          <span className="h-2 w-2 shrink-0 rounded-full sm:hidden" style={{ background: o.status === 'review' ? 'var(--warn)' : o.status === 'done' || o.status === 'paid' ? 'var(--pos)' : o.status === 'work' ? 'var(--accent)' : 'var(--ink-3)' }} aria-label={STATUS[o.status]} />
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
-              <div className="min-w-0 truncate text-[15px] font-medium">{o.title}</div>
-              {o.client && <div className="muted min-w-0 truncate text-[12.5px] sm:shrink-0 sm:text-[13px]">{o.client}</div>}
+      <div className={`row-slide ${extra} ${closed ? 'opacity-55' : ''}`}>
+        <div className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`} style={{ background: 'var(--sf)', borderRadius: 22 }} onClick={onOpen}>
+          <div className="relative flex items-center gap-3.5 pl-1">
+            <span className="absolute -left-4 bottom-1 top-1 w-1 rounded-full" style={{ background: STATUS_DOT[o.status] }} aria-hidden />
+            <span className={`badge !hidden shrink-0 sm:!inline-flex ${STATUS_TONE[o.status]}`}>{STATUS[o.status]}</span>
+            <span className="h-2 w-2 shrink-0 rounded-full sm:hidden" style={{ background: STATUS_DOT[o.status] }} aria-label={STATUS[o.status]} />
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
+                <div className="min-w-0 truncate text-[15px] font-medium">{o.title}</div>
+                {o.client && <div className="muted min-w-0 truncate text-[12.5px] sm:shrink-0 sm:text-[13px]">{o.client}</div>}
+              </div>
+              <div className={`flex flex-wrap items-center gap-x-1.5 text-[12px] ${o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
+                {dl && <span className="flex items-center gap-1"><Clock size={11} /> {dl}</span>}
+                {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{dl ? '· ' : ''}{hours(o.hours)}{o.pulse?.estimate_h ? ` из ${hours(o.pulse.estimate_h)}` : ''}{o.rate ? ` · ${money(o.rate)}/ч` : ''}</span>}
+                {running && <span className="accent">{dl || o.hours ? '· ' : ''}идёт таймер</span>}
+              </div>
+              {o.price > 0 && (
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
+                  </div>
+                  <span className="num faint shrink-0 text-[10.5px]">{pct}%</span>
+                </div>
+              )}
             </div>
-            <div className={`flex flex-wrap items-center gap-x-1.5 text-[12px] ${o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
-              {dl && <span className="flex items-center gap-1"><Clock size={11} /> {dl}</span>}
-              {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{dl ? '· ' : ''}{hours(o.hours)}{o.pulse?.estimate_h ? ` из ${hours(o.pulse.estimate_h)}` : ''}{o.rate ? ` · ${money(o.rate)}/ч` : ''}</span>}
-              {running && <span className="accent">{dl || o.hours ? '· ' : ''}идёт таймер</span>}
+            <div className="num shrink-0 text-right">
+              <div className="text-[15px] font-medium">{o.price ? money(o.price) : <span className="faint">без суммы</span>}</div>
+              {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">осталось {money(o.left)}</div>}
+              {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">не оплачен</div>}
             </div>
+            {!closed && NEXT[o.status] && (
+              <button className="btn-soft btn-sm !h-7 shrink-0 hidden sm:inline-flex" title={`перевести в статус «${STATUS[NEXT[o.status]]}»`} onClick={(e) => { e.stopPropagation(); onStatus(o, NEXT[o.status]) }}>
+                <Check size={12} /> {NEXT_LABEL[o.status]}
+              </button>
+            )}
+            {!closed && <button className="btn-icon !hidden !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100 sm:!inline-flex" data-tip={running ? 'таймер идёт' : `таймер ${timer?.focus_min || 25} мин`} onClick={(e) => { e.stopPropagation(); if (!running) onStart() }} aria-label="Таймер">{running ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : <Play size={13} />}</button>}
+            <span className="btn-icon !h-7 !w-7 faint">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
           </div>
-          <div className="num shrink-0 text-right">
-            <div className="text-[15px] font-medium">{o.price ? money(o.price) : <span className="faint">без суммы</span>}</div>
-            {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">осталось {money(o.left)}</div>}
-            {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">не оплачен</div>}
-          </div>
-          {!closed && NEXT[o.status] && (
-            <button className="btn-soft btn-sm !h-7 shrink-0 hidden sm:inline-flex" title={`перевести в статус «${STATUS[NEXT[o.status]]}»`} onClick={(e) => { e.stopPropagation(); onStatus(o, NEXT[o.status]) }}>
-              <Check size={12} /> {NEXT_LABEL[o.status]}
-            </button>
-          )}
-          {!closed && <button className="btn-icon !hidden !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100 sm:!inline-flex" data-tip={running ? 'таймер идёт' : `таймер ${timer?.focus_min || 25} мин`} onClick={(e) => { e.stopPropagation(); if (!running) onStart() }} aria-label="Таймер">{running ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : <Play size={13} />}</button>}
-          <span className="btn-icon !h-7 !w-7 faint">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+          {open && <Details o={o} onEdit={onEdit} onPay={onPay} onDel={onDel} onStatus={onStatus} onStart={onStart} closed={closed} />}
         </div>
-        {open && <Details o={o} onEdit={onEdit} onPay={onPay} onDel={onDel} onStatus={onStatus} onStart={onStart} closed={closed} />}
       </div>
     </Swipe>
   )
@@ -225,7 +270,7 @@ function Details({ o, onEdit, onPay, onDel, onStatus, onStart, closed }) {
     } catch (e) { setManualMsg(e.message || 'Не удалось сохранить') } finally { setManualBusy(false) }
   }
   return (
-    <div className="animate-rise -mt-1 mb-3 ml-[2px] space-y-3 border-l-2 pl-4" style={{ borderColor: 'var(--line)' }}>
+    <div className="animate-rise mt-3 space-y-3 rounded-2xl p-3.5 sm:p-4" style={{ background: 'var(--sf2)' }}>
       {o.notes && <div className="muted whitespace-pre-wrap text-[13.5px]">{o.notes}</div>}
       <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] sm:grid-cols-4">
         <div><div className="label">оплачено</div><div className="num mt-0.5">{money(o.paid)}{o.price ? <span className="muted"> из {money(o.price)}</span> : ''}</div></div>
@@ -234,7 +279,7 @@ function Details({ o, onEdit, onPay, onDel, onStatus, onStart, closed }) {
         <div><div className="label">дедлайн</div><div className="mt-0.5">{o.deadline ? `${dayLabel(o.deadline).toLowerCase()}, ${hhmm(o.deadline)}` : '—'}</div></div>
       </div>
       {o.pulse?.warn && <div className="warn text-[12.5px]">заказ съедает на {o.pulse.over_pct} % больше времени, чем планировали — {hours(o.pulse.hours)} из {hours(o.pulse.estimate_h)}</div>}
-      <div className="rounded-xl border hair p-3">
+      <div className="rounded-xl border hair p-3" style={{ background: 'var(--sf)' }}>
         <div className="label mb-2">добавить потраченное время</div>
         <div className="flex flex-wrap items-center gap-2">
           <input className="input !h-8 !w-24 num" type="number" min="1" max="10080" placeholder="минуты" value={manualMin} onChange={(e) => setManualMin(e.target.value)} aria-label="Потраченные минуты" />
@@ -243,7 +288,7 @@ function Details({ o, onEdit, onPay, onDel, onStatus, onStart, closed }) {
         </div>
         {manualMsg && <div className="muted mt-1 text-[12px]">{manualMsg}</div>}
       </div>
-      {screenProjects.length > 0 && <div className="rounded-xl border hair p-3">
+      {screenProjects.length > 0 && <div className="rounded-xl border hair p-3" style={{ background: 'var(--sf)' }}>
         <div className="label mb-2">найдено за ПК сегодня</div>
         <div className="space-y-1.5">
           {screenProjects.map((x) => <div key={`${x.app}-${x.project}`} className="flex items-center justify-between gap-3 text-[12.5px]">
@@ -274,27 +319,40 @@ function StatsBlock({ stats, onUnpaid }) {
   const [more, setMore] = useState(false)
   const max = Math.max(1, ...stats.months.map((m) => m.income))
   const maxF = Math.max(1, ...stats.focus_days.map((d) => d.min))
+  const lastMonth = stats.months.at(-1)?.month
   return (
     <Section title="как идут дела" hint="доход по месяцам — только оплаты по заказам; часы — по таймеру">
-      <div className="grid grid-cols-1 gap-10 lg:grid-cols-2">
-        <div>
-          <div className="label mb-3">доход по месяцам</div>
-          <div className="flex h-[120px] items-end gap-2">
-            {stats.months.map((m) => (
-              <div key={m.month} className="group flex flex-1 flex-col items-center gap-1.5">
-                <div className="num text-[11px] opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
-                <div className="w-full rounded-t-md transition-all duration-700" style={{ height: `${Math.max(2, (m.income / max) * 90)}px`, background: m.month === stats.months.at(-1).month ? 'var(--accent)' : 'var(--fill-2)' }} />
-                <div className="faint mono text-[10px]">{m.month.slice(5)}</div>
-              </div>
-            ))}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        <div className="c" style={{ borderRadius: 26 }}>
+          <div className="label mb-5">доход по месяцам</div>
+          <div className="flex h-[132px] items-end gap-2">
+            {stats.months.map((m) => {
+              const cur = m.month === lastMonth
+              return (
+                <div key={m.month} className="group flex flex-1 flex-col items-center gap-1.5">
+                  <div className="num text-[11px] opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
+                  <div className="w-full rounded-t-lg transition-all duration-700" style={{
+                    height: `${Math.max(3, (m.income / max) * 96)}px`,
+                    background: cur ? 'linear-gradient(180deg, var(--acc2) 0%, var(--acc) 100%)' : m.income ? 'linear-gradient(180deg, color-mix(in srgb, var(--acc) 55%, transparent), color-mix(in srgb, var(--acc) 32%, transparent))' : 'var(--fill-2)',
+                    boxShadow: cur ? '0 12px 26px -12px color-mix(in srgb, var(--acc) 60%, transparent)' : 'none',
+                  }} />
+                  <div className="faint mono text-[10px]">{m.month.slice(5)}</div>
+                </div>
+              )
+            })}
           </div>
         </div>
-        <div>
-          <div className="mb-3 flex items-baseline justify-between"><div className="label">фокус за 2 недели</div><span className="muted text-[12px]">{stats.week_load_h ? `${hours(stats.week_load_h)} за неделю` : 'таймер ещё не запускали'}</span></div>
-          <div className="flex h-[120px] items-end gap-1">
+        <div className="c" style={{ borderRadius: 26 }}>
+          <div className="mb-5 flex items-baseline justify-between"><div className="label">фокус за 2 недели</div><span className="muted text-[12px]">{stats.week_load_h ? `${hours(stats.week_load_h)} за неделю` : 'таймер ещё не запускали'}</span></div>
+          <div className="flex h-[132px] items-end gap-1">
             {stats.focus_days.map((d) => (
               <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5" title={`${d.date.slice(8)}.${d.date.slice(5, 7)} · ${d.min} мин`}>
-                <div className="w-full rounded-t-md" style={{ height: `${Math.max(2, (d.min / maxF) * 90)}px`, background: d.min ? 'var(--pos)' : 'var(--fill-2)', opacity: d.min ? 0.85 : 1 }} />
+                <div className="w-full rounded-t-md" style={{
+                  height: `${Math.max(3, (d.min / maxF) * 96)}px`,
+                  background: d.min ? 'linear-gradient(180deg,#19b34a 0%,#10b3a3 100%)' : 'var(--fill-2)',
+                  opacity: d.min ? 0.92 : 1,
+                  boxShadow: d.min ? '0 10px 22px -12px rgba(16,179,163,0.6)' : 'none',
+                }} />
                 <div className="faint mono text-[9px]">{d.date.slice(8)}</div>
               </div>
             ))}
@@ -302,10 +360,10 @@ function StatsBlock({ stats, onUnpaid }) {
         </div>
       </div>
       {stats.clients.length > 0 && (
-        <div className="mt-8">
+        <div className="c mt-5" style={{ borderRadius: 26 }}>
           <button className="flex items-center gap-2 text-left" onClick={() => setMore((v) => !v)}><span className="label">клиенты · {stats.clients.length}</span>{more ? <ChevronUp size={13} className="faint" /> : <ChevronDown size={13} className="faint" />}</button>
           {more && (
-            <div className="rule mt-2 animate-rise">
+            <div className="mt-3 animate-rise">
               {stats.clients.map((c) => (
                 <div key={c.client} className="row">
                   <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-[12px]">{c.orders} {plural(c.orders, 'заказ', 'заказа', 'заказов')}{c.total ? ` на ${money(c.total)}` : ''}{c.open ? ` · ${c.open} в работе` : ''}{c.hours ? ` · ${hours(c.hours)}` : ''}{c.rate ? ` · ${money(c.rate)}/ч` : ''}</div></div>
@@ -327,11 +385,23 @@ const blank = { title: '', price: '', client: '', deadline: '', notes: '', estim
 export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   const [f, setF] = useState(blank)
   const [clients, setClients] = useState([])
+  const [hint, setHint] = useState(null)
   useEffect(() => {
     if (!open) return
     api.clients().then(setClients).catch(() => {})
     setF(order ? { title: order.title, price: order.price ? String(order.price) : '', client: order.client || '', deadline: order.deadline ? toLocalISO(new Date(order.deadline)).slice(0, 16) : '', notes: order.notes || '', estimate_h: order.estimate_h ? String(order.estimate_h) : '', status: order.status } : blank)
   }, [open, order])
+  // Подсказка цены/часов по похожим прошлым заказам (только для нового заказа, с задержкой ввода)
+  useEffect(() => {
+    if (!open || order) { setHint(null); return }
+    const t = f.title.trim()
+    if (t.length < 4) { setHint(null); return }
+    let on = true
+    const id = setTimeout(() => {
+      api.ordersSuggest(t).then((s) => { if (on) setHint(s && s.count ? s : null) }).catch(() => {})
+    }, 450)
+    return () => { on = false; clearTimeout(id) }
+  }, [f.title, open, order])
   const submit = async (e) => {
     e.preventDefault()
     const body = { title: f.title.trim(), price: Number(String(f.price).replace(/\s/g, '').replace(',', '.')) || 0, client: f.client.trim() || null, deadline: f.deadline || null, notes: f.notes.trim() || null, estimate_h: Number(f.estimate_h) || 0, status: f.status }
@@ -344,10 +414,18 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
     <Sheet open={open} onClose={onClose} title={order ? 'заказ' : 'новый заказ'} sub={order ? undefined : 'или скажите ассистенту: «заказ: ролик для Пятёрочки, 25к, до пятницы»'}>
       <form onSubmit={submit} className="space-y-4">
         <Field label="что делаем"><input autoFocus className="input !text-[17px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder="Монтаж ролика" /></Field>
+        {hint && (
+          <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: 'var(--sf2)' }}>
+            <span className="muted">похожие: {hint.sample?.slice(0, 2).join(', ')}</span>
+            {hint.price ? <span>обычно <b>{money(hint.price)}</b></span> : null}
+            {hint.hours ? <span className="muted">≈{hint.hours} ч{hint.rate ? ` · ${money(hint.rate)}/ч` : ''}</span> : null}
+            <button type="button" className="btn-ghost btn-sm !h-6 ml-auto" onClick={() => setF((x) => ({ ...x, ...(hint.price ? { price: String(hint.price) } : {}), ...(hint.hours ? { estimate_h: String(hint.hours) } : {}) }))}>подставить</button>
+          </div>
+        )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="сумма"><Money value={f.price} onChange={(v) => setF({ ...f, price: v })} /></Field>
           <Field label="клиент"><input className="input" list="clients-list" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} placeholder="Пятёрочка" /><datalist id="clients-list">{clients.map((c) => <option key={c.id} value={c.name} />)}</datalist></Field>
-          <Field label="дедлайн"><input type="datetime-local" className="input" value={f.deadline} onChange={(e) => setF({ ...f, deadline: e.target.value })} /></Field>
+          <Field label="дедлайн"><DateTimeField value={f.deadline} onChange={(v) => setF({ ...f, deadline: v })} /></Field>
           <Field label="план по времени" hint="часов"><input type="number" min="0" step="0.5" className="input num" value={f.estimate_h} onChange={(e) => setF({ ...f, estimate_h: e.target.value })} placeholder="8" /></Field>
         </div>
         <Field label="статус" hint={order ? undefined : 'старый заказ — сразу «сдан», оплату запишете после'}><Pills value={f.status} onChange={(s) => setF({ ...f, status: s })} options={Object.entries(STATUS).filter(([k]) => order || !['paid', 'cancelled'].includes(k))} /></Field>

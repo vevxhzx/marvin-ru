@@ -29,7 +29,7 @@ from datetime import datetime, timedelta
 from ..config import cfg
 from ..db import get_setting, set_setting
 
-log = logging.getLogger("marvin.attention")
+log = logging.getLogger("assistant.attention")
 
 QUEUE_KEY = "attention.queue"
 COUNT_KEY = "proactive.count"    # тот же счётчик, что у proactive — бюджет один на всех

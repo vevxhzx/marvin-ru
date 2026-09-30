@@ -28,6 +28,26 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 log = logging.getLogger("assistant")
 
+def _instance_label() -> str:
+    """Чем эта копия отличается от «главной»: имя папки + порт. Нужно, когда рядом живёт вторая копия
+    (другой порт и другая база) — иначе два одинаковых окна не различить."""
+    from core.config import ROOT
+    port = int(getattr(getattr(cfg, "server", None), "port", 8765) or 8765)
+    return f"{ROOT.name} · :{port}" if port != 8765 else ""
+
+
+def _set_console_title(label: str) -> None:
+    title = identity.title() + (f" — {label}" if label else "")
+    try:
+        if sys.platform == "win32":
+            import ctypes
+            ctypes.windll.kernel32.SetConsoleTitleW(title)
+        else:
+            sys.stdout.write(f"\033]0;{title}\007"); sys.stdout.flush()
+    except Exception:
+        pass
+
+
 def _banner() -> str:
     name = identity.title().upper()
     line = "\u2500" * (len(name) + 27)
@@ -38,7 +58,10 @@ async def main(with_tg: bool) -> None:
     print(_banner())
     init_db()
     from core import VERSION
-    log.info("%s v%s · база готова: data/assistant.db", identity.title(), VERSION)
+    label = _instance_label()
+    _set_console_title(label)
+    log.info("%s v%s%s · база готова: data/assistant.db", identity.title(), VERSION,
+             f" · копия {label}" if label else "")
 
     from core.brain import llm
     if await llm.ollama_available():
@@ -52,7 +75,7 @@ async def main(with_tg: bool) -> None:
         log.warning("Как только Ollama поднимется, ассистент подхватит её сам, перезапуск не нужен.")
     try:
         from core.voice import stt, tts
-        if os.getenv("ASSISTANT_NO_VOICE_WARMUP"):
+        if os.getenv("ASSISTANT_NO_VOICE_WARMUP") or os.getenv("ASSISTANT_NO_VOICE_WARMUP"):
             log.info("Голос: прогрев моделей отключён (ASSISTANT_NO_VOICE_WARMUP)")
         elif stt.available():
             log.info("Голос: распознавание whisper-%s, озвучка %s — прогреваю в фоне (первый раз качает модели)", stt.STT_MODEL, tts.ENGINE)
@@ -61,6 +84,13 @@ async def main(with_tg: bool) -> None:
             log.info("Голос: пакеты не установлены (install_voice.bat) — голосовые в Telegram пока текстом")
     except Exception as e:  # pragma: no cover
         log.warning("Голос не инициализирован: %s", e)
+    # Окружение: ffmpeg нужен не всегда — OGG/Opus из Telegram декодирует PyAV (пакет av).
+    import shutil as _shutil
+    if _shutil.which("ffmpeg"):
+        log.info("Окружение: ffmpeg найден")
+    else:
+        log.info("Окружение: ffmpeg в PATH нет — не страшно, голосовые декодирует PyAV (пакет av). "
+                 "Ставьте ffmpeg, только если какой-то формат не читается.")
     if llm.cloud_enabled():
         log.info("Облако: %s (анонимайзер %s)", llm.cloud_title(), "вкл" if cfg.brain.gemini.anonymize else "выкл")
 
@@ -75,7 +105,7 @@ async def main(with_tg: bool) -> None:
             log.info("Первый запуск: мастер настройки → http://localhost:%s/setup?t=%s  (ссылка с ключом доступа)", cfg.server.port, _tok())
         else:
             log.info("Первый запуск: открываю мастер настройки http://localhost:%s/setup", cfg.server.port)
-        if not os.getenv("ASSISTANT_NO_BROWSER"):
+        if not os.getenv("ASSISTANT_NO_BROWSER") and not os.getenv("ASSISTANT_NO_BROWSER"):
             import webbrowser
             asyncio.get_event_loop().call_later(1.5, lambda: webbrowser.open(f"http://localhost:{cfg.server.port}/setup"))
     if with_tg:

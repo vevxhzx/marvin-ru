@@ -1110,6 +1110,9 @@ textarea.input { height: auto; padding-top: 11px; padding-bottom: 11px; }
 .input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .input::placeholder { color: var(--ink-3); }
 .input.err { border-color: var(--neg); box-shadow: 0 0 0 3px var(--neg-soft); }
+/* Поле даты/времени: нативный контрол спрятан, фокус подсвечиваем на видимой части */
+.dt-field { position: relative; }
+.dt-field:focus-within > .input { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 select.input { appearance: none; }
 .inline-edit { @apply outline-none bg-transparent num; border-bottom: 1px dashed var(--line-2); cursor: text; }
 .inline-edit:hover { border-bottom-color: var(--ink); }

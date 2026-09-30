@@ -16,7 +16,7 @@ export const ACT = {
   bulk_delete: ['удалено пачкой', Undo2], game_mode: ['режим переключён', Cpu], voice: ['голос сменён', Sparkles],
 }
 const VIA = { rules: ['правила', Zap], ollama: ['локально', Cpu], llm: ['облако', Cloud], gemini: ['облако', Cloud], none: ['сбой', AlertCircle] }
-const CH = { tg: 'telegram', 'tg-voice': 'telegram · голос', voice: 'голос', web: 'сайт', system: 'авто' }
+const CH = { tg: 'telegram', 'tg-voice': 'telegram · голос', voice: 'голос', web: 'сайт', system: 'авто', digest: 'дайджест' }
 const fromServer = (h) => h.map((m) => ({ id: m.id, role: m.role === 'user' ? 'me' : 'bot', text: m.text, channel: m.channel, at: m.at }))
 
 /* Подсказки под контекст времени суток — 4 штуки, коротко */
@@ -36,10 +36,24 @@ export default function Chat({ open, onClose, seed }) {
   const { tick, bump } = useRefresh()
   const hints = useMemo(suggestions, [open])
 
-  // одна история с Telegram: подгружаем при открытии и при каждом живом обновлении
+  // одна история с Telegram: подгружаем при открытии и при каждом живом обновлении.
+  // В истории карточек нет (их отдаёт только живой ответ) — переносим их по совпадению роли и текста.
   useEffect(() => {
     if (!open) return
-    api.chatHistory(60).then((h) => { setMsgs(fromServer(h)); setLoaded(true) }).catch(() => setLoaded(true))
+    const key = (m) => `${m.role}|${String(m.text || '').replace(/\s*(⚡|🧠|☁️)\s*$/u, '').trim()}`
+    api.chatHistory(60).then((h) => {
+      setMsgs((prev) => {
+        const cards = new Map()
+        for (const p of prev) if (p.card) cards.set(key(p), p.card)
+        return fromServer(h).map((m) => (m)).reverse().map((m) => {
+          const k = key(m)
+          const card = cards.has(k) ? cards.get(k) : undefined
+          if (card) cards.delete(k)          // карточку вешаем только на последнее подходящее сообщение
+          return { ...m, card }
+        }).reverse()
+      })
+      setLoaded(true)
+    }).catch(() => setLoaded(true))
   }, [open, tick])
   useEffect(() => { box.current?.scrollTo({ top: 1e9, behavior: loaded ? 'smooth' : 'auto' }) }, [msgs, open, busy])
   useEffect(() => { if (open) setTimeout(() => inp.current?.focus(), 60) }, [open])
@@ -69,7 +83,7 @@ export default function Chat({ open, onClose, seed }) {
           return [...m, { role: 'bot', text: piece, channel: 'web', streaming: true, at: new Date().toISOString() }]
         })
       })
-      setMsgs((m) => (streamed && m[m.length - 1]?.streaming ? m.slice(0, -1) : m).concat({ role: 'bot', text: r.text, via: r.via, actions: r.actions, channel: 'web', at: new Date().toISOString() }))
+      setMsgs((m) => (streamed && m[m.length - 1]?.streaming ? m.slice(0, -1) : m).concat({ role: 'bot', text: r.text, via: r.via, actions: r.actions, card: r.card, channel: 'web', at: new Date().toISOString() }))
       if (r.actions?.length) bump()
     } catch (e) {
       const denied = e?.status === 401
@@ -183,7 +197,7 @@ function Message({ m, grouped, showMeta = true, onRetry }) {
       
       {isMorningDigest ? (
         <div className="w-full max-w-[94%] sm:max-w-[420px]">
-          <MorningDigestCard />
+          <MorningDigestCard ownerName={(m.text || '').match(/доброе утро,\s*\**\s*([^\n*]+)/i)?.[1]?.trim()} />
         </div>
       ) : isWeekSummary ? (
         <div className="w-full max-w-[94%] sm:max-w-[420px]">
@@ -196,8 +210,13 @@ function Message({ m, grouped, showMeta = true, onRetry }) {
         </div>
       )}
 
-      {(acts.length > 0 || clarify) && (
+      {(m.card || acts.length > 0 || clarify) && (
         <div className="mt-1.5 flex max-w-[88%] flex-col gap-1.5">
+          {m.card && (
+            <a href={m.card} target="_blank" rel="noreferrer" className="block overflow-hidden rounded-2xl border hair" style={{ boxShadow: '0 12px 28px -16px rgba(0,0,0,.4)' }}>
+              <img src={m.card} alt="карточка" className="block w-full" loading="lazy" />
+            </a>
+          )}
           {acts.map((a) => { const [label, I] = ACT[a]; return (
             <div key={a} className="act-card bubble-in">
               <span className="act-ic"><Check size={14} strokeWidth={2.6} /></span>

@@ -393,8 +393,8 @@ def test_update_order_on_missing_order_is_a_failure():
 
 def test_update_order_status_is_verified():
     from core.services import orders
-    o = orders.add_order("Ролик для Headway", client="Headway", price=15000)
-    res = registry.call("update_order", {"query": "Headway", "status": "review"}, "web")
+    o = orders.add_order("Ролик для Acme", client="Acme", price=15000)
+    res = registry.call("update_order", {"query": "Acme", "status": "review"}, "web")
     assert res.ok and res.verified is True
     assert orders.get_order(o.id).status == "review"
 

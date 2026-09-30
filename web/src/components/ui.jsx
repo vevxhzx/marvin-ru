@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { X, Trash2, Check } from 'lucide-react'
+import { X, Trash2, Check, CalendarDays, Clock } from 'lucide-react'
 import { parseNum } from '../lib/api'
 import { ACCENTS, accentFor, usePageAccent, setPageAccent } from '../lib/prefs'
 
@@ -278,6 +278,56 @@ export function Field({ label, hint, error, children, className = '' }) {
       {children}
       {error && <div className="neg mt-1 text-[12px]">{error}</div>}
     </label>
+  )
+}
+
+/* Нативные date/time-поля показывают формат браузера: в en-US — «09/30/2026 10:30 PM».
+   Прячем нативный вид (opacity-0) и показываем свой текст в 24-часовом формате «дд.мм.гггг чч:мм»;
+   по клику открываем системный календарь через showPicker() с запасным фокусом. */
+const _p2 = (n) => String(n).padStart(2, '0')
+
+function _dtLabel(v) {
+  const s = String(v || '')
+  const [day, time] = s.split('T')
+  if (!day) return ''
+  const [y, m, d] = day.split('-')
+  return `${d}.${m}.${y}${time ? ` ${time.slice(0, 5)}` : ''}`
+}
+
+function _openPicker(ref) {
+  const el = ref.current
+  if (!el) return
+  try { el.showPicker ? el.showPicker() : el.focus() } catch { el.focus() }
+}
+
+export function DateTimeField({ value, onChange, required, className = '' }) {
+  const ref = useRef(null)
+  const label = _dtLabel(value)
+  return (
+    <div className="dt-field">
+      <div className={`input flex items-center justify-between gap-2 pointer-events-none ${className}`}>
+        <span className={label ? '' : 'faint'}>{label || 'выбрать дату и время'}</span>
+        <CalendarDays size={16} className="faint shrink-0" />
+      </div>
+      <input ref={ref} type="datetime-local" value={value || ''} required={required}
+        onClick={() => _openPicker(ref)} onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+    </div>
+  )
+}
+
+export function TimeField({ value, onChange, required, className = '' }) {
+  const ref = useRef(null)
+  return (
+    <div className="dt-field">
+      <div className={`input flex items-center justify-between gap-2 pointer-events-none ${className}`}>
+        <span className={value ? '' : 'faint'}>{value ? value.slice(0, 5) : '--:--'}</span>
+        <Clock size={15} className="faint shrink-0" />
+      </div>
+      <input ref={ref} type="time" value={value || ''} required={required}
+        onClick={() => _openPicker(ref)} onChange={(e) => onChange(e.target.value)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+    </div>
   )
 }
 

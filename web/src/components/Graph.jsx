@@ -174,7 +174,7 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
 
   const st = data?.stats || {}
   const empty = data && data.nodes.length === 0
-  // «клиент: Кот Прод · оплата: Доход по заказам · упоминание: 3»
+  // «клиент: Иван Петров · оплата: Доход по заказам · упоминание: 3»
   const hoverRels = useMemo(() => {
     if (!hover || !layout) return ''
     const by = {}

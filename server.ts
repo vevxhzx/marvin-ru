@@ -184,7 +184,7 @@ const state = {
     today_sessions: 3,
   },
   people: [
-    { id: 1, name: 'кот прод', aliases: 'kotprod', kind: 'company', open: 2, unpaid: 10300, note: 'Студия видеопродакшна', contact: '@kotprod', tags: ['клиент', 'монтаж'], birthday: null, last_seen: now.toISOString() },
+    { id: 1, name: 'иван петров', aliases: 'acme', kind: 'company', open: 2, unpaid: 10300, note: 'Студия видеопродакшна', contact: '@acme', tags: ['клиент', 'монтаж'], birthday: null, last_seen: now.toISOString() },
     { id: 2, name: 'илья (монтажер скаммерса)', aliases: '', kind: 'client', open: 1, unpaid: 500, note: 'Монтаж и анимация для YouTube', contact: '@ilya_scam', tags: ['фриланс'], birthday: null, last_seen: now.toISOString() },
     { id: 3, name: 'камилла', aliases: '', kind: 'friend', open: 0, unpaid: 0, note: 'Подруга', contact: '@kamilla', tags: ['дизайн', 'кофе'], birthday: '1998-04-12', last_seen: now.toISOString() },
     { id: 4, name: 'Кирилл', aliases: '', kind: 'person', open: 0, unpaid: 0, note: 'Арендатор / квартира', contact: '+7 999 555-44-33', tags: ['квартира', 'аренда'], birthday: null, last_seen: now.toISOString() },
@@ -352,50 +352,34 @@ app.get('/api/events/stream', (req, res) => {
   })
 })
 
-// По умолчанию — «Марвин»: репозиторий и сайт проекта marvin-ru. Личный профиль «Джарвис» — только по явному EDITION=jarvis.
-let currentEdition = process.env.EDITION === 'jarvis' ? 'jarvis' : 'marvin'
+// Публичная сборка Marvin — один профиль (переключателя «личный/публичный» здесь нет).
+const APP_NAME_RU = 'Марвин'
+const APP_NAME_LAT = 'Marvin'
 
 // Health
 app.get('/api/health', (req, res) => {
-  const isMarvin = currentEdition === 'marvin'
   res.json({
     ok: true,
     ollama: false,
     mode: 'local',
     time: new Date().toISOString(),
-    version: '1.0.0',
-    edition: currentEdition,
-    name: isMarvin ? 'Марвин' : 'Джарвис',
-    name_latin: isMarvin ? 'Marvin' : 'Jarvis',
+    version: PKG_VERSION,
+    edition: 'marvin',
+    name: APP_NAME_RU,
+    name_latin: APP_NAME_LAT,
   })
 })
 
 // Edition Management
 app.get('/api/edition', (req, res) => {
-  const isMarvin = currentEdition === 'marvin'
-  res.json({
-    edition: currentEdition,
-    name: isMarvin ? 'Марвин' : 'Джарвис',
-    name_latin: isMarvin ? 'Marvin' : 'Jarvis',
-    is_marvin: isMarvin,
-    is_jarvis: !isMarvin,
-  })
+  res.json({ edition: 'marvin', name: APP_NAME_RU, name_latin: APP_NAME_LAT, is_marvin: true })
 })
 
 app.post('/api/edition', (req, res) => {
-  const { edition } = req.body
-  if (edition === 'marvin' || edition === 'jarvis') {
-    currentEdition = edition
-    broadcast('state')
+  if (req.body?.edition && req.body.edition !== 'marvin') {
+    return res.status(400).json({ detail: 'edition: marvin' })
   }
-  const isMarvin = currentEdition === 'marvin'
-  res.json({
-    edition: currentEdition,
-    name: isMarvin ? 'Марвин' : 'Джарвис',
-    name_latin: isMarvin ? 'Marvin' : 'Jarvis',
-    is_marvin: isMarvin,
-    is_jarvis: !isMarvin,
-  })
+  res.json({ edition: 'marvin', name: APP_NAME_RU, name_latin: APP_NAME_LAT, is_marvin: true })
 })
 
 // Status & State
@@ -1729,8 +1713,8 @@ app.delete('/api/orders/:id/time/:timeId', (req, res) => {
 // Desktop Client Info
 app.get('/api/client/info', (req, res) => {
   res.json({
-    app_name: currentEdition === 'marvin' ? 'Марвин' : 'Джарвис',
-    version: '1.0.0',
+    app_name: APP_NAME_RU,
+    version: PKG_VERSION,
     platform: process.platform,
     mode: 'desktop_projection',
     single_instance: true,
@@ -1741,22 +1725,13 @@ app.get('/api/client/info', (req, res) => {
   })
 })
 
-// Direct download of the full complete archive
-app.get('/api/download/jarvis.zip', (req, res) => {
-  const zipPath = path.resolve(process.cwd(), 'jarvis-complete.zip')
+// Direct download of the full archive (if the release zip is next to the server)
+app.get('/api/download/marvin.zip', (req, res) => {
+  const zipPath = path.resolve(process.cwd(), 'marvin-complete.zip')
   if (fs.existsSync(zipPath)) {
-    res.download(zipPath, 'jarvis-complete.zip')
+    res.download(zipPath, 'marvin-complete.zip')
   } else {
     res.status(404).send('Архив не найден')
-  }
-})
-
-app.get('/api/download/marvin.zip', (req, res) => {
-  const zipPath = path.resolve(process.cwd(), 'github-marvin.zip')
-  if (fs.existsSync(zipPath)) {
-    res.download(zipPath, 'github-marvin.zip')
-  } else {
-    res.status(404).send('Архив Марвина не найден')
   }
 })
 
@@ -2385,14 +2360,14 @@ app.get('/api/screen', (req, res) => {
     hours,
     hour_cats,
     apps: [
-      ['Premiere Pro', 200, 'работа', 'Монтаж узбекам2'],
+      ['Premiere Pro', 200, 'работа', 'Монтаж ролика'],
       ['After Effects', 72, 'работа', 'Анимация титров'],
       ['Telegram Desktop', 35, 'общение', 'Чат с клиентом'],
       ['Google Chrome', 25, 'браузер', 'YouTube референсы'],
       ['Figma', 10, 'работа', 'Превью макета'],
     ],
     projects: [
-      { app: 'Premiere Pro', project: 'Монтаж узбекам2', minutes: 200, days },
+      { app: 'Premiere Pro', project: 'Монтаж ролика', minutes: 200, days },
       { app: 'After Effects', project: 'Анимация титров', minutes: 72, days },
     ]
   })
@@ -2415,7 +2390,7 @@ app.post('/api/backups/restore', (req, res) => {
 app.get('/api/pc/organize/preview', (req, res) => {
   res.json({
     status: 'ready',
-    root: 'D:\\Проекты\\Монтаж',
+    root: 'D:\\Projects\\Edit',
     total: 4,
     profile: 'sound',
     by_category: {
@@ -2437,7 +2412,7 @@ app.get('/api/pc/organize/log', (req, res) => {
     {
       at: '2026-09-29 11:20',
       kind: 'organize',
-      text: 'Организована папка D:\\Проекты\\Монтаж (4 файла)',
+      text: 'Организована папка D:\\Projects\\Edit (4 файла)',
       log: {
         moved: [
           { src: 'clip.mov', dst: '02_Исходники/Видео/clip.mov' },
@@ -2890,7 +2865,7 @@ async function llmAnswer(text: string): Promise<string | null> {
         {
           role: 'system',
           content:
-            'Ты — Марвин (Джарвис), личный ассистент владельца. Отвечай коротко, по-русски, спокойно и по делу. ' +
+            'Ты — Марвин (Марвин), личный ассистент владельца. Отвечай коротко, по-русски, спокойно и по делу. ' +
             'Никогда не выдумывай суммы, даты и статусы — используй только данные ниже. ' +
             'Если вопрос про действия в приложении (записать трату, поставить задачу) — просто подскажи, как это сказать одной фразой.\n\n' +
             llmContext(),

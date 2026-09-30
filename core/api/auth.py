@@ -86,7 +86,7 @@ def rotate() -> str:
 
 # В Docker браузер хоста приходит из сети моста (172.x), а не с loopback — «свой компьютер» там определяется токеном,
 # ссылку с ним контейнер печатает в лог при старте (как Jupyter).
-IN_DOCKER = bool(os.getenv("ASSISTANT_DOCKER"))
+IN_DOCKER = bool(os.getenv("ASSISTANT_DOCKER") or os.getenv("ASSISTANT_DOCKER"))
 
 
 def behind_proxy(request: Request) -> bool:
@@ -141,7 +141,7 @@ def _host_ok(request: Request) -> bool:
         return True  # HTTP/1.0-клиенты и скрипты без Host — не браузер, rebinding им не грозит
     if host in ("localhost", "127.0.0.1", "::1") or host.endswith((".ts.net", ".local", ".localhost", ".internal")):
         return True
-    if host == "testserver" and os.getenv("ASSISTANT_TEST"):
+    if host == "testserver" and (os.getenv("ASSISTANT_TEST") or os.getenv("ASSISTANT_TEST")):
         return True
     try:
         ipaddress.ip_address(host)

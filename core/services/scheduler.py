@@ -18,7 +18,7 @@ from ..services import calendar, finance, tasks
 from ..services.finance import money
 from ..db import get_setting, set_setting
 
-log = logging.getLogger("jarvis.sched")
+log = logging.getLogger("assistant.sched")
 Notifier = Callable[[str], Awaitable[None]]
 
 
@@ -36,54 +36,157 @@ def morning_facts() -> dict:
             "open_tasks": len(ts)}
 
 
-def morning_digest_text(head: str | None = None) -> str:
-    """Короткий утренний текст: подпись к картинке (и запасной вариант, если картинка не собралась).
-    head — живая первая строка от персоны; без неё — нейтральное приветствие."""
+_WD_S = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
+_MO_S = ["янв", "фев", "мар", "апр", "мая", "июн", "июл", "авг", "сен", "окт", "ноя", "дек"]
+_MONTHS_RU = ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа",
+              "сентября", "октября", "ноября", "декабря"]
+
+
+def _card_footer(d: datetime) -> str:
+    """Подвал карточки как на сайте: «марвин · ср 30сен»."""
+    try:
+        from .. import identity
+        name = (identity.NAME or "марвин").lower()
+    except Exception:  # pragma: no cover
+        name = "марвин"
+    return f"{name} · {_WD_S[d.weekday()]} {d.day}{_MO_S[d.month - 1]}"
+
+
+def trim_caption(text: str, limit: int = 900) -> str:
+    """Подпись к картинке по линиям: Telegram даёт 1000 символов, а резать посреди **жирного** нельзя."""
+    if len(text) <= limit:
+        return text
+    out, used = [], 0
+    for line in text.split("\n"):
+        if used + len(line) + 1 > limit - 40:
+            break
+        out.append(line)
+        used += len(line) + 1
+    res = "\n".join(out)
+    if res.count("**") % 2:
+        res = res.rstrip("*")
+    return res + "\n…"
+
+
+def morning_digest_text(head: str | None = None, card: bool = True, extra: str | None = None) -> str:
+    """Утренний дайджест.
+
+    card=True — как карточка на сайте: бейдж «УТРЕННИЙ ДАЙДЖЕСТ», живая строка персоны,
+    плитки баланса, секции СЕГОДНЯ/ЗАДАЧИ с количеством и теми же пустыми строками
+    («встреч нет — день ваш», «задач нет. подозрительно.»), футер «марвин · ср 30сен».
+    Такой текст уходит в Telegram и пишется в историю чата — сайт по нему рисует свою карточку.
+    card=False — тот же набор данных обычными строками (голос на ПК: «Доброе утро, сэр. …»).
+    head — живая первая строка от персоны; extra — доп. строки (дни рождения) перед футером."""
     d = datetime.now()
     wd = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"][d.weekday()]
     addr = (getattr(getattr(cfg, "owner", None), "name", None) or "сэр").strip().lower()
-    lines = [f"☀️ {head}" if head else f"☀️ Доброе утро, {addr}. {wd.capitalize()}, {d:%d.%m}."]
     evs = calendar.events_today()
-    if evs:
-        first = evs[0]
-        more = f" и ещё {len(evs) - 1}" if len(evs) > 1 else ""
-        lines.append(f"📅 {first.start:%H:%M} — {first.title}{more}.")
-    else:
-        lines.append("📅 Встреч нет. Подозрительно спокойно.")
     ts = tasks.list_tasks(limit=50)
-    if ts:
-        today = [t for t in ts if t.due and t.due.date() <= d.date()]
-        lines.append(f"✅ Задач: {len(ts)}" + (f", с дедлайном сегодня — {len(today)}." if today else "."))
-        # дела «на день» (без времени) — по именам: отдельных напоминаний по ним не будет, это единственное место утром
-        day = [t for t in today if is_all_day(t.due)]
-        if day:
-            lines.append("📋 На сегодня: " + ", ".join(t.title for t in day[:5]) + (f" и ещё {len(day) - 5}" if len(day) > 5 else "") + ".")
+    today = [t for t in ts if t.due and t.due.date() <= d.date()]
+    day = [t for t in today if is_all_day(t.due)]
     pays = finance.upcoming_payments(3)
-    if pays:
-        lines.append(f"💳 Платежей на днях: {len(pays)} на {money(sum(p.amount for p in pays))}.")
+    s = finance.summary(1)
+    safe = s.get("safe") or {}
+
+    # ---------------- секции (общие для обоих вариантов)
+    ev_rows = [f"— **{e.start:%H:%M}** {e.title}" + (f" · {e.location}" if e.location else "") for e in evs[:6]]
+    seen_today = {t.id for t in today}
+    ordered = today + [t for t in ts if t.id not in seen_today]
+    task_rows = []
+    for t in ordered[:6]:
+        lab = "" if (not t.due or is_all_day(t.due)) else f"до {t.due:%H:%M} "
+        task_rows.append(f"— {lab}**{t.title}**")
+    pay_rows = [f"— {p.title} {money(p.amount)} · {p.next_date:%d.%m}" for p in pays]
+
+    notes: list[str] = []
     try:
         from . import orders
         for n in orders.deadline_nudges()[:3]:
-            lines.append(n)
+            notes.append(n)
         from . import pulse
-        lines += pulse.late_lines(2)
+        notes += pulse.late_lines(2)
         from . import people
         for pt in people.people_today()[:2]:
             if pt.get("hint"):
-                lines.append(pt["hint"])
+                notes.append(pt["hint"])
     except Exception as e:  # pragma: no cover
         log.debug("orders nudges: %s", e)
     try:
         from . import aims
         f = aims.focus()
         if f["items"]:
-            lines.append("🎯 Фокус: " + "; ".join(p["title"] for p in f["items"][:2]) + f" — к цели «{f['items'][0]['aim']}».")
+            notes.append("🎯 Фокус: " + "; ".join(p["title"] for p in f["items"][:2]) + f" — к цели «{f['items'][0]['aim']}».")
         for a in aims.stale_aims()[:1]:
-            lines.append(f"🎯 «{a.title}» стоит уже давно — либо шаг, либо честно закрыть.")
+            notes.append(f"🎯 «{a.title}» стоит уже давно — либо шаг, либо честно закрыть.")
     except Exception as e:  # pragma: no cover
         log.debug("aims focus: %s", e)
-    s = finance.summary(1)
-    safe = s.get("safe") or {}
+
+    # ---------------- карточный вид — как на сайте (и как карточка в чате сайта)
+    if card:
+        out = [f"✨ **УТРЕННИЙ ДАЙДЖЕСТ** · {d:%H:%M}"]
+        live = bool(head and "доброе утро" in head.lower())
+        out.append(f"**{head.strip()}**" if live else f"**доброе утро, {addr}**")
+        out.append(f"{wd}, {d.day} {_MONTHS_RU[d.month - 1]}")
+        if head and not live:
+            out.append(head)
+        # плитки баланса — зелёные карточки сверху
+        out.append("")
+        out.append(f"**баланс** {money(s['total_balance'])} · свободно")
+        if safe.get("per_day") is not None:
+            out.append(f"**можно тратить** {money(safe['per_day'])} · в день")
+        # СЕГОДНЯ
+        out.append("")
+        out.append(f"📅 **СЕГОДНЯ** · {len(evs)}")
+        if ev_rows:
+            out += ev_rows
+            if len(evs) > 6:
+                out.append(f"…и ещё {len(evs) - 6}")
+        else:
+            out.append("встреч нет — день ваш")
+        # ЗАДАЧИ
+        out.append("")
+        out.append(f"✅ **ЗАДАЧИ** · {len(ts)}")
+        if not ts:
+            out.append("задач нет. подозрительно.")
+        elif task_rows:
+            out += task_rows
+            if len(ordered) > 6:
+                out.append(f"…и ещё {len(ordered) - 6}")
+        else:
+            out.append(f"на сегодня пусто · всего в списке {len(ts)}")
+        # ПЛАТЕЖИ
+        if pays:
+            out.append("")
+            out.append(f"💳 **ПЛАТЕЖИ** · {len(pays)} на {money(sum(p.amount for p in pays))}")
+            out += pay_rows
+        if notes:
+            out.append("")
+            out += notes
+        if extra:
+            out.append("")
+            out.append(extra)
+        out.append("")
+        out.append(f"———\n{_card_footer(d)}")
+        return "\n".join(out)
+
+    # ---------------- обычные строки — голос на ПК и /api/dashboard
+    lines = [f"☀️ {head}" if head else f"☀️ Доброе утро, {addr}. {wd.capitalize()}, {d:%d.%m}."]
+    if evs:
+        first = evs[0]
+        more = f" и ещё {len(evs) - 1}" if len(evs) > 1 else ""
+        lines.append(f"📅 {first.start:%H:%M} — {first.title}{more}.")
+    else:
+        lines.append("📅 Встреч нет. Подозрительно спокойно.")
+    if ts:
+        lines.append(f"✅ Задач: {len(ts)}" + (f", с дедлайном сегодня — {len(today)}." if today else "."))
+        # дела «на день» (без времени) — по именам: отдельных напоминаний по ним не будет, это единственное место утром
+        if day:
+            lines.append("📋 На сегодня: " + ", ".join(t.title for t in day[:5]) + (f" и ещё {len(day) - 5}" if len(day) > 5 else "") + ".")
+    if pays:
+        lines.append(f"💳 Платежей на днях: {len(pays)} на {money(sum(p.amount for p in pays))}.")
+    lines += notes
+    if extra:
+        lines.append(extra)
     tail = f"💰 Баланс {money(s['total_balance'])}"
     if safe.get("per_day") is not None:
         tail += f" · можно тратить {money(safe['per_day'])} в день"
@@ -216,8 +319,19 @@ def list_backups(limit: int = 40) -> list[dict]:
     return out
 
 
+def _release_db_handles() -> None:
+    """Закрыть открытые соединения с базой (Windows не даёт подменить занятый файл)."""
+    try:
+        from .. import db as dbm
+        eng = getattr(dbm, "engine", None)
+        if eng is not None:
+            eng.dispose()
+    except Exception as e:   # pragma: no cover
+        log.debug("dispose engine: %s", e)
+
+
 def restore_backup(name: str) -> dict:
-    """Подменить data/jarvis.db выбранным снимком. Текущая база → backup-pre-restore-… .
+    """Подменить data/assistant.db выбранным снимком. Текущая база → backup-pre-restore-… .
     Картинки (data/media) не откатываются по дате — зеркало media в backups/ актуально «как сейчас».
     После вызова нужен перезапуск ядра: открытые SQLite-соединения держат старый файл."""
     name = (name or "").strip()
@@ -241,6 +355,9 @@ def restore_backup(name: str) -> dict:
     # подмена: сначала во временный, потом replace — атомарнее на одном томе
     tmp = DB_PATH.with_suffix(".db.restoring")
     shutil.copy2(src, tmp)
+    # Windows: открытые SQLite-соединения (пул engine) держат файл — replace дал бы WinError 5.
+    # Отдаём пул перед подменой; новые соединения SQLAlchemy откроет сам (перезапуск всё равно нужен).
+    _release_db_handles()
     tmp.replace(DB_PATH)
     # рядом лежат -wal/-shm от старой сессии — иначе SQLite может подмешать старый журнал
     for suf in ("-wal", "-shm"):
@@ -319,17 +436,30 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             agent.on_change(kind, payload)
 
     async def reminders():
+        from . import habits
+        hint = habits.hint()
         for e in calendar.due_reminders():
             mins = max(0, int((e.start - datetime.now()).total_seconds() // 60))
             when = "уже сейчас" if mins == 0 else f"через {mins} мин"
-            text = f"⏰ «{e.title}» — {when} ({e.start:%H:%M})" + (f", {e.location}" if e.location else "") + "."
+            text = (f"⏰ **НАПОМИНАНИЕ** · {e.start:%H:%M}\n"
+                    f"**«{e.title}»** — {when}"
+                    + (f"\n{e.location}" if e.location else "")
+                    + (f"\n{hint}" if hint else ""))
             ping("reminder", text=text, id=f"ev{e.id}-{e.start:%Y%m%d%H%M}")
-            await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏰ +1 час", f"ev:{e.id}:hour"), ("📅 Завтра", f"ev:{e.id}:tomorrow")], urgent=True)
+            await _notify(text, [("✅ Иду", f"ev:{e.id}:ok"), ("⏱ 15 мин", f"ev:{e.id}:min15"),
+                                  ("⏰ По привычке", f"ev:{e.id}:habit"),
+                                  ("🌆 Вечером", f"ev:{e.id}:evening"), ("📅 Завтра", f"ev:{e.id}:tomorrow")], urgent=True)
 
     async def task_reminders():
+        from . import habits
+        hint = habits.hint()
         for t, text in tasks.due_task_reminders():
+            if hint:
+                text = text + "\n" + hint
             ping("reminder", text=text, id=f"task{t.id}-{t.remind_stage}")
-            await _notify(text, [("✅ Сделал", f"task:{t.id}:done"), ("⏰ +1 час", f"task:{t.id}:hour"), ("📅 Завтра", f"task:{t.id}:tomorrow")], urgent=True)
+            await _notify(text, [("✅ Сделано", f"task:{t.id}:done"), ("⏱ 15 мин", f"task:{t.id}:min15"),
+                                  ("⏰ По привычке", f"task:{t.id}:habit"),
+                                  ("🌆 Вечером", f"task:{t.id}:evening"), ("📅 Завтра", f"task:{t.id}:tomorrow")], urgent=True)
 
     async def semantic_job():
         from . import relations, semantic
@@ -366,7 +496,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     async def recurring():
         for r in finance.process_due_recurring():
             ping("recurring")
-            await _notify(f"💳 Провёл регулярный платёж: «{r.title}» {money(r.amount)}. Следующий {r.next_date:%d.%m}.")
+            await _notify(f"💳 **ПЛАТЁЖ** · следующий {r.next_date:%d.%m}\n**«{r.title}»** — {money(r.amount)} (регулярный, провёл).")
 
     async def _photo(path, caption):
         """Картинка владельцу, если notify умеет (атрибут .photo); иначе — текст."""
@@ -386,21 +516,31 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             head = await persona.opener(morning_facts(), "")
         except Exception as e:  # pragma: no cover
             log.debug("morning opener: %s", e); head = ""
-        text = morning_digest_text(head or None)
         bd = insights.upcoming_birthdays(0)
-        if bd:
-            text += "\n🎂 Сегодня " + ", ".join(b["title"] for b in bd) + "!"
-        path = await asyncio.to_thread(cards.morning_card)
+        extra = ("🎂 Сегодня " + ", ".join(b["title"] for b in bd) + "!") if bd else None
+        text = morning_digest_text(head or None, extra=extra)
+        # пишем в общую историю чата: сайт по строке «доброе утро» рисует свою карточку — и цифры там те же,
+        # что в Telegram (дайджест из базы), а не захардкоженные
+        try:
+            from ..brain import agent as _agent
+            _agent._log_chat("assistant", text, "digest")
+        except Exception as e:  # pragma: no cover
+            log.debug("digest chat log: %s", e)
+        path = await asyncio.to_thread(cards.morning_card) if cards.should_send("digest") else None
         if not await _photo(path, text):
             await notify(text)
 
     async def weekly_card():
         from . import cards
+        if not cards.should_send("week"):
+            return
         path = await asyncio.to_thread(cards.report_card, 7)
         await _photo(path, "📊 Итоги недели, сэр.")
 
     async def monthly_card():
         from . import cards
+        if not cards.should_send("month"):
+            return
         path = await asyncio.to_thread(cards.report_card, 30)
         await _photo(path, "📊 Итоги месяца, сэр. Цифры не врут — в отличие от ощущений.")
 
@@ -440,6 +580,12 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         except Exception as e:  # pragma: no cover
             log.warning("trace weekly block failed: %s", e)
         if txt:
+            txt = txt.rstrip() + "\n———\n" + _card_footer(datetime.now())
+            try:
+                from ..brain import agent as _agent
+                _agent._log_chat("assistant", txt, "digest")
+            except Exception as e:  # pragma: no cover
+                log.debug("weekly chat log: %s", e)
             await notify(txt)
 
     async def monthly_subs():
@@ -501,7 +647,12 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             log.debug("evening opener: %s", e); first = ""
         head = cards.evening_text(data, first or None)
         ping("reminder", text=head, id=key)
-        path = await asyncio.to_thread(cards.evening_card, None, data)
+        try:   # вечерний итог — в общую историю чата, чтобы карточка была и на сайте (как утренний дайджест)
+            from ..brain import agent as _a
+            _a._log_chat("assistant", head, "digest")
+        except Exception as e:  # pragma: no cover
+            log.debug("evening log: %s", e)
+        path = await asyncio.to_thread(cards.evening_card, None, data) if cards.should_send("evening") else None
         if first and persona.choose_channel("evening", head) == "voice":
             # вечерний итог голосом — как акцент дня; картинка ниже всё равно приходит
             await _notify(head, kind="evening")
@@ -511,7 +662,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         n = len(due)
         for t in due[:5]:
             when = "сегодня" if t.due.date() == datetime.now().date() else f"было {t.due:%d.%m}"
-            await _notify(f"• «{t.title}» — {when}", [("✅ Сделал", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow")])
+            await _notify(f"• «{t.title}» — {when}", [("✅ Сделано", f"task:{t.id}:done"), ("📅 Завтра", f"task:{t.id}:tomorrow")])
         if n > 5:
             await _notify(f"…и ещё {n - 5}. Полный список — «мои задачи».")
 

@@ -45,11 +45,15 @@ async def diagnose() -> dict:
 
     # ПК-агент
     if pc.alive():
-        add("ok", "ПК на связи")
+        add("ok", f"ПК на связи (последний пульс {int(pc.age_sec() or 0)} с назад)")
     else:
-        seen = pc.STATE.get("seen")
-        ago = f"молчит {int((time.time() - seen) / 60)} мин" if seen else "ни разу не выходил на связь"
-        add("bad" if seen else "warn", f"ПК-агент {ago}", "start.bat → окно «Голос» должно быть открыто; проверь, что voice_client запущен")
+        age = pc.age_sec()
+        if age is None:
+            add("warn", "ПК-клиент ещё не выходил на связь",
+                "⚙ Настройки → «голос и ПК» → карточка «пк-клиент» → «запустить»; или окно voice.bat")
+        else:
+            add("bad", f"ПК-клиент молчит {int(age / 60)} мин (последний пульс {pc.last_seen_iso()})",
+                "проверьте окно voice.bat; перезапустить можно из ⚙ Настройки → «голос и ПК»")
 
     # Telegram
     tg = bool(cfg.telegram.token and cfg.telegram.owner_id)

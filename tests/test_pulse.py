@@ -248,16 +248,16 @@ def test_next_payday_monthly_and_batch():
 def test_expected_income_groups_batch_client_into_one_point():
     from core.services import orders
     _on()
-    _done_order("логотип", 5000, "кот прод", days_ago=3)
-    _done_order("баннер", 3000, "кот прод", days_ago=1)
+    _done_order("логотип", 5000, "иван петров", days_ago=3)
+    _done_order("баннер", 3000, "иван петров", days_ago=1)
     _done_order("сайт", 7000, "лена", days_ago=2)
     items_each = orders.expected_income()
     assert len(items_each) == 3
-    _set_pay("кот прод", pay_mode="monthly", pay_days="10,25")
+    _set_pay("иван петров", pay_mode="monthly", pay_days="10,25")
     items = orders.expected_income()
     titles = [i["title"] for i in items]
-    assert any(t.startswith("кот прод, 2 заказа") for t in titles), titles
-    grp = next(i for i in items if i["title"].startswith("кот прод"))
+    assert any(t.startswith("иван петров, 2 заказа") for t in titles), titles
+    grp = next(i for i in items if i["title"].startswith("иван петров"))
     assert grp["amount"] == 8000
     assert grp["date"].day in (10, 25)
     assert any(i["client"] == "лена" and i["amount"] == 7000 for i in items)
@@ -266,15 +266,15 @@ def test_expected_income_groups_batch_client_into_one_point():
 def test_late_payments_batch_counts_from_payday_not_done():
     from core.services import pulse
     _on(late_days=3)
-    _done_order("логотип", 5000, "кот прод", days_ago=10)
+    _done_order("логотип", 5000, "иван петров", days_ago=10)
     assert pulse.late_payments(), "за каждый заказ: 10 дней после сдачи — задержка"
     # клиент платит раз в 60 дней, создан вчера → день выплат ещё не наступил → не задерживает
-    c = _set_pay("кот прод", pay_mode="batch", pay_every=60)
+    c = _set_pay("иван петров", pay_mode="batch", pay_every=60)
     with db.session() as s:
         row = s.get(db.Client, c.id); row.created_at = datetime.now() - timedelta(days=1); s.add(row); s.commit()
     assert pulse.late_payments() == []
     # по числам: платит 1-го; заказ сдан 10 дней назад — если после сдачи день выплат ещё не был, задержки нет
-    c = _set_pay("кот прод", pay_mode="monthly", pay_days="1")
+    c = _set_pay("иван петров", pay_mode="monthly", pay_days="1")
     prev = pulse._prev_payday(c, datetime.now())
     late = pulse.late_payments()
     days_since_payday = (datetime.now() - prev).days
@@ -283,7 +283,7 @@ def test_late_payments_batch_counts_from_payday_not_done():
     else:
         assert late and late[0]["days"] == days_since_payday
     # заказ сдан 40 дней назад → день выплат точно прошёл → задержка считается от него, а не от сдачи
-    _done_order("старый баннер", 2000, "кот прод", days_ago=40)
+    _done_order("старый баннер", 2000, "иван петров", days_ago=40)
     late = pulse.late_payments()
     if days_since_payday >= 3:
         assert late and max(l["days"] for l in late) == days_since_payday
@@ -293,7 +293,7 @@ def test_late_payments_batch_counts_from_payday_not_done():
 
 def test_update_person_pay_fields_are_sanitised():
     from core.services import people
-    c = people.add_person("кот прод", kind="client")
+    c = people.add_person("иван петров", kind="client")
     c = people.update_person(c.id, pay_mode="weird", pay_every=9999, pay_days="0, 5, 40, 25, 25")
     assert c.pay_mode == "each" and c.pay_every == 120 and c.pay_days == "5,25"
     card = people.card(c)
@@ -301,7 +301,7 @@ def test_update_person_pay_fields_are_sanitised():
     c = people.update_person(c.id, pay_mode="monthly")
     assert people.card(c)["next_payday"]
     from core.services import orders
-    orders.add_order("лого", price=1000, client="кот прод")
+    orders.add_order("лого", price=1000, client="иван петров")
     txt = people.card_text(people.card(c))
     assert "платит 5 и 25 числа" in txt and "ближайшая выплата" in txt and " в " not in txt.split("ближайшая выплата")[1].split("\n")[0]
 
@@ -310,14 +310,14 @@ def test_guess_batch_clients_and_api():
     from core.services import pulse, orders
     _on()
     for t in ("а", "б"):
-        o = orders.add_order(t, price=1000, client="кот прод"); orders.update_order(o.id, status="done")
+        o = orders.add_order(t, price=1000, client="иван петров"); orders.update_order(o.id, status="done")
         orders.add_payment(o.id, 1000)
     o = orders.add_order("в", price=1000, client="лена"); orders.update_order(o.id, status="done"); orders.add_payment(o.id, 1000)
     hints = pulse.guess_batch_clients()
-    assert [h["name"] for h in hints] == ["кот прод"]
+    assert [h["name"] for h in hints] == ["иван петров"]
     r = _j(_client().get("/api/people/batch-hints"))
-    assert r and r[0]["name"] == "кот прод"
-    _set_pay("кот прод", pay_mode="batch")
+    assert r and r[0]["name"] == "иван петров"
+    _set_pay("иван петров", pay_mode="batch")
     assert pulse.guess_batch_clients() == []
 
 

@@ -5,6 +5,11 @@ import { Section, Sheet, Field, Money, Pills, Empty, Confirm } from './ui'
 
 const BUCKET = { need: 'обязательное', want: 'хотелки', save: 'накопления' }
 const BUCKET_TONE = { need: 'var(--ink)', want: 'var(--accent)', save: 'var(--pos)' }
+const BUCKET_GRAD = {
+  need: 'linear-gradient(90deg, var(--ink), #4b4b55)',
+  want: 'linear-gradient(90deg, var(--accent), #8a5cff)',
+  save: 'linear-gradient(90deg, #19b34a, #14b8a6)',
+}
 const ask = (text, send = true) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text, send } }))
 const ICONS = ['🎯', '🛟', '📷', '💻', '✈️', '🚗', '🏠', '🎁', '🎓', '💍', '🏋️', '🐶']
 
@@ -32,7 +37,7 @@ export function Goals({ goals, onChange, onErr, onOk }) {
                   <button className="min-w-0 truncate text-left text-[15px] font-medium hover:text-accent" onClick={() => setSheet(g)}>{g.icon} {g.title}</button>
                   <span className="num shrink-0 text-[14px]"><b>{money(g.saved)}</b> <span className="faint">/ {money(g.target)}</span></span>
                 </div>
-                <div className="progress mt-2 !h-[6px]"><div style={{ width: `${Math.round(g.pct * 100)}%`, background: g.pct >= 1 ? 'var(--pos)' : 'var(--accent)' }} /></div>
+                <div className="progress mt-2 !h-[6px]"><div style={{ width: `${Math.round(g.pct * 100)}%`, background: g.pct >= 1 ? 'linear-gradient(90deg, #19b34a, #14b8a6)' : 'linear-gradient(90deg, var(--accent), #8a5cff)' }} /></div>
                 <div className="mt-1.5 flex items-center justify-between gap-2 text-[12px]">
                   <span className="muted">{Math.round(g.pct * 100)} %{g.due ? ` · к ${new Date(g.due).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' })}` : ''}{g.per_month ? ` · по ${money(g.per_month)} в месяц` : g.left ? ` · осталось ${money(g.left)}` : ''}{g.days_left != null && g.days_left < 0 && g.left > 0 ? ' · срок прошёл' : ''}</span>
                   <div className="flex items-center gap-1">
@@ -147,10 +152,10 @@ function Buckets({ b, onOpenCat }) {
   return (
     <div>
       <div className="flex h-[10px] w-full overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-        {b.buckets.map((x) => <div key={x.bucket} className="h-full transition-all duration-700" style={{ width: `${Math.min(100, x.share * 100)}%`, background: BUCKET_TONE[x.bucket] }} />)}
+        {b.buckets.map((x) => <div key={x.bucket} className="h-full transition-all duration-700" style={{ width: `${Math.min(100, x.share * 100)}%`, background: BUCKET_GRAD[x.bucket] || BUCKET_TONE[x.bucket] }} />)}
       </div>
       <div className="mt-1.5 flex h-[3px] w-full overflow-hidden rounded-full opacity-40" style={{ background: 'var(--fill-2)' }} title="норма 50 / 30 / 20">
-        {b.buckets.map((x) => <div key={x.bucket} className="h-full" style={{ width: `${x.norm * 100}%`, background: BUCKET_TONE[x.bucket] }} />)}
+        {b.buckets.map((x) => <div key={x.bucket} className="h-full" style={{ width: `${x.norm * 100}%`, background: BUCKET_GRAD[x.bucket] || BUCKET_TONE[x.bucket] }} />)}
       </div>
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
         {b.buckets.map((x) => (

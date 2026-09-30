@@ -29,26 +29,26 @@ def test_keywords_skip_generic_words():
     from core.services.graph import keywords, mentions_title
     assert keywords("Сбер кредит") == ["сбер"]
     assert keywords("Кредитная карта") == []                 # нечего искать — общие слова
-    assert keywords("Headway v1") == ["headway"]
-    assert mentions_title("надо доделать хедвей", ["headway"]) is False
-    assert mentions_title("Headway: правки по второй сцене", ["headway"]) is True
+    assert keywords("Acme v1") == ["acme"]
+    assert mentions_title("надо доделать экме", ["acme"]) is False
+    assert mentions_title("Acme: правки по второй сцене", ["acme"]) is True
     assert mentions_title("закрыть сбер досрочно", ["сбер"]) is True
     assert mentions_title("любой текст", []) is False
 
 
 def test_work_cluster_orders_clients_tag_and_project():
     from core.services import graph, orders, people, tasks
-    people.add_person("Кот Прод", kind="client")
+    people.add_person("Иван Петров", kind="client")
     people.add_person("Мама", kind="family")
-    o = orders.add_order("Headway v1", price=20000, client="Кот Прод")
-    t1 = tasks.add_task("Отрендерить финал", project="Headway v1")
+    o = orders.add_order("Acme v1", price=20000, client="Иван Петров")
+    t1 = tasks.add_task("Отрендерить финал", project="Acme v1")
     t2 = tasks.add_task("Купить лампу", project="Дом")
     tasks.add_task("Повесить полку", project="Дом")
     tasks.add_task("Одинокая задача", project="Гараж")     # проект с одной задачей — не узел, задача не висит сиротой
     tasks.add_task("Просто дело без проекта")
     g = graph.build()
     ids = {n["id"] for n in g["nodes"]}
-    cli = next(n for n in g["nodes"] if n["kind"] == "person" and n["label"] == "Кот Прод")
+    cli = next(n for n in g["nodes"] if n["kind"] == "person" and n["label"] == "Иван Петров")
     mom = next(n for n in g["nodes"] if n["kind"] == "person" and n["label"] == "Мама")
     assert _linked(g, f"order:{o.id}", "tag:работа", "work")
     assert _linked(g, cli["id"], "tag:работа", "work")
@@ -62,10 +62,10 @@ def test_work_cluster_orders_clients_tag_and_project():
 
 def test_notes_mention_orders_and_debts_by_keywords():
     from core.services import graph, orders, finance, brain_notes as notes
-    o = orders.add_order("Headway v1", price=20000)
+    o = orders.add_order("Acme v1", price=20000)
     d = finance.add_debt("Сбер кредит", 100000, payment=5000)
     d2 = finance.add_debt("Альфа кредитка", 50000, payment=3000)
-    n1 = notes.add_note("Идея для Headway: сделать интро на 3 секунды")
+    n1 = notes.add_note("Идея для Acme: сделать интро на 3 секунды")
     n2 = notes.add_note("сбер кредит по наследству — узнать про рефинансирование")
     n3 = notes.add_note("вкусная еда сегодня")
     g = graph.build()
@@ -78,8 +78,8 @@ def test_notes_mention_orders_and_debts_by_keywords():
 
 def test_money_categories_link_payments_tags_and_people():
     from core.services import graph, orders, finance, people, goals, brain_notes as notes
-    people.add_person("Кот Прод", kind="client")
-    o = orders.add_order("Headway v1", price=20000, client="Кот Прод")
+    people.add_person("Иван Петров", kind="client")
+    o = orders.add_order("Acme v1", price=20000, client="Иван Петров")
     d = finance.add_debt("Сбер кредит", 100000, payment=5000)
     finance.add_category("Дом", "expense")
     finance.add_transaction(1500, "expense", category="Дом", note="лампочки")
@@ -105,9 +105,9 @@ def test_money_categories_link_payments_tags_and_people():
 
 def test_focus_on_work_tag_shows_cluster():
     from core.services import graph, orders, people, brain_notes as notes
-    people.add_person("Кот Прод", kind="client")
-    o = orders.add_order("Headway v1", price=20000, client="Кот Прод")
-    n = notes.add_note("Headway — референсы по цвету")
+    people.add_person("Иван Петров", kind="client")
+    o = orders.add_order("Acme v1", price=20000, client="Иван Петров")
+    n = notes.add_note("Acme — референсы по цвету")
     far = notes.add_note("купить хлеб #быт")
     notes.add_note("второй про быт #быт")
     g = graph.build(focus="tag:работа")

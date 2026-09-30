@@ -28,7 +28,7 @@ from sqlmodel import select
 from ..db import ScreenSlot, get_setting, session, set_setting
 from . import events
 
-log = logging.getLogger("marvin.state")
+log = logging.getLogger("assistant.state")
 
 IDLE_AFTER_MIN = 5        # столько минут без мыши/клавы = idle (перекрывается voice.pc.screen_time.idle_min)
 AWAY_AFTER_MIN = 30       # столько минут idle = away

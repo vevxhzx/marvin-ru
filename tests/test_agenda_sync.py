@@ -163,7 +163,7 @@ def test_task_with_day_only_is_all_day_not_ten_am():
     assert (next(t for t in tasks.list_tasks(limit=50) if t.title == "Созвон с Пашей").due.hour) == 11
     # напоминаний «остался час» по задаче на день не приходит
     tasks.add_task("Разобрать почту", datetime.now().replace(hour=23, minute=59, second=0, microsecond=0), source="test")
-    assert all("Разобрать почту" not in text or "остался" not in text for _, text in tasks.due_task_reminders())
+    assert all("разобрать почту" not in text.lower() or "осталось" not in text.lower() for _, text in tasks.due_task_reminders())
 
 
 def test_edit_in_place_endpoints_task_and_link():
@@ -211,9 +211,9 @@ def test_day_tasks_not_pushed_one_by_one_and_tomorrow_keeps_all_day(monkeypatch)
     assert moved.due.date() == (datetime.now() + timedelta(days=1)).date() and (moved.due.hour, moved.due.minute) == (23, 59)
     moved = tasks.postpone_to_tomorrow(timed.id)
     assert (moved.due.hour, moved.due.minute) == (10, 0)
-    # утренний дайджест называет дела на день по именам
+    # утренний дайджест называет дела на день по именам (карточка в стиле сайта: секции СЕГОДНЯ/ЗАДАЧИ)
     digest = scheduler.morning_digest_text()
-    assert "На сегодня:" in digest and "Убраться на кухне" in digest and "Заезд в Сбер" in digest
+    assert "ЗАДАЧИ" in digest and "Убраться на кухне" in digest and "Заезд в Сбер" in digest
     # дайджест включён → проактивность про «сегодня без времени» молчит (уже сказано утром)
     noon_less = datetime.now().replace(hour=9, minute=30)
     monkeypatch.setattr(proactive.cfg.telegram, "morning_digest", "08:30", raising=False)
@@ -259,6 +259,8 @@ def test_memory_block_goes_to_user_turn_not_system(monkeypatch):
     monkeypatch.setattr(memory, "context", fake_ctx)
     monkeypatch.setattr(agent, "_history", lambda *a, **k: [])
     asyncio.run(agent.via_ollama("как назвать кота?", "web"))
-    sys_msg, user_msg = seen["messages"][0]["content"], seen["messages"][-1]["content"]
+    # «Ок.» — вода вместо ответа, поэтому модель ещё раз дёргается с уточнением; память ищем в ПЕРВОЙ user-реплике
+    sys_msg = seen["messages"][0]["content"]
+    user_msg = next(m["content"] for m in seen["messages"] if m["role"] == "user")
     assert "Барсик" not in sys_msg and "инструменты" in sys_msg
     assert "Барсик" in user_msg and "как назвать кота?" in user_msg

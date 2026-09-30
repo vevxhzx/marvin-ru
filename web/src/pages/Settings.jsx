@@ -15,6 +15,7 @@ const GROUPS = [
   ['brain.cloud', 'облако', 'Для общих вопросов («объясни», «напиши», «посоветуй»). Личные данные туда не уходят. Ключ берётся за минуту, карта не нужна.'],
   ['brain', 'мозг', 'Локальная модель (Ollama) — всё личное: деньги, календарь, задачи, заметки. Никуда не уходит.'],
   ['voice', 'голос и ПК', 'Whisper распознаёт на вашем ПК (никуда не уходит), отвечает Silero. voice.bat — голос в комнате, управление программами, утренний доклад, ночной режим и авто-игровой режим. Скриншоты «что на экране» и фото чеков — через модель зрения (см. «мозг»).'],
+  ['cards', 'картинки', 'Карточки-картинки к действиям в Telegram в фирменном стиле. Рисуются на вашем ПК и кэшируются; в облако не уходят.'],
   ['google', 'google календарь', 'События ассистента появляются в Google Календаре — на телефоне, часах, в любом приложении. Только в одну сторону: ассистент → Google. Client ID и secret — 5 минут по инструкции в README (бесплатно, карта не нужна).'],
   ['backup', 'бэкапы', 'Ежедневно в 03:00. Вторая копия — на другой диск или в папку Яндекс.Диска / Google Drive.'],
   ['owner', 'вы', ''],
@@ -30,7 +31,7 @@ const CATS = [
   { id: 'desktop', label: 'windows-клиент', groups: [], extra: ['desktop'] },
   { id: 'freelance', label: 'фриланс', groups: [], extra: ['freelance', 'pomodoro'] },
   { id: 'ai', label: 'мозг', groups: ['brain', 'brain.cloud'] },
-  { id: 'voice', label: 'голос и пк', groups: ['voice'], extra: ['organizer'] },
+  { id: 'voice', label: 'голос и пк', groups: ['voice', 'cards'], extra: ['organizer'] },
   { id: 'memory', label: 'память и данные', groups: ['backup'], extra: ['data'] },
   { id: 'integrations', label: 'интеграции', groups: ['telegram', 'google'] },
   { id: 'system', label: 'система', groups: ['server'], extra: ['status'] },
@@ -47,6 +48,7 @@ export default function Settings({ health }) {
   const [gem, setGem] = useState(null)
   const [small, setSmall] = useState(null)   // результат проверки малой модели
   const [llm, setLlm] = useState(null)       // внешняя модель из .env (если сервер её умеет)
+  const [pcBusy, setPcBusy] = useState(false) // идёт запуск/перезапуск voice.bat
   const [cat, setCat] = useState(() => (location.hash.replace('#', '') || localStorage.getItem('settings.cat') || 'general'))
   const pick = (id) => { setCat(id); localStorage.setItem('settings.cat', id); history.replaceState(null, '', '#' + id); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
@@ -72,6 +74,15 @@ export default function Settings({ health }) {
   const toggleNotif = async () => {
     if (notifyEnabled()) { disableNotifications(); setNotif('off'); return }
     const p = await enableNotifications(); setNotif(p === 'granted' ? 'granted' : p)
+  }
+
+  const launchPc = async (restart) => {
+    setPcBusy(true)
+    try {
+      const r = await api.post('/api/pc/launch', { restart })
+      if (r?.ok) { show(r.message || (restart ? 'перезапускаю голосовой клиент' : 'запускаю голосовой клиент'), '', 'окно появится через пару секунд'); setTimeout(load, 4000) }
+      else show(r?.error || 'не получилось запустить', 'err', 'вручную: voice.bat рядом с ядром')
+    } catch (e) { show.err(e) } finally { setPcBusy(false) }
   }
 
   const groupBlock = ([prefix, title, hint]) => {
@@ -124,19 +135,29 @@ export default function Settings({ health }) {
               line1={!status.backup.enabled ? 'выключен' : status.backup.last ? `последний ${relTime(status.backup.last)}` : 'ещё не делался (в 03:00)'}
               line2={`${status.backup.count} копий · ${status.backup.dir}${status.backup.extra_dir ? ` + ${status.backup.extra_dir}` : ''}`} />
             <StatusCard ok={status.gemini.enabled && !status.gemini.last_error && gem?.ok !== false} warn={!status.gemini.enabled || (status.gemini.enabled && !status.gemini.last_error && !gem)} title={`облако · ${status.gemini.title || 'gemini'}`}
-              line1={!status.gemini.enabled ? 'выключен' : gem ? (gem.ok ? 'отвечает' : 'ошибка') : status.gemini.last_error ? 'ошибка' : status.gemini.model}
-              line2={gem && !gem.ok ? gem.detail : gem?.ok ? `модель ${gem.model}${status.gemini.proxy ? ' · через прокси' : ''}` : status.gemini.last_error || (status.gemini.enabled ? `${status.gemini.model}${status.gemini.proxy ? ' · через прокси' : ' · напрямую'}` : 'ключ не задан или режим local')}
+              line1={!status.gemini.enabled ? 'выключен' : status.gemini.last_error && gem?.ok === false ? 'ошибка' : gem?.ok ? 'отвечает' : status.gemini.last_error ? 'ошибка' : 'подключено'}
+              line2={gem && !gem.ok ? gem.detail : status.gemini.last_error ? status.gemini.last_error
+                : `настроена ${status.gemini.model}${status.gemini.model_last && status.gemini.model_last !== status.gemini.model ? ` · реально отвечает ${status.gemini.model_last}` : ''}${status.gemini.proxy ? ' · через прокси' : ' · напрямую'}`}
               action={status.gemini.enabled && <button className="btn-ghost btn-sm" onClick={() => { setGem({ pending: true }); api.post('/api/status/gemini').then(setGem).catch((e) => setGem({ ok: false, detail: e.message })) }}>{gem?.pending ? 'проверяю…' : 'проверить'}</button>} />
-            {llm && <StatusCard ok={!!llm.enabled} warn={!llm.enabled} title="внешняя модель · llm"
-              line1={llm.enabled ? `${llm.model} · отвечает через API` : 'ключ не задан'}
-              line2={llm.enabled ? 'ключ лежит в .env · такие ответы помечены в чате как ☁️ облако' : 'впишите LLM_API_KEY (и LLM_URL, LLM_MODEL) в .env — и чат пойдёт во внешнюю модель; без неё работает по правилам'} />}
+            {llm && <StatusCard ok={!!llm.enabled} warn={llm.mode === 'off'} title="какая модель отвечает"
+              line1={llm.mode === 'cloud' ? `только облако · ${status.gemini.model_last || llm.model}`
+                : llm.mode === 'off' ? 'мозг не подключён'
+                : `локально · ${status.ollama?.model || llm.model}`}
+              line2={llm.mode === 'cloud' ? 'режим cloud: все запросы идут в облако'
+                : llm.mode === 'hybrid' ? `правило (без модели) → ${status.ollama?.model || 'локальная модель'} → облако ${status.gemini.title || ''}. Личное — на ПК.`
+                : llm.mode === 'local' ? 'режим local: данные с компьютера не уходят'
+                : 'задайте модель в «мозг» или подключите облако'} />}
             {status.voice && <StatusCard ok={status.voice.stt && status.voice.stt_ready && (!status.voice.tts || status.voice.tts_ready)} warn={status.voice.stt && !status.voice.stt_ready} title="голос"
               line1={!status.voice.stt ? 'не установлен' : !status.voice.stt_ready ? (status.voice.stt_error ? 'ошибка' : 'загружается…') : `whisper-${status.voice.stt_model} · ${status.voice.tts ? status.voice.tts_engine : 'без озвучки'}`}
               line2={status.voice.stt_error || status.voice.tts_error || (!status.voice.stt ? 'запустите update.bat — поставит распознавание и голос' : status.voice.stt_ready ? `голосовые в Telegram работают · ответ голосом: ${{ voice: 'на голосовые', always: 'всегда', never: 'никогда' }[status.voice.reply] || status.voice.reply}` : 'первый запуск качает модели (~600 МБ), подождите пару минут')} />}
-            {status.screen && <StatusCard ok={status.screen.enabled && !!status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000} warn={status.screen.enabled} title="экранное время"
-              line1={!status.screen.enabled ? 'выключено' : status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000 ? `пишется · сегодня ${Math.floor(status.screen.today_min / 60)} ч ${String(status.screen.today_min % 60).padStart(2, '0')}` : 'включено, но данных нет'}
-              line2={!status.screen.enabled ? 'включить: голос и пк → «экранное время»; пишется только имя программы и сайт, локально' : status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000 ? 'блок «время за пк» — на главной; в чате «сколько сидел за компом»' : status.pc?.alive ? 'voice.bat запущен, но старой версии или без перезапуска после включения — перезапустите voice.bat' : 'пульс идёт от voice.bat — запустите его (после включения настройки нужен перезапуск)'} />}
-            <StatusCard ok={!!status.pc?.alive} warn={!status.pc?.alive} title="пк-клиент" line1={status.pc?.alive ? ({ idle: 'ждёт', listening: 'слушает', thinking: 'думает', speaking: 'говорит', off: 'микрофон выкл' }[status.pc.mode] || status.pc.mode) : 'не запущен'} line2={status.pc?.alive ? 'voice.bat на связи' : 'запустите voice.bat — голос в комнате и управление программами'} />
+            {status.screen && <StatusCard ok={status.screen.enabled && !!status.pc?.alive && !!status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000} warn={status.screen.enabled} title="экранное время"
+              line1={!status.screen.enabled ? 'выключено' : !status.pc?.alive ? (status.pc?.seen ? 'клиент молчит' : 'нет пульса') : status.screen.today_min > 0 || (status.screen.last && (Date.now() - new Date(status.screen.last)) < 120000) ? `пишется · сегодня ${Math.floor(status.screen.today_min / 60)} ч ${String(status.screen.today_min % 60).padStart(2, '0')}` : 'ждём данные'}
+              line2={!status.screen.enabled ? 'включить: голос и пк → «экранное время»; применяется на лету (~20 с), перезапуск не нужен' : !status.pc?.alive ? (status.pc?.seen ? `voice.bat молчит с ${relTime(status.pc.seen)} — запустите/перезапустите (кнопка ниже)` : 'пульс идёт от voice.bat — запустите его (кнопка ниже)') : 'блок «время за пк» — на главной; в чате «сколько сидел за компом»'} />}
+            <StatusCard ok={!!status.pc?.alive} warn={!status.pc?.alive} title="пк-клиент"
+              line1={status.pc?.alive ? ({ idle: 'ждёт', listening: 'слушает', thinking: 'думает', speaking: 'говорит', off: 'микрофон выкл' }[status.pc.mode] || status.pc.mode) : 'не запущен'}
+              line2={status.pc?.alive ? `на связи · последний пульс ${status.pc.seen ? relTime(status.pc.seen) : 'только что'}`
+                : status.pc?.seen ? `молчит с ${relTime(status.pc.seen)} — нажмите «перезапустить» или проверьте окно voice.bat` : 'ни разу не выходил на связь — нажмите «запустить»'}
+              action={<div className="flex flex-wrap gap-2"><button className="btn-ghost btn-sm" disabled={pcBusy || status.pc?.alive} onClick={() => launchPc(false)}>запустить</button><button className="btn-ghost btn-sm" disabled={pcBusy} onClick={() => launchPc(true)}>перезапустить</button></div>} />
           </div>
         )}
         {status && (
@@ -645,7 +666,7 @@ function FileOrganizer({ show }) {
     <Section title="организация монтажных папок" hint="Путь читается на компьютере, где запущен voice.bat. Сначала получите предпросмотр, затем подтвердите в чате. Файлы не удаляются.">
       <Card className="space-y-4">
         <div className="flex flex-col gap-2 sm:flex-row">
-          <input className="input flex-1" value={path} onChange={(e) => setPath(e.target.value)} placeholder={'D:\\Проекты\\Клиент\\Монтаж'} />
+          <input className="input flex-1" value={path} onChange={(e) => setPath(e.target.value)} placeholder={'D:\\Projects\\Client\\Edit'} />
           <button className="btn-primary" onClick={run}>показать план</button>
         </div>
         <div className="muted text-[12px]">Структура: исходники по типам, графика, музыка, проекты Premiere/After Effects/DaVinci, прокси, рендеры, экспорт, прочее. В чате можно проверить список и написать «да» или «нет».</div>
@@ -755,24 +776,11 @@ function SettingField({ it, value, onChange, providers }) {
 
 function DesktopClientSection() {
   const [info, setInfo] = useState(null)
-  const [edition, setEdition] = useState('marvin')
   const [, show] = useToast()
 
   useEffect(() => {
     api.get('/api/client/info').then(setInfo).catch(() => {})
-    api.get('/api/edition').then((res) => { if (res?.edition) setEdition(res.edition) }).catch(() => {})
   }, [])
-
-  const switchEdition = async (ed) => {
-    try {
-      setEdition(ed)
-      await api.post('/api/edition', { edition: ed })
-      show(ed === 'marvin' ? 'Включён профиль Марвин (GitHub)' : 'Включён личный профиль Джарвис')
-      setTimeout(() => window.location.reload(), 300)
-    } catch (err) {
-      show.err(err)
-    }
-  }
 
   const launchStandalone = () => {
     window.open(window.location.origin, '_blank', 'toolbar=no,menubar=no,location=no,status=no,directories=no,width=1280,height=840')
@@ -796,52 +804,6 @@ function DesktopClientSection() {
           <button className="btn-primary shrink-0" onClick={launchStandalone}>
             открыть в окне
           </button>
-        </div>
-      </div>
-
-      {/* Переключатель профиля: Джарвис (личный) vs Марвин (публичный) */}
-      <div className="rounded-xl border hair p-4 space-y-3" style={{ background: 'var(--surface-2)' }}>
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="font-medium text-[13.5px]">Версия и профиль ассистента</div>
-            <div className="muted text-[12.5px] mt-0.5">
-              {edition === 'marvin'
-                ? 'Активен профиль «Марвин» — публичная версия для GitHub с открытой конфигурацией.'
-                : 'Активен профиль «Джарвис» — ваш персональный ассистент с полным контекстом и заказами.'}
-            </div>
-          </div>
-          <div className="flex items-center rounded-lg p-1 border hair" style={{ background: 'var(--fill)' }}>
-            <button
-              className={`px-3 py-1 text-[12.5px] rounded-md font-medium transition ${edition === 'jarvis' ? 'bg-[var(--surface)] shadow-sm text-accent' : 'faint hover:text-ink'}`}
-              onClick={() => switchEdition('jarvis')}
-            >
-              🤖 Джарвис (Личный)
-            </button>
-            <button
-              className={`px-3 py-1 text-[12.5px] rounded-md font-medium transition ${edition === 'marvin' ? 'bg-[var(--surface)] shadow-sm text-accent' : 'faint hover:text-ink'}`}
-              onClick={() => switchEdition('marvin')}
-            >
-              📦 Марвин (GitHub)
-            </button>
-          </div>
-        </div>
-
-        <div className="rule pt-3 flex flex-wrap items-center gap-2 text-[12.5px]">
-          <span className="faint">Скачать полные архивы сборки:</span>
-          <a
-            href="/api/download/jarvis.zip"
-            download="jarvis-complete.zip"
-            className="btn-soft !h-7 !px-3 !text-[12px]"
-          >
-            💾 jarvis-complete.zip (Личный)
-          </a>
-          <a
-            href="/api/download/marvin.zip"
-            download="github-marvin.zip"
-            className="btn-soft !h-7 !px-3 !text-[12px]"
-          >
-            🐙 github-marvin.zip (Марвин для GitHub)
-          </a>
         </div>
       </div>
 

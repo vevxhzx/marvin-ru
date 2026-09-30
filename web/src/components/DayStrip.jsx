@@ -45,6 +45,7 @@ export default function DayStrip({ list, isToday, onPick }) {
     return { e, px, wx: x(endOf(e)) - px, lane, past, live }
   })
   const tone = (e) => (e.kind === 'task' ? (e.priority === 1 ? 'var(--neg)' : 'var(--ink)') : e.kind === 'order' ? 'var(--warn)' : 'var(--accent)')
+  const toneGrad = (e) => (e.kind === 'task' ? (e.priority === 1 ? 'linear-gradient(90deg, #ff3b5c, #ff8a3d)' : 'linear-gradient(90deg, #3a3a44, #6b6b78)') : e.kind === 'order' ? 'linear-gradient(90deg, #ffb020, #ff8a3d)' : 'linear-gradient(90deg, var(--accent), #8a5cff)')
 
   return (
     <div className="animate-rise select-none pb-1 pt-0.5" aria-label="лента дня">
@@ -60,7 +61,7 @@ export default function DayStrip({ list, isToday, onPick }) {
         <div className="absolute left-0 right-0 top-[27px] h-px" style={{ background: 'var(--line-2)' }} />
         {/* длительность */}
         {dots.filter((d) => d.wx > 0.4).map((d) => (
-          <span key={`w${d.e.id}${d.e.start}`} className="absolute top-[25px] h-[5px] rounded-full" style={{ left: `${d.px}%`, width: `${d.wx}%`, background: tone(d.e), opacity: d.past || d.e.done ? .18 : .32 }} />
+          <span key={`w${d.e.id}${d.e.start}`} className="absolute top-[25px] h-[5px] rounded-full" style={{ left: `${d.px}%`, width: `${d.wx}%`, background: toneGrad(d.e), opacity: d.past || d.e.done ? .18 : .32 }} />
         ))}
         {/* точки */}
         {dots.map((d) => (
@@ -75,7 +76,7 @@ export default function DayStrip({ list, isToday, onPick }) {
         {/* сейчас */}
         {nowMin != null && (
           <span className="absolute top-[18px] -translate-x-1/2" style={{ left: `${x(nowMin)}%` }}>
-            <span className="block h-[19px] w-[2px] rounded-full" style={{ background: 'var(--neg)' }} />
+            <span className="block h-[19px] w-[2px] rounded-full" style={{ background: 'linear-gradient(180deg, #ff3b5c, #ff8a3d)' }} />
             <span className="neg num absolute left-1/2 top-[-15px] -translate-x-1/2 text-[10.5px] font-medium">{hhmm(now)}</span>
           </span>
         )}

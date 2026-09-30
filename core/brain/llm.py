@@ -137,6 +137,7 @@ PROVIDERS: dict[str, dict] = {
     "custom":     {"base_url": "", "model": "", "title": "Свой OpenAI-совместимый", "free": None, "ru_ok": None, "key_url": ""},
 }
 LAST_CLOUD_ERROR: str | None = None
+LAST_CLOUD_MODEL: str = ""          # модель, которая реально ответила в последний раз (после фолбэков) — показываем в настройках
 _CLOUD_RESOLVED: str | None = None
 _VOICE_MODEL_BAD: set[str] = set()   # голосовые модели, которые провайдер отверг (404) — больше не пробуем
 # для OpenRouter «auto» = самая толковая бесплатная модель из живого списка (список меняется каждый месяц)
@@ -455,6 +456,16 @@ def anonymize(text: str) -> str:
     return text
 
 
+# Обезличенный текст уходит в облако, и модель в ответе повторяла плейсхолдер («Тратил пока [сумма]»).
+# Говорим прямо: скобки в ответ не тащить, а про цифру — молчать или сказать без конкретики.
+# Значения мы ей всё равно не показываем — приватность не страдает, а мусор в ответе пропадает.
+_ANON_HINT = ("\n\nВажно: в переданном тебе тексте часть данных скрыта плейсхолдерами — "
+              "[сумма], [имя], [телефон], [email], [карта], [ключ], [скрыто]. "
+              "Никогда не повторяй такие скобки в ответе (не пиши «[сумма]» и подобное). "
+              "Если для ответа нужно скрытое значение — обойдись без конкретной цифры "
+              "(«некоторая сумма», «один из контактов») или не упоминай это место.")
+
+
 _names_cache: tuple[float, list[str]] = (0.0, [])
 
 
@@ -730,11 +741,13 @@ def _explain_cloud_error(e: Exception, r: "httpx.Response | None") -> str:
 async def cloud_chat(system: str, user_text: str, history: list[dict] | None = None, _force_model: str | None = None,
                      temperature: float = 0.7) -> str | None:
     """Единая точка входа в облако. Провайдер — из настроек; Gemini — частный случай."""
-    global LAST_CLOUD_ERROR, _CLOUD_RESOLVED
+    global LAST_CLOUD_ERROR, _CLOUD_RESOLVED, LAST_CLOUD_MODEL
     history_retry = _force_model is not None
     if not CLOUD_PROVIDER or CLOUD_PROVIDER == "gemini":
         ans = await gemini_chat(system, user_text, history)
         LAST_CLOUD_ERROR = None if ans else LAST_GEMINI_ERROR
+        if ans:
+            LAST_CLOUD_MODEL = f"gemini:{_RESOLVED_MODEL or GEMINI_MODEL}"
         return ans
     if not cloud_enabled():
         return None
@@ -743,6 +756,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
     if cfg.brain.gemini.anonymize and not history_retry and MODE != "cloud":
         user_text = anonymize(user_text)
         history = [{**h, "text": anonymize(h["text"])} for h in (history or [])]
+        system = system + _ANON_HINT
     messages = [{"role": "system", "content": system}]
     messages += [{"role": "user" if h["role"] == "user" else "assistant", "content": h["text"]} for h in (history or [])]
     messages.append({"role": "user", "content": user_text})
@@ -750,6 +764,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
     if CLOUD_PROVIDER == "openrouter":
         headers["HTTP-Referer"] = "https://github.com/local-assistant"; headers["X-Title"] = "Local Assistant"
     model = _force_model or await resolve_cloud_model()
+    _t0 = time.monotonic()
     main_model = model
     if short_mode.get() and not _force_model and model not in _VOICE_MODEL_BAD:
         if CLOUD_VOICE_MODEL:
@@ -765,6 +780,9 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         streamed = await _cloud_stream(body, headers, sink)
         if streamed:
             LAST_CLOUD_ERROR = None
+            LAST_CLOUD_MODEL = body.get("model", "")
+            log.info("облако %s: %s — %.1f с (стрим, %s)", cloud_title(), LAST_CLOUD_MODEL,
+                     time.monotonic() - _t0, (_CLOUD_ROUTE_OK or ("?",))[0])
             return streamed
         # стрим не удался — обычный запрос ниже
     try:
@@ -807,6 +825,9 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 LAST_CLOUD_ERROR = f"{cloud_title()}: пустой ответ."
                 return None
             LAST_CLOUD_ERROR = None
+            LAST_CLOUD_MODEL = body.get("model", "")
+            log.info("облако %s: %s — %.1f с, %s", cloud_title(), LAST_CLOUD_MODEL,
+                     time.monotonic() - _t0, (_CLOUD_ROUTE_OK or ("?",))[0])
             return text
     except Exception as e:
         if r is not None and r.status_code in (404, 429) and (CLOUD_MODEL or PROVIDERS.get(CLOUD_PROVIDER, {}).get("model")) == "auto" and _CLOUD_RESOLVED:
@@ -823,7 +844,8 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             log.warning("%s: модель «%s» отвергнута (%s) — пробую стандартную %s", cloud_title(), model, r.status_code, default_model)
             return await cloud_chat(system, user_text, history, _force_model=default_model)
         LAST_CLOUD_ERROR = _explain_cloud_error(e, r if r is not None and r.status_code >= 400 else None)
-        log.warning("cloud error: %s", LAST_CLOUD_ERROR)
+        log.warning("облако %s: сбой за %.1f с (%s) — %s", cloud_title(), time.monotonic() - _t0,
+                    (_CLOUD_ROUTE_OK or ("?",))[0], LAST_CLOUD_ERROR)
         return None
 
 
@@ -1043,6 +1065,7 @@ async def gemini_chat(system: str, user_text: str, history: list[dict] | None = 
     if cfg.brain.gemini.anonymize:
         user_text = anonymize(user_text)
         history = [{**h, "text": anonymize(h["text"])} for h in (history or [])]
+        system = system + _ANON_HINT
     contents = [{"role": "user" if h["role"] == "user" else "model", "parts": [{"text": h["text"]}]} for h in (history or [])]
     contents.append({"role": "user", "parts": [{"text": user_text}]})
     if not model or not model.startswith("gemini"):

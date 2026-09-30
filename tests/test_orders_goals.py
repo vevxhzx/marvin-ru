@@ -295,7 +295,7 @@ def test_payment_backdated_lands_in_its_month():
     """Старый заказ: оплата задним числом попадает в тот месяц, заказ закрывается той датой, а не сегодняшней."""
     from datetime import datetime, timedelta
     from core.services import orders
-    o = orders.add_order("Старый ролик", 15000, "Кот прод", status="done")
+    o = orders.add_order("Старый ролик", 15000, "Иван Петров", status="done")
     when = datetime.now().replace(hour=12, minute=0, second=0, microsecond=0) - timedelta(days=40)
     orders.add_payment(o.id, 15000, date=when)
     o2 = orders.get_order(o.id)
@@ -326,12 +326,12 @@ def test_chat_payment_with_past_date():
 def test_manually_paid_order_waits_for_nothing():
     """Старый заказ закрыли статусом «оплачен» без записи денег — он не должен «ждать оплаты» ни в заказах, ни у клиента."""
     from core.services import orders, people
-    o = orders.add_order("Давний ролик", 13500, "Кот прод", status="done")
+    o = orders.add_order("Давний ролик", 13500, "Иван Петров", status="done")
     orders.update_order(o.id, status="paid")
     v = orders.order_view(orders.get_order(o.id))
     assert v["left"] == 0 and v["paid"] == 0
     assert orders.stats(3)["unpaid"] == 0
-    card = people.card(people.find_person("Кот прод"))
+    card = people.card(people.find_person("Иван Петров"))
     assert card["money"]["unpaid"] == 0
     c = _client()
     assert _j(c.get("/api/dashboard"))["orders"]["unpaid"] == 0
@@ -340,14 +340,14 @@ def test_manually_paid_order_waits_for_nothing():
 def test_review_after_deadline_is_not_overdue_and_client_totals():
     """«На правках» после срока — не просрочка (первая версия сдана); в статистике по клиенту — сумма заказов и получено за всё время."""
     from core.services import orders
-    o = orders.add_order("Ролик Headway", 1500, "Кот Прод", datetime.now() - timedelta(days=1))
+    o = orders.add_order("Ролик Acme", 1500, "Иван Петров", datetime.now() - timedelta(days=1))
     v = orders.order_view(orders.get_order(o.id))
     assert v["overdue"] and not v["past_due"]
     orders.update_order(o.id, status="review")
     v = orders.order_view(orders.get_order(o.id))
     assert not v["overdue"] and v["past_due"]
-    assert not any("Headway" in x for x in orders.deadline_nudges())
+    assert not any("Acme" in x for x in orders.deadline_nudges())
     assert "срок был" in orders.summary_text()
     st = orders.stats(1)
-    c = next(x for x in st["clients"] if x["client"] == "Кот Прод")
+    c = next(x for x in st["clients"] if x["client"] == "Иван Петров")
     assert c["total"] >= 1500 and c["unpaid"] >= 1500 and "_paid_period" not in c

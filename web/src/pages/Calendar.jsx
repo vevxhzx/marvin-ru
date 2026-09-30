@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, plural } from '../lib/api'
-import { Sheet, Field, useToast, PageAccent } from '../components/ui'
+import { Sheet, Field, DateTimeField, useToast, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
@@ -110,7 +110,7 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
           <p className="text-sm text-[var(--ink3)]">
             {ev?.kind === 'order'
               ? 'Это дедлайн заказа. Завершение переведёт заказ в статус «сдан» — он также изменится на странице заказов.'
-              : 'Это задача, показанная в календаре. Завершение закроет её и в списке задач.'}
+              : 'Задача из списка, показанная в календаре. Завершение закроет её и везде — и задачу, и привязанную встречу.'}
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" className="btn g" onClick={onClose}>закрыть</button>
@@ -130,13 +130,13 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
           <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Встреча с клиентом, созвон…" />
         </Field>
         <Field label="дата и время">
-          <input type="datetime-local" className="input" value={start} onChange={(e) => setStart(e.target.value)} />
+          <DateTimeField value={start} onChange={setStart} />
         </Field>
         <Field label="место или ссылка">
           <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Zoom, переговорная, https://…" />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="привязать к задаче" hint="завершение встречи закроет и задачу">
+          <Field label="привязать к задаче" hint="срок задачи встанет на это время; ✓ закроет обоих">
             <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
               <option value="">не привязывать</option>
               {tasks.map((t) => <option key={t.id} value={t.id}>{t.done ? '✓ ' : ''}{t.title}</option>)}
@@ -209,6 +209,7 @@ export default function Calendar() {
   const [linkOrders, setLinkOrders] = useState([])
   const [sheet, setSheet] = useState(null)
   const [view, setView] = useState('month') // 'month' | 'week'
+  const [loaded, setLoaded] = useState(false)
   const { tick, bump } = useRefresh()
   const [, show] = useToast()
 
@@ -220,7 +221,7 @@ export default function Calendar() {
     return [start, end]
   }, [cursor])
 
-  const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([]))
+  const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([])).finally(() => setLoaded(true))
   useEffect(() => { load() }, [range, tick])
   // справочники для привязок «встреча → задача/заказ»: тянем один раз
   useEffect(() => {
@@ -452,7 +453,9 @@ export default function Calendar() {
                 <small>{shortDate(selected)} · {dayEvents.length} {plural(dayEvents.length, 'событие', 'события', 'событий')}</small>
               </div>
               <div className="flex-1 overflow-y-auto pr-1 space-y-1">
-                {dayEvents.length === 0 ? (
+                {!loaded ? (
+                  <ListSkeleton n={4} />
+                ) : dayEvents.length === 0 ? (
                   <div className="py-12 text-center text-sm text-[var(--ink3)] flex flex-col items-center justify-center gap-2">
                     <span>нет событий на этот день</span>
                     <button type="button" className="btn g !h-8 !px-3.5 !text-xs mt-2" onClick={() => setSheet('new')}>

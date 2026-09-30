@@ -10,10 +10,11 @@ import re
 import time
 from dataclasses import dataclass, field
 
-log = logging.getLogger("jarvis.pc")
+log = logging.getLogger("assistant.pc")
 
 # состояние ПК-клиента: когда последний раз был на связи и что сейчас делает (idle/listening/thinking/speaking/off)
 LAST_SEEN: float = 0.0
+HEARTBEAT_TIMEOUT = 90            # пульс раз в 20 с; 90 с без пульса = клиент считается отвалившимся
 STATE: dict = {"mode": "offline", "text": ""}
 _pending_results: list[dict] = []   # результаты команд (поиск файлов), которые ещё не показали
 SSE_CLIENTS = 0                     # сколько открытых /api/events/stream (ставит app.py) — по нему видно, слушает ли кто-то команды
@@ -21,7 +22,20 @@ _sent: dict[str, float] = {}        # action → когда отправили �
 
 
 def alive() -> bool:
-    return time.time() - LAST_SEEN < 90
+    return time.time() - LAST_SEEN < HEARTBEAT_TIMEOUT
+
+
+def age_sec() -> float | None:
+    """Сколько секунд назад был последний пульс ПК-клиента. None — ни разу с запуска ядра."""
+    return None if LAST_SEEN <= 0 else max(0.0, time.time() - LAST_SEEN)
+
+
+def last_seen_iso() -> str | None:
+    """Время последнего пульса в ISO (для настроек: «последний раз 14:32»). None — пульса не было."""
+    if LAST_SEEN <= 0:
+        return None
+    from datetime import datetime
+    return datetime.fromtimestamp(LAST_SEEN).isoformat(timespec="seconds")
 
 
 def seen(state: dict | None = None) -> None:
@@ -39,7 +53,7 @@ SITES = {
     "гитхаб": "https://github.com", "github": "https://github.com", "хабр": "https://habr.com", "чат гпт": "https://chatgpt.com", "chatgpt": "https://chatgpt.com", "джипити": "https://chatgpt.com",
     "озон": "https://ozon.ru", "вайлдберриз": "https://wildberries.ru", "авито": "https://avito.ru", "карты": "https://yandex.ru/maps", "погоду": "https://yandex.ru/pogoda", "погода": "https://yandex.ru/pogoda",
     "нетфликс": "https://netflix.com", "спотифай": "https://open.spotify.com", "spotify": "https://open.spotify.com", "яндекс музыку": "https://music.yandex.ru", "музыку": "https://music.yandex.ru",
-    "джарвиса": "__self__", "сайт джарвиса": "__self__", "джарвис сайт": "__self__",
+    "марвина": "__self__", "сайт марвина": "__self__", "марвин сайт": "__self__",
 }
 APPS = {
     "телегу": "telegram", "телеграм": "telegram", "telegram": "telegram", "дискорд": "discord", "discord": "discord", "стим": "steam", "steam": "steam",
@@ -145,7 +159,7 @@ def parse(text: str) -> PcCommand | None:
         return PcCommand("find", m.group(2).strip(" «»\"'"), say=f"Ищу «{m.group(2).strip()}» на компьютере…")
     m = OPEN_RX.match(t)
     if m and re.search(r"\b(задач|дел[аоы]?|встреч|событи|календар|финанс|баланс|долг|трат|расход|доход|заметк|мысл|ссылк|мозг|памят|бриф|план|подписк|прогноз|отч[её]т|сводк|напомина|регулярн)", low):
-        m = None   # «покажи задачи», «открой календарь» — это про данные Джарвиса, не про ПК
+        m = None   # «покажи задачи», «открой календарь» — это про данные Марвина, не про ПК
     if m:
         target = m.group(2).strip(" «»\"'").lower()
         if re.search(r"^(https?://|www\.)|\.(ru|com|org|net|io|tv|me|dev|app)(/|$)", target):

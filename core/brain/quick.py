@@ -35,7 +35,46 @@ _BYE = ["До связи, сэр. Я тут, если что.", "Ухожу в �
 _NAME = ["Слушаю, сэр.", "Да, сэр?", "Я здесь. Что делаем?", "На связи."]
 
 
+# «привет» / «че как дела» / «что как делиша»: раньше такие фразы уходили в облако и отвечали там
+# чем попало (эхо вопроса, «запускаю мозги»). Теперь это локально, мгновенно и с цифрами дня.
+GREET_RX = re.compile(r"^\s*(?:привет|здравствуй\w*|здаров\w*|здорово|хай|йо|ку|салют|доброе\s+утро|добрый\s+(?:день|вечер)|доброй\s+ночи|го)\W*(?:"
+                      + identity.NAME_RX_SRC + r"|сэр|бро|брат|марвин)?[!.…]*\s*$", re.I)
+HOW_RX = re.compile(r"^\s*(?:что\s+|ну\s+|че\s+|чё\s+|короче\s+)*как\s+(?:у\s+тебя\s+)?(?:дела|дел\w*|делиша\w*|делишки|жизнь|настроение|ты|сам|самочувствие|"
+                    r"как\s+ты)|^\s*(?:че|чё|ну)\s+там\s*[?!]*$|^\s*ну\s+и?\s*как\s*\??$", re.I)
+
+
+def _day_status() -> str:
+    """Короткий статус дня для «как дела»: живые цифры вместо болтовни из головы."""
+    evs = calendar.events_today()
+    ts = tasks.list_tasks(limit=100)
+    s = finance.summary(1)
+    bits = []
+    if evs:
+        bits.append(f"встреч {len(evs)} (первая в {evs[0].start:%H:%M})" if len(evs) > 1 else f"встреча в {evs[0].start:%H:%M}")
+    else:
+        bits.append("встреч нет — день мой")
+    bits.append(f"открытых задач {len(ts)}" if ts else "задач нет")
+    money_bits = []
+    if s.get("spent"):
+        money_bits.append(f"за сегодня −{money(s['spent'])}")
+    bal = s.get("total_balance")
+    if bal is not None:
+        money_bits.append(f"баланс {money(bal)}")
+    return " · ".join(bits + money_bits)
+
+
+_HOW_REPLIES = [
+    "Держусь, {addr}: {status}. Ваша очередь — что делаем?",
+    "В норме. По сегодняшнему дню: {status}. Чем помочь?",
+    "Работаю. По дню: {status}. Что на повестке?",
+]
+
+
 def smalltalk(text: str) -> Result | None:
+    if GREET_RX.match(text):
+        return _greet(), ["greet"]
+    if HOW_RX.match(text):
+        return random.choice(_HOW_REPLIES).format(addr=_addr(), status=_day_status()), ["smalltalk"]
     if THANKS_RX.match(text):
         return random.choice(_THANKS), ["smalltalk"]
     if OK_RX.match(text):
@@ -47,6 +86,23 @@ def smalltalk(text: str) -> Result | None:
     if YESNO_LONE_RX.match(text):
         return "Это ответ на что-то, сэр, но я не задавал вопроса. Уточните.", ["smalltalk"]
     return None
+
+
+def _addr() -> str:
+    try:
+        from ..config import cfg
+        return (getattr(getattr(cfg, "owner", None), "name", None) or "сэр").strip() or "сэр"
+    except Exception:  # pragma: no cover
+        return "сэр"
+
+
+def _greet() -> str:
+    """Приветствие: готовая реплика персоны (учитывает стиль и обращение), без вызова LLM."""
+    from . import persona
+    try:
+        return persona.say("greet")
+    except Exception:  # pragma: no cover
+        return "На связи. Пишите как удобно: трату, дело, встречу, мысль — или просто спросите."
 
 
 # ------------------------------------------------------------------ периоды
@@ -151,19 +207,29 @@ def _end(n: int) -> str:
 
 
 # ------------------------------------------------------------------ «что у меня завтра / в пятницу / на выходных»
-AGENDA_RX = re.compile(r"^\s*(?:что|чё|че|какие\s+(?:планы|дела|встречи|события))\s*(?:у\s+меня|по\s+плану|запланировано|в\s+планах|планы)?\s*(?:на|в|во)?\s*(.+?)\s*\??$", re.I)
+AGENDA_RX = re.compile(r"^\s*(?:что|чё|че|дайджест\w*|бриф\w*|план\w*|расписание|дела|какие\s+(?:планы|дела|встречи|события))"
+                       r"\s*(?:,\s*(?:что|чё|че)\s*)*"                       # «что, что сегодня але»
+                       r"\s*(?:у\s+меня|по\s+плану|запланировано|в\s+планах|планы)?\s*(?:на|в|во)?\s*(.+?)\s*\??$", re.I)
+# слова-вода, которые люди пишут в запросе дня, но которые не про дату: «что там на сегодня», «че там сегодня але»
+_AG_FILLER = re.compile(r"\b(там|ну|вообще|же|але|ух|го|короче|слушай|пожалуйста|дай|дайте|расскажи|покажи|скажи|"
+                        r"напомни|посмотри|у\s+меня|мне|что|чё|че|дай)\b", re.I)
 
 
 def agenda(text: str) -> Result | None:
     low = text.lower().strip(" ?!.")
-    if not re.match(r"^(что|чё|че|какие)\b", low):
+    if not re.match(r"^(что|чё|че|какие|дайджест|бриф|план\w*|расписание|дела)\b", low):
         return None
-    if re.search(r"\b(потратил|ушло|доход|заработал|долг|баланс|денег|такое|значит|делать|нового|умеешь|делаешь)\b", low):
+    if re.search(r"\b(потратил|ушло|доход|заработал|долг|баланс|денег|деньг\w*|финанс\w*|задач\w*|такое|значит|делать|нового|умеешь|делаешь)\b", low):
         return None
     m = AGENDA_RX.match(low)
     if not m:
         return None
-    when = m.group(1)
+    # «там на сегодня» → «на сегодня»: убираем воду, иначе парсер даты видит мусор и отвечает отказом
+    when = re.sub(r"[«»\"',;:!?()]+", " ", m.group(1))
+    when = _AG_FILLER.sub(" ", when)
+    when = re.sub(r"\s+", " ", when).strip()
+    if not when:
+        when = "сегодня"
     now = datetime.now()
     d0 = now.replace(hour=0, minute=0, second=0, microsecond=0)
     if re.search(r"\bвыходн", when):
@@ -174,6 +240,11 @@ def agenda(text: str) -> Result | None:
         start, end, label = mon, mon + timedelta(days=7), "на следующей неделе"
     elif re.search(r"\bнеделе\b|\bнеделю\b", when):
         start, end, label = d0, d0 + timedelta(days=7 - now.weekday()), "до конца недели"
+    elif re.search(r"\bсегодня\b|\bсегодняшн", when):
+        start, end, label = d0, d0 + timedelta(days=1), "сегодня"
+    elif re.search(r"\bзавтра\b|\bназавтра\b", when):
+        start = d0 + timedelta(days=1)
+        start, end, label = start, start + timedelta(days=1), "завтра"
     else:
         dt, rest = parse_datetime(when, now)
         if not dt or re.search(r"[а-яё]{3,}", rest or ""):

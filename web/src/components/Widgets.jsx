@@ -91,10 +91,20 @@ export function Forecast({ f, compact = false }) {
         onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1))))) }}
         onTouchStart={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = e.touches[0]; setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((t.clientX - r.left) / r.width) * (pts.length - 1))))) }}
         onTouchMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = e.touches[0]; setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((t.clientX - r.left) / r.width) * (pts.length - 1))))) }}>
-        <defs><linearGradient id="fcg" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stopColor="var(--accent)" stopOpacity=".22" /><stop offset="1" stopColor="var(--accent)" stopOpacity="0" /></linearGradient></defs>
+        <defs>
+          <linearGradient id="grad-widget-cash-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="var(--accent)" stopOpacity=".32" />
+            <stop offset=".55" stopColor="#8a5cff" stopOpacity=".16" />
+            <stop offset="1" stopColor="#8a5cff" stopOpacity="0" />
+          </linearGradient>
+          <linearGradient id="grad-widget-cash-line" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stopColor="var(--accent)" />
+            <stop offset="1" stopColor="#8a5cff" />
+          </linearGradient>
+        </defs>
         {min < 0 && <line x1={P} x2={W - P} y1={zero} y2={zero} stroke="var(--neg)" strokeDasharray="3 4" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
-        <path d={`${d} L${x(pts.length - 1)},${H - P} L${x(0)},${H - P} Z`} fill="url(#fcg)" />
-        <path d={d} fill="none" stroke={f.ok ? 'var(--accent)' : 'var(--neg)'} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ strokeDasharray: 3000, strokeDashoffset: 3000, animation: 'draw 1.4s cubic-bezier(.2,.8,.2,1) forwards' }} />
+        <path d={`${d} L${x(pts.length - 1)},${H - P} L${x(0)},${H - P} Z`} fill="url(#grad-widget-cash-fill)" />
+        <path d={d} fill="none" stroke={f.ok ? 'url(#grad-widget-cash-line)' : 'var(--neg)'} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ strokeDasharray: 3000, strokeDashoffset: 3000, animation: 'draw 1.4s cubic-bezier(.2,.8,.2,1) forwards' }} />
         {hover != null && <line x1={x(hover)} x2={x(hover)} y1={P} y2={H - P} stroke="var(--ink-3)" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
       </svg>
       {/* точки — отдельным слоем поверх растянутого svg, иначе круги превращаются в овалы */}

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
 import { api, hhmm, isSameDay, plural } from '../lib/api'
-import { Num, useToast, useLeave, useArrived, PageAccent } from '../components/ui'
+import { Num, useToast, useLeave, useArrived, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
@@ -27,6 +27,7 @@ export default function Tasks() {
   const view = params.get('view') || 'open'
   const setView = (v) => setParams(v === 'open' ? {} : { view: v }, { replace: true })
   const [quick, setQuick] = useState('')
+  const nav = useNavigate()
   const [sheet, setSheet] = useState(null) // null | 'new' | задача
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
@@ -49,6 +50,11 @@ export default function Tasks() {
   const open = all.filter((t) => !t.done).sort(sortFn)
   const done = all.filter((t) => t.done).sort((a, b) => new Date(b.done_at || 0) - new Date(a.done_at || 0))
   const todayTasks = open.filter((t) => t.due && isSameDay(t.due, now))
+  /* «сегодня»: дела на сегодня + встречи из календаря (одна картина, как в утреннем дайджесте) */
+  const todayList = useMemo(() => {
+    const at = (x) => new Date(x.due || x.start || 0).getTime()
+    return [...todayTasks, ...agenda].sort((a, b) => (Number(!!a.done) - Number(!!b.done)) || at(a) - at(b))
+  }, [tasks, tasksSort])
 
   const addQuick = async (e) => {
     if (e && e.preventDefault) e.preventDefault()
@@ -74,6 +80,14 @@ export default function Tasks() {
   }
 
   const toggle = async (t) => {
+    if (t.kind === 'event') {   // встреча из календаря: галочка закрывает её и в календаре
+      try {
+        await api.doneEvent(t.id, !t.done)
+        show(t.done ? 'Вернул в календарь' : 'Встреча отмечена', '', t.title)
+        load(); bump()
+      } catch (e) { show.err(e) }
+      return
+    }
     if (t.done) {
       try { await api.undoneTask(t.id); load(); bump() } catch (e) { show.err(e) }
       return
@@ -89,7 +103,7 @@ export default function Tasks() {
     })
   }
 
-  const currentList = view === 'today' ? todayTasks : view === 'done' ? done : open
+  const currentList = view === 'today' ? todayList : view === 'done' ? done : open
   const kicker = open.length ? `${open.length} в работе` : 'всё сделано'
 
   return (
@@ -164,7 +178,9 @@ export default function Tasks() {
                     <h2>{view === 'today' ? 'сегодня по календарю' : view === 'done' ? 'выполнено' : 'задачи в работе'}</h2>
                     <small>{currentList.length}</small>
                   </div>
-                  {currentList.length === 0 ? (
+                  {tasks === null ? (
+                    <ListSkeleton n={5} />
+                  ) : currentList.length === 0 ? (
                     <p style={{ color: 'var(--ink3)', paddingTop: '12px' }}>список пуст</p>
                   ) : (
                     <>
@@ -174,12 +190,12 @@ export default function Tasks() {
                       {currentList.map((t) => (
                         <div className={`rowi ck ${leaveCls(t.id)} ${arriveCls(t.id)}`} key={t.id}>
                           <input type="checkbox" checked={!!t.done} onChange={() => toggle(t)} aria-label={t.done ? 'вернуть в работу' : 'закрыть задачу'} />
-                          <span className="t" style={{ cursor: 'pointer' }} onClick={() => setSheet(t)} title="открыть задачу">
+                          <span className="t" style={{ cursor: 'pointer' }} onClick={() => (t.kind === 'event' ? nav('/calendar') : setSheet(t))} title={t.kind === 'event' ? 'открыть в календаре' : 'открыть задачу'}>
                             {t.title}
-                            {t.sub || t.category ? <small>{t.sub || t.category}</small> : null}
+                            {t.kind === 'event' ? <small>встреча</small> : (t.sub || t.category ? <small>{t.sub || t.category}</small> : null)}
                           </span>
                           {t.due && <time>{hhmm(t.due)}</time>}
-                          <button className="row-open" onClick={() => setSheet(t)} aria-label="открыть задачу" title="изменить задачу"><ChevronRight size={16} /></button>
+                          <button className="row-open" onClick={() => (t.kind === 'event' ? nav('/calendar') : setSheet(t))} aria-label={t.kind === 'event' ? 'открыть в календаре' : 'открыть задачу'} title={t.kind === 'event' ? 'в календаре' : 'изменить задачу'}><ChevronRight size={16} /></button>
                         </div>
                       ))}
                     </>

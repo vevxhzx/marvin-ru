@@ -353,12 +353,34 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
       const el = wrapRef.current, v = viewRef.current; const cx = (el.clientWidth / 2 - v.x) / v.k, cy = (el.clientHeight / 2 - v.y) / v.k
       const f = [...(e.clipboardData?.files || [])].find((x) => x.type.startsWith('image/'))
       if (f) { e.preventDefault(); const fr = selected().length === 1 && selected()[0].type === 'frame' ? selected()[0] : null; uploadImage(f, cx, cy, fr?.id); return }
+      // наши скопированные объекты приоритетнее чужого текста в OS-буфере (иначе Ctrl+V молчит),
+      // но картинка из OS-буфера всё равно первая
+      if (clipRef.current?.length) {
+        e.preventDefault()
+        snapshot()
+        const src = clipRef.current, map = new Map(), made = []
+        for (const s of src.filter((i) => i.type !== 'arrow')) {
+          const c = clone(s); c.id = uid(); c._key = null; withKey(c); c.z = topZ(); map.set(s.id, c.id)
+          if (c.type === 'ink') c.data.points = (c.data.points || []).map(([x, y]) => [x + 24, y + 24]); else { c.x += 24; c.y += 24 }
+          itemsRef.current.push(c); made.push(c.id)
+        }
+        for (const a of src.filter((i) => i.type === 'arrow')) {
+          const rf = a.data.from || {}, rt = a.data.to || {}
+          if ((rf.item == null || map.has(rf.item)) && (rt.item == null || map.has(rt.item))) {
+            const c = clone(a); c.id = uid(); c._key = null; withKey(c); c.z = topZ()
+            c.data.from = rf.item != null ? { ...rf, item: map.get(rf.item) } : { x: (rf.x || 0) + 24, y: (rf.y || 0) + 24 }
+            c.data.to = rt.item != null ? { ...rt, item: map.get(rt.item) } : { x: (rt.x || 0) + 24, y: (rt.y || 0) + 24 }
+            itemsRef.current.push(c); made.push(c.id)
+          }
+        }
+        renumber(); setSel(new Set(made)); commit()
+        return
+      }
       const t = e.clipboardData?.getData('text/plain')
-      if (clipRef.current?.length && !t) { e.preventDefault(); setSel(new Set(clipRef.current.map((c) => c.id))); duplicateSel(); return }
       if (t && t.trim()) { e.preventDefault(); const it = addItem(t.length > 140 ? 'text' : 'sticky', cx - 100, cy - 100, { text: t.trim() }); if (it) setSel(new Set([it.id])) }
     }
     window.addEventListener('paste', onPaste); return () => window.removeEventListener('paste', onPaste)
-  }, [readOnly, addItem, uploadImage, duplicateSel, setSel])
+  }, [readOnly, addItem, uploadImage, snapshot, commit, setSel])
 
   /* ---------- картинки ---------- */
   const getImg = useCallback((src) => {

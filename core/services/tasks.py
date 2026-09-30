@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlmodel import select
 
 from ..db import diff_text, icontains, Task, log_action, now, remember, session
+from . import coord
 
 
 def add_task(title: str, due: datetime | None = None, priority: int = 2,
@@ -82,6 +83,10 @@ def update_task(task_id: int, **fields) -> Task | None:
         s.commit(); s.refresh(t)
     if fields.get("done") and not before["done"]:
         _after_done(t)
+    if "due" in fields:      # срок поменяли — переносим привязанную встречу
+        coord.sync_from_task(t.id)
+    if "done" in fields:     # закрыли/вернули задачу — и встречу тоже
+        coord.complete_events_for_task(t.id, bool(t.done))
     return t
 
 
@@ -100,11 +105,11 @@ def due_task_reminders() -> list[tuple[Task, str]]:
             if t.remind_stage < 1 and same_day and nw.hour >= 9:
                 # если до дедлайна уже меньше часа — второе напоминание («остался час») не нужно
                 t.remind_stage = 2 if t.due - nw <= timedelta(hours=1) else 1; s.add(t)
-                out.append((t, f"📌 Сегодня до {t.due:%H:%M} — «{t.title}»."))
+                out.append((t, f"📌 **ЗАДАЧА** · до {t.due:%H:%M} сегодня\n«{t.title}»"))
             elif t.remind_stage < 2 and timedelta(0) <= t.due - nw <= timedelta(hours=1):
                 t.remind_stage = 2; s.add(t)
                 mins = int((t.due - nw).total_seconds() // 60)
-                out.append((t, f"⏳ «{t.title}» — остался {'час' if mins > 50 else f'{mins} мин'} (до {t.due:%H:%M})."))
+                out.append((t, f"⏳ **ОСТАЛОСЬ {'час' if mins > 50 else f'{mins} мин'}** · до {t.due:%H:%M}\n«{t.title}»"))
         s.commit()
     return out
 
@@ -138,6 +143,7 @@ def complete_task(query: str | int) -> Task | None:
         s.commit()
         s.refresh(t)
     _after_done(t)
+    coord.complete_events_for_task(t.id, True)   # закрыл задачу — закрылась и привязанная встреча
     return t
 
 
@@ -170,7 +176,7 @@ def _after_done(t: Task) -> None:
                 LAST_PROGRESS.clear(); LAST_PROGRESS[t.id] = r
     except Exception as e:  # pragma: no cover
         import logging
-        logging.getLogger("marvin.tasks").warning("after task done: %s", e)
+        logging.getLogger("assistant.tasks").warning("after task done: %s", e)
 
 
 def delete_task(task_id: int) -> bool:
