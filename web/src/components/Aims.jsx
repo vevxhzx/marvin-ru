@@ -84,7 +84,7 @@ function AimCard({ a, onPatch, onChange }) {
         <div className="num shrink-0 text-[15px] font-semibold tabular-nums">{pct}%</div>
         <button className="btn-icon !h-7 !w-7" onClick={() => setOpen(!open)} aria-label={open ? 'Свернуть' : 'Раскрыть'}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
       </div>
-      <div className="progress mt-3"><div style={{ width: `${pct}%` }} /></div>
+      <div className="progress mt-3"><div style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }} /></div>
       {stale && !open && <div className="warn mt-2 text-[12px]">ничего не двигалось {a.stale_days} дн.</div>}
       {open && (
         <div className="mt-4 space-y-4" style={{ animation: 'rise .2s var(--ease-out)' }}>

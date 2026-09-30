@@ -6,6 +6,8 @@ import { Section } from './ui'
 /* Экранное время: сколько и где за ПК сегодня. Данные — от voice.bat (пульс раз в 20 с), только имя программы и сайт.
    Свернуто: итог + полоска дня по часам + топ-3. Развёрнуто: все программы с долями и подходы «сел/ушёл». */
 const CAT_COLOR = { работа: 'var(--accent)', медиа: '#e0703a', общение: '#7c6bd6', браузер: '#5b8bd6', игра: '#d64b6b', прочее: 'var(--ink-3)' }
+const CAT_PAIR = { работа: ['#5b8bff', '#0a3cff'], медиа: ['#ffb15c', '#e0703a'], общение: ['#a98cff', '#7c6bd6'], браузер: ['#8fb8ff', '#5b8bd6'], игра: ['#ff7d99', '#d64b6b'], прочее: ['#b9bcc6', '#8b8e98'] }
+const catGrad = (cat, deg = 180) => { const [a, b] = CAT_PAIR[cat] || CAT_PAIR.прочее; return `linear-gradient(${deg}deg, ${a}, ${b})` }
 const fmt = (m) => { m = Math.round(m); if (m < 60) return `${m} мин`; const h = Math.floor(m / 60), r = m % 60; return r ? `${h} ч ${String(r).padStart(2, '0')}` : `${h} ч` }
 const hm = (iso) => iso.slice(11, 16)
 
@@ -42,7 +44,7 @@ export default function ScreenTime({ tick, calm }) {
               <div className="flex h-7 items-end gap-[3px]" aria-label="активность по часам">
                 {range.map(({ v, h }) => (
                   <div key={h} className="flex-1 rounded-[3px]" title={`${h}:00 — ${fmt(v)}`}
-                    style={{ height: `${v >= 3 ? Math.max(14, (v / maxHour) * 100) : 4}%`, background: v >= 3 ? CAT_COLOR[d.hour_cats?.[h]] || 'var(--accent)' : 'var(--line-2)', opacity: v >= 3 ? 0.45 + 0.55 * (v / maxHour) : 1 }} />
+                    style={{ height: `${v >= 3 ? Math.max(14, (v / maxHour) * 100) : 4}%`, background: v >= 3 ? catGrad(d.hour_cats?.[h] || 'работа') : 'var(--line-2)', opacity: v >= 3 ? 0.5 + 0.5 * (v / maxHour) : 1 }} />
                 ))}
               </div>
               <div className="faint mt-1 flex justify-between text-[11px] num"><span>{range[0].h}:00</span>{d.first && <span>сели в {hm(d.first)}{d.sessions.length > 1 ? ` · ${d.sessions.length} подхода` : ''}</span>}<span>{range[range.length - 1].h + 1}:00</span></div>
@@ -55,7 +57,7 @@ export default function ScreenTime({ tick, calm }) {
                   <span className="flex min-w-0 items-center gap-2"><span className="h-2 w-2 shrink-0 rounded-full" style={{ background: CAT_COLOR[cat] || CAT_COLOR.прочее }} /><span className="truncate">{name}</span>{sub && sub !== name && <span className="faint truncate text-[12px]">{sub}</span>}</span>
                   <span className="num shrink-0 font-medium">{fmt(mins)}</span>
                 </div>
-                {!calm && <div className="mt-1 h-[3px] w-full rounded-full" style={{ background: 'var(--line-2)' }}><div className="h-full rounded-full" style={{ width: `${Math.max(2, (mins / total) * 100)}%`, background: CAT_COLOR[cat] || CAT_COLOR.прочее }} /></div>}
+                {!calm && <div className="mt-1 h-[3px] w-full rounded-full" style={{ background: 'var(--line-2)' }}><div className="h-full rounded-full" style={{ width: `${Math.max(2, (mins / total) * 100)}%`, background: catGrad(cat, 90) }} /></div>}
               </li>
             ))}
           </ul>

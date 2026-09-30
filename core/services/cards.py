@@ -106,22 +106,32 @@ class _Canvas:
             self.d.line((cx - dx, cy - dy, cx + dx, cy + dy), fill=color, width=width)
 
     def header(self, badge: str, color=ACCENT):
-        """Верхняя фирменная полоса-градиент (синий #0a3cff → светлее) + знак и бейдж раздела."""
+        """Тонкая градиентная полоса сверху + пилюля с бейджем и временем — как .report-card/.report-tag на сайте."""
         from PIL import Image
-        h = 8
+        h = 4
         grad = Image.new("RGB", (W, h))
         px = grad.load()
-        c2 = ACCENT_2
+        stops = [ACCENT, ACCENT_2, GREEN]
         for x in range(W):
-            t = x / max(1, W - 1)
-            px_col = (int(color[0] + (c2[0] - color[0]) * t), int(color[1] + (c2[1] - color[1]) * t), int(color[2] + (c2[2] - color[2]) * t))
+            t = x / max(1, W - 1) * (len(stops) - 1)
+            i = min(int(t), len(stops) - 2)
+            fr = t - i
+            a, b = stops[i], stops[i + 1]
+            col = (int(a[0] + (b[0] - a[0]) * fr), int(a[1] + (b[1] - a[1]) * fr), int(a[2] + (b[2] - a[2]) * fr))
             for yy in range(h):
-                px[x, yy] = px_col
+                px[x, yy] = col
         self.img.paste(grad, (0, 0))
-        self.y = PAD + 8
-        self.asterisk(PAD + 12, self.y + 10, 13, color)
-        self.d.text((PAD + 40, self.y), badge.upper(), font=_font(22), fill=color)
-        self.y += 46
+        self.y = PAD + 6
+        f = _font(21)
+        txt = badge.upper()
+        w = self.tw(txt, f) + 64
+        self.d.rounded_rectangle((PAD, self.y, PAD + w, self.y + 42), radius=21, fill=SURFACE_2)
+        self.asterisk(PAD + 27, self.y + 21, 9, color, width=3)
+        self.d.text((PAD + 46, self.y + 11), txt, font=f, fill=INK_2)
+        ts = datetime.now().strftime("%H:%M")
+        f2 = _font(21)
+        self.d.text((W - PAD - self.tw(ts, f2), self.y + 11), ts, font=f2, fill=INK_3)
+        self.y += 42
 
     # измерения
     def tw(self, text: str, font) -> float:
@@ -155,54 +165,61 @@ class _Canvas:
         self.y += 10
 
     def row(self, left: str, text: str, right: str | None = None, left_color=INK, right_color=INK_2, left_w: int = 118, muted: bool = False):
-        """Строка списка: левая колонка фиксированной ширины (время/дата), текст с обрезкой, правая колонка прижата вправо."""
-        f_left, f_text, f_right = _font(28), _font(28, False), _font(24)
-        h = 54
-        right_w = (self.tw(right, f_right) + 28) if right else 0
-        self.d.text((PAD, self.y + 12), left, font=f_left, fill=left_color)
-        text_x = PAD + left_w
+        """Строка-пилюля: левая колонка (время/дата), текст с обрезкой, значение прижато вправо."""
+        f_left, f_text, f_right = _font(27), _font(27, False), _font(24)
+        h = 58
+        self.d.rounded_rectangle((PAD, self.y, W - PAD, self.y + h), radius=18, fill=SURFACE)
+        cy = self.y + h // 2
+        self.d.text((PAD + 22, cy - 15), left, font=f_left, fill=left_color)
+        right_w = (self.tw(right, f_right) + 40) if right else 0
         text = self.ellipsis(text, f_text, CW - left_w - right_w)
-        self.d.text((text_x, self.y + 12), text, font=f_text, fill=INK_2 if muted else INK)
+        self.d.text((PAD + left_w, cy - 15), text, font=f_text, fill=INK_3 if muted else INK)
         if right:
-            self.d.text((W - PAD - self.tw(right, f_right), self.y + 15), right, font=f_right, fill=right_color)
-        self.y += h
-        self.d.line((PAD, self.y, W - PAD, self.y), fill=LINE, width=1)
+            self.d.text((W - PAD - 22 - self.tw(right, f_right), cy - 12), right, font=f_right, fill=right_color)
+        self.y += h + 8
 
     def check_row(self, text: str, right: str | None = None, right_color=INK_2, done: bool = False, urgent: bool = False):
-        f_text, f_right = _font(28, False), _font(24)
-        right_w = (self.tw(right, f_right) + 28) if right else 0
-        cy = self.y + 27
+        f_text, f_right = _font(27, False), _font(24)
+        h = 58
+        self.d.rounded_rectangle((PAD, self.y, W - PAD, self.y + h), radius=18, fill=SURFACE)
+        cy = self.y + h // 2
         if done:
-            self.d.ellipse((PAD, cy - 12, PAD + 24, cy + 12), fill=ACCENT)
-            self.d.line((PAD + 6, cy, PAD + 10, cy + 5), fill=(255, 255, 255), width=3)
-            self.d.line((PAD + 10, cy + 5, PAD + 18, cy - 5), fill=(255, 255, 255), width=3)
+            self.d.ellipse((PAD + 20, cy - 12, PAD + 44, cy + 12), fill=GREEN)
+            self.d.line((PAD + 26, cy, PAD + 30, cy + 5), fill=(255, 255, 255), width=3)
+            self.d.line((PAD + 30, cy + 5, PAD + 38, cy - 5), fill=(255, 255, 255), width=3)
         else:
-            self.d.ellipse((PAD, cy - 12, PAD + 24, cy + 12), outline=RED if urgent else INK_3, width=2)
-        self.d.text((PAD + 44, self.y + 12), self.ellipsis(text, f_text, CW - 44 - right_w), font=f_text, fill=INK_3 if done else INK)
+            self.d.ellipse((PAD + 20, cy - 12, PAD + 44, cy + 12), outline=RED if urgent else INK_3, width=2)
+        right_w = (self.tw(right, f_right) + 40) if right else 0
+        self.d.text((PAD + 60, cy - 15), self.ellipsis(text, f_text, CW - 60 - right_w), font=f_text, fill=INK_3 if done else INK)
         if right:
-            self.d.text((W - PAD - self.tw(right, f_right), self.y + 15), right, font=f_right, fill=right_color)
-        self.y += 54
-        self.d.line((PAD, self.y, W - PAD, self.y), fill=LINE, width=1)
+            self.d.text((W - PAD - 22 - self.tw(right, f_right), cy - 12), right, font=f_right, fill=right_color)
+        self.y += h + 8
 
     def empty(self, text: str):
         self.d.text((PAD, self.y + 10), text, font=_font(26, False), fill=INK_3)
         self.y += 50
 
     def stats(self, items: list[tuple[str, str, tuple]]):
-        """Ряд карточек «подпись / значение». Ширина делится поровну; значение ужимается, чтобы не вылезти."""
-        self.y += 22
+        """Ряд bento-плиток: первая — hero-градиент (синий→фиолетовый), остальные — пастель по цвету значения."""
+        self.y += 24
         n = len(items)
         gap = 14
         cw = (CW - gap * (n - 1)) // n
-        h = 124
+        h = 128
         for i, (label, value, color) in enumerate(items):
             x = PAD + i * (cw + gap)
-            self.d.rounded_rectangle((x, self.y, x + cw, self.y + h), radius=24, fill=SURFACE)
-            self.d.text((x + 24, self.y + 18), label, font=_font(21, False), fill=INK_2)
+            box = (x, self.y, x + cw, self.y + h)
+            if i == 0:
+                _grad_round(self.img, box, 24, ACCENT, ACCENT_2, vertical=True)
+                lc, vc = (226, 230, 255), (255, 255, 255)
+            else:
+                self.d.rounded_rectangle(box, radius=24, fill=PASTEL.get(_kind_of(color), SURFACE))
+                lc, vc = INK_2, color
+            self.d.text((x + 22, self.y + 18), label, font=_font(21, False), fill=lc)
             size = 44
-            while size > 26 and self.tw(value, _font(size)) > cw - 48:
+            while size > 24 and self.tw(value, _font(size)) > cw - 44:
                 size -= 2
-            self.d.text((x + 24, self.y + h - 24 - size), value, font=_font(size), fill=color)
+            self.d.text((x + 22, self.y + h - 22 - size), value, font=_font(size), fill=vc)
         self.y += h
 
     def bar(self, frac: float, color, h: int = 8):
@@ -270,6 +287,7 @@ def morning_card(path: Path | None = None) -> Path | None:
         s = finance.summary(1)
         safe = s.get("safe") or {}
         c = _Canvas()
+        c.header("утренний дайджест")
         c.title(f"доброе утро, {_address()}", f"{_weekday(now)}, {now.day} {_month(now)}")
 
         c.label("сегодня", len(evs))
@@ -410,6 +428,7 @@ def evening_card(path: Path | None = None, data: dict | None = None) -> Path | N
         d = data or evening_data()
         now = d["now"]
         c = _Canvas()
+        c.header("итоги дня")
         c.title(f"итоги дня, {_address()}", f"{_weekday(now)}, {now.day} {_month(now)}")
 
         n_done, n_due = len(d["done"]), len(d["due"])
@@ -459,6 +478,7 @@ def report_card(days: int = 7, path: Path | None = None) -> Path | None:
             notes = db.exec(select(Note).where(Note.created_at >= since)).all()
             active_days = len({m.created_at.date() for m in db.exec(select(Memory).where(Memory.created_at >= since, Memory.channel != "system"))})
         c = _Canvas()
+        c.header("итоги недели" if days <= 7 else "итоги месяца")
         c.title("итоги недели" if days <= 7 else "итоги месяца", f"{since:%d.%m} — {datetime.now():%d.%m.%Y}")
 
         spent_label = "потрачено"
@@ -515,6 +535,16 @@ LT_ACC_2 = ACCENT_2
 LT_TINT = {
     "hero": None, "blue": PASTEL["blue"], "violet": PASTEL["violet"],
     "green": PASTEL["green"], "orange": PASTEL["orange"], "red": PASTEL["red"], "plain": SURFACE,
+}
+# Градиенты главной (первой) плитки полосы — цвет по смыслу значения
+_BAND_GRAD = {
+    "green": ((25, 179, 74), (14, 165, 150)),
+    "red": ((255, 59, 92), (255, 122, 61)),
+    "orange": ((245, 168, 0), (238, 120, 40)),
+    "blue": (ACCENT, ACCENT_2),
+    "violet": (ACCENT, ACCENT_2),
+    "hero": (ACCENT, ACCENT_2),
+    "plain": (ACCENT, ACCENT_2),
 }
 
 
@@ -591,20 +621,20 @@ class _Band:
                         font=_font(26, False), fill=INK_2)
 
     def tiles(self, items: list, y: int = 250, h: int = 168):
-        """items: (label, value, color[, kind]) — kind: hero|blue|green|red|orange|plain."""
+        """items: (label, value, color[, kind]) — kind: hero|blue|green|red|orange|plain.
+        Первая плитка — градиент по смыслу значения, остальные — пастель."""
         n = max(1, len(items))
         gap = 16
         cw = (BW - 2 * self.pad - gap * (n - 1)) // n
         for i, it in enumerate(items):
             label, value, color = it[0], it[1], (it[2] if len(it) > 2 and it[2] else INK)
             kind = it[3] if len(it) > 3 and it[3] else _kind_of(color)
-            if kind == "hero":
-                kind = "hero"
             x = self.pad + i * (cw + gap)
             box = (x, y, x + cw, y + h)
-            if kind == "hero":
-                _grad_round(self.img, box, 26, LT_ACC, LT_ACC_2)
-                lbl, val = (255, 255, 255), (255, 255, 255)
+            if i == 0:
+                g1, g2 = _BAND_GRAD.get(kind, (LT_ACC, LT_ACC_2))
+                _grad_round(self.img, box, 26, g1, g2)
+                lbl, val = (226, 230, 255), (255, 255, 255)
             else:
                 self.d.rounded_rectangle(box, radius=26, fill=LT_TINT.get(kind, SURFACE))
                 lbl, val = INK_2, color

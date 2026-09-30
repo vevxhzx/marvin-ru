@@ -139,9 +139,28 @@ export default function Mind() {
           ) : items.map((it, idx) => (
             // id у заметок и ссылок начинаются с 1 — ключ составной, иначе дубли
             <section className="c r" key={`${it._t}-${it.id}`} style={{ '--i': 4 + (idx % 6) }}>
+              {/* Превью показываем только когда картинка есть (иначе карточка остаётся текстовой) */}
               {it.image && (
-                <div className={`img ${it.imgVariant === 'b' ? 'b' : ''}`}>
-                  {it.imgVariant === 'b' ? 'фото' : 'скриншот'}
+                <div style={{
+                  position: 'relative', width: '100%', aspectRatio: '16 / 9',
+                  borderRadius: '18px', overflow: 'hidden', border: '1px solid var(--line)',
+                  background: 'var(--sf2)', marginBottom: '14px',
+                }}>
+                  <img
+                    src={it.image.startsWith('http') ? it.image : '/media/' + it.image}
+                    alt={it.title || it.text || it.summary || it.url || ''}
+                    loading="lazy"
+                    onError={(e) => { const box = e.currentTarget.parentElement; if (box) box.style.display = 'none' }}
+                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
+                  />
+                  {it._t === 'link' && it.domain && (
+                    <span style={{
+                      position: 'absolute', left: '8px', bottom: '8px', maxWidth: 'calc(100% - 16px)',
+                      padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 17, 20, 0.55)', color: '#fff',
+                      font: '11px "Inter Tight", "Inter", sans-serif',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{it.domain}</span>
+                  )}
                 </div>
               )}
               {it.title && <h3>{it.title}</h3>}
