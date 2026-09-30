@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from sqlmodel import select
 
 from ..db import Client, Order, Transaction, WorkSession, log_action, now, remember, session
+from ..crm import stages
 from . import finance
 from .finance import money
 from .plural import days as _days_word
@@ -90,8 +91,10 @@ def add_order(title: str, price: float = 0, client: str | None = None, deadline:
         raise OrderError("Сумма не может быть отрицательной")
     c = get_or_create_client(client)
     with session() as s:
+        status = status if status in STATUSES else "work"
         o = Order(title=title[0].upper() + title[1:], price=price, client_id=c.id if c else None, deadline=deadline,
-                  notes=(notes or None), estimate_h=float(estimate_h or 0), status=status if status in STATUSES else "work", source=source)
+                  notes=(notes or None), estimate_h=float(estimate_h or 0), status=status, source=source,
+                  stage=stages.status_to_stage(status), last_contact_at=datetime.now())
         s.add(o); s.commit(); s.refresh(o)
         remember(s, "order", f"Заказ: «{o.title}»" + (f" для {c.name}" if c else "") + (f" · {money(price)}" if price else "")
                  + (f" · до {deadline:%d.%m %H:%M}" if deadline else ""), "order", o.id, source)
@@ -138,6 +141,9 @@ def update_order(oid: int, **fields) -> Order | None:
         if "client" in fields:
             c = get_or_create_client(fields.pop("client"))
             o.client_id = c.id if c else None
+        stage = fields.pop("stage", None)
+        if stage is not None and stage not in stages.STAGE_ORDER:
+            raise OrderError(f"Стадия: {', '.join(stages.STAGE_ORDER)}")
         for k, v in fields.items():
             if k == "status":
                 if v not in STATUSES:
@@ -147,6 +153,8 @@ def update_order(oid: int, **fields) -> Order | None:
                 if v == "paid" and o.status != "paid":
                     o.paid_at = now(); o.done_at = o.done_at or now()
                 o.status = v
+                if stage is None:          # старый путь (status) — держим стадию согласованной
+                    o.stage = stages.status_to_stage(v)
             elif k == "price":
                 if float(v or 0) < 0:
                     raise OrderError("Цена не может быть отрицательной")
@@ -157,8 +165,27 @@ def update_order(oid: int, **fields) -> Order | None:
                 setattr(o, k, (str(v).strip() or None) if k == "notes" else str(v).strip())
             elif k == "deadline":
                 o.deadline = v
+            elif k == "revisions":
+                o.revisions = max(0, int(v or 0))
+            elif k == "lost_reason":
+                o.lost_reason = (str(v).strip() or None) if v is not None else None
+            elif k == "next_step":
+                o.next_step = str(v or "").strip()
+            elif k == "next_step_at":
+                o.next_step_at = v
+            elif k == "last_contact_at":
+                o.last_contact_at = v
+        if stage is not None:              # новый путь (стадия канбана) — синхронизируем старый статус
+            o.stage = stage
+            new_status = stages.status_for(stage)
+            if new_status == "done" and o.status != "done":
+                o.done_at = o.done_at or now()
+            if new_status == "paid" and o.status != "paid":
+                o.paid_at = o.paid_at or now(); o.done_at = o.done_at or now()
+            o.status = new_status
+        o.last_contact_at = datetime.now()
         s.add(o); s.commit(); s.refresh(o)
-        remember(s, "order", f"Заказ «{o.title}»: {STATUS_LABEL[o.status]}" + (f" · {money(o.price)}" if o.price else ""), "order", o.id)
+        remember(s, "order", f"Заказ «{o.title}»: {STATUS_LABEL.get(o.status, o.status)}" + (f" · {money(o.price)}" if o.price else ""), "order", o.id)
         s.commit()
         return o
 
@@ -182,18 +209,24 @@ def paid_for(oid: int) -> float:
 
 
 def add_payment(oid: int, amount: float, note: str | None = None, account: str | None = None, source: str = "web",
-                date: datetime | None = None) -> Transaction:
+                date: datetime | None = None, idem_key: str | None = None) -> Transaction:
     """Аванс/оплата по заказу — доход в категории «Фриланс» с привязкой. Полная оплата закрывает заказ в «оплачен».
-    `date` — когда пришли деньги (старый заказ задним числом); по умолчанию сейчас."""
+    `date` — когда пришли деньги (старый заказ задним числом); по умолчанию сейчас.
+    `idem_key` — ключ идемпотентности (CRM-фаза 4): повторный запрос с тем же ключом не создаёт второй доход."""
     o = get_order(oid)
     if not o:
         raise OrderError("Заказ не найден")
     if float(amount) <= 0:
         raise OrderError("Сумма оплаты должна быть больше нуля")
+    if idem_key:
+        with session() as s:
+            dup = s.exec(select(Transaction).where(Transaction.idem_key == idem_key)).first()
+        if dup:
+            return dup
     with session() as s:
         cname = s.get(Client, o.client_id).name if o.client_id else None
     t = finance.add_transaction(amount, "income", INCOME_CATEGORY, note or (f"{o.title}" + (f" · {cname}" if cname else "")),
-                                account, date=date, source=source, order_id=oid)
+                                account, date=date, source=source, order_id=oid, idem_key=idem_key)
     total = paid_for(oid)
     if o.price and total >= o.price - 0.5 and o.status in UNPAID:
         update_order(oid, status="paid")
@@ -267,8 +300,12 @@ def order_view(o: Order, clients: dict[int, str] | None = None) -> dict:
     # закрытый заказ ничего не «ждёт», даже если оплату не записывали (старый заказ закрыт статусом вручную).
     # paid_at — отметка «деньги получены»: такой заказ тоже не должен висеть в «ждут оплаты».
     left = 0.0 if (o.status in ("paid", "cancelled") or o.paid_at) else max(0.0, o.price - paid)
+    stage = stages.stage_of(o)
     d.update({"client": clients.get(o.client_id), "paid": paid, "left": left, "hours": hours,
               "rate": round(o.price / hours) if hours >= 0.25 and o.price else None,
+              "stage": stage, "stage_label": stages.label(stage), "stage_index": stages.STAGE_ORDER.get(stage, 0),
+              "revisions": o.revisions or 0, "lost_reason": o.lost_reason,
+              "next_step": o.next_step or "", "next_step_at": o.next_step_at,
               "status_label": STATUS_LABEL.get(o.status, o.status),
               "days_left": (o.deadline.date() - datetime.now().date()).days if o.deadline and o.status in OPEN else None,
               # «на правках» после срока — не просрочка: первая версия сдана, идут правки; срок показываем, но не краснеем

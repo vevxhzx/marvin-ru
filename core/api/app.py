@@ -30,6 +30,10 @@ app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http
 from .auth import AuthMiddleware  # noqa: E402
 app.add_middleware(AuthMiddleware)
 
+# CRM (фаза 4) — отдельный роутер в core/crm/, подключается здесь; существующие пути не трогаются
+from ..crm.router import router as _crm_router  # noqa: E402
+app.include_router(_crm_router)
+
 
 # ---------------- живые обновления (сайт узнаёт о действиях из Telegram/голоса мгновенно) ----------------
 import asyncio as _asyncio

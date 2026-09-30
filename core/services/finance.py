@@ -297,7 +297,7 @@ def add_transaction(amount: float, kind: str = "expense", category: str | None =
                     note: str | None = None, account: str | None = None,
                     to_account: str | None = None, date: datetime | None = None,
                     source: str = "tg", import_hash: str | None = None, debt_id: int | None = None,
-                    order_id: int | None = None, goal_id: int | None = None) -> Transaction:
+                    order_id: int | None = None, goal_id: int | None = None, idem_key: str | None = None) -> Transaction:
     amount = _num(abs(float(amount)) if isinstance(amount, (int, float)) else amount, "Сумма", 0, strict_min=True)
     if kind not in ("expense", "income", "transfer"):
         raise FinanceError("Тип операции: expense / income / transfer")
@@ -319,7 +319,7 @@ def add_transaction(amount: float, kind: str = "expense", category: str | None =
             _account_exists(s, to_account)
         t = Transaction(amount=amount, kind=kind, category=category, note=(note or None), account=account,
                         to_account=to_account, date=date or datetime.now(), source=source,
-                        import_hash=import_hash, debt_id=debt_id, order_id=order_id, goal_id=goal_id)
+                        import_hash=import_hash, debt_id=debt_id, order_id=order_id, goal_id=goal_id, idem_key=idem_key)
         s.add(t)
         if kind == "expense":
             _shift_balance(s, account, -amount)

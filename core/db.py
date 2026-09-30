@@ -128,6 +128,7 @@ class Transaction(SQLModel, table=True):
     debt_id: Optional[int] = Field(default=None, index=True)       # если это платёж по долгу — чтобы откат был честным
     order_id: Optional[int] = Field(default=None, index=True)      # оплата/аванс по заказу (фриланс)
     goal_id: Optional[int] = Field(default=None, index=True)       # перевод в конверт-накопление
+    idem_key: Optional[str] = Field(default=None, index=True)      # CRM-фаза 4: ключ идемпотентности платежа по заказу
 
 
 class Recurring(SQLModel, table=True):
@@ -175,6 +176,11 @@ class Client(SQLModel, table=True):
     pay_every: int = 14                # batch: период в днях (считается от последней оплаты)
     pay_days: str = ""                 # monthly: числа месяца через запятую («10,25»)
     created_at: datetime = Field(default_factory=now)
+    # CRM-фаза 4 (карточка клиента): источник лида, последний контакт, следующий шаг с датой
+    source: str = ""                   # откуда пришёл клиент (рекомендация, сайт, ТГ…)
+    last_contact_at: Optional[datetime] = None
+    next_step: str = ""                # что сделать дальше («прислать смету», «позвонить»)
+    next_step_at: Optional[datetime] = None
 
 
 class Order(SQLModel, table=True):
@@ -192,6 +198,13 @@ class Order(SQLModel, table=True):
     created_at: datetime = Field(default_factory=now)
     done_at: Optional[datetime] = None
     paid_at: Optional[datetime] = None
+    # CRM-фаза 4 (воронка): стадия канбана. Пусто — выводится из status (см. core/crm/stages.py).
+    stage: str = Field(default="", index=True)   # lead/negotiation/spec/in_work/revisions/delivered/awaiting_payment/paid/lost
+    revisions: int = 0                 # счётчик кругов правок
+    lost_reason: Optional[str] = None  # почему потерян (для стадии «потерян»)
+    last_contact_at: Optional[datetime] = None
+    next_step: str = ""                # следующий шаг по заказу
+    next_step_at: Optional[datetime] = None
 
 
 class WorkSession(SQLModel, table=True):
@@ -317,6 +330,52 @@ class ActionLog(SQLModel, table=True):
     title: str = ""
     channel: str = "tg"
     undone: bool = False
+    created_at: datetime = Field(default_factory=now, index=True)
+
+
+class CrmActivity(SQLModel, table=True):
+    """Лента активности по заказу/клиенту: кто/что/когда (фаза 4 CRM)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    order_id: Optional[int] = Field(default=None, index=True)
+    client_id: Optional[int] = Field(default=None, index=True)
+    kind: str = Field(default="note", index=True)   # stage/payment/comment/time/checklist/note/system
+    text: str = ""
+    author: str = "вы"
+    channel: str = "web"
+    created_at: datetime = Field(default_factory=now, index=True)
+
+
+class CrmComment(SQLModel, table=True):
+    """Комментарий к заказу/клиенту (отдельно от notes, чтобы была лента)."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    order_id: Optional[int] = Field(default=None, index=True)
+    client_id: Optional[int] = Field(default=None, index=True)
+    text: str
+    author: str = "вы"
+    created_at: datetime = Field(default_factory=now, index=True)
+
+
+class CrmChecklist(SQLModel, table=True):
+    """Чек-лист этапов заказа."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    order_id: int = Field(index=True)
+    title: str
+    done: bool = False
+    position: int = 0
+    created_at: datetime = Field(default_factory=now)
+
+
+class CrmFollowup(SQLModel, table=True):
+    """Follow-up: авто-напоминание или ручная задача по заказу/клиенту.
+    kind: silent (клиент молчит) / overdue (просрочен дедлайн) / unpaid (долго нет оплаты) / manual."""
+    id: Optional[int] = Field(default=None, primary_key=True)
+    order_id: Optional[int] = Field(default=None, index=True)
+    client_id: Optional[int] = Field(default=None, index=True)
+    kind: str = Field(default="manual", index=True)
+    text: str
+    due_at: Optional[datetime] = None
+    done: bool = False
+    done_at: Optional[datetime] = None
     created_at: datetime = Field(default_factory=now, index=True)
 
 

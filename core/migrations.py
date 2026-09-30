@@ -40,9 +40,68 @@ def _noop(_conn) -> None:
     """Базовая версия: сама таблица `schema_version` уже создана до применения."""
 
 
+def _v2_crm(conn) -> None:
+    """Фаза 4 (CRM): аддитивные колонки воронки/карточки + таблицы активности, комментариев,
+    чек-листа и follow-up + идемпотентность платежей. Данные не теряются, только добавляются."""
+    # --- заказ: стадия канбана, круги правок, причина потери, следующий шаг, контакт
+    add_column(conn, "order", "stage", "VARCHAR DEFAULT ''")
+    add_column(conn, "order", "revisions", "INTEGER DEFAULT 0")
+    add_column(conn, "order", "lost_reason", "VARCHAR")
+    add_column(conn, "order", "last_contact_at", "DATETIME")
+    add_column(conn, "order", "next_step", "VARCHAR DEFAULT ''")
+    add_column(conn, "order", "next_step_at", "DATETIME")
+    # --- клиент: источник лида, последний контакт, следующий шаг
+    add_column(conn, "client", "source", "VARCHAR DEFAULT ''")
+    add_column(conn, "client", "last_contact_at", "DATETIME")
+    add_column(conn, "client", "next_step", "VARCHAR DEFAULT ''")
+    add_column(conn, "client", "next_step_at", "DATETIME")
+    # --- платёж: ключ идемпотентности (повтор с тем же ключом не создаёт второй доход)
+    add_column(conn, "transaction", "idem_key", "VARCHAR")
+    create_index(conn, "ix_transaction_idem_key", "transaction", '"idem_key"')
+    # --- таблицы CRM (идемпотентно; имена совпадают с SQLModel-моделями в core/db.py)
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS crmactivity ("
+        "id INTEGER PRIMARY KEY, order_id INTEGER, client_id INTEGER, kind VARCHAR, "
+        "text VARCHAR, author VARCHAR, channel VARCHAR, created_at DATETIME)"
+    ))
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS crmcomment ("
+        "id INTEGER PRIMARY KEY, order_id INTEGER, client_id INTEGER, text VARCHAR, "
+        "author VARCHAR, created_at DATETIME)"
+    ))
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS crmchecklist ("
+        "id INTEGER PRIMARY KEY, order_id INTEGER NOT NULL, title VARCHAR, done BOOLEAN, "
+        "position INTEGER, created_at DATETIME)"
+    ))
+    conn.execute(text(
+        "CREATE TABLE IF NOT EXISTS crmfollowup ("
+        "id INTEGER PRIMARY KEY, order_id INTEGER, client_id INTEGER, kind VARCHAR, text VARCHAR, "
+        "due_at DATETIME, done BOOLEAN, done_at DATETIME, created_at DATETIME)"
+    ))
+    for name, table, cols in (("ix_crmactivity_order_id", "crmactivity", "order_id"),
+                              ("ix_crmactivity_client_id", "crmactivity", "client_id"),
+                              ("ix_crmcomment_order_id", "crmcomment", "order_id"),
+                              ("ix_crmcomment_client_id", "crmcomment", "client_id"),
+                              ("ix_crmchecklist_order_id", "crmchecklist", "order_id"),
+                              ("ix_crmfollowup_order_id", "crmfollowup", "order_id"),
+                              ("ix_crmfollowup_client_id", "crmfollowup", "client_id"),
+                              ("ix_crmfollowup_kind", "crmfollowup", "kind")):
+        create_index(conn, name, table, cols)
+    # --- бэкфилл стадии для существующих заказов (только новая колонка, без потери данных)
+    if table_exists(conn, "order"):
+        conn.execute(text(
+            "UPDATE \"order\" SET stage = CASE status "
+            "WHEN 'new' THEN 'lead' WHEN 'work' THEN 'in_work' WHEN 'review' THEN 'revisions' "
+            "WHEN 'done' THEN 'delivered' WHEN 'paid' THEN 'paid' WHEN 'cancelled' THEN 'lost' "
+            "ELSE 'lead' END WHERE stage IS NULL OR stage = ''"
+        ))
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
+    (2, "crm: order.stage/revisions/next_step, client.source, transaction.idem_key, crm-таблицы", _v2_crm),
 ]
 
 
@@ -68,7 +127,9 @@ def add_column(conn, table: str, column: str, ddl: str) -> bool:
 
 
 def create_index(conn, name: str, table: str, columns: str) -> None:
-    """Идемпотентно создать индекс (аддитивно, без удаления)."""
+    """Идемпотентно создать индекс (аддитивно, без удаления). Пропускает отсутствующую таблицу."""
+    if not table_exists(conn, table):
+        return
     conn.execute(text(f'CREATE INDEX IF NOT EXISTS "{name}" ON "{table}" ({columns})'))
 
 
