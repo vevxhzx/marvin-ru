@@ -383,6 +383,7 @@ def test_pc_launcher_running_pids_is_list():
     assert isinstance(pids, list) and all(isinstance(p, int) for p in pids)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="кнопка запуска voice.bat есть только в Windows")
 def test_pc_launcher_missing_bat_is_safe(monkeypatch, tmp_path):
     """Если voice.bat рядом с ядром нет — понятная ошибка, а не падение и не запуск чего попало."""
     from core.pc import launcher
