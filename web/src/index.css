@@ -1184,6 +1184,8 @@ select.input { appearance: none; }
 [data-tip][data-tip-side="right"]:hover::after { transform: translate(0, -50%); }
 [data-tip][data-tip-side="bottom"]::after { bottom: auto; top: calc(100% + 8px); transform: translate(-50%, -4px); }
 [data-tip][data-tip-side="bottom"]:hover::after { transform: translate(-50%, 0); }
+/* длинное пояснение: тултип переносится по строкам, а не уезжает за экран */
+[data-tip].tip-wide::after { white-space: normal; width: max-content; max-width: min(320px, 80vw); text-align: left; line-height: 1.35; }
 .topbar [data-tip]::after { bottom: auto; top: calc(100% + 8px); transform: translate(-50%, -4px); }
 .topbar [data-tip]:hover::after { transform: translate(-50%, 0); }
 

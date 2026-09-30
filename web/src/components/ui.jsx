@@ -53,7 +53,7 @@ export function Section({ title, idx, hint, tip, action, children, className = '
         <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
-              {title && <h2 data-tip={tip} className={`text-[20px] font-semibold tracking-[-0.03em] ${tip ? 'cursor-help underline decoration-dotted decoration-[var(--line-2)] underline-offset-[6px]' : ''}`}>{title}{tip ? ' ?' : ''}</h2>}
+              {title && <h2 data-tip={tip} className={`${tip ? 'tip-wide cursor-help underline decoration-dotted decoration-[var(--line-2)] underline-offset-[6px]' : ''} text-[20px] font-semibold tracking-[-0.03em]`}>{title}{tip ? ' ?' : ''}</h2>}
               {idx != null && idx !== 0 && <span className="mono text-[12px] text-accent">{idx}</span>}
             </div>
             {hint && !tip && <div className="muted mt-1 max-w-[520px] text-[13px] leading-snug">{hint}</div>}
