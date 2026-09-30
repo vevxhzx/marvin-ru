@@ -49,7 +49,9 @@
 3. В `config.yaml` две строки: `token` (от @BotFather) и `owner_id` (свой ID от @userinfobot). Сохранить.
 4. **`start.bat`** — в Telegram придёт «Система онлайн, сэр». Сайт: http://localhost:8765.
 
-Дальше по желанию, всё кнопками: локальный мозг — [Ollama](https://ollama.com/download) + `ollama pull qwen3.5:4b`; облако для общих вопросов — ключ Groq в ⚙ Настройки → облако; голос — `voice.bat`; с телефона — `phone.bat` + QR в настройках, а прямо внутри Telegram без VPN — `funnel.bat` ([инструкция](docs/telegram-miniapp.md)); автозагрузка — `autostart.bat`.
+Дальше по желанию, всё кнопками: локальный мозг — [Ollama](https://ollama.com/download) + `ollama pull qwen3.5:4b`; облако для общих вопросов — ключ Groq в ⚙ Настройки → облако; голос — `voice.bat` (для точного распознавания на ПК — `gpu.bat`, тогда доступны `medium`/`large-v3-turbo`; в hybrid/cloud голос распознаёт Groq `whisper-large-v3-turbo`); с телефона — `phone.bat` + QR в настройках, а прямо внутри Telegram без VPN — `funnel.bat` ([инструкция](docs/telegram-miniapp.md)); автозагрузка — `autostart.bat`.
+
+Характер (⚙ Настройки → характер): `persona.style: swag` + `persona.humor_level` 3–10 — сухая ирония и подколы «как у Джарвиса»; `neutral` — спокойно и по делу (для «второго ассистента» близким).
 
 Пошагово, со всеми вариантами — [docs/install.md](docs/install.md).
 
