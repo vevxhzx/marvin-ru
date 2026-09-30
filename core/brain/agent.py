@@ -145,8 +145,8 @@ def is_personal(text: str) -> bool:
 
 
 def _days_word(n: int) -> str:
-    a, b = n % 100, n % 10
-    return "дней" if 10 < a < 20 else "день" if b == 1 else "дня" if 1 < b < 5 else "дней"
+    from ..services.plural import days
+    return days(n)
 
 
 def _core_status_text() -> str:
@@ -1974,7 +1974,7 @@ async def _handle(text: str, channel: str) -> Reply:
     if ms:
         days = 30 if re.search(r"месяц", text, re.I) else 1 if re.search(r"сегодня|за день", text, re.I) else 7
         txt = trace.report_text(days)
-        r = Reply(txt or f"За {days} дн. обращений ко мне не было, сэр — докладывать не о чем.", ["self_report"], "rules")
+        r = Reply(txt or f"За {days} {_days_word(days)} обращений ко мне не было, сэр — докладывать не о чем.", ["self_report"], "rules")
         _log_chat("assistant", r.text, channel)
         return r
 

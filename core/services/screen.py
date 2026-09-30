@@ -18,6 +18,7 @@ from sqlmodel import select
 
 from ..config import cfg
 from ..db import ScreenSlot, session
+from .plural import days as _days_word
 
 log = logging.getLogger("jarvis.screen")
 
@@ -265,7 +266,7 @@ def text(day: datetime | None = None, days: int = 1) -> str:
                 "в течение примерно 20 секунд (перезапуск voice.bat не нужен). Пишется только имя программы и сайт, всё остаётся на ПК.")
     if not d["active_min"] and not d["idle_min"]:
         return "За этот период данных нет: voice.bat не был запущен (пульс идёт от него)." if days == 1 else "За этот период данных нет."
-    when = "сегодня" if days == 1 and (day is None or day.date() == datetime.now().date()) else (f"{day:%d.%m}" if days == 1 else f"за {days} дн.")
+    when = "сегодня" if days == 1 and (day is None or day.date() == datetime.now().date()) else (f"{day:%d.%m}" if days == 1 else f"за {days} {_days_word(days)}")
     lines = [f"🖥 **За ПК {when}: {fmt_min(d['active_min'])}**" + (f" (первый раз сели в {d['first']:%H:%M})" if d["first"] and days == 1 else "")]
     for name, mins, cat, sub in d["apps"][:7]:
         if mins < 2:

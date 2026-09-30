@@ -16,6 +16,7 @@ from ..config import DB_PATH, ROOT, cfg
 from ..brain.dates import is_all_day
 from ..services import calendar, finance, tasks
 from ..services.finance import money
+from ..services.plural import days as _days_word
 from ..db import get_setting, set_setting
 
 log = logging.getLogger("jarvis.sched")
@@ -605,7 +606,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             if get_setting(key):
                 continue
             set_setting(key, "1")
-            when = "сегодня" if b["in_days"] == 0 else "завтра" if b["in_days"] == 1 else f"через {b['in_days']} дн."
+            when = "сегодня" if b["in_days"] == 0 else "завтра" if b["in_days"] == 1 else f"через {b['in_days']} {_days_word(b['in_days'])}"
             text = (f"🎂 {when.capitalize()} — {b['title']}. Идеи подарка, если ещё не купили: что-то по его увлечению, "
                     f"впечатление (билеты, мастер-класс) или подарочная карта — беспроигрышно, хоть и скучно. Сказать «задача: купить подарок {b['who']}» — и я напомню.")
             ping("reminder", text=text, id=key)
@@ -793,7 +794,9 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             txt = f"По цели «{e.data.get('aim', '')}» все вехи закрыты. Она достигнута — или ставим следующую веху? Скажи «цель {e.data.get('aim', '')[:25]} достигнута» или «веха: …»."
             _fire(_notify(txt, None, kind="goal", importance=2, spend=True))
         elif e.kind == "long_session":
-            _fire(_notify(f"{e.data.get('hours', 4)} часа за ПК без перерыва. Не нотация — просто встань на пять минут.", None, kind="care", importance=1, spend=True))
+            _h = e.data.get('hours', 4)
+            from .plural import hours as _hours
+            _fire(_notify(f"{_h} {_hours(_h)} за ПК без перерыва. Не нотация — просто встань на пять минут.", None, kind="care", importance=1, spend=True))
 
     from . import events as _events
     _events.on("*", _on_event)

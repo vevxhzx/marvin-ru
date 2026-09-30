@@ -14,6 +14,7 @@ from sqlmodel import select
 from ..db import ChatMessage, Debt, Event, Link, Note, Task, Transaction, get_setting, log_action, session, set_setting
 from . import finance
 from .finance import money
+from .plural import days as _days_word
 
 # что чистим → (таблица, поле даты, человеческое название в род. падеже мн. ч.)
 KINDS = {
@@ -76,7 +77,7 @@ def parse_period(tail: str, now: datetime | None = None) -> tuple[datetime | Non
             since, label = now - timedelta(hours=n), f"за последние {n} ч"
         elif u.startswith(("дн", "ден", "сут")):
             # «за последние 2 дня» = сегодня и вчера (целые дни)
-            since, label = day0 - timedelta(days=n - 1), f"за последние {n} дн"
+            since, label = day0 - timedelta(days=n - 1), f"за последние {n} {_days_word(n)}"
         elif u.startswith("недел"):
             since, label = day0 - timedelta(days=7 * n - 1), f"за последние {n} нед"
         elif u.startswith("мес"):

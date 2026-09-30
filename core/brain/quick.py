@@ -16,7 +16,8 @@ from datetime import datetime, timedelta
 from ..services import calendar, finance, tasks
 from ..services.calendar import fmt_dt
 from ..services.finance import money
-from .dates import parse_amount, parse_datetime
+from ..services.plural import days as _days_word
+from .dates import is_all_day, parse_amount, parse_datetime
 
 Result = tuple[str, list[str]]
 
@@ -130,7 +131,7 @@ def _period(low: str) -> tuple[datetime, datetime | None, str] | None:
     m = re.search(r"за\s+(\d+)\s*(дн|ден|день|дня|дней)", low)
     if m:
         n = int(m.group(1))
-        return d0 - timedelta(days=n - 1), None, f"за {n} дн."
+        return d0 - timedelta(days=n - 1), None, f"за {n} {_days_word(n)}"
     m = re.search(r"\b(?:в|за)\s+(январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр)\w*", low)
     if m:
         idx = next(i for i, x in enumerate(("янв", "фев", "мар", "апр", "ма", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")) if m.group(1).startswith(x))
@@ -262,7 +263,8 @@ def agenda(text: str) -> Result | None:
     for e in evs:
         lines.append(f"— **{fmt_dt(e.start) if multi else e.start.strftime('%H:%M')}** {'✓ ' if calendar.is_done(e) else ''}{e.title}" + (f" · {e.location}" if e.location else ""))
     for t in due:
-        lines.append(f"— ✅ {t.title} · до {fmt_dt(t.due) if multi else t.due.strftime('%H:%M')}")
+        tail = fmt_dt(t.due) if multi else ('' if is_all_day(t.due) else t.due.strftime('%H:%M'))
+        lines.append(f"— ✅ {t.title}" + (f" · до {tail}" if tail else ""))
     for p in pays:
         lines.append(f"— 💳 {p.title} {money(p.amount)}" + (f" · {p.next_date:%d.%m}" if multi else ""))
     return "\n".join(lines), ["agenda"]

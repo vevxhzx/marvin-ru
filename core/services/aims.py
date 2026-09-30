@@ -23,6 +23,7 @@ from sqlmodel import select
 
 from ..db import Aim, Milestone, Order, Task, log_action, now, remember, session
 from . import events
+from .plural import days as _days_word
 from .match import score
 
 log = logging.getLogger("jarvis.aims")
@@ -344,7 +345,7 @@ def _fmt_due(d: datetime | None) -> str:
     if not d:
         return ""
     days = (d.date() - now().date()).days
-    return " — сегодня" if days == 0 else (f" — просрочено на {-days} дн." if days < 0 else f" — до {d:%d.%m}")
+    return " — сегодня" if days == 0 else (f" — просрочено на {-days} {_days_word(-days)}" if days < 0 else f" — до {d:%d.%m}")
 
 
 def text_focus(now_: datetime | None = None) -> str:
@@ -380,7 +381,7 @@ def text_aims() -> str:
             m = ms_open[0]
             lines.append(f"   сейчас: веха «{m['title']}» ({int(round(m['progress'] * 100))}%, открыто задач: {m['open']})")
         if v["stale_days"] >= STALE_DAYS and v["status"] == "active":
-            lines.append(f"   ⚠ ничего не двигалось {v['stale_days']} дн." + (f" Зачем это было: {v['why']}" if v["why"] else ""))
+            lines.append(f"   ⚠ ничего не двигалось {v['stale_days']} {_days_word(v['stale_days'])}" + (f" Зачем это было: {v['why']}" if v["why"] else ""))
     return "\n".join(lines)
 
 

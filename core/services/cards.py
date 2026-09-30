@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 from ..config import DATA_DIR, cfg
+from ..brain.dates import is_all_day
 from . import calendar, finance, tasks
 from .finance import money
 
@@ -307,7 +308,7 @@ def morning_card(path: Path | None = None, badge: str = "утренний дай
                     if t.due.date() < now.date():
                         right = f"просрочено · {t.due:%d.%m}"
                     elif t.due.date() == now.date():
-                        right = f"до {t.due:%H:%M}"
+                        right = "весь день" if is_all_day(t.due) else f"до {t.due:%H:%M}"
                     else:
                         right = f"{t.due:%d.%m}"
                 c.check_row(t.title, right, right_color=RED if urgent else INK_2, urgent=urgent)
@@ -507,7 +508,7 @@ def report_card(days: int = 7, path: Path | None = None) -> Path | None:
         c.label("дела")
         c.pills([(f"✓ {len(done)} {_plural(len(done), 'задача', 'задачи', 'задач')} закрыто", None),
                  (f"✎ {len(notes)} {_plural(len(notes), 'заметка', 'заметки', 'заметок')}", None),
-                 (f"● {active_days} из {days} дней с записями", ACCENT)])
+                 (f"● {active_days} из {days} {_plural(days, 'день', 'дня', 'дней')} с записями", ACCENT)])
 
         over = [b for b in s.get("budgets", []) if b["pct"] >= 0.8][:3]
         if over:
@@ -818,7 +819,7 @@ def for_result(actions, text: str = "") -> Path | None:
             ts = tasks.list_tasks(limit=1)
             if ts:
                 t = ts[0]
-                when = f"{t.due:%d.%m %H:%M}" if getattr(t, "due", None) else ""
+                when = (f"{t.due:%d.%m}" if is_all_day(t.due) else f"{t.due:%d.%m %H:%M}") if getattr(t, "due", None) else ""
                 return task_card(t.title, when)
         if "add_event" in acts and should_send("event"):
             evs = calendar.events_today() or []

@@ -13,6 +13,7 @@ from sqlmodel import select
 
 from ..db import Client, Debt, Event, Link, Note, Order, Task, Transaction, session
 from .match import stem, tokens
+from .plural import days as _days_word
 
 # ---------------------------------------------------------------- имена и совпадения
 _WORD_RX = re.compile(r"[а-яёa-z0-9@_]+", re.I)
@@ -353,7 +354,7 @@ def card_text(d: dict, short: bool = False) -> str:
             s += f", в работе {m['open']}"
         npd = f", ближайшая выплата {fmt_dt(datetime.fromisoformat(d['next_payday'])).split(' в ')[0]}" if d.get("next_payday") else ""
         if d.get("pay_mode") == "batch":
-            s += f"; платит пачкой раз в {d['pay_every']} дн.{npd}"
+            s += f"; платит пачкой раз в {d['pay_every']} {_days_word(d['pay_every'])}{npd}"
         elif d.get("pay_mode") == "monthly":
             days = (d["pay_days"] or "1").split(",")
             s += f"; платит {(', '.join(days[:-1]) + ' и ' + days[-1]) if len(days) > 1 else days[0]} числа{npd}"
@@ -378,7 +379,7 @@ def card_text(d: dict, short: bool = False) -> str:
         lines.append(d["about"])
     if d["last_contact"]:
         days = (datetime.now() - d["last_contact"]).days
-        lines.append("Последний след: " + ("сегодня" if days == 0 else f"{days} дн. назад"))
+        lines.append("Последний след: " + ("сегодня" if days == 0 else f"{days} {_days_word(days)} назад"))
     if len(lines) == 1:
         lines.append("Пока ничего не связано — упомяните имя в заказе, задаче или заметке, и оно появится здесь.")
     return "\n".join(lines)

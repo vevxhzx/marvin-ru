@@ -8,10 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Callable
 
-from ..brain.dates import fix_night_hour, parse_datetime, parse_datetime_ex, task_due
+from ..brain.dates import fix_night_hour, is_all_day, parse_datetime, parse_datetime_ex, task_due
 from ..services import brain_notes, calendar, finance, tasks
 from ..services.calendar import fmt_dt, fmt_due
 from ..services.finance import money
+from ..services.plural import days as _days_word
 
 TOOLS: dict[str, dict[str, Any]] = {}
 FUNCS: dict[str, Callable] = {}
@@ -411,7 +412,7 @@ def list_events(days: int = 7, **_) -> str:
     evs = calendar.list_events(start, start + timedelta(days=days or 7))
     if not evs:
         return "Событий нет."
-    return f"📅 **Ближайшие {days or 7} дн.**\n" + "\n".join(f"— **{fmt_dt(e.start)}** {'✓ ' if calendar.is_done(e) else ''}{e.title}" + (f" · {e.location}" if e.location else "") for e in evs)
+    return f"📅 **Ближайшие {days or 7} {_days_word(days or 7)}**\n" + "\n".join(f"— **{fmt_dt(e.start)}** {'✓ ' if calendar.is_done(e) else ''}{e.title}" + (f" · {e.location}" if e.location else "") for e in evs)
 
 
 @tool("delete_event", "Удалить/отменить событие по id или названию.",
@@ -565,7 +566,7 @@ def add_income(amount: float, note: str | None = None, category: str | None = No
 def finance_summary(days: int = 30, **_) -> str:
     s = finance.summary(days or 30)
     lines = [f"💰 **Баланс {money(s['total_balance'])}**",
-             f"За {s['days']} дн.: −**{money(s['spent'])}** · +**{money(s['earned'])}**"]
+             f"За {s['days']} {_days_word(s['days'])}: −**{money(s['spent'])}** · +**{money(s['earned'])}**"]
     if s["by_category"]:
         lines.append("")
         lines.append("**Куда ушло**")
@@ -588,7 +589,7 @@ def finance_summary(days: int = 30, **_) -> str:
 def spent(category: str | None = None, days: int | None = None, kind: str = "expense", **_) -> str:
     now = datetime.now()
     since = now - timedelta(days=days) if days else now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    label = f"за {days} дн." if days else "с начала месяца"
+    label = f"за {days} {_days_word(days)}" if days else "с начала месяца"
     cat = finance.category_by_word(category, kind) if category else None
     if kind == "income":
         txs = [t for t in finance.list_transactions(400, 100_000) if t.kind == "income" and t.date >= since and (not cat or t.category == cat.name)]
@@ -779,7 +780,7 @@ def today_briefing(**_) -> str:
     lines.append("")
     if ts:
         lines.append(f"✅ **Задачи** · {len(ts)}")
-        lines += [f"— {t.title}" + (f" · до **{t.due:%H:%M}**" if t.due and t.due.date() == now.date() else "") for t in ts[:5]]
+        lines += [f"— {t.title}" + (f" · до **{t.due:%H:%M}**" if t.due and t.due.date() == now.date() and not is_all_day(t.due) else "") for t in ts[:5]]
         if len(ts) > 5:
             lines.append(f"…и ещё {len(ts) - 5}")
     else:
@@ -968,7 +969,7 @@ def finance_report(kind: str, **_) -> str:
     if r["runway_days"] is None:
         return f"Свободных денег {money(r['free'])}, средних трат за месяц нет — считать нечего."
     return (f"Свободных (после обязательных платежей) {money(r['free'])}, тратите в среднем {money(r['per_day_avg'])} в день → хватит на "
-            f"{r['runway_days']} дн., до дохода {r['days_left_to_income']} дн. " + ("Запас есть." if r["ok"] else f"Впритык не дотягиваете — держитесь в {money(r['safe_per_day'])}/день."))
+            f"{r['runway_days']} {_days_word(r['runway_days'])}, до дохода {r['days_left_to_income']} {_days_word(r['days_left_to_income'])}. " + ("Запас есть." if r["ok"] else f"Впритык не дотягиваете — держитесь в {money(r['safe_per_day'])}/день."))
 
 
 _DAYS_RU = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]

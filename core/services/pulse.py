@@ -13,6 +13,7 @@ from datetime import datetime, timedelta
 from sqlmodel import select
 
 from ..db import Client, Order, Transaction, session, get_setting, set_setting
+from .plural import days as _days_word
 
 # ---------------------------------------------------------------- настройки режима
 FREELANCE_DEFAULTS = {
@@ -140,8 +141,8 @@ def late_lines(limit: int = 3) -> list[str]:
     out = []
     for x in late_payments()[:limit]:
         who = x["client"] or f"«{x['title']}»"
-        tail = f" (обычно платит за {x['typical_days']} дн.)" if x["typical_days"] is not None else ""
-        out.append(f"💸 {who} задерживает {money(x['left'])} за «{x['title']}» — {x['days']} дн. после сдачи{tail}.")
+        tail = f" (обычно платит за {x['typical_days']} {_days_word(x['typical_days'])})" if x["typical_days"] is not None else ""
+        out.append(f"💸 {who} задерживает {money(x['left'])} за «{x['title']}» — {x['days']} {_days_word(x['days'])} после сдачи{tail}.")
     return out
 
 
@@ -151,13 +152,13 @@ def late_text() -> str:
     from .finance import money
     rows = late_payments()
     if not rows:
-        return f"Никто не задерживает: все сданные заказы оплачены или ещё в пределах {st['late_days']} дн. после сдачи."
+        return f"Никто не задерживает: все сданные заказы оплачены или ещё в пределах {st['late_days']} {_days_word(st['late_days'])} после сдачи."
     total = sum(r["left"] for r in rows)
     lines = [f"**Задерживают оплату** — {money(total)}:"]
     for x in rows:
         who = x["client"] or "без клиента"
-        tail = f", обычно платит за {x['typical_days']} дн." if x["typical_days"] is not None else ""
-        lines.append(f"• {who} — «{x['title']}», {money(x['left'])}, {x['days']} дн. после сдачи{tail}")
+        tail = f", обычно платит за {x['typical_days']} {_days_word(x['typical_days'])}" if x["typical_days"] is not None else ""
+        lines.append(f"• {who} — «{x['title']}», {money(x['left'])}, {x['days']} {_days_word(x['days'])} после сдачи{tail}")
     lines.append("Скажите «задача: напомнить … про оплату» — поставлю напоминание.")
     return "\n".join(lines)
 

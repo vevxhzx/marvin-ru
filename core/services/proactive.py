@@ -24,6 +24,7 @@ from ..brain import persona
 from ..config import cfg
 from ..db import Fact, Task, get_setting, session, set_setting
 from . import judge
+from . import plural
 
 log = logging.getLogger("jarvis.proactive")
 
@@ -135,7 +136,7 @@ def candidates(now: datetime | None = None) -> list[dict]:
             out.append({"key": f"aim_stale:{a.id}:{now:%Y%W}", "topic": a.title,
                         "fact": {"kind": "aim_stale", "title": a.title, "days": days, "why": a.why, "urgency": "low",
                                  "question": "шаг, пауза или закрыть?"},
-                        "text": f"«{a.title}» стоит {days} дн. без единого шага." + (f" Ты хотел её, потому что {a.why}." if a.why else "") + " Шаг, пауза или закрываем?",
+                        "text": f"«{a.title}» стоит {days} {plural.days(days)} без единого шага." + (f" Ты хотел её, потому что {a.why}." if a.why else "") + " Шаг, пауза или закрываем?",
                         "buttons": [("⏸ Пауза", f"aim:{a.id}:pause"), ("✖ Снять", f"aim:{a.id}:drop"), ("🔕 Не надо", f"pro:mute:{a.id}:aim")]})
         for r in ([] if muted("рутины: пропуски") else routines.nudges(now)[:1]):
             out.append({"key": r["key"], "topic": r["title"],

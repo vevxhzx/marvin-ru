@@ -30,6 +30,7 @@ from sqlmodel import select
 
 from ..config import cfg
 from ..db import Run, session
+from .plural import days as _days_word
 
 log = logging.getLogger("jarvis.trace")
 
@@ -236,7 +237,7 @@ def report_text(days: int = 7) -> str:
     d = report(days)
     if not d["n"]:
         return ""
-    lines = [f"🧾 Как я работал за {days} дн.: {d['n']} обращений."]
+    lines = [f"🧾 Как я работал за {days} {_days_word(days)}: {d['n']} обращений."]
     routes = sorted(d["routes"].items(), key=lambda kv: -kv[1]["n"])
     parts = [f"{ROUTE_RU.get(k, k)} {v['n']} ({v['ms_avg'] / 1000:.1f} с)" for k, v in routes if v["n"]]
     if parts:

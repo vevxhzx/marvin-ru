@@ -263,7 +263,9 @@ def system_status() -> str:
                     parts.append(f"диск {d.device.rstrip(chr(92))} свободно {u.free / 2**30:.0f} гигабайт")
             except Exception:
                 pass
-        parts.append(f"работает {int((time.time() - psutil.boot_time()) // 3600)} часов")
+        _up_h = int((time.time() - psutil.boot_time()) // 3600)
+        from ..services.plural import hours as _hours
+        parts.append(f"работает {_up_h} {_hours(_up_h)}")
     except ImportError:
         parts.append("psutil не установлен — запустите update.bat")
     try:
