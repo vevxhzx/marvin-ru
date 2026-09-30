@@ -68,7 +68,7 @@ start.bat
 - Python-версия (основная): `start.bat` → `python run.py`. Порт берётся из `config.yaml` (`server.port`, по умолчанию 8765). Флаги: `python run.py --no-tg` (без Telegram), `python run.py --no-browser`, `python run.py --no-voice-warmup`.
 - Пересборка сайта после правок во `web/src`: `build_web.bat` (или `cd web && npm run build`) → готовый сайт в `web/site`, перезапусти `start.bat`.
 - Node-стенд (альтернативный сервер на Express + тот же фронт): `npm install && npm run dev` → http://localhost:3000, прод-сборка `npm run build` → `dist/`. Второй экземпляр бота на том же токене не запускай одновременно с Python-версией.
-- Тесты: `python -m pytest tests -q` (Python) и `npm test` (Node-стенд).
+- Тесты: `python -m pytest tests -q` (Python, нужен `pip install -r requirements-dev.txt`) и `npm test` (Node-стенд).
 - Переменные окружения — см. `.env.example` (скопируй в `.env`; в git `.env` не попадает).
 
 ---

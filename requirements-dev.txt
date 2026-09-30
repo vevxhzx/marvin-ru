@@ -1,0 +1,5 @@
+# Зависимости для разработки и тестов (в обычный запуск не входят)
+#   .venv\Scripts\python -m pip install -r requirements-dev.txt
+-r requirements.txt
+pytest>=8.0
+pytest-timeout>=2.3

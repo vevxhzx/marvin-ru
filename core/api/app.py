@@ -2062,6 +2062,57 @@ def ui_prefs_put(p: UiPrefsIn, request: Request):
     return {"ok": True, "updated_at": now_iso}
 
 
+# ---------------- профиль издания, LLM-ключ, карточка клиента ----------------
+# Раньше этих роутов в Python-сервере не было (они есть в Node-стенде server.ts),
+# и раздел «Настройки → Windows-клиент» показывал ошибку. Формы — как в server.ts.
+def _edition_payload(ed: str) -> dict:
+    is_marvin = ed == "marvin"
+    return {"edition": ed,
+            "name": "Марвин" if is_marvin else "Джарвис",
+            "name_latin": "Marvin" if is_marvin else "Jarvis",
+            "is_marvin": is_marvin, "is_jarvis": not is_marvin}
+
+
+@app.get("/api/edition")
+def edition_get():
+    ed = get_setting("edition") or "jarvis"
+    return _edition_payload(ed if ed in ("marvin", "jarvis") else "jarvis")
+
+
+class EditionIn(BaseModel):
+    edition: str
+
+
+@app.post("/api/edition")
+def edition_put(p: EditionIn):
+    if p.edition not in ("marvin", "jarvis"):
+        raise HTTPException(400, "edition: marvin|jarvis")
+    set_setting("edition", p.edition)
+    broadcast("state")
+    return _edition_payload(p.edition)
+
+
+@app.get("/api/client/info")
+def client_info():
+    """Карточка десктоп-клиента в настройках (WebView2 / App Mode)."""
+    import platform as _platform
+    from .. import identity
+    return {"app_name": identity.NAME or "Джарвис", "version": "0.12.0",
+            "platform": _platform.system().lower(), "mode": "desktop_projection",
+            "single_instance": True, "tray_enabled": True, "webview2_ready": True}
+
+
+@app.get("/api/llm")
+async def llm_info():
+    """Статус LLM-ключа для карточки «Подключить LLM» (ожидает {enabled, model})."""
+    from ..brain import llm
+    on = await llm.ollama_available() if llm.OLLAMA_MODEL else False
+    cloud = llm.cloud_enabled()
+    model = llm.OLLAMA_MODEL if on else (llm.cloud_title() if cloud else None)
+    return {"enabled": bool(on or cloud), "model": model,
+            "mode": ("cloud" if cloud and not on else "hybrid" if cloud else "local" if on else "off")}
+
+
 @app.get("/api/settings")
 def settings_get():
     from ..config import read_settings
