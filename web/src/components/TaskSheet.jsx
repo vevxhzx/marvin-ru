@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { api, toLocalISO, isAllDay } from '../lib/api'
-import { Sheet, Field, Seg, Pills } from './ui'
+import { Sheet, Field, Seg, Pills, TimeField } from './ui'
 
 /* Одна форма задачи для всего сайта: новая (task=null) и правка существующей (task=…).
    Срок — тремя способами: без срока · на день (23:59, без напоминаний «через час») · ко времени. */
@@ -44,7 +44,7 @@ export default function TaskSheet({ open, task, onClose, onDone, onErr }) {
               <>
                 <Seg value={f.day === todayISO ? 'today' : f.day === tomorrowISO ? 'tomorrow' : 'other'} onChange={(v) => setF({ ...f, day: v === 'today' ? todayISO : v === 'tomorrow' ? tomorrowISO : f.day })} options={[['today', 'сегодня'], ['tomorrow', 'завтра'], ['other', 'дата']]} />
                 <input type="date" className="input !h-9 !w-auto" value={f.day} onChange={(e) => setF({ ...f, day: e.target.value })} required />
-                {f.when === 'time' && <input type="time" className="input !h-9 !w-auto" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} required />}
+                {f.when === 'time' && <TimeField value={f.time} onChange={(v) => setF({ ...f, time: v })} required />}
               </>
             )}
           </div>

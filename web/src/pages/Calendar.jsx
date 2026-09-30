@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, plural } from '../lib/api'
-import { Sheet, Field, useToast, PageAccent, ListSkeleton } from '../components/ui'
+import { Sheet, Field, DateTimeField, useToast, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
@@ -130,7 +130,7 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
           <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Встреча с клиентом, созвон…" />
         </Field>
         <Field label="дата и время">
-          <input type="datetime-local" className="input" value={start} onChange={(e) => setStart(e.target.value)} />
+          <DateTimeField value={start} onChange={setStart} />
         </Field>
         <Field label="место или ссылка">
           <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Zoom, переговорная, https://…" />
