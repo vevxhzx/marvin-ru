@@ -2601,7 +2601,13 @@ def export(what: str, fmt: str):
     import io
     from fastapi.responses import Response
     from sqlmodel import select
-    tables = {"transactions": Transaction, "events": Event, "tasks": Task, "notes": Note, "links": Link, "debts": Debt, "recurring": Recurring}
+    from ..db import Account, Client, Goal, Order, WorkSession
+    # «operations» — читаемый алиас для операций (то же, что transactions); заказы добавлены отдельно
+    tables = {"transactions": Transaction, "orders": Order, "clients": Client, "goals": Goal,
+              "accounts": Account, "work_sessions": WorkSession,
+              "events": Event, "tasks": Task, "notes": Note, "links": Link, "debts": Debt, "recurring": Recurring}
+    if what == "operations":
+        what = "transactions"
     if what != "all" and what not in tables:
         raise HTTPException(404)
     with session() as s:
