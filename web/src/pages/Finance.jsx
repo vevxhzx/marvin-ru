@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { api, money, shortDate, toLocalISO, plural } from '../lib/api'
-import { Num, Sheet, Field, Empty, useToast, PageAccent } from '../components/ui'
+import { Num, Sheet, Field, Empty, Money, useToast, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
@@ -38,8 +38,9 @@ export default function Finance() {
   const [budgets, setBudgets] = useState(null)
 
   // Modal sheets
-  const [sheet, setSheet] = useState(null) // 'tx' | 'account' | 'debt' | 'payDebt' | 'recurring' | 'goal' | 'putGoal'
+  const [sheet, setSheet] = useState(null) // 'tx' | 'account' | 'debt' | 'payDebt' | 'recurring' | 'goal' | 'putGoal' | 'budget'
   const [editingItem, setEditingItem] = useState(null)
+  const [budgetCat, setBudgetCat] = useState(null) // категория/бюджет, для которого правим лимит
 
   // Filters for txs
   const [txSearch, setTxSearch] = useState('')
@@ -160,8 +161,11 @@ export default function Finance() {
   }, [recurring, now.getMonth(), now.getDate()])
 
   const daysUntil = (d0) => Math.round((d0 - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5)
-  const budgetItems = budgets?.items || []
-  const budgetLeft = (budgets?.total_budget || 0) - (budgets?.total_spent || 0)
+  // API отдаёт список лимитов в поле budgets (категории с лимитом > 0)
+  const budgetItems = Array.isArray(budgets) ? budgets : (budgets?.budgets || [])
+  const totalBudget = budgetItems.reduce((s, b) => s + (b.budget || 0), 0)
+  const totalSpent = budgetItems.reduce((s, b) => s + (b.spent || 0), 0)
+  const budgetLeft = totalBudget - totalSpent
 
   // Фильтрация транзакций
   const filteredTxs = useMemo(() => {
@@ -171,13 +175,15 @@ export default function Finance() {
       const matchAcc = txAccount === 'all' || t.account === txAccount
       const matchSearch = !q ||
         (t.title && t.title.toLowerCase().includes(q)) ||
+        (t.note && t.note.toLowerCase().includes(q)) ||
         (t.category && t.category.toLowerCase().includes(q)) ||
         (t.comment && t.comment.toLowerCase().includes(q)) ||
         (t.account && t.account.toLowerCase().includes(q))
       return matchCat && matchAcc && matchSearch
     })
-    const income = list.filter((t) => Number(t.amount) > 0).reduce((s, t) => s + Number(t.amount), 0)
-    const expense = Math.abs(list.filter((t) => Number(t.amount) < 0).reduce((s, t) => s + Number(t.amount), 0))
+    // сумма в БД всегда положительная, знак хранится в kind — иначе траты считались бы доходом
+    const income = list.filter((t) => t.kind === 'income').reduce((s, t) => s + Number(t.amount), 0)
+    const expense = list.filter((t) => t.kind === 'expense').reduce((s, t) => s + Number(t.amount), 0)
     return { list, income: Math.round(income), expense: Math.round(expense) }
   }, [txs, txCategory, txAccount, txSearch])
   const shownTxs = filteredTxs.list
@@ -365,30 +371,34 @@ export default function Finance() {
               <section key="budgets" className="c p2 s6 r" style={st}>{ctl}
                 <div className="hd">
                   <h2>бюджеты на месяц</h2>
-                  <small>{budgets?.month ? `${budgets.month.slice(5, 10).replace('-', '.')} · ${budgetLeft >= 0 ? 'осталось' : 'перерасход'}` : ''}</small>
+                  <span className="flex items-center gap-2">
+                    <small>{budgetItems.length ? `${MON_SHORT[now.getMonth()]} · ${budgetLeft >= 0 ? 'осталось' : 'перерасход'}` : ''}</small>
+                    <button type="button" className="btn-soft btn-sm !h-6" onClick={() => { setBudgetCat(null); setSheet('budget') }}>+ лимит</button>
+                  </span>
                 </div>
                 {!budgetItems.length ? (
-                  <p className="py-6 text-center text-sm text-[var(--ink3)]">
-                    лимиты не заданы — укажите бюджет в категории, и тут появится контроль
-                  </p>
+                  <div className="py-6 text-center">
+                    <p className="text-sm text-[var(--ink3)]">лимиты не заданы — задайте месячный лимит на категорию, и тут появится контроль</p>
+                    <button type="button" className="btn mt-3" onClick={() => { setBudgetCat(null); setSheet('budget') }}><Plus size={15} /> задать лимит</button>
+                  </div>
                 ) : (
                   <>
                     <div className="flex items-baseline gap-2">
                       <span className="text-[26px] font-semibold" style={{ color: budgetLeft < 0 ? 'var(--neg)' : 'inherit' }}>
                         <Num value={Math.abs(budgetLeft)} /> ₽
                       </span>
-                      <span className="text-xs text-[var(--ink3)]">{budgetLeft < 0 ? 'перерасход' : 'в запасе'} из {money(budgets.total_budget)}</span>
+                      <span className="text-xs text-[var(--ink3)]">{budgetLeft < 0 ? 'перерасход' : 'в запасе'} из {money(totalBudget)}</span>
                     </div>
                     <div className="mt-4 space-y-3">
                       {budgetItems.slice(0, 5).map((b) => (
-                        <div key={b.category} className="text-[13px]">
+                        <div key={b.id || b.name} className="cursor-pointer text-[13px]" title="Изменить лимит" onClick={() => { setBudgetCat(b); setSheet('budget') }}>
                           <div className="flex items-center justify-between mb-1">
-                            <span className="flex items-center gap-1.5">{b.icon} {b.category}</span>
+                            <span className="flex items-center gap-1.5">{b.icon} {b.name}</span>
                             <span className="num text-[var(--ink2)]">{money(b.spent)} / {money(b.budget)}</span>
                           </div>
                           <div className="h-1.5 rounded-full bg-[var(--sf2)] overflow-hidden">
                             <div className="h-full rounded-full transition-all" style={{
-                              width: `${Math.min(100, b.pct)}%`,
+                              width: `${Math.min(100, Math.round((b.pct || 0) * 100))}%`,
                               background: b.status === 'over' ? 'linear-gradient(90deg, #ff3b5c, #ff8a3d)' : b.status === 'warn' ? 'linear-gradient(90deg, #ffb020, #ff8a3d)' : 'linear-gradient(90deg, var(--acc), #8a5cff)',
                             }}></div>
                           </div>
@@ -396,7 +406,7 @@ export default function Finance() {
                       ))}
                     </div>
                     <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)] text-xs text-[var(--ink3)]">
-                      <span>перерасход: {budgetItems.filter((b) => b.status === 'over').length}</span>
+                      <span>перерасход: {budgetItems.filter((b) => b.status === 'over').length} · нажмите категорию, чтобы поправить лимит</span>
                       <span className="btn-soft btn-sm" onClick={() => { setTxCategory('all'); setTab('txs') }}>смотреть операции →</span>
                     </div>
                   </>
@@ -529,13 +539,14 @@ export default function Finance() {
                 <div className="rowi group" key={t.id}>
                   <time>{shortDate(t.date || t.created_at)}</time>
                   <span className="t">
-                    {t.title || t.category || 'Операция'}
+                    {t.title || t.note || t.category || 'Операция'}
                     <small>
                       {[t.category, t.account, t.comment].filter(Boolean).join(' · ')}
                     </small>
                   </span>
-                  <span className="amt" style={{ color: t.amount > 0 ? 'var(--pos)' : 'inherit' }}>
-                    {t.amount > 0 ? '+' : ''}{money(t.amount)}
+                  {/* знак берём из kind: amount приходит из API положительным */}
+                  <span className="amt" style={{ color: t.kind === 'income' ? 'var(--pos)' : 'inherit' }}>
+                    {t.kind === 'income' ? '+' : t.kind === 'expense' ? '−' : ''}{money(t.amount)}
                   </span>
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
                     <button
@@ -908,6 +919,14 @@ export default function Finance() {
         onClose={() => { setSheet(null); setEditingItem(null) }}
         onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
       />
+
+      <BudgetSheet
+        open={sheet === 'budget'}
+        item={budgetCat}
+        categories={categories}
+        onClose={() => { setSheet(null); setBudgetCat(null) }}
+        onDone={() => { setSheet(null); setBudgetCat(null); load(); bump() }}
+      />
     </div>
   )
 }
@@ -932,11 +951,12 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
     if (!open) return
     if (item) {
       setAmount(String(Math.abs(item.amount || 0)))
-      setTitle(item.title || '')
+      setTitle(item.title || item.note || '')   // описание хранится в note
       setCategory(item.category || '')
       setAccount(item.account || '')
       setComment(item.comment || '')
-      setKind(item.amount < 0 ? 'expense' : 'income')
+      // переводы форма не редактирует — сохраняем их тип, иначе трата/доход «съест» перевод
+      setKind(item.kind === 'income' ? 'income' : item.kind === 'transfer' ? 'transfer' : 'expense')
       setDate(item.date ? item.date.slice(0, 10) : toLocalISO(new Date()).slice(0, 10))
     } else {
       setAmount('')
@@ -955,12 +975,13 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
     if (!a || isNaN(a)) return
     setSaving(true)
     try {
+      // API принимает положительную сумму и kind; описание/комментарий кладём в note
       const payload = {
-        amount: kind === 'expense' ? -Math.abs(a) : Math.abs(a),
-        title: title.trim() || category || (kind === 'expense' ? 'Расход' : 'Доход'),
+        amount: Math.abs(a),
+        kind,
         category: category.trim() || undefined,
+        note: [title.trim(), comment.trim()].filter(Boolean).join(' · ') || undefined,
         account: account.trim() || undefined,
-        comment: comment.trim() || undefined,
         date: date ? `${date}T${item?.date ? item.date.slice(11, 19) : '12:00:00'}` : toLocalISO(new Date()).slice(0, 10),
       }
       if (isNew) {
@@ -1354,6 +1375,66 @@ function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" className="btn g" onClick={onClose}>отмена</button>
           <button type="submit" className="btn" disabled={saving || !amount}>{saving ? 'сохраняю…' : 'пополнить'}</button>
+        </div>
+      </form>
+    </Sheet>
+  )
+}
+
+/* Месячный лимит категории: хранится в Category.budget, карточка «бюджеты» читает его
+   через /api/finance/budgets. Лимит необязателен — 0 или пусто означает «без контроля». */
+function BudgetSheet({ open, item, categories = [], onClose, onDone }) {
+  const [cid, setCid] = useState('')
+  const [amount, setAmount] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [, show] = useToast()
+  const options = useMemo(() => categories.filter((c) => c.kind !== 'income'), [categories])
+
+  useEffect(() => {
+    if (!open) return
+    // item приходит со строки бюджета; для «+ лимит» берём первую расходную категорию
+    const chosen = item?.id != null ? (options.find((c) => c.id === item.id) || item) : options[0]
+    setCid(chosen?.id != null ? String(chosen.id) : '')
+    setAmount(chosen?.budget ? String(chosen.budget) : '')
+  }, [open, item?.id, options.length])
+
+  const pick = (id) => {
+    setCid(id)
+    const c = options.find((x) => String(x.id) === id)
+    setAmount(c?.budget ? String(c.budget) : '')
+  }
+
+  const submit = async (e) => {
+    if (e) e.preventDefault()
+    const id = Number(cid)
+    if (!id) return
+    setSaving(true)
+    try {
+      const n = parseFloat(String(amount).replace(/\s|\u00a0/g, '').replace(',', '.')) || 0
+      await api.updateCategory(id, { budget: n })
+      onDone()
+    } catch (err) {
+      show.err(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title="лимит на месяц" sub="необязательно: 0 или пусто — категория без контроля">
+      <form onSubmit={submit} className="space-y-4">
+        <Field label="категория">
+          <select className="input" value={cid} onChange={(e) => pick(e.target.value)} autoFocus>
+            {!options.length && <option value="">нет расходных категорий</option>}
+            {options.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}{c.budget ? ` · ${money(c.budget)}` : ''}</option>)}
+          </select>
+        </Field>
+        <Field label="лимит на месяц (₽)" hint="0 — без лимита">
+          <Money value={amount} onChange={setAmount} min={0} placeholder="0" />
+        </Field>
+        <div className="flex justify-end gap-2 pt-4">
+          <button type="button" className="btn g" onClick={onClose}>отмена</button>
+          <button type="submit" className="btn" disabled={saving || !cid}>{saving ? 'сохраняю…' : 'сохранить'}</button>
         </div>
       </form>
     </Sheet>

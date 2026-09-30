@@ -105,6 +105,9 @@ export default function Tasks() {
 
   const currentList = view === 'today' ? todayList : view === 'done' ? done : open
   const kicker = open.length ? `${open.length} в работе` : 'всё сделано'
+  /* декоративная карточка «список пуст» — только когда реально пусто:
+     ни открытых задач, ни невыполненных встреч (и данные уже загружены) */
+  const nothingToDo = tasks !== null && open.length === 0 && !agenda.some((e) => !e.done)
 
   return (
     <div className="pg on" id="p-tasks" style={pageAcc.style}>
@@ -202,13 +205,17 @@ export default function Tasks() {
                   )}
                 </section>
               )
-              if (id === 'empty') return (
-                <section key="empty" className="c p2 s6 r" style={st}>{ctl}
-                  <div className="hd"><h2>список пуст</h2><small></small></div>
-                  <p className="emp">можно отдыхать, сэр. или сказать мне что-нибудь</p>
-                  <span className="chip" onClick={() => addQuickDirect('купить молоко')}>«задача: купить молоко» ↗</span>
-                </section>
-              )
+              /* карточка скрыта, пока есть открытые задачи или встречи — не показываем её и в «спрятанных» */
+              if (id === 'empty') {
+                if (!nothingToDo) return null
+                return (
+                  <section key="empty" className="c p2 s6 r" style={st}>{ctl}
+                    <div className="hd"><h2>список пуст</h2><small></small></div>
+                    <p className="emp">можно отдыхать, сэр. или сказать мне что-нибудь</p>
+                    <span className="chip" onClick={() => addQuickDirect('купить молоко')}>«задача: купить молоко» ↗</span>
+                  </section>
+                )
+              }
               return (
                 <section key="sort" className="c p1 s6 r" style={st}>{ctl}
                   <div className="hd"><h2>сортировка</h2><small></small></div>

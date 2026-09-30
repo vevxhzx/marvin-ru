@@ -18,12 +18,13 @@ export const ACCENTS = {
   teal: { label: 'бирюза', light: '#0f766e', dark: '#2dd4bf', hue: 175 },
   sky: { label: 'небо', light: '#0369a1', dark: '#38bdf8', hue: 200 },
 }
-/* Оттенок поверхностей: лёгкая подкраска фона/карточек. tint — в тон акценту (берём его hue). */
+/* Оттенок поверхностей: лёгкая подкраска фона/карточек. tint — в тон акценту (берём его hue).
+   Холодный и чернильный держим в синей зоне (200–235): hue 250 подмешивал к синему фиолетовый. */
 export const TINTS = {
   neutral: { label: 'нейтральный', light: null, dark: null },
   warm: { label: 'тёплый', light: [40, 12], dark: [35, 6] },     // [hue, насыщенность %]
-  cool: { label: 'холодный', light: [215, 10], dark: [220, 8] },
-  ink: { label: 'чернильный', light: [250, 6], dark: [250, 10] },
+  cool: { label: 'холодный', light: [215, 10], dark: [215, 8] },
+  ink: { label: 'чернильный', light: [250, 6], dark: [232, 10] },
   accent: { label: 'в тон акценту', light: 'accent', dark: 'accent' },
 }
 export const FONT_SIZES = { sm: ['мельче', 0.92], md: ['обычный', 1], lg: ['крупнее', 1.1] }
@@ -113,12 +114,16 @@ export function hexHsl(hex) {
   else h = (r - g) / d + 4
   return [Math.round(((h * 60) + 360) % 360), Math.round(s * 100), Math.round(l * 100)]
 }
-/* Акцент должен читаться и в светлой, и в тёмной теме: слишком светлый — притемняем, слишком тёмный — осветляем */
+/* Акцент должен читаться и в светлой, и в тёмной теме: слишком светлый — притемняем, слишком тёмный — осветляем.
+   В тёмной теме осветляем к светлому, но фирменному синему подмешиваем голубой, а не белый:
+   белый давал сиреневый подтон, и «синий» читался как фиолетовый. Светлая тема не меняется. */
 export function accentFor(hex, dark) {
   const base = /^#[0-9a-f]{6}$/i.test(String(hex)) ? hex : '#0a3cff'
   const L = lumOf(base)
-  if (dark && L < 0.16) return mixHex(base, '#ffffff', 0.5)
-  if (dark && L < 0.3) return mixHex(base, '#ffffff', 0.28)
+  /* синие варианты акцента (свотч «синий» и пара из ACCENTS.blue) — подмешиваем голубой */
+  const lift = /^#(0a3cff|0a2bff|3b5bff)$/i.test(base) ? '#7fb2ff' : '#ffffff'
+  if (dark && L < 0.16) return mixHex(base, lift, 0.5)
+  if (dark && L < 0.3) return mixHex(base, lift, 0.28)
   if (!dark && L > 0.62) return mixHex(base, '#101114', 0.55)
   return base
 }

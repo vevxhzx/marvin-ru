@@ -430,7 +430,7 @@ def test_fuzzy_match():
 def test_quick_finance_rules():
     from core.services import finance
     run("баланс т-банк 50000")
-    r = run("потратил 1200 на еду вчера")
+    r = run("потратил 1200 на еду сегодня")   # «сегодня» — чтобы тест не ломался в первый день месяца
     assert "Еда" in r.text
     r = run("700 такси")
     assert "Транспорт" in r.text

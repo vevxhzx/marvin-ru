@@ -11,6 +11,8 @@ import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 import { useTimer, mmss } from './Orders'
 
 import { TodaySummaryWidget, ScreenTimeBentoWidget } from '../components/ReportCards'
+// новые карточки главной: быстрое дело, лимит трат, цели, привычки, ближайшее дело
+import { QuickAddWidget, SpendTodayWidget, GoalsWidget, HabitsWidget, NextUpWidget } from '../components/TodayCards'
 import { useNavigate } from 'react-router-dom'
 
 const GREETS = { morning: 'доброе утро', day: 'добрый день', evening: 'добрый вечер', night: 'доброй ночи' }
@@ -35,10 +37,29 @@ const ALL_WIDGET_DEFS = {
   pomo: { id: 'pomo', name: 'помодоро', desc: 'Виджет фокус-сессии и таймера', defaultCol: 's4' },
   orders: { id: 'orders', name: 'заказы в работе', desc: 'Активные заказы и дедлайны', defaultCol: 's8' },
   missed: { id: 'missed', name: 'что я упускаю', desc: 'Просроченные оплаты, дела без срока, цели без движения', defaultCol: 's8' },
+  // новые карточки — по умолчанию спрятаны (как pomo/orders/missed), включаются кнопкой «добавить карточку»
+  quick: { id: 'quick', name: 'быстрое дело', desc: 'Дело или трата одной строкой, не уходя со страницы', defaultCol: 's4' },
+  spend: { id: 'spend', name: 'можно потратить', desc: 'Безопасный дневной лимит и ближайший платёж', defaultCol: 's4' },
+  goals: { id: 'goals', name: 'цели', desc: 'Прогресс целей и фокус дня', defaultCol: 's4' },
+  habits: { id: 'habits', name: 'привычки', desc: 'Стрик ведения дня и тепловая карта', defaultCol: 's4' },
+  next: { id: 'next', name: 'ближайшее дело', desc: 'Следующая встреча и свободное окно до неё', defaultCol: 's4' },
 }
 
 const DEFAULT_ORDER = ['summary', 'screen', 'balance', 'chart', 'expenses', 'free', 'debts', 'today', 'calendar', 'brain']
-const DEFAULT_WIDTHS = { summary: 8, screen: 4, balance: 4, chart: 8, expenses: 4, free: 4, debts: 4, today: 4, calendar: 4, brain: 4, pomo: 4, orders: 8, missed: 8 }
+const DEFAULT_WIDTHS = { summary: 8, screen: 4, balance: 4, chart: 8, expenses: 4, free: 4, debts: 4, today: 4, calendar: 4, brain: 4, pomo: 4, orders: 8, missed: 8, quick: 4, spend: 4, goals: 4, habits: 4, next: 4 }
+
+// Вселенная карточек — все известные виджеты: иначе добавленная карточка (pomo/orders/missed
+// и новые) после перезагрузки отфильтровывалась бы из сохранённой раскладки.
+const ALL_WIDGET_IDS = Object.keys(ALL_WIDGET_DEFS)
+
+// Первый заход: фиксируем прежний набор карточек как стартовую раскладку, чтобы новые/редкие
+// виджеты не появлялись сами. Дальше раскладку ведёт lib/layout в localStorage.
+try {
+  const LAYOUT_KEY = 'marvin.layout.today'
+  if (typeof localStorage !== 'undefined' && !localStorage.getItem(LAYOUT_KEY)) {
+    localStorage.setItem(LAYOUT_KEY, JSON.stringify({ order: [...DEFAULT_ORDER], widths: { ...DEFAULT_WIDTHS } }))
+  }
+} catch {}
 
 export default function Today({ openChat, address = 'вовчик' }) {
   const nav = useNavigate()
@@ -54,7 +75,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
 
   // Режим настройки главной: порядок и ширина карточек
   const [editMode, setEditMode] = useState(false)
-  const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth, reset: resetLayout } = useCardLayout('today', DEFAULT_ORDER, DEFAULT_WIDTHS)
+  const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth } = useCardLayout('today', ALL_WIDGET_IDS, DEFAULT_WIDTHS)
   const wide = useWide()
   const pageAcc = usePageAccent('today')
   const [addSheetOpen, setAddSheetOpen] = useState(false)
@@ -69,7 +90,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
 
   const moveWidget = (id, direction) => move(id, direction)
 
-  const resetWidgets = () => resetLayout()
+  const resetWidgets = () => setWidgetOrder([...DEFAULT_ORDER])
 
   const load = () => {
     Promise.all([
@@ -618,6 +639,46 @@ export default function Today({ openChat, address = 'вовчик' }) {
                 <span className="amt">500 ₽<small>не оплачен</small></span>
               </div>
             </div>
+          </section>
+        )
+
+      case 'quick':
+        return (
+          <section key="quick" className={`c s4 r ${isWig}`} style={animStyle} {...dragProps}>
+            {renderCardControls('quick', idx)}
+            <QuickAddWidget onDone={(m) => { show(m); load(); bump() }} onErr={show.err} />
+          </section>
+        )
+
+      case 'spend':
+        return (
+          <section key="spend" className={`c p2 s4 r ${isWig}`} style={animStyle} {...dragProps}>
+            {renderCardControls('spend', idx)}
+            <SpendTodayWidget runway={d?.runway} payments={d?.payments} />
+          </section>
+        )
+
+      case 'goals':
+        return (
+          <section key="goals" className={`c s4 r ${isWig}`} style={animStyle} {...dragProps}>
+            {renderCardControls('goals', idx)}
+            <GoalsWidget goals={d?.goals} tasks={d?.tasks} onOpen={() => nav('/tasks?view=aims')} />
+          </section>
+        )
+
+      case 'habits':
+        return (
+          <section key="habits" className={`c s4 r ${isWig}`} style={animStyle} {...dragProps}>
+            {renderCardControls('habits', idx)}
+            <HabitsWidget streak={d?.streak} />
+          </section>
+        )
+
+      case 'next':
+        return (
+          <section key="next" className={`c s4 r ${isWig}`} style={animStyle} {...dragProps}>
+            {renderCardControls('next', idx)}
+            <NextUpWidget events={d?.today} tasks={d?.tasks} onOpen={(kind) => nav(kind === 'event' ? '/calendar' : '/tasks')} />
           </section>
         )
 

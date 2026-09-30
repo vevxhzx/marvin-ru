@@ -337,6 +337,11 @@ def _month(d: datetime) -> str:
     return ["января", "февраля", "марта", "апреля", "мая", "июня", "июля", "августа", "сентября", "октября", "ноября", "декабря"][d.month - 1]
 
 
+def _month_in(d: datetime) -> str:
+    """Предложный падеж — после «в»: «в октябре», а не «в октября»."""
+    return ["январе", "феврале", "марте", "апреле", "мае", "июне", "июле", "августе", "сентябре", "октябре", "ноябре", "декабре"][d.month - 1]
+
+
 # ---------------------------------------------------------------- вечер
 def evening_data() -> dict:
     """Что было за день — одним словарём (для карточки и для короткого текста)."""
@@ -845,7 +850,7 @@ def month_snapshot_card(path: Path | None = None) -> Path | None:
             log.debug("snapshot extras: %s", e)
         c = _Canvas()
         c.header("снимок месяца")
-        c.title(f"как я жил в {_month(now)}", f"на {now.day} {_month(now)} {now.year}")
+        c.title(f"как я жил в {_month_in(now)}", f"на {now.day} {_month(now)} {now.year}")
         c.stats([("заработал", money(s.get("earned", 0)), GREEN),
                  ("потратил", money(s.get("spent", 0)), RED),
                  ("на счетах", money(s.get("total_balance", 0)), INK)])
