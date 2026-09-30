@@ -181,29 +181,34 @@ async def cmd_summary(m: Message):
 
 @router.message(Command("today"))
 async def today(m: Message):
-    await m.answer(registry.today_briefing())
+    await _answer_md(m, registry.today_briefing())
+    await _send_card(m, "today")
 
 
 @router.message(Command("money"))
 async def money_cmd(m: Message):
-    await m.answer(registry.finance_summary(30))
+    await _answer_md(m, registry.finance_summary(30))
+    await _send_card(m, "money")
 
 
 @router.message(Command("tasks"))
 async def tasks_cmd(m: Message):
-    await m.answer(registry.list_tasks())
+    await _answer_md(m, registry.list_tasks())
+    await _send_card(m, "tasks")
 
 
 @router.message(Command("orders"))
 async def orders_cmd(m: Message):
     from ..services import orders
-    await m.answer(orders.summary_text())
+    await _answer_md(m, orders.summary_text())
+    await _send_card(m, "orders")
 
 
 @router.message(Command("missed", "упускаю"))
 async def missed_cmd(m: Message):
     from ..services import missed as _missed
-    await m.answer(_missed.missed_text())
+    await _answer_md(m, _missed.missed_text())
+    await _send_card(m, "missed")
 
 
 @router.message(Command("pomo"))
@@ -211,26 +216,29 @@ async def pomo_cmd(m: Message):
     """/pomo — 25 мин без заказа; /pomo ролик — по заказу; /pomo stop."""
     arg = (m.text or "").split(maxsplit=1)[1].strip() if len((m.text or "").split(maxsplit=1)) > 1 else ""
     if arg.lower() in ("stop", "стоп"):
-        await m.answer(registry.pomodoro("stop", _channel="tg"))
+        await _answer_md(m, registry.pomodoro("stop", _channel="tg"))
         return
-    await m.answer(registry.pomodoro("start", query=arg or None, minutes=None, _channel="tg"),
-                   reply_markup=_kb([("⏹ Стоп", "pomo:0:stop")]))
+    await _answer_md(m, registry.pomodoro("start", query=arg or None, minutes=None, _channel="tg"),
+                     reply_markup=_kb([("⏹ Стоп", "pomo:0:stop")]))
 
 
 @router.message(Command("goals"))
 async def goals_cmd(m: Message):
     from ..services import goals
-    await m.answer(goals.goals_text())
+    await _answer_md(m, goals.goals_text())
+    await _send_card(m, "goals")
 
 
 @router.message(Command("events"))
 async def events_cmd(m: Message):
-    await m.answer(registry.list_events(7))
+    await _answer_md(m, registry.list_events(7))
+    await _send_card(m, "events")
 
 
 @router.message(Command("debts"))
 async def debts_cmd(m: Message):
-    await m.answer(registry.list_debts())
+    await _answer_md(m, registry.list_debts())
+    await _send_card(m, "debts")
 
 
 @router.message(Command("voice"))
@@ -387,6 +395,40 @@ async def send_long(m: Message, text: str, raw_prefix: bool = False) -> None:
         else:
             html_text = _to_html(chunk)
         await _send(m, html_text, _re.sub(r"<[^>]+>", "", chunk))
+
+
+async def _answer_md(m: Message, text: str, **kw) -> None:
+    """Команды отдают markdown (**жирный**). Шлём HTML-разметкой, при сбое — чистым текстом."""
+    if kw.get("reply_markup"):
+        try:
+            await m.answer(_to_html(text), parse_mode=ParseMode.HTML, **kw)
+            return
+        except Exception as e:  # pragma: no cover
+            log.debug("md answer с клавиатурой: %s", e)
+    await _send(m, _to_html(text), text)
+
+
+# Команда → функция красивой карточки (core.services.cards)
+_CMD_CARDS = {"today": "today_card", "money": "finances_card", "tasks": "tasks_card", "orders": "orders_card",
+              "missed": "missed_card", "goals": "goals_card", "events": "events_card", "debts": "debts_card",
+              "forecast": "forecast_card"}
+
+
+async def _send_card(m: Message, kind: str) -> None:
+    """Красивая карточка-картинка к ответу команды (уважает cards.mode). Молчит при любом сбое."""
+    from core.services import cards
+    try:
+        if not cards.should_send("finances" if kind == "money" else kind):
+            return
+        fn = getattr(cards, _CMD_CARDS.get(kind, ""), None)
+        if not fn:
+            return
+        from aiogram.types import FSInputFile
+        path = await asyncio.to_thread(fn)
+        if path:
+            await m.answer_photo(FSInputFile(str(path)))
+    except Exception as e:  # pragma: no cover
+        log.debug("карточка команды %s: %s", kind, e)
 
 
 HANDLE_TIMEOUT = 120  # сек: дольше этого «печатает…» крутиться не будет — ответим, что зависли

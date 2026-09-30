@@ -278,7 +278,7 @@ def _out(name: str, path: Path | None) -> Path:
 
 
 # ---------------------------------------------------------------- утро
-def morning_card(path: Path | None = None) -> Path | None:
+def morning_card(path: Path | None = None, badge: str = "утренний дайджест", title: str | None = None) -> Path | None:
     try:
         now = datetime.now()
         evs = calendar.events_today()[:6]
@@ -287,8 +287,8 @@ def morning_card(path: Path | None = None) -> Path | None:
         s = finance.summary(1)
         safe = s.get("safe") or {}
         c = _Canvas()
-        c.header("утренний дайджест")
-        c.title(f"доброе утро, {_address()}", f"{_weekday(now)}, {now.day} {_month(now)}")
+        c.header(badge)
+        c.title(title or f"доброе утро, {_address()}", f"{_weekday(now)}, {now.day} {_month(now)}")
 
         c.label("сегодня", len(evs))
         if evs:
@@ -691,7 +691,11 @@ def band_card(kind: str, title: str, sub: str = "", tiles: list | None = None, f
 _SECTION = getattr(cfg, "cards", None)
 IMAGES_MODE = str(getattr(_SECTION, "mode", "important") or "important")
 _IMPORTANT = {"digest", "evening", "week", "report", "month", "status", "backup", "payday"}
-_SHORT = {"expense", "income", "task", "event", "done", "reminder", "order", "goal", "debt", "finances"}
+_SHORT = {"expense", "income", "task", "event", "done", "reminder", "order", "goal", "debt", "finances",
+          "tasks", "events", "debts", "orders", "goals", "missed", "forecast", "today"}
+
+# Версия внешнего вида карточек: входит в ключ кэша, чтобы после редизайна не отдавались старые картинки.
+_CARD_STYLE = "v2"
 
 _BADGES = {"expense": "расход", "income": "доход", "task": "задача", "event": "календарь", "done": "сделано",
            "reminder": "напоминание", "order": "заказ", "goal": "цель", "status": "статус", "debt": "долг",
@@ -710,7 +714,7 @@ def should_send(kind: str) -> bool:
 
 def _cache_path(kind: str, title: str, sub: str, tiles, footer: str) -> Path:
     import hashlib
-    key = "|".join([kind, title, sub, str(tiles), footer]).encode("utf-8")
+    key = "|".join([_CARD_STYLE, kind, title, sub, str(tiles), footer]).encode("utf-8")
     return DATA_DIR / "card_cache" / f"{kind}-{hashlib.sha1(key).hexdigest()[:16]}.png"
 
 
@@ -858,5 +862,178 @@ def month_snapshot_card(path: Path | None = None) -> Path | None:
         return c.finish(_out("month_snapshot.png", path))
     except Exception as e:
         log.warning("month snapshot failed: %s", e)
+        return None
+
+
+# ---------------------------------------------------------------- карточки команд (/tasks, /events, /debts, …)
+def _sheet(badge: str, title: str, sub: str = ""):
+    c = _Canvas()
+    c.header(badge)
+    c.title(title, sub)
+    return c
+
+
+def tasks_card(path: Path | None = None) -> Path | None:
+    try:
+        ts = tasks.list_tasks(limit=10)
+        c = _sheet("задачи", "задачи", f"{len(ts)} " + _plural(len(ts), "открытая", "открытые", "открытых") if ts else "всё закрыто")
+        if ts:
+            now = datetime.now()
+            for t in ts:
+                right, urgent = None, False
+                if getattr(t, "due", None):
+                    d = t.due
+                    if d.date() < now.date():
+                        right, urgent = f"просрочено · {d:%d.%m}", True
+                    elif d.date() == now.date():
+                        right = f"до {d:%H:%M}"
+                    else:
+                        right = f"{d:%d.%m}"
+                c.check_row(t.title, right, right_color=RED if urgent else INK_2, urgent=urgent)
+        else:
+            c.empty("открытых задач нет. подозрительно.")
+        return c.finish(_out("cmd_tasks.png", path))
+    except Exception as e:
+        log.warning("tasks card: %s", e)
+        return None
+
+
+def events_card(path: Path | None = None, days: int = 7) -> Path | None:
+    try:
+        start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        evs = calendar.list_events(start, start + timedelta(days=days + 1), limit=14)
+        c = _sheet("календарь", "что впереди", f"ближайшие {days} " + _plural(days, "день", "дня", "дней"))
+        if evs:
+            last = None
+            for e in evs:
+                if e.start.date() != last:
+                    last = e.start.date()
+                    c.label(f"{_weekday(e.start)}, {e.start.day} {_month(e.start)}")
+                c.row(f"{e.start:%H:%M}", e.title + (f" · {e.location}" if e.location else ""), left_color=ACCENT)
+        else:
+            c.empty("встреч нет — день ваш")
+        return c.finish(_out("cmd_events.png", path))
+    except Exception as e:
+        log.warning("events card: %s", e)
+        return None
+
+
+def debts_card(path: Path | None = None) -> Path | None:
+    try:
+        ds = finance.list_debts()
+        active = [d for d in ds if not getattr(d, "closed", False)]
+        total = sum((d.remaining or 0) for d in active)
+        monthly = sum((d.payment or 0) for d in active)
+        c = _sheet("долги", "долги", f"осталось {money(total)}" + (f" · {money(monthly)}/мес" if monthly else ""))
+        if active:
+            for d in active:
+                right = f"{money(d.remaining)}"
+                left = f"{d.pay_day:02d} число" if getattr(d, "pay_day", None) else "—"
+                c.row(left, d.title + (f" · из {money(d.total)}" if d.total else ""), right, right_color=RED, left_w=150)
+        else:
+            c.empty("долгов нет. приятно.")
+        return c.finish(_out("cmd_debts.png", path))
+    except Exception as e:
+        log.warning("debts card: %s", e)
+        return None
+
+
+def orders_card(path: Path | None = None) -> Path | None:
+    try:
+        from . import orders as _o
+        rows = _o.list_orders()[:10]
+        unpaid = sum((o.get("left") or 0) for o in rows)
+        c = _sheet("заказы", "заказы в работе", f"{len(rows)} · ждут оплаты {money(unpaid)}" if rows else "пусто")
+        if rows:
+            for o in rows:
+                right = money(o.get("left") or o.get("price") or 0)
+                c.row(o.get("status_label") or (o.get("status") or ""), (o.get("title") or "") + (f" · {o['client']}" if o.get("client") else ""),
+                      right, right_color=GREEN if (o.get("status") == "paid") else INK, left_w=190)
+        else:
+            c.empty("заказов в работе нет")
+        return c.finish(_out("cmd_orders.png", path))
+    except Exception as e:
+        log.warning("orders card: %s", e)
+        return None
+
+
+def goals_card(path: Path | None = None) -> Path | None:
+    try:
+        from . import goals as _g
+        gs = _g.list_goals()
+        c = _sheet("цели", "цели и конверты", f"{len(gs)} " + _plural(len(gs), "цель", "цели", "целей") if gs else "пусто")
+        if gs:
+            for g in gs:
+                pct = round((g.get("pct") or 0) * 100)
+                c.row(f"{pct}%", g.get("title") or "", money(g.get("saved") or 0) + " / " + money(g.get("target") or 0),
+                      right_color=GREEN if pct >= 100 else INK_2, left_w=90)
+        else:
+            c.empty("целей пока нет")
+        return c.finish(_out("cmd_goals.png", path))
+    except Exception as e:
+        log.warning("goals card: %s", e)
+        return None
+
+
+def missed_card(path: Path | None = None) -> Path | None:
+    try:
+        from . import missed as _m
+        m = _m.missed()
+        c = _sheet("упущения", "что я упускаю", f"{m['count']} " + _plural(m["count"], "пункт", "пункта", "пунктов") if m["count"] else "чисто")
+        if not m["count"]:
+            c.note("Ничего не упускаете, сэр. Редкое и подозрительное состояние.")
+        else:
+            if m["unpaid"]:
+                c.label("ждут оплаты", len(m["unpaid"]))
+                for o in m["unpaid"][:4]:
+                    c.row("оплата", (o.get("title") or "") + (f" · {o['client']}" if o.get("client") else ""),
+                          money(o.get("left") or 0), right_color=RED, left_w=140)
+            if m["overdue_debts"]:
+                c.label("платежи по долгам", len(m["overdue_debts"]))
+                for d in m["overdue_debts"][:4]:
+                    c.row(f"{d.get('pay_day', 1):02d} число", d.get("title") or "", money(d.get("payment") or 0), right_color=ORANGE, left_w=140)
+            if m["tasks_no_due"]:
+                c.label("дела без срока", len(m["tasks_no_due"]))
+                for t in m["tasks_no_due"][:4]:
+                    c.check_row(t.get("title") or "")
+            if m["goals_stale"]:
+                c.label("цели без движения", len(m["goals_stale"]))
+                for g in m["goals_stale"][:4]:
+                    c.row(f"{g.get('pct', 0)}%", g.get("title") or "", money(g.get("left") or 0) if g.get("left") else "", left_w=90)
+        return c.finish(_out("cmd_missed.png", path))
+    except Exception as e:
+        log.warning("missed card: %s", e)
+        return None
+
+
+def forecast_card(path: Path | None = None) -> Path | None:
+    try:
+        from . import insights
+        f = insights.cash_forecast(30)
+        cur = f["points"][0]["balance"] if f.get("points") else 0
+        tiles = [("сейчас", money(cur), INK), ("в среднем в день", money(f.get("per_day") or 0), ORANGE)]
+        if f.get("safe_per_day") is not None:
+            tiles.append(("можно тратить", money(f["safe_per_day"]), GREEN if f["safe_per_day"] > 0 else RED))
+        c = _sheet("прогноз", "прогноз кассы", "на 30 дней вперёд")
+        c.stats(tiles[:3])
+        if not f.get("ok"):
+            d = datetime.fromisoformat(f["low_date"])
+            c.label("внимание")
+            c.row(f"{d:%d.%m}", "при текущем темпе уйдёте в минус", money(f["low"]), right_color=RED, left_w=120)
+        if f.get("expected_income"):
+            c.label("ожидается по заказам")
+            c.row("доход", "уже за вычетом налога", money(f["expected_income"]), right_color=GREEN, left_w=120)
+        return c.finish(_out("cmd_forecast.png", path))
+    except Exception as e:
+        log.warning("forecast card: %s", e)
+        return None
+
+
+def today_card(path: Path | None = None) -> Path | None:
+    """«Сегодня» — короткая сводка дня (для /today): дневной рендер с бейджем «сегодня»."""
+    try:
+        return morning_card(path or (DATA_DIR / "tmp" / "today.png"), badge="сегодня", title="сегодня")
+    except Exception as e:
+        log.warning("today card: %s", e)
         return None
 

@@ -15,8 +15,8 @@ const NEXT_LABEL = { new: 'в работу', work: 'сдан', review: 'сдан
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
 const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ч` : h > 0 ? `${Math.round(h * 60)} мин` : '—')
 
-/* Мягкая карточка строки: одинаковая тень в списке заказов и в блоках «как идут дела» */
-const CARD_SHADOW = 'inset 0 0 0 1px var(--line), 0 14px 34px -26px rgba(16,17,20,0.55)'
+/* Мягкая карточка строки: нейтральная тень, на hover — чуть сильнее (и подъём через hover:-translate-y-px) */
+const CARD_SHADOW = 'shadow-[inset_0_0_0_1px_var(--line),0_16px_34px_-24px_rgba(16,17,20,0.35)] hover:shadow-[inset_0_0_0_1px_var(--line),0_22px_42px_-24px_rgba(16,17,20,0.5)]'
 
 /* Таймер помодоро: одна активная сессия на всю систему (сайт + Telegram + голос). Тикает локально, сверяется по SSE. */
 export function useTimer() {
@@ -80,7 +80,7 @@ export default function Orders() {
   const month = stats?.months?.at(-1)?.income || 0
   const prevMonth = stats?.months?.at(-2)
   return (
-    <div className="bento-page space-y-10" style={pageAcc.style}>
+    <div className="bento-page space-y-8 pt-4" style={{ ...pageAcc.style, '--acc2': 'color-mix(in srgb, var(--acc) 55%, #8a5cff)' }}>
       <PageHead kicker={kicker} title="заказы" idx={openN}
         right={<><Seg value={view} onChange={setView} options={VIEWS} /><PageAccent page="orders" /><button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button></>} />
 
@@ -91,17 +91,17 @@ export default function Orders() {
       </form>
 
       {/* сводка: таймер + градиентные hero-плитки в одной bento-сетке */}
-      <div className="bento !mt-0">
+      <div className="bento" style={{ marginTop: 26 }}>
         <section className="c s4 flex items-center" style={{ borderRadius: 26 }}>
           <TimerCard timer={timer} left={left} onStart={() => start(null)} onStop={stop} onBreak={() => api.startTimer(timer?.order_id || null, null, 'break').then(load).catch(show.err)} />
         </section>
-        <Tile span="s4" glow="rgba(10,60,255,0.42)" gradient="linear-gradient(135deg,#0a3cff 0%,#6a2df0 55%,#8a5cff 100%)" icon={<Play size={16} />}
+        <Tile span="s4" glow="color-mix(in srgb, var(--acc) 60%, transparent)" gradient="linear-gradient(135deg, var(--acc) 0%, var(--acc2) 100%)" ink="var(--accent-ink)" icon={<Play size={16} />}
           label="в работе" value={<Num value={openN} />}
           sub={overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : 'всё под контролем'} />
-        <Tile span="s4" glow="rgba(255,59,92,0.42)" gradient="linear-gradient(135deg,#ff3b5c 0%,#ff5f3b 55%,#ff9f0a 100%)" icon={<Wallet size={16} />}
+        <Tile span="s4" glow="rgba(255,59,92,0.5)" gradient="linear-gradient(135deg,#ff3b5c 0%,#ff5f3b 55%,#ff9f0a 100%)" icon={<Wallet size={16} />}
           label="ждут оплаты" value={<Num value={unpaid} fmt={money} />} onClick={() => setView('unpaid')} tip={unpaid ? 'показать, кто не заплатил' : undefined}
           sub={unpaid ? 'нажмите, чтобы найти должников' : 'все рассчитались'} />
-        <Tile span="s4" glow="rgba(25,179,74,0.4)" gradient="linear-gradient(135deg,#19b34a 0%,#12b08a 55%,#10b3a3 100%)" icon={<TrendingUp size={16} />}
+        <Tile span="s4" glow="rgba(25,179,74,0.5)" gradient="linear-gradient(135deg,#19b34a 0%,#12b08a 55%,#10b3a3 100%)" icon={<TrendingUp size={16} />}
           label="за этот месяц" value={stats ? <Num value={month} fmt={money} /> : '—'}
           sub={prevMonth ? `прошлый · ${money(prevMonth.income)}` : 'первый месяц в работе'} />
         <Tile span="s4" ink="#2a2470" glow="rgba(116,92,255,0.28)" gradient="linear-gradient(140deg,#eef0ff 0%,#ddd6ff 100%)" icon={<Clock size={16} />}
@@ -158,7 +158,7 @@ function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.
       {sub && <div className="mt-2 max-w-[94%] text-[12.5px] leading-snug" style={{ opacity: 0.82 }}>{sub}</div>}
     </>
   )
-  const style = { background: gradient, color: ink, borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.28), 0 22px 44px -24px ${glow}` }
+  const style = { background: gradient, color: ink, borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 18px 40px -22px ${glow}` }
   return onClick
     ? <button type="button" onClick={onClick} data-tip={tip} className={`c ${span} relative block w-full text-left transition duration-300 hover:-translate-y-0.5`} style={style}>{inner}</button>
     : <section className={`c ${span} relative block`} style={style}>{inner}</section>
@@ -207,7 +207,7 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, 
   return (
     <Swipe onLeft={!closed ? onDel : undefined} onRight={!closed && NEXT[o.status] ? () => onStatus(o, NEXT[o.status]) : undefined} rightLabel={NEXT_LABEL[o.status] || 'готово'}>
       <div className={`row-slide ${extra} ${closed ? 'opacity-55' : ''}`}>
-        <div className="group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px" style={{ background: 'var(--sf)', borderRadius: 22, boxShadow: CARD_SHADOW }} onClick={onOpen}>
+        <div className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`} style={{ background: 'var(--sf)', borderRadius: 22 }} onClick={onOpen}>
           <div className="relative flex items-center gap-3.5 pl-1">
             <span className="absolute -left-4 bottom-1 top-1 w-1 rounded-full" style={{ background: STATUS_DOT[o.status] }} aria-hidden />
             <span className={`badge !hidden shrink-0 sm:!inline-flex ${STATUS_TONE[o.status]}`}>{STATUS[o.status]}</span>
@@ -225,7 +225,7 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, timer, 
               {o.price > 0 && (
                 <div className="mt-2 flex items-center gap-2">
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'linear-gradient(90deg,#0a3cff,#8a5cff)' }} />
+                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
                   </div>
                   <span className="num faint shrink-0 text-[10.5px]">{pct}%</span>
                 </div>
@@ -333,8 +333,8 @@ function StatsBlock({ stats, onUnpaid }) {
                   <div className="num text-[11px] opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
                   <div className="w-full rounded-t-lg transition-all duration-700" style={{
                     height: `${Math.max(3, (m.income / max) * 96)}px`,
-                    background: cur ? 'linear-gradient(180deg,#8a5cff 0%,#0a3cff 100%)' : m.income ? 'linear-gradient(180deg,rgba(138,92,255,0.55),rgba(10,60,255,0.32))' : 'var(--fill-2)',
-                    boxShadow: cur ? '0 12px 26px -12px rgba(10,60,255,0.6)' : 'none',
+                    background: cur ? 'linear-gradient(180deg, var(--acc2) 0%, var(--acc) 100%)' : m.income ? 'linear-gradient(180deg, color-mix(in srgb, var(--acc) 55%, transparent), color-mix(in srgb, var(--acc) 32%, transparent))' : 'var(--fill-2)',
+                    boxShadow: cur ? '0 12px 26px -12px color-mix(in srgb, var(--acc) 60%, transparent)' : 'none',
                   }} />
                   <div className="faint mono text-[10px]">{m.month.slice(5)}</div>
                 </div>

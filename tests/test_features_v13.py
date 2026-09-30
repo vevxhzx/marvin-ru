@@ -67,3 +67,28 @@ def test_orders_suggestion_from_history(tmp_path, monkeypatch):
     s = orders.suggestion("монтаж ролика")
     assert s["count"] >= 2 and s["price"] == 27500
     assert orders.suggestion("совсем не про это")["count"] == 0
+
+
+# ---------------------------------------------------------------- карточки команд и markdown в Telegram
+def test_command_cards_render(tmp_path, monkeypatch):
+    """У команд (/tasks, /events, /debts) есть своя карточка-картинка."""
+    from core.services import cards
+    monkeypatch.setattr(cards, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(cards.tasks, "list_tasks", lambda **k: [])
+    monkeypatch.setattr(cards.calendar, "list_events", lambda *a, **k: [])
+    monkeypatch.setattr(cards.finance, "list_debts", lambda: [])
+    for fn in (cards.tasks_card, cards.events_card, cards.debts_card):
+        p = fn()
+        assert p and p.exists() and p.stat().st_size > 1000
+        assert p.read_bytes()[:8] == b"\x89PNG\r\n\x1a\n"
+
+
+def test_telegram_markdown_to_html():
+    """Команды отдают markdown — его конвертируем в HTML, иначе в Telegram видны «**». """
+    from core.telegram.bot import _to_html
+    out = _to_html("**жирный** и `код` и <тег> и *курсив*")
+    assert "<b>жирный</b>" in out
+    assert "<code>код</code>" in out
+    assert "&lt;тег&gt;" in out
+    assert "**" not in out
+    assert _to_html("— пункт") == "— пункт"
