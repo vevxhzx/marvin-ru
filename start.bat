@@ -1,12 +1,15 @@
 @echo off
 title Marvin
 cd /d "%~dp0"
+chcp 65001 >nul
+
 if not exist .venv\Scripts\python.exe (
-    echo Run install.bat first.
+    echo   [!] Marvin ещё не установлен. Сначала запустите install.bat
     pause
     exit /b 1
 )
-:: auto-install missing packages after project update (fast if nothing to do)
+
+rem после обновления проекта дотягиваем новые библиотеки (быстро, если всё на месте)
 .venv\Scripts\python.exe -m pip install -r requirements.txt -q --disable-pip-version-check >nul 2>nul
 
 set /a retries=0
@@ -14,10 +17,10 @@ set /a retries=0
 .venv\Scripts\python.exe run.py
 set RC=%ERRORLEVEL%
 
-:: 3 = порт занят: ассистент уже запущен в другом окне (см. run.py)
+rem код 3 = уже запущено в другом окне (см. run.py)
 if "%RC%"=="3" (
     echo.
-    echo The assistant is ALREADY RUNNING in another window. Close this one.
+    echo   Marvin уже запущен в другом окне. Закройте это.
     pause
     exit /b 3
 )
@@ -25,12 +28,13 @@ if "%RC%"=="3" (
 set /a retries+=1
 if %retries% GEQ 3 (
     echo.
-    echo The assistant stopped with exit code %RC% and will not be restarted.
+    echo   Marvin остановился с кодом %RC% и больше не перезапускается.
+    echo   Что не так — покажет doctor.bat
     pause
     exit /b %RC%
 )
 
 echo.
-echo Exit code %RC%. Restarting in 3 sec [attempt %retries% of 3] (Ctrl+C to exit^)...
+echo   Код выхода %RC%. Перезапуск через 3 сек [попытка %retries% из 3] (Ctrl+C — выйти^)...
 timeout /t 3 >nul
 goto loop

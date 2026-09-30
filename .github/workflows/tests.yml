@@ -11,10 +11,22 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  lint:
+    name: ruff (линтер Python)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check core run.py voice_client.py doctor.py setup.py desktop_app.py
+
   python:
     name: pytest (Python ${{ matrix.python }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -26,7 +38,7 @@ jobs:
           python-version: ${{ matrix.python }}
           cache: pip
       - run: pip install -r requirements.txt pytest
-      - run: python -m compileall -q core run.py voice_client.py setup.py
+      - run: python -m compileall -q core run.py voice_client.py setup.py doctor.py desktop_app.py
       - run: python -m pytest tests -q
 
   web:

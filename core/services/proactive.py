@@ -140,7 +140,7 @@ def candidates(now: datetime | None = None) -> list[dict]:
         for r in ([] if muted("рутины: пропуски") else routines.nudges(now)[:1]):
             out.append({"key": r["key"], "topic": r["title"],
                         "fact": {"kind": "routine_missed", "title": r["title"], "missed": r["missed"], "urgency": "low", "question": "привычка сломалась?"},
-                        "text": r["text"], "buttons": [("🔕 Не надо", f"pro:mute:0:routine")]})
+                        "text": r["text"], "buttons": [("🔕 Не надо", "pro:mute:0:routine")]})
     except Exception as e:  # pragma: no cover
         log.debug("aims/routines candidates: %s", e)
     # 3. факты «сейчас»: самочувствие и планы без задачи

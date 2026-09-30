@@ -143,7 +143,6 @@ _HALLUCINATIONS = {"субтитры", "продолжение следует", 
 
 def _cached_locally(name: str) -> bool:
     """Есть ли модель faster-whisper уже на диске (кэш HuggingFace) — чтобы не пугать «качается» при каждом старте."""
-    import os
     from pathlib import Path
     base = Path(os.environ.get("HF_HOME") or (Path.home() / ".cache" / "huggingface")) / "hub"
     if not base.exists():
@@ -156,7 +155,6 @@ def _cached_locally(name: str) -> bool:
 
 def _add_cuda_dlls() -> None:
     """Windows: ctranslate2 ищет cublas/cudnn DLL в PATH. gpu.bat ставит их pip-пакетами nvidia-* — подключаем их папки."""
-    import os
     try:
         import importlib.util
         for pkg in ("nvidia.cublas", "nvidia.cudnn", "nvidia.cuda_runtime"):

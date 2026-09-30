@@ -6,12 +6,11 @@
 from __future__ import annotations
 
 import re
-from datetime import datetime
 
 from sqlmodel import select
 
 from ..db import Note, session
-from .match import score, tokens
+from .match import score
 
 TAG = "решение"
 

@@ -9,11 +9,10 @@ from __future__ import annotations
 import json
 import math
 import re
-from datetime import datetime
 
 from sqlmodel import select
 
-from ..db import Aim, Board, BoardItem, Link, Note, Order, icontains, log_action, now, remember, session
+from ..db import Aim, Board, BoardItem, Link, Note, Order, log_action, now, remember, session
 
 TYPES = ("sticky", "text", "frame", "image", "arrow", "ink")
 KINDS = ("free", "storyboard", "script")

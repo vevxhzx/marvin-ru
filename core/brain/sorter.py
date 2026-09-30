@@ -23,7 +23,7 @@ from ..services import brain_notes, calendar, finance, goals, orders, people, ta
 from ..services.calendar import fmt_dt
 from ..services.finance import money
 from . import llm
-from .dates import fix_night_hour, parse_datetime, parse_datetime_ex
+from .dates import fix_night_hour, parse_datetime_ex
 from .persona import now_line
 
 log = logging.getLogger("assistant.sorter")
