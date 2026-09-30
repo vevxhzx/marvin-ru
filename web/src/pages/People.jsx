@@ -56,7 +56,6 @@ export default function People() {
             ))}
           </div>
           <span className="btn" onClick={() => setSheet('new')}>+ человек</span>
-          <PageAccent page="people" />
         </div>
       </div>
 

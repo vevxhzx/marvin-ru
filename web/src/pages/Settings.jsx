@@ -5,7 +5,7 @@ import { playChime } from '../lib/sound'
 import { api, relTime, kb } from '../lib/api'
 import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm } from '../components/ui'
 import { enableNotifications, disableNotifications, notifyEnabled, notifyState } from '../lib/notify'
-import { usePrefs, prefs as PREFS, ACCENTS, TINTS, FONT_SIZES, RADII } from '../lib/prefs'
+import { usePrefs, prefs as PREFS, ACCENTS, TINTS, FONT_SIZES, RADII, setPageAccent } from '../lib/prefs'
 import { useTheme, NAV_GROUPS, useRefresh } from '../App'
 import { RotateCcw } from 'lucide-react'
 
@@ -260,6 +260,8 @@ export default function Settings({ health }) {
 }
 
 const ACCENT_SWATCHES = ['#0a3cff', '#1d1d24', '#5b5bf0', '#8a5cff', '#c04cff', '#ff4d8d', '#ff4b4b', '#ff7a1a', '#f5b400', '#8bc32a', '#19b34a', '#12b5a5', '#21a0f0']
+/* Список вкладок для персонального цвета (переехал сюда из шапок страниц). */
+const PAGE_ACCENT_LIST = [['today', 'сегодня'], ['tasks', 'задачи'], ['calendar', 'календарь'], ['finance', 'финансы'], ['orders', 'заказы'], ['mind', 'мозг'], ['people', 'люди']]
 
 /* Вид: тема, акцент, размер, углы, анимации, навигация. Всё — в этом браузере. */
 function Appearance() {
@@ -297,6 +299,30 @@ function Appearance() {
           {[['neutral', 'нейтральный'], ['warm', 'тёплый'], ['cool', 'холодный'], ['ink', 'чернильный'], ['accent', 'в тон акценту']].map(([id, label]) => (
             <span key={id} className={p.tint === id ? 'on' : ''} onClick={() => set({ tint: id })}>{label}</span>
           ))}
+        </div>
+      </section>
+
+      <section className="c r" style={{ '--i': 3 }}>
+        <div className="hd"><h2>цвет вкладок</h2><small></small></div>
+        <p style={{ color: 'var(--ink2)' }}>каждая вкладка может жить в своём цвете — только в этом браузере, общая тема не меняется.</p>
+        <div className="mt-4 space-y-4">
+          {PAGE_ACCENT_LIST.map(([id, label]) => {
+            const cur = (p.pageAccents || {})[id] || ''
+            return (
+              <div key={id}>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[13px] font-medium">{label}</span>
+                  {cur && <button className="btn-ghost btn-sm" onClick={() => setPageAccent(id, '')}>сброс</button>}
+                </div>
+                <div className="pa-grid !mt-2" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
+                  <button type="button" className={`pa-sw ${!cur ? 'pa-sw-on' : ''}`} style={{ background: 'var(--sf2)' }} onClick={() => setPageAccent(id, '')} title="как всё" />
+                  {ACCENT_SWATCHES.map((hex) => (
+                    <button type="button" key={hex} className={`pa-sw ${cur === hex ? 'pa-sw-on' : ''}`} style={{ background: hex }} onClick={() => setPageAccent(id, hex)} title={hex} />
+                  ))}
+                </div>
+              </div>
+            )
+          })}
         </div>
       </section>
 

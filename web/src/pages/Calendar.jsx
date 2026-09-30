@@ -379,7 +379,6 @@ export default function Calendar() {
             <span onClick={() => shiftTime(1)}>›</span>
           </div>
           <span className="btn" onClick={() => setSheet('new')}>+ событие</span>
-          <PageAccent page="calendar" />
           {shown.length > 1 && (
             <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
               title="Переместить или поменять ширину карточек">настроить</span>

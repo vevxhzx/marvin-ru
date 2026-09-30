@@ -256,6 +256,7 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
     <aside>
       <div className="logo"><i></i>{lower()}</div>
       <nav>
+        <div className="nav-group-title">план</div>
         <NavLink to="/" end className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="2"/></svg>сегодня
         </NavLink>
@@ -265,6 +266,11 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
         <NavLink to="/calendar" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="13" rx="3"/><path d="M3 8h14M7 2v3M13 2v3"/></svg>календарь
         </NavLink>
+        <NavLink to="/board" className={({ isActive }) => isActive ? 'on' : ''}>
+          <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="3"/><path d="M7 4v12M13 4v12"/></svg>доска
+        </NavLink>
+
+        <div className="nav-group-title">деньги</div>
         <NavLink to="/finance" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="11" rx="3"/><path d="M13 10.5h1"/></svg>финансы
         </NavLink>
@@ -273,14 +279,15 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
             <svg viewBox="0 0 20 20"><rect x="3" y="6" width="14" height="10" rx="3"/><path d="M7.5 6V4.5h5V6"/></svg>заказы
           </NavLink>
         )}
-        <NavLink to="/mind" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><path d="M10 3.5a4 4 0 0 0-4 4 3 3 0 0 0-1 5 3.5 3.5 0 0 0 5 3.5zm0 0a4 4 0 0 1 4 4 3 3 0 0 1 1 5 3.5 3.5 0 0 1-5 3.5z"/></svg>мозг
-        </NavLink>
-        <NavLink to="/board" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="3"/><path d="M7 4v12M13 4v12"/></svg>доска
-        </NavLink>
+
+        <div className="nav-group-title">люди</div>
         <NavLink to="/people" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 20 20"><circle cx="7.5" cy="7" r="2.5"/><circle cx="14" cy="8" r="2"/><path d="M3 16c0-3 2-4.5 4.5-4.5S12 13 12 16M13 12c2 0 4 1 4 4"/></svg>люди
+        </NavLink>
+
+        <div className="nav-group-title">джарвис</div>
+        <NavLink to="/mind" className={({ isActive }) => isActive ? 'on' : ''}>
+          <svg viewBox="0 0 20 20"><path d="M10 3.5a4 4 0 0 0-4 4 3 3 0 0 0-1 5 3.5 3.5 0 0 0 5 3.5zm0 0a4 4 0 0 1 4 4 3 3 0 0 1 1 5 3.5 3.5 0 0 1-5 3.5z"/></svg>мозг
         </NavLink>
         <NavLink to="/memory" className={({ isActive }) => isActive ? 'on' : ''}>
           <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.5 2.5"/></svg>память

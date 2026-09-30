@@ -44,18 +44,19 @@ export function Num({ value, fmt = (n) => Math.round(n).toLocaleString('ru-RU').
   return <span className={`n ${className}`}>{fmt(v)}</span>
 }
 
-/* Заголовок раздела: компактный, спокойный. idx — счётчик справа от названия */
-export function Section({ title, idx, hint, action, children, className = '', i = 0 }) {
+/* Заголовок раздела: компактный, спокойный. idx — счётчик справа от названия.
+   hint — текст под заголовком; tip — то же, но в тултипе (для длинных пояснений). */
+export function Section({ title, idx, hint, tip, action, children, className = '', i = 0 }) {
   return (
     <section className={`r ${className}`} style={{ '--i': i }}>
       {(title || action) && (
         <div className="mb-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
-              {title && <h2 className="text-[20px] font-semibold tracking-[-0.03em]">{title}</h2>}
+              {title && <h2 data-tip={tip} className={`text-[20px] font-semibold tracking-[-0.03em] ${tip ? 'cursor-help underline decoration-dotted decoration-[var(--line-2)] underline-offset-[6px]' : ''}`}>{title}{tip ? ' ?' : ''}</h2>}
               {idx != null && idx !== 0 && <span className="mono text-[12px] text-accent">{idx}</span>}
             </div>
-            {hint && <div className="muted mt-1 max-w-[520px] text-[13px] leading-snug">{hint}</div>}
+            {hint && !tip && <div className="muted mt-1 max-w-[520px] text-[13px] leading-snug">{hint}</div>}
           </div>
           {action && <div className="flex items-center gap-2">{action}</div>}
         </div>

@@ -233,7 +233,6 @@ export default function Finance() {
             <span className={days === 90 ? 'on' : ''} onClick={() => setDays(90)}>90 дн</span>
             <span className={days === 0 ? 'on' : ''} onClick={() => setDays(0)}>всё</span>
           </div>
-          <PageAccent page="finance" />
           {tab === 'overview' && <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title="Переместить, спрятать или поменять ширину карточек">настроить</span>}
           <span className="btn g" onClick={exportCSV} title="Скачать CSV выписку">выписка</span>
           <span
@@ -362,7 +361,7 @@ export default function Finance() {
               </section>
             )
             if (id === 'free') return (
-              <section key="free" className="c hero s3 r" style={st}>{ctl}
+              <section key="free" className="c tint-ok s3 r" style={st}>{ctl}
                 <div className="hd"><h2>свободно</h2><small>в месяц</small></div>
                 <div className="mid"><Num value={cf.free || 7816} /> ₽</div>
               </section>

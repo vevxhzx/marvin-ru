@@ -418,17 +418,22 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
  * Виджет «Экранное время за ПК» (Bento-стиль)
  */
 export function ScreenTimeBentoWidget({ data }) {
-  const d = data || {
-    recording: true,
-    pc_alive: true,
-    active_min: 342,
-    hours: [0, 0, 0, 0, 0, 0, 0, 0, 15, 45, 55, 60, 40, 50, 58, 42, 30, 0, 0, 0, 0, 0, 0, 0],
-    apps: [
-      ['Premiere Pro', 200, 'работа', 'Монтаж узбекам2'],
-      ['After Effects', 72, 'работа', 'Анимация титров'],
-      ['Telegram', 35, 'общение', 'Чат с клиентом'],
-      ['Chrome', 25, 'браузер', 'YouTube'],
-    ]
+  const d = data
+  // Пустой виджет: раньше здесь были захардкоженные демо-данные. Теперь честно и компактно.
+  if (!d || !(d.active_min > 0) || !(d.hours || []).some((v) => v > 0)) {
+    return (
+      <div className="screen-time-widget flex flex-col justify-between h-full">
+        <div className="hd !mb-2">
+          <div className="flex items-center gap-2">
+            <span className="flex h-7 w-7 items-center justify-center rounded-xl" style={{ background: 'color-mix(in srgb, var(--ai) 14%, transparent)', color: 'var(--ai)' }}>
+              <Clock size={15} />
+            </span>
+            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">время за пк</h2>
+          </div>
+        </div>
+        <div className="muted py-6 text-center text-[13px]">{d?.pc_alive === false ? 'пк офлайн — данных нет' : 'пока нет данных — включите учёт экранного времени'}</div>
+      </div>
+    )
   }
 
   const hours = Math.floor(d.active_min / 60)

@@ -697,9 +697,6 @@ export default function Today({ openChat, address = 'вовчик' }) {
           <h1 className="r" style={{ '--i': 0 }}>{greeting}, {ownerName}</h1>
           <p className="sub r" style={{ '--i': 1 }}>{daySubtitle}</p>
         </div>
-        <div className="hr r" style={{ '--i': 1 }}>
-          <PageAccent page="today" />
-        </div>
       </div>
 
       {/* Композер с печатной машинкой */}

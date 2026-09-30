@@ -89,7 +89,6 @@ export default function Mind() {
             <span className={tab === 'link' ? 'on' : ''} onClick={() => setTab('link')}>ссылки</span>
             <span className={tab === 'graph' ? 'on' : ''} onClick={() => setTab('graph')}>граф</span>
           </div>
-          <PageAccent page="mind" />
         </div>
       </div>
 

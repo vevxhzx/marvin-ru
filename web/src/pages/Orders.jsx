@@ -111,7 +111,6 @@ export default function Orders() {
         right={<>
           <Seg value={layout} onChange={setLayout} options={[['list', 'список'], ['board', 'канбан']]} />
           <Seg value={view} onChange={setView} options={VIEWS} />
-          <PageAccent page="orders" />
           <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button>
         </>} />
 
@@ -121,26 +120,24 @@ export default function Orders() {
         <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label="Добавить"><Plus size={16} /></button>
       </form>
 
-      {/* сводка: таймер + градиентные hero-плитки в одной bento-сетке */}
+      {/* сводка: смысловые плитки (лайм — деньги, янтарь — ожидание); пустые не показываем.
+          Помодоро живёт в сайдбаре и в шапке-таймере — на странице заказов не дублируем. */}
       <div className="bento" style={{ marginTop: 26 }}>
-        <section className="c s4 flex items-center" style={{ borderRadius: 26 }}>
-          <TimerCard timer={timer} left={left} onStart={() => start(null)} onStop={stop} onBreak={() => api.startTimer(timer?.order_id || null, null, 'break').then(load).catch(show.err)} />
-        </section>
-        <Tile span="s4" glow="color-mix(in srgb, var(--acc) 60%, transparent)" gradient="linear-gradient(135deg, var(--acc) 0%, var(--acc2) 100%)" ink="var(--accent-ink)" icon={<Play size={16} />}
+        <Tile span="s4" icon={<Play size={16} />}
           label="в работе" value={<Num value={openN} />}
           sub={overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : 'всё под контролем'} />
-        <Tile span="s4" glow="rgba(255,59,92,0.5)" gradient="linear-gradient(135deg,#ff3b5c 0%,#ff5f3b 55%,#ff9f0a 100%)" icon={<Wallet size={16} />}
+        <Tile span="s4" tone="warn" icon={<Wallet size={16} />}
           label="ждут оплаты" value={<Num value={unpaid} fmt={money} />} onClick={() => setView('unpaid')} tip={unpaid ? 'показать, кто не заплатил' : undefined}
           sub={unpaid ? 'нажмите, чтобы найти должников' : 'все рассчитались'} />
-        <Tile span="s4" glow="rgba(25,179,74,0.5)" gradient="linear-gradient(135deg,#19b34a 0%,#12b08a 55%,#10b3a3 100%)" icon={<TrendingUp size={16} />}
-          label="за этот месяц" value={stats ? <Num value={month} fmt={money} /> : '—'}
-          sub={prevMonth ? `прошлый · ${money(prevMonth.income)}` : 'первый месяц в работе'} />
-        <Tile span="s4" ink="#2a2470" glow="rgba(116,92,255,0.28)" gradient="linear-gradient(140deg,#eef0ff 0%,#ddd6ff 100%)" icon={<Clock size={16} />}
-          label="ставка в час" value={stats?.rate ? money(stats.rate) : '—'}
-          sub={stats?.total_hours ? `${hours(stats.total_hours)} по таймеру` : 'запускайте таймер по заказу'} />
-        <Tile span="s4" ink="#0f5a2b" glow="rgba(25,179,74,0.26)" gradient="linear-gradient(140deg,#e9f8ef 0%,#d2f1e6 100%)" icon={<Coins size={16} />}
-          label="средний чек" value={stats?.avg_check ? money(stats.avg_check) : '—'}
-          sub={stats?.avg_lead_days ? `~${stats.avg_lead_days} дн. на заказ` : 'по закрытым заказам'} />
+        {stats && <Tile span="s4" tone="ok" icon={<TrendingUp size={16} />}
+          label="за этот месяц" value={<Num value={month} fmt={money} />}
+          sub={prevMonth ? `прошлый · ${money(prevMonth.income)}` : 'первый месяц в работе'} />}
+        {stats?.rate ? <Tile span="s4" icon={<Clock size={16} />}
+          label="ставка в час" value={money(stats.rate)}
+          sub={stats.total_hours ? `${hours(stats.total_hours)} по таймеру` : 'по таймеру'} /> : null}
+        {stats?.avg_check ? <Tile span="s4" icon={<Coins size={16} />}
+          label="средний чек" value={money(stats.avg_check)}
+          sub={stats.avg_lead_days ? `~${stats.avg_lead_days} дн. на заказ` : 'по закрытым заказам'} /> : null}
       </div>
 
       {pulse?.enabled && (pulse.late?.length > 0 || pulse.tax?.tax_total > 0) && (
@@ -170,12 +167,12 @@ export default function Orders() {
 
       {!orders ? <ListSkeleton n={4} /> : layout === 'board' ? (
         <Section title="канбан" idx={list.length}
-          hint="перетаскивайте карточки между колонками или открывайте их с изменениями правок, оплат, чек-листа и ленты. На телефоне переключатель «список» удобнее.">
+          tip="перетаскивайте карточки между колонками или открывайте их с изменениями правок, оплат, чек-листа и ленты. На телефоне переключатель «список» удобнее.">
           <Board orders={list} timer={timer} onCard={openCard} onStage={setStage} onStart={start} />
         </Section>
       ) : (
         <Section title={VIEWS.find((v) => v[0] === view)[1]} idx={list.length}
-          hint="как закрыть заказ: кнопка со статусом справа в строке, либо раскройте заказ (стрелка) — там «сдан», оплата и удаление. На телефоне — свайп вправо: следующий статус, влево: удалить.">
+          tip="как закрыть заказ: кнопка со статусом справа в строке, либо раскройте заказ (стрелка) — там «сдан», оплата и удаление. На телефоне — свайп вправо: следующий статус, влево: удалить.">
           <div className="stagger space-y-2.5">
             {list.length === 0 && (
               view === 'open' ? <Empty glyph="tasks" text="Заказов в работе нет" sub="Как возьмёте — скажите мне, я запомню дедлайн и буду ждать оплату" hint="заказ: монтаж свадьбы для Иванова, 60к, до 30 сентября" />
@@ -202,8 +199,9 @@ export default function Orders() {
   )
 }
 
-/* Градиентная hero-плитка сводки: крупная цифра, мелкая подпись, мягкая цветная тень */
-function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.5)', icon, label, value, sub, onClick, tip }) {
+/* Плитка сводки. tone — смысловой тинт (.tint-ok/.tint-warn/…); без него — нейтральная
+   поверхность. Старый градиентный вид оставлен на случай явного gradient. */
+function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.5)', tone, icon, label, value, sub, onClick, tip }) {
   const inner = (
     <>
       {icon && <span className="pointer-events-none absolute right-5 top-5 opacity-70" aria-hidden>{icon}</span>}
@@ -212,10 +210,13 @@ function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.
       {sub && <div className="mt-2 max-w-[94%] text-[12.5px] leading-snug" style={{ opacity: 0.82 }}>{sub}</div>}
     </>
   )
-  const style = { background: gradient, color: ink, borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 18px 40px -22px ${glow}` }
+  const style = gradient
+    ? { background: gradient, color: ink, borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 18px 40px -22px ${glow}` }
+    : { borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible' }
+  const cls = `c ${span} relative block ${tone ? `tint-${tone}` : ''}`
   return onClick
-    ? <button type="button" onClick={onClick} data-tip={tip} className={`c ${span} relative block w-full text-left transition duration-300 hover:-translate-y-0.5`} style={style}>{inner}</button>
-    : <section className={`c ${span} relative block`} style={style}>{inner}</section>
+    ? <button type="button" onClick={onClick} data-tip={tip} className={`${cls} w-full text-left transition duration-300 hover:-translate-y-0.5`} style={style}>{inner}</button>
+    : <section className={cls} style={style}>{inner}</section>
 }
 
 function TimerCard({ timer, left, onStart, onStop, onBreak }) {

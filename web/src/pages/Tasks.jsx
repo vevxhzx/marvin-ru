@@ -137,7 +137,6 @@ export default function Tasks() {
             <>
               <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title="Переместить, спрятать или поменять ширину карточек">настроить</span>
               <span className="btn" onClick={() => setSheet('new')}>+ задача</span>
-              <PageAccent page="tasks" />
             </>
           )}
         </div>
@@ -226,14 +225,13 @@ export default function Tasks() {
                 )
               }
               return (
-                <section key="sort" className="c p1 s6 r" style={st}>{ctl}
+                <section key="sort" className="c p1 s4 r" style={st}>{ctl}
                   <div className="hd"><h2>сортировка</h2><small></small></div>
                   <div className="sg">
                     <span className={tasksSort === 'priority' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'priority' })}>по важности</span>
                     <span className={tasksSort === 'due' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'due' })}>по сроку</span>
                     <span className={tasksSort === 'new' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'new' })}>по новизне</span>
                   </div>
-                  <p style={{ marginTop: '18px', opacity: 0.8 }}>важное сверху, просроченное подсвечивается</p>
                 </section>
               )
             })}
