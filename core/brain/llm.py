@@ -611,7 +611,9 @@ def reload_cloud_settings() -> str:
     _vc = getattr(_c.cfg.brain, "vision", None)
     VISION_WHERE = str(getattr(_vc, "where", "auto") or "auto").lower()
     VISION_WHERE = VISION_WHERE if VISION_WHERE in ("auto", "cloud", "local") else "auto"
-    VISION_CLOUD_OK = bool(getattr(_vc, "allow_cloud", True))
+    # ФАЗА 6: по умолчанию в облако картинки НЕ уходят — нужен явный brain.vision.allow_cloud: true
+    # (дефолт совпадает с описанием настройки в core/config.py; старые config.yaml с allow_cloud: true не затронуты)
+    VISION_CLOUD_OK = bool(getattr(_vc, "allow_cloud", False))
     _VISION_LOCAL_OK = None
     _CLOUD_RESOLVED = None
     _CLOUD_ROUTE_OK = None
@@ -1117,7 +1119,8 @@ VISION_MODEL = str(getattr(cfg.brain.ollama, "vision_model", "") or "")         
 if not VISION_MODEL and re.search(r"qwen3\.5|qwen3\.6|gemma3|gemma4|llava|minicpm-v|qwen2\.5vl|moondream|llama3\.2-vision", OLLAMA_MODEL, re.I):
     VISION_MODEL = OLLAMA_MODEL    # основная модель сама видит картинки — отдельная не нужна
 _vision_cfg = getattr(cfg.brain, "vision", None)
-VISION_CLOUD_OK = bool(getattr(_vision_cfg, "allow_cloud", True))                  # можно ли слать картинку в облако
+# ФАЗА 6: дефолт False — без явного allow_cloud: true скриншот/фото в облако не уходит (совпадает с core/config.py)
+VISION_CLOUD_OK = bool(getattr(_vision_cfg, "allow_cloud", False))                  # можно ли слать картинку в облако
 # где смотреть картинки: auto — локально, а если нет/не отвечает → облако; cloud — всегда облако (быстро, но фото уходят наружу); local — только ПК
 VISION_WHERE = str(getattr(_vision_cfg, "where", "auto") or "auto").lower()
 if VISION_WHERE not in ("auto", "cloud", "local"):
