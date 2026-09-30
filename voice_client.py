@@ -724,14 +724,24 @@ def main() -> None:
             set_state("thinking")
             text = ""
             t0 = time.time()
-            if pcm is not None and len(pcm) >= SR * 0.4:
+            used_pcm = pcm is not None and len(pcm) >= SR * 0.4
+            if used_pcm:
                 text = stt.transcribe_pcm(pcm)
-                log.info("Услышал (%.1f с): %r", time.time() - t0, text)
+                log.info("Услышал (%.1f с, уверенность %.2f, шум %.2f): %r", time.time() - t0, stt.LAST_CONFIDENCE, stt.LAST_NO_SPEECH, text)
             if not text and tail:
                 text = tail
+                used_pcm = False
             if not text:
                 set_state("idle")
                 _beep(440, 120)
+                continue
+            # мусорную расшифровку в мозг НЕ отправляем: выполняем только то, что расслышали уверенно
+            if used_pcm and stt.looks_unsure():
+                log.info("Низкая уверенность (%.2f / шум %.2f) — переспрашиваю, команду не выполняю", stt.LAST_CONFIDENCE, stt.LAST_NO_SPEECH)
+                sp = _Speaker(); sp.start()
+                sp.say(("Расслышал так себе: " + text[:120] + ". Повторите, пожалуйста.") if text else "Не разобрал, повторите.")
+                sp.finish()
+                set_state("idle")
                 continue
 
             from core.brain.agent import normalize_spoken

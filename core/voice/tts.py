@@ -22,7 +22,7 @@ _TTS = getattr(_VOICE, "tts", None)
 ENGINE = str(getattr(_TTS, "engine", "silero") or "silero")          # silero / edge / off
 SPEAKER = str(getattr(_TTS, "speaker", "eugene") or "eugene")        # silero: aidar, baya, kseniya, xenia, eugene
 EDGE_VOICE = str(getattr(_TTS, "edge_voice", "ru-RU-DmitryNeural") or "ru-RU-DmitryNeural")
-REPLY_VOICE = str(getattr(_TTS, "reply_in_telegram", "never") or "never")  # never — только текст (по умолчанию); voice — голосом на голосовые; always
+REPLY_VOICE = str(getattr(_TTS, "reply_in_telegram", "voice") or "voice")  # never — только текст · voice — голосом на голосовые (по умолчанию) · always — на всё
 
 MODEL_URL = "https://models.silero.ai/models/tts/ru/v4_ru.pt"
 MODEL_PATH = DATA_DIR / "models" / "v4_ru.pt"
@@ -267,8 +267,28 @@ def enabled() -> bool:
     return ENGINE != "off"
 
 
+CACHE_DIR = DATA_DIR / "voice_cache"   # одинаковые фразы («готово», приветствие, напоминания) не синтезируем дважды
+CACHE_KEEP = 400                        # последние N файлов; старые чистим, чтобы папка не росла бесконечно
+
+
+def _cache_path(spoken: str, suffix: str) -> Path:
+    import hashlib
+    key = f"{ENGINE}|{SPEAKER}|{EDGE_VOICE}|{SAMPLE_RATE}|{suffix}|{spoken}".encode("utf-8")
+    return CACHE_DIR / (hashlib.sha1(key).hexdigest()[:20] + (suffix or ".ogg"))
+
+
+def _cache_prune() -> None:
+    try:
+        files = sorted(CACHE_DIR.glob("*"), key=lambda p: p.stat().st_mtime, reverse=True)
+        for old in files[CACHE_KEEP:]:
+            old.unlink(missing_ok=True)
+    except Exception:  # pragma: no cover
+        pass
+
+
 async def speak_to_file(text: str, path: str | Path) -> Path | None:
-    """Озвучить текст в файл (.ogg для Telegram, .wav/.mp3 для ПК). None — не вышло (причина в LAST_ERROR)."""
+    """Озвучить текст в файл (.ogg для Telegram, .wav/.mp3 для ПК). None — не вышло (причина в LAST_ERROR).
+    Одинаковые фразы берутся из кэша data/voice_cache — озвучка типовых ответов мгновенная и без сети."""
     global LAST_ERROR
     if not enabled():
         return None
@@ -277,18 +297,39 @@ async def speak_to_file(text: str, path: str | Path) -> Path | None:
     spoken = prepare(text)
     if not spoken:
         return None
+    cached = _cache_path(spoken, path.suffix or ".ogg")
+    if cached.exists() and cached.stat().st_size > 0:
+        try:
+            import shutil
+            shutil.copyfile(cached, path)   # копию отдаём вызывающему: он вправе её удалить, кэш остаётся
+            return path
+        except Exception as e:  # pragma: no cover
+            log.debug("tts cache read: %s", e)
     order = ["silero", "edge"] if ENGINE == "silero" else ["edge", "silero"]
+    result = None
     for eng in order:
         try:
             if eng == "silero":
                 if not silero_available():
                     continue
-                return await asyncio.to_thread(_silero_to_file, spoken, path)
-            return await _edge_to_file(spoken, path)
+                result = await asyncio.to_thread(_silero_to_file, spoken, path)
+            else:
+                result = await _edge_to_file(spoken, path)
+            break
         except Exception as e:
             LAST_ERROR = f"{eng}: {e}"
             log.warning("TTS %s не сработал: %s", eng, e)
-    return None
+    if not result:
+        return None
+    try:
+        if not cached.exists() or cached.stat().st_size == 0:
+            CACHE_DIR.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copyfile(path, cached)
+            _cache_prune()
+    except Exception as e:  # pragma: no cover
+        log.debug("tts cache write: %s", e)
+    return result
 
 
 def warmup() -> None:

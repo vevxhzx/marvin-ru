@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime
 import logging
+import time
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.enums import ChatAction, ParseMode
@@ -20,6 +21,31 @@ router = Router()
 OWNER_ID = int(cfg.telegram.owner_id)
 from ..config import DATA_DIR
 VOICE_DIR = DATA_DIR / "voice_tmp"
+
+# Незавершённые голосовые: расшифровка, которую ждём подтвердить («Верно»). И защита от повторной доставки апдейта.
+_VOICE_PENDING: dict[int, str] = {}
+_VOICE_SEEN: dict[int, float] = {}
+
+
+def _once(m: Message) -> bool:
+    """True — обрабатываем впервые. Telegram иногда доставляет апдейт дважды (после рестарта/сети) —
+    во второй раз молчим, чтобы не выполнить команду и не списать деньги дважды."""
+    now = time.time()
+    if m.message_id in _VOICE_SEEN and now - _VOICE_SEEN[m.message_id] < 180:
+        return False
+    _VOICE_SEEN[m.message_id] = now
+    for k in [k for k, v in _VOICE_SEEN.items() if now - v > 600]:
+        _VOICE_SEEN.pop(k, None)
+    return True
+
+
+def _voice_kb():
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Верно", callback_data="vc:ok"),
+        InlineKeyboardButton(text="🔁 Повторить", callback_data="vc:again"),
+        InlineKeyboardButton(text="✏️ Исправить", callback_data="vc:fix"),
+    ]])
 
 
 def _mine(m: Message) -> bool:
@@ -295,10 +321,13 @@ def _record_error(text: str) -> None:
 
 @router.message(F.voice | F.audio | F.video_note)
 async def voice_msg(m: Message):
-    """Голосовое → Whisper (локально) → тот же agent.handle → ответ текстом и голосом."""
+    """Голосовое → Whisper (локально) → agent.handle → ответ текстом и голосом.
+    Если уверенность низкая — показываем расшифровку и спрашиваем: Верно / Повторить / Исправить."""
     from core.voice import stt, tts
     if not stt.available():
         await m.answer("Распознавание голосовых не установлено — запустите install_voice.bat, сэр.")
+        return
+    if not _once(m):
         return
     typing = asyncio.create_task(_keep_typing(m))
     tmp = None
@@ -307,22 +336,23 @@ async def voice_msg(m: Message):
         VOICE_DIR.mkdir(parents=True, exist_ok=True)
         tmp = VOICE_DIR / f"in_{m.message_id}.ogg"
         await m.bot.download(media, destination=tmp)
-        text = await asyncio.wait_for(stt.transcribe(tmp), timeout=120)
-        if not text:
-            typing.cancel()
-            await m.answer("Не разобрал ни слова, сэр. Ближе к микрофону или текстом.")
-            return
-        log.info("← tg voice: %r", text[:80])
-        r = await asyncio.wait_for(agent.handle(text, channel="tg-voice"), timeout=HANDLE_TIMEOUT)
+        res = await asyncio.wait_for(stt.transcribe_detailed(tmp), timeout=120)
+        text = (res.get("text") or "").strip()
         typing.cancel()
-        unsure = " <i>(расслышал так себе — если не то, повторите чётче или текстом)</i>" if stt.LAST_CONFIDENCE < 0.45 else ""
-        # сверху — расшифровка ЦЕЛИКОМ (сворачиваемой цитатой: длинная показывается первыми строками и «развернуть»),
-        # снизу — ответ; одно сообщение. Раньше резали до 140 символов — казалось, что услышал только начало.
-        shown = text if len(text) <= 3000 else text[:2997].rstrip() + "…"   # лимит одного сообщения Telegram — 4096
-        quote = f"<blockquote expandable>🎙 {_html.escape(shown)}</blockquote>" if len(shown) > 140 else f"<blockquote>🎙 {_html.escape(shown)}</blockquote>"
-        await send_long(m, f"{quote}{unsure}\n\n{r.text or '…'}", raw_prefix=True)
-        if tts.enabled() and tts.REPLY_VOICE in ("voice", "always"):
-            await _reply_voice(m, r.text)
+        if not text:
+            await m.answer("Не разобрал ни слова, сэр. Ближе к микрофону или текстом.",
+                           reply_markup=_kb([("🎙 повторить", "vc:again")]))
+            return
+        log.info("← tg voice: %r (conf %.2f, no_speech %.2f, via %s)", text[:80],
+                 res.get("confidence", 0), res.get("no_speech", 0), res.get("via"))
+        if stt.looks_unsure(res.get("confidence"), res.get("no_speech")):
+            # Мусорную расшифровку в LLM НЕ отправляем: сначала подтверждение от человека.
+            _VOICE_PENDING[m.chat.id] = text
+            shown = text if len(text) <= 2800 else text[:2797].rstrip() + "…"
+            await m.answer(f"🎙 Расслышал так — <b>так себе</b>:\n<blockquote>{_html.escape(shown)}</blockquote>\n\nВерно понял?",
+                           reply_markup=_voice_kb())
+            return
+        await _run_voice_command(m, text)
     except asyncio.TimeoutError:
         typing.cancel()
         await m.answer("Слишком долго думал над голосовым, сэр. Попробуйте ещё раз или текстом.")
@@ -338,6 +368,53 @@ async def voice_msg(m: Message):
                 tmp.unlink(missing_ok=True)
             except Exception:
                 pass
+
+
+async def _run_voice_command(m: Message, text: str) -> None:
+    """Выполнить распознанную команду и ответить: сверху расшифровка цитатой, снизу ответ; голосом — по настройке."""
+    from core.voice import tts
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        r = await asyncio.wait_for(agent.handle(text, channel="tg-voice"), timeout=HANDLE_TIMEOUT)
+    finally:
+        typing.cancel()
+    # сверху — расшифровка ЦЕЛИКОМ (сворачиваемой цитатой), снизу — ответ; одно сообщение.
+    shown = text if len(text) <= 3000 else text[:2997].rstrip() + "…"   # лимит одного сообщения Telegram — 4096
+    quote = f"<blockquote expandable>🎙 {_html.escape(shown)}</blockquote>" if len(shown) > 140 else f"<blockquote>🎙 {_html.escape(shown)}</blockquote>"
+    await send_long(m, f"{quote}\n\n{r.text or '…'}", raw_prefix=True)
+    if tts.enabled() and tts.REPLY_VOICE in ("voice", "always"):
+        await _reply_voice(m, r.text)
+
+
+@router.callback_query(F.from_user.id == OWNER_ID, F.data.regexp(r"^vc:(ok|again|fix)$"))
+async def cb_voice_confirm(cq: CallbackQuery):
+    """Подтверждение расшифровки: Верно — выполняем; Повторить — ждём новое голосовое; Исправить — текстом."""
+    act = cq.data.split(":")[1]
+    chat = cq.message.chat.id
+    text = _VOICE_PENDING.pop(chat, None)
+    if act == "again":
+        await cq.answer("Жду голосовое")
+        await _drop_kb(cq, "🎙 Хорошо — запишите ещё раз, я слушаю.")
+        return
+    if act == "fix":
+        await cq.answer("Напишите текстом")
+        await _drop_kb(cq, "✏️ Напишите, что имели в виду, обычным сообщением — выполню.")
+        return
+    await cq.answer("Ок, выполняю")
+    await _drop_kb(cq, f"🎙 {text}" if text else "Уже не помню эту фразу — повторите, пожалуйста.")
+    if text:
+        await _run_voice_command(cq.message, text)
+
+
+async def _drop_kb(cq: CallbackQuery, note: str) -> None:
+    """Убрать кнопки у сообщения и оставить итог (если редактировать нельзя — просто новое сообщение)."""
+    try:
+        await cq.message.edit_text(note, reply_markup=None)
+    except Exception:
+        try:
+            await cq.message.answer(note)
+        except Exception:  # pragma: no cover
+            pass
 
 
 async def _reply_voice(m: Message, text: str) -> None:
