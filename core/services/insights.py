@@ -14,6 +14,7 @@ from sqlmodel import select
 from ..db import Memory, Note, Task, Transaction, get_setting, session, set_setting
 from . import calendar, finance
 from .finance import money
+from .plural import days as _days_word
 
 log = logging.getLogger("jarvis.insights")
 
@@ -22,8 +23,7 @@ log = logging.getLogger("jarvis.insights")
 def cash_forecast(days: int = 30) -> dict:
     """Баланс по дням на N дней вперёд: регулярные платежи/доходы + средние переменные траты в день."""
     now = datetime.now()
-    accounts = finance.list_accounts()
-    balance = sum(a.balance for a in accounts if a.kind != "debt_only")
+    balance = finance.total_balance()
     rec = finance.list_recurring()
     # средние переменные траты в день за 30 дней (без авто и долгов)
     txs = [t for t in finance.list_transactions(30, 100_000) if t.kind == "expense" and "(авто)" not in (t.note or "") and t.category != "Долги"]
@@ -78,7 +78,7 @@ def cash_forecast_text() -> str:
     f = cash_forecast(30)
     parts = [f"Сейчас **{money(f['points'][0]['balance'])}**, тратите в среднем **{money(f['per_day'])}** в день."]
     if f["days_to_income"] is not None:
-        parts.append(f"До ближайшего дохода {f['days_to_income']} дн. — безопасно тратить до **{money(f['safe_per_day'])}** в день.")
+        parts.append(f"До ближайшего дохода {f['days_to_income']} {_days_word(f['days_to_income'])} — безопасно тратить до **{money(f['safe_per_day'])}** в день.")
     if f.get("expected_income"):
         parts.append(f"Плюс по заказам ожидается **{money(f['expected_income'])}**" + (f" уже за вычетом налога ~{money(f['expected_tax'])}" if f.get("expected_tax") else "") + " (учтено в прогнозе).")
     if not f["ok"]:

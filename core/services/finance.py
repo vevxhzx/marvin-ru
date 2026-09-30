@@ -165,8 +165,7 @@ def safe_to_spend() -> dict:
     else:
         next_income = (now.replace(day=1) + relativedelta(months=1))
     days_left = max(1, (next_income.date() - now.date()).days)
-    accounts = list_accounts()
-    balance = sum(a.balance for a in accounts if a.kind != "debt_only")
+    balance = total_balance()
     # обязательные платежи до зарплаты: регулярные расходы (в т.ч. по долгам), чья дата раньше зарплаты
     upcoming = [r for r in rec if r.kind == "expense" and r.next_date < next_income]
     reserved = sum(r.amount for r in upcoming)
@@ -195,6 +194,15 @@ def main_account_name() -> str:
 def list_accounts() -> list[Account]:
     with session() as s:
         return list(s.exec(select(Account)))
+
+
+def total_balance() -> float:
+    """Единый источник «баланса»: сумма по всем счетам, кроме чисто долговых.
+
+    Главная и «финансы» обязаны показывать одно и то же число — любое место,
+    где нужен баланс, должно звать эту функцию, а не суммировать счета заново.
+    """
+    return sum(a.balance for a in list_accounts() if a.kind != "debt_only")
 
 
 def set_balance(name: str, balance: float) -> Account:
@@ -500,7 +508,7 @@ def summary(days: int = 30) -> dict:
     by_cat = dict(sorted(by_cat.items(), key=lambda kv: -kv[1]))
     accounts = list_accounts()
     debts = list_debts()
-    balance = sum(a.balance for a in accounts if a.kind != "debt_only")
+    balance = total_balance()
 
     # Столбики для главной («траты» по дням недели и по дням месяца) — из реальных
     # операций текущего календарного месяца. Раньше этих полей в сводке не было и

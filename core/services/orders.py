@@ -16,6 +16,7 @@ from sqlmodel import select
 from ..db import Client, Order, Transaction, WorkSession, log_action, now, remember, session
 from . import finance
 from .finance import money
+from .plural import days as _days_word
 from .match import same
 
 log = logging.getLogger("jarvis.orders")
@@ -263,8 +264,9 @@ def order_view(o: Order, clients: dict[int, str] | None = None) -> dict:
     paid = paid_for(o.id)
     hours = hours_for(o.id)
     d = o.model_dump()
-    # закрытый заказ ничего не «ждёт», даже если оплату не записывали (старый заказ закрыт статусом вручную)
-    left = 0.0 if o.status in ("paid", "cancelled") else max(0.0, o.price - paid)
+    # закрытый заказ ничего не «ждёт», даже если оплату не записывали (старый заказ закрыт статусом вручную).
+    # paid_at — отметка «деньги получены»: такой заказ тоже не должен висеть в «ждут оплаты».
+    left = 0.0 if (o.status in ("paid", "cancelled") or o.paid_at) else max(0.0, o.price - paid)
     d.update({"client": clients.get(o.client_id), "paid": paid, "left": left, "hours": hours,
               "rate": round(o.price / hours) if hours >= 0.25 and o.price else None,
               "status_label": STATUS_LABEL.get(o.status, o.status),
@@ -291,6 +293,17 @@ def list_orders(status: str | None = None, include_closed: bool = False, limit: 
     # открытые — по дедлайну (без дедлайна в конец), закрытые — по дате
     out.sort(key=lambda d: (d["status"] not in OPEN, d["deadline"] or datetime.max, -(d["id"])))
     return out
+
+
+def unpaid_total(include_new: bool = False) -> float:
+    """Единый источник «ждут оплаты»: остаток по незакрытым заказам.
+
+    include_new=False — «обсуждение» ещё не заработано и в ожидание оплаты не входит
+    (так считают главная и страница заказов). include_new=True — для статистики, где
+    показывали все незакрытые.
+    """
+    statuses = UNPAID if include_new else ("work", "review", "done")
+    return sum(d["left"] for d in list_orders(include_closed=False) if d["status"] in statuses)
 
 
 def expected_income(days: int = 30) -> list[dict]:
@@ -548,7 +561,7 @@ def stats(months: int = 6) -> dict:
         if o.status in OPEN:
             b["open"] += 1
         if o.status in UNPAID:
-            b["unpaid"] += max(0.0, o.price - paid_all)
+            b["unpaid"] += 0.0 if o.paid_at else max(0.0, o.price - paid_all)
     top = sorted(by_client.values(), key=lambda b: -b["paid"])
     for b in top:
         b["rate"] = round(b["_paid_period"] / b["hours"]) if b["hours"] >= 1 else None
@@ -564,7 +577,7 @@ def stats(months: int = 6) -> dict:
             "rate": round(total_paid / total_h) if total_h >= 1 else None,
             "avg_check": round(sum(o.price for o in done) / len(done)) if done else None,
             "avg_lead_days": round(sum(lead) / len(lead), 1) if lead else None,
-            "open": len(open_orders), "unpaid": round(sum(max(0.0, o.price - paid_for(o.id)) for o in orders if o.status in UNPAID)),
+            "open": len(open_orders), "unpaid": round(unpaid_total(include_new=True)),
             "week_load_h": round(sum(_session_min(w) for w in sessions if w.started_at >= nowd - timedelta(days=7)) / 60, 1),
             "focus_days": _focus_days(sessions, 14)}
 
@@ -604,7 +617,7 @@ def summary_text() -> str:
     for d in rows[:8]:
         dl = ""
         if d["deadline"]:
-            dl = " · 🔴 просрочен" if d["overdue"] else f" · срок был {d['deadline']:%d.%m}" if d["past_due"] else f" · до {d['deadline']:%d.%m}" + (f" ({d['days_left']} дн.)" if d["days_left"] is not None and 0 < d["days_left"] <= 7 else " (сегодня)" if d["days_left"] == 0 else "")
+            dl = " · 🔴 просрочен" if d["overdue"] else f" · срок был {d['deadline']:%d.%m}" if d["past_due"] else f" · до {d['deadline']:%d.%m}" + (f" ({d['days_left']} {_days_word(d['days_left'])})" if d["days_left"] is not None and 0 < d["days_left"] <= 7 else " (сегодня)" if d["days_left"] == 0 else "")
         pay = f" · осталось {money(d['left'])}" if d["left"] and d["paid"] else f" · {money(d['price'])}" if d["price"] else ""
         lines.append(f"• #{d['id']} {d['title']}{' — ' + d['client'] if d['client'] else ''} · {d['status_label']}{pay}{dl}" + (f" · {d['hours']} ч" if d["hours"] else ""))
     from . import pulse

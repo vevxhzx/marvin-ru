@@ -463,7 +463,7 @@ async def dashboard():
         "pc": {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE},
         "timer": orders.timer_state(),
         "orders": {"open": [o for o in orders.list_orders() if o["status"] in ("new", "work", "review")][:5],
-                   "unpaid": sum(o["left"] for o in orders.list_orders() if o["status"] not in ("new", "paid", "cancelled")),
+                   "unpaid": orders.unpaid_total(),
                    "expected": orders.expected_income(30),
                    "late": pulse.late_payments()[:3] if fl["enabled"] and fl["late_nudge"] else []},
         "freelance": fl["enabled"],
@@ -946,7 +946,7 @@ def fin_forecast(days: int = 30):
     совпадает с тем, что ждёт фронтенд, — иначе график молча показывал бы пустоту."""
     horizon = max(7, min(int(days or 30), 365))
     hist = max(30, min(horizon, 90))
-    balance = sum(a.balance for a in finance.list_accounts() if a.kind != "debt_only")
+    balance = finance.total_balance()
     today = datetime.now().date()
 
     txs = [t for t in finance.list_transactions(hist + 1, 100_000) if t.date]

@@ -261,7 +261,7 @@ def annual_reserve() -> dict:
 def payment_check(days: int = 7) -> dict:
     """Ближайшие обязательные платежи против того, что есть на счетах (без конвертов и долговых счетов)."""
     now = datetime.now()
-    balance = sum(a.balance for a in finance.list_accounts() if a.kind != "debt_only")
+    balance = finance.total_balance()
     upcoming = [r for r in finance.upcoming_payments(days) if r.kind == "expense"]
     need = sum(r.amount for r in upcoming)
     incomes = [r for r in finance.list_recurring() if r.kind == "income" and r.next_date <= now + timedelta(days=days)]
