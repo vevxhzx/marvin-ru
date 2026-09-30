@@ -982,7 +982,9 @@ def fin_forecast(days: int = 30):
     runway = next((i + 1 for i, p in enumerate(fut) if p["balance"] <= 0), None)
     return {"points": points, "horizon_days": horizon, "avg_day_spent": round(spent / hist),
             "avg_day_income": round(income / hist), "runway_days": runway, "min_balance": round(low),
-            "min_date": low_date, "balance": round(balance)}
+            "min_date": low_date, "balance": round(balance),
+            # реалистичный/пессимистичный сценарии (ожидаемые оплаты заказов) — только добавление
+            "scenarios": fc.get("scenarios")}
 
 
 @app.get("/api/finance/transactions")

@@ -340,6 +340,13 @@ export default function Finance() {
                     <span>минимум {money(forecast.min_balance)} · {forecast.min_date?.slice(8, 10)}.{forecast.min_date?.slice(5, 7)}</span>
                   )}
                 </div>
+                {forecast?.scenarios?.realistic && forecast?.scenarios?.pessimistic
+                  && forecast.scenarios.realistic.low !== forecast.scenarios.pessimistic.low && (
+                  <div className="muted mt-1 text-[12px]">
+                    сценарии: реалистично минимум <b className="num">{money(forecast.scenarios.realistic.low)}</b>
+                    {' · '}пессимистично (оплаты позже ~{forecast.scenarios.pessimistic.delay_days ?? 0} дн) <b className={`num ${forecast.scenarios.pessimistic.ok ? '' : 'neg'}`}>{money(forecast.scenarios.pessimistic.low)}</b>
+                  </div>
+                )}
               </section>
             )
             if (id === 'income') return (
