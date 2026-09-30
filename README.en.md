@@ -130,19 +130,21 @@ Details and the security breakdown — [docs/telegram-miniapp.md](docs/telegram-
 
 ## Docs and the rest
 
-- Install: Windows, Docker, voice, phone, Google Calendar — [docs/install.md](docs/install.md) (Russian)
-- What it can do in detail, all commands by area — [docs/features.md](docs/features.md) (Russian)
+- Install: Windows, Linux/macOS, Docker, voice, phone — [docs/INSTALL.md](docs/INSTALL.md) (Russian)
+- What it can do in detail — [docs/features.md](docs/features.md); all commands by area — [docs/COMMANDS.md](docs/COMMANDS.md) (Russian)
+- Settings and the example config — [docs/CONFIGURATION.md](docs/CONFIGURATION.md) · [config.example.yaml](config.example.yaml)
+- Privacy: what leaves your machine and what never does — [docs/PRIVACY.md](docs/PRIVACY.md) (Russian)
+- Voice on the PC — [docs/VOICE.md](docs/VOICE.md) (Russian)
+- The UI: sections, gestures, hotkeys — [docs/UI.md](docs/UI.md) (Russian)
 - The brain: modes, models for your GPU, cloud providers — [docs/brain.md](docs/brain.md) · [docs/small-model.md](docs/small-model.md) (Russian)
-- Settings and the example config — [config.example.yaml](config.example.yaml)
-- Security and public access: mini app, Tailscale Funnel — [docs/telegram-miniapp.md](docs/telegram-miniapp.md) · [ARCHITECTURE.md](ARCHITECTURE.md) (Russian)
-- Voice on the PC — [docs/install.md](docs/install.md) (the "Voice on the PC" section) · [docs/features.md](docs/features.md)
-- Website: sections, gestures, hotkeys — [docs/site.md](docs/site.md) (Russian)
-- A second assistant for someone close — [docs/second-assistant.md](docs/second-assistant.md) · [docs/for-family.md](docs/for-family.md) (Russian)
+- How it works inside (with a diagram) — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) (Russian)
+- Public access: mini app, Tailscale Funnel — [docs/telegram-miniapp.md](docs/telegram-miniapp.md) (Russian)
+- A second assistant for someone close — [docs/second-copy.md](docs/second-copy.md) (Russian)
 - If something breaks — [docs/troubleshooting.md](docs/troubleshooting.md) (Russian)
-- Development and structure — [docs/development.md](docs/development.md) · [ARCHITECTURE.md](ARCHITECTURE.md)
-- What's next — [ROADMAP.md](ROADMAP.md) · change history — [CHANGELOG.md](CHANGELOG.md)
+- Development and structure — [docs/development.md](docs/development.md) (Russian)
+- What's next — [docs/ROADMAP.md](docs/ROADMAP.md) · change history — [CHANGELOG.md](CHANGELOG.md)
 
-Want to fix or add something? Send a pull request — new phrase templates (the offline, no-neural-network commands) with tests are especially welcome. Handy dev notes are in [docs/development.md](docs/development.md).
+Want to fix or add something? Send a pull request — new phrase templates (the offline, no-neural-network commands) with tests are especially welcome. How everything fits together and how to contribute — [CONTRIBUTING.md](CONTRIBUTING.md); security — [SECURITY.md](SECURITY.md).
 
 License — [Apache 2.0](LICENSE): take it, change it, use it anywhere, but keep the attribution (the [NOTICE](NOTICE) file) and mark what exactly you changed.
 

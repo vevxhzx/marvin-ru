@@ -130,19 +130,21 @@ Linux / macOS: `./install.sh`, затем `./start.sh` (на macOS есть `.co
 
 ## Документация и всё остальное
 
-- Установка: Windows, Docker, голос, телефон, Google Календарь — [docs/install.md](docs/install.md)
-- Что умеет подробно, все команды по областям — [docs/features.md](docs/features.md)
+- Установка: Windows, Linux/macOS, Docker, голос, телефон — [docs/INSTALL.md](docs/INSTALL.md)
+- Настройки и пример конфига — [docs/CONFIGURATION.md](docs/CONFIGURATION.md) · [config.example.yaml](config.example.yaml)
+- Что умеет подробно — [docs/features.md](docs/features.md); все команды по областям — [docs/COMMANDS.md](docs/COMMANDS.md)
+- Приватность: что уходит в облако, а что нет — [docs/PRIVACY.md](docs/PRIVACY.md)
+- Голос на ПК — [docs/VOICE.md](docs/VOICE.md)
+- Интерфейс: разделы, жесты, горячие клавиши — [docs/UI.md](docs/UI.md)
 - Мозг: режимы, модели под видеокарту, облачные провайдеры — [docs/brain.md](docs/brain.md) · [docs/small-model.md](docs/small-model.md)
-- Настройки и пример конфига — [config.example.yaml](config.example.yaml)
-- Безопасность и публичный доступ: Mini App, Tailscale Funnel — [docs/telegram-miniapp.md](docs/telegram-miniapp.md) · [ARCHITECTURE.md](ARCHITECTURE.md)
-- Голос на ПК — [docs/install.md](docs/install.md) (раздел «Голос на ПК») · [docs/features.md](docs/features.md)
-- Сайт: разделы, жесты, горячие клавиши — [docs/site.md](docs/site.md)
-- Второй ассистент для близкого человека — [docs/second-assistant.md](docs/second-assistant.md) · [docs/for-family.md](docs/for-family.md)
+- Как всё устроено внутри (со схемой) — [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Публичный доступ: Mini App, Tailscale Funnel — [docs/telegram-miniapp.md](docs/telegram-miniapp.md)
+- Второй ассистент для близкого человека — [docs/second-copy.md](docs/second-copy.md)
 - Если что-то не так — [docs/troubleshooting.md](docs/troubleshooting.md)
-- Разработка и структура — [docs/development.md](docs/development.md) · [ARCHITECTURE.md](ARCHITECTURE.md)
-- Что дальше — [ROADMAP.md](ROADMAP.md) · история изменений — [CHANGELOG.md](CHANGELOG.md)
+- Разработка и структура — [docs/development.md](docs/development.md)
+- Что дальше — [docs/ROADMAP.md](docs/ROADMAP.md) · история изменений — [CHANGELOG.md](CHANGELOG.md)
 
-Хочешь что-то поправить или добавить — присылай pull request: особенно приветствуются новые фразы-шаблоны (команды без нейросети) с тестами. Полезное для разработки — в [docs/development.md](docs/development.md).
+Хочешь что-то поправить или добавить — присылай pull request: особенно приветствуются новые фразы-шаблоны (команды без нейросети) с тестами. Как всё устроено и как контрибьютить — [CONTRIBUTING.md](CONTRIBUTING.md), про безопасность — [SECURITY.md](SECURITY.md).
 
 Лицензия — [Apache 2.0](LICENSE): бери, меняй, используй где угодно, но сохраняй авторство (файл [NOTICE](NOTICE)) и помечай, что именно поменял.
 
