@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import Graph from '../components/Graph'
-import { api, relTime, plural } from '../lib/api'
+import { api, relTime, plural, listOf } from '../lib/api'
 import { useToast, PageAccent, Empty, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
@@ -148,7 +148,7 @@ export default function Mind() {
               <p>{it.text || it.summary || it.body || it.url}</p>
               <div className="tg">
                 <small>{relTime(it.created_at)}</small>
-                {it.tags?.map((t) => <span key={t}>#{t}</span>)}
+                {listOf(it.tags).map((t) => <span key={t}>#{t}</span>)}
               </div>
             </section>
           ))}

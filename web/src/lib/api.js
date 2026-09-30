@@ -248,6 +248,13 @@ export const relTime = (s) => {
 }
 export const plural = (n, one, few, many) => { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many }
 
+// Теги из API приходят строкой ("а,б") — приводим к массиву, чтобы .map не падал.
+export const listOf = (v) => {
+  if (Array.isArray(v)) return v
+  if (typeof v === 'string') return v.split(',').map((s) => s.trim().replace(/^#/, '')).filter(Boolean)
+  return []
+}
+
 export const parseNum = (v) => {
   if (v === '' || v == null) return NaN
   const n = Number(String(v).replace(/\s|\u00a0/g, '').replace(',', '.'))

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Users } from 'lucide-react'
-import { api, money, plural } from '../lib/api'
+import { api, money, plural, listOf } from '../lib/api'
 import { Sheet, Field, Empty, useToast, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
@@ -27,7 +27,7 @@ export default function People() {
     const s = q.trim().toLowerCase()
     return (list || [])
       .filter((p) => tab === 'all' || p.kind === tab)
-      .filter((p) => !s || [p.name, p.aliases, p.contact, ...(p.tags || [])].join(' ').toLowerCase().includes(s))
+      .filter((p) => !s || [p.name, p.aliases, p.contact, ...listOf(p.tags)].join(' ').toLowerCase().includes(s))
       .sort((a, b) => (b.open - a.open) || (b.unpaid - a.unpaid) || a.name.localeCompare(b.name, 'ru'))
   }, [list, q, tab])
 
@@ -86,7 +86,7 @@ export default function People() {
               <span className="av2">{initials(p.name)}</span>
               <div>
                 <b>{p.name}</b>
-                <p>{p.aliases ? (p.aliases.startsWith('она') || p.aliases.startsWith('он') ? p.aliases : `также ${p.aliases}`) : (p.tags?.map((t) => `#${t}`).join(' ') || '')}</p>
+                <p>{p.aliases ? (p.aliases.startsWith('она') || p.aliases.startsWith('он') ? p.aliases : `также ${p.aliases}`) : (listOf(p.tags).map((t) => `#${t}`).join(' ') || '')}</p>
               </div>
               <small>{kindLabel(p)}</small>
             </div>
