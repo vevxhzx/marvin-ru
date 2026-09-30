@@ -764,6 +764,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
     if CLOUD_PROVIDER == "openrouter":
         headers["HTTP-Referer"] = "https://github.com/local-assistant"; headers["X-Title"] = "Local Assistant"
     model = _force_model or await resolve_cloud_model()
+    _t0 = time.monotonic()
     main_model = model
     if short_mode.get() and not _force_model and model not in _VOICE_MODEL_BAD:
         if CLOUD_VOICE_MODEL:
@@ -780,6 +781,8 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         if streamed:
             LAST_CLOUD_ERROR = None
             LAST_CLOUD_MODEL = body.get("model", "")
+            log.info("облако %s: %s — %.1f с (стрим, %s)", cloud_title(), LAST_CLOUD_MODEL,
+                     time.monotonic() - _t0, (_CLOUD_ROUTE_OK or ("?",))[0])
             return streamed
         # стрим не удался — обычный запрос ниже
     try:
@@ -823,6 +826,8 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 return None
             LAST_CLOUD_ERROR = None
             LAST_CLOUD_MODEL = body.get("model", "")
+            log.info("облако %s: %s — %.1f с, %s", cloud_title(), LAST_CLOUD_MODEL,
+                     time.monotonic() - _t0, (_CLOUD_ROUTE_OK or ("?",))[0])
             return text
     except Exception as e:
         if r is not None and r.status_code in (404, 429) and (CLOUD_MODEL or PROVIDERS.get(CLOUD_PROVIDER, {}).get("model")) == "auto" and _CLOUD_RESOLVED:
@@ -839,7 +844,8 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             log.warning("%s: модель «%s» отвергнута (%s) — пробую стандартную %s", cloud_title(), model, r.status_code, default_model)
             return await cloud_chat(system, user_text, history, _force_model=default_model)
         LAST_CLOUD_ERROR = _explain_cloud_error(e, r if r is not None and r.status_code >= 400 else None)
-        log.warning("cloud error: %s", LAST_CLOUD_ERROR)
+        log.warning("облако %s: сбой за %.1f с (%s) — %s", cloud_title(), time.monotonic() - _t0,
+                    (_CLOUD_ROUTE_OK or ("?",))[0], LAST_CLOUD_ERROR)
         return None
 
 
