@@ -1,6 +1,7 @@
 """Одна база данных (SQLite) для всего: календарь, задачи, финансы, заметки, память."""
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Iterator, Optional
@@ -299,6 +300,14 @@ class Setting(SQLModel, table=True):
     updated_at: datetime = Field(default_factory=now)
 
 
+class SchemaVersion(SQLModel, table=True):
+    """Учёт применённых миграций схемы (см. core/migrations.py). Одна строка = одна версия.
+    Таблица только аддитивная: применяем по порядку, бэкапим файл БД перед первой миграцией."""
+    version: int = Field(primary_key=True)
+    name: str = ""
+    applied_at: datetime = Field(default_factory=now)
+
+
 class ActionLog(SQLModel, table=True):
     """Что Джарвис сделал по команде — чтобы «отмени» работало для чего угодно и переживало перезапуск."""
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -416,6 +425,8 @@ engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread"
 def _pragmas(dbapi_conn, _):
     cur = dbapi_conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")
+    # busy_timeout: если файл БД займёт другой процесс (пульс ПК, бэкап), ждём до 5 с, а не падаем «database is locked»
+    cur.execute("PRAGMA busy_timeout=5000")
     cur.execute("PRAGMA foreign_keys=ON")
     cur.close()
     # SQLite не умеет lower() для кириллицы — добавляем свою функцию
@@ -478,8 +489,17 @@ def _migrate() -> None:
 
 
 def init_db() -> None:
+    # файл БД до create_all: только для существующей (непустой) базы нужен бэкап перед миграцией
+    _db_file = getattr(engine.url, "database", None)
+    had_db = bool(_db_file) and os.path.exists(_db_file) and os.path.getsize(_db_file) > 0
     SQLModel.metadata.create_all(engine)
     _migrate()
+    try:
+        from . import migrations
+        migrations.apply(engine, had_db=had_db)
+    except Exception as e:  # pragma: no cover — миграция не должна ронять старт
+        import logging
+        logging.getLogger("jarvis.db").warning("миграции не применены: %s", e)
     from .config import cfg
     with Session(engine, expire_on_commit=False) as s:
         if s.exec(select(Category)).first() is None:
