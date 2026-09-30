@@ -697,8 +697,27 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             ping("reminder", text=text, id=f"payshort-{datetime.now():%Y%m%d}")
             await _notify(text)
 
+    async def crm_followups_job():
+        """Раз в день: досоздать follow-up по заказам и один раз сообщить о важных (просрочка/неоплата).
+        Спама нет: scan идемпотентен (один открытый повод на заказ)."""
+        from ..crm import service as crm_service
+        try:
+            created = crm_service.scan()
+        except Exception as e:  # pragma: no cover — не роняем планировщик
+            log.warning("crm follow-up scan failed: %s", e); return
+        hot = [f for f in created if f.get("kind") in ("overdue", "unpaid")]
+        if not hot:
+            return
+        lines = [f"• {f['text']}" for f in hot[:5]]
+        text = "🔔 заказы требуют внимания:\n" + "\n".join(lines)
+        if len(hot) > len(lines):
+            text += f"\n…и ещё {len(hot) - len(lines)}."
+        ping("reminder", text=text, id=f"crm-{datetime.now():%Y%m%d}")
+        await _notify(text)
+
     sch.add_job(timer_tick, "interval", seconds=20, id="timer_tick", next_run_time=_soon(20))
     sch.add_job(payment_check, CronTrigger(hour=10, minute=30), id="payment_check")
+    sch.add_job(crm_followups_job, CronTrigger(hour=9, minute=40), id="crm_followups")
     sch.add_job(evening_review, CronTrigger(hour=21, minute=0), id="evening_review")
     sch.add_job(evening_budget, CronTrigger(hour=21, minute=2), id="evening_budget")
     sch.add_job(weekly, CronTrigger(day_of_week="sun", hour=19, minute=0), id="weekly_digest")

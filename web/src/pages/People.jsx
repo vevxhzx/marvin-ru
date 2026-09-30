@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Users } from 'lucide-react'
 import { api, money, plural, listOf } from '../lib/api'
 import { Sheet, Field, Empty, useToast, PageAccent, ListSkeleton } from '../components/ui'
+import { ClientCardSheet } from './Orders'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 
@@ -17,6 +18,7 @@ export default function People() {
   const [q, setQ] = useState('')
   const [tab, setTab] = useState('all')
   const [sheet, setSheet] = useState(null)
+  const [crm, setCrm] = useState(null)
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
 
@@ -99,12 +101,14 @@ export default function People() {
         ))}
       </div>
 
-      <PersonSheet open={!!sheet} person={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }} />
+      <PersonSheet open={!!sheet} person={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }}
+        onCrm={(id) => { setSheet(null); setCrm(id) }} />
+      <ClientCardSheet cid={crm} onClose={() => setCrm(null)} onCard={() => {}} />
     </div>
   )
 }
 
-function PersonSheet({ open, person, onClose, onDone }) {
+function PersonSheet({ open, person, onClose, onDone, onCrm }) {
   const isNew = person === 'new' || !person?.id
   const [name, setName] = useState('')
   const [aliases, setAliases] = useState('')
@@ -165,6 +169,7 @@ function PersonSheet({ open, person, onClose, onDone }) {
           <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="@username или +7 999 123-45-67" />
         </Field>
         <div className="flex justify-end gap-2 pt-4">
+          {!isNew && <button type="button" className="btn-soft mr-auto" onClick={() => onCrm?.(person.id)}>карточка CRM</button>}
           <button type="button" className="btn-ghost" onClick={onClose}>отмена</button>
           <button type="submit" className="btn-primary" disabled={saving || !name.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
         </div>

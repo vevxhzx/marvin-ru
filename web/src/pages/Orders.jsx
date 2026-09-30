@@ -515,7 +515,7 @@ function CrmOrderSheet({ oid, onClose, onClient, onChanged, onErr }) {
 }
 
 /* Карточка клиента CRM: LTV, средний чек, долг, источник, теги, контакт, следующий шаг, история */
-function ClientCardSheet({ cid, onClose, onCard }) {
+export function ClientCardSheet({ cid, onClose, onCard }) {
   const [d, setD] = useState(null)
   const [step, setStep] = useState('')
   useEffect(() => { if (cid) api.crmClientCard(cid).then((r) => { setD(r); setStep(r.next_step || '') }).catch(() => {}); else setD(null) }, [cid])
