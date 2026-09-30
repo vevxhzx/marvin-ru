@@ -1,5 +1,5 @@
 @echo off
-title Assistant
+title Jarvis
 cd /d "%~dp0"
 if not exist .venv\Scripts\python.exe (
     echo Run install.bat first.

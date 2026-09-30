@@ -55,6 +55,56 @@
 
 ---
 
+## Как запускать (краткая инструкция)
+
+```bat
+:: 1. первая установка (один раз)
+install.bat
+
+:: 2. запуск: бот + сайт на http://localhost:8765
+start.bat
+```
+
+- Python-версия (основная): `start.bat` → `python run.py`. Порт берётся из `config.yaml` (`server.port`, по умолчанию 8765). Флаги: `python run.py --no-tg` (без Telegram), `python run.py --no-browser`, `python run.py --no-voice-warmup`.
+- Пересборка сайта после правок во `web/src`: `build_web.bat` (или `cd web && npm run build`) → готовый сайт в `web/site`, перезапусти `start.bat`.
+- Node-стенд (альтернативный сервер на Express + тот же фронт): `npm install && npm run dev` → http://localhost:3000, прод-сборка `npm run build` → `dist/`. Второй экземпляр бота на том же токене не запускай одновременно с Python-версией.
+- Тесты: `python -m pytest tests -q` (Python) и `npm test` (Node-стенд).
+- Переменные окружения — см. `.env.example` (скопируй в `.env`; в git `.env` не попадает).
+
+---
+
+## Структура проекта
+
+```
+jarvis-main/
+├── run.py                 # точка входа: бот + HTTP-сервер + планировщик
+├── start.bat              # запуск (с автоперезапуском) · install.bat — установка
+├── server.ts              # альтернативный Node-стенд (Express), npm run dev
+├── config.yaml            # рабочий конфиг (в .gitignore, секреты здесь)
+├── config.example.yaml    # шаблон конфига без секретов
+├── .env.example           # шаблон переменных окружения
+├── core/                  # ядро: config, db, brain, tools, services, api, telegram, pc, voice
+│   ├── api/app.py         # FastAPI: все /api/* роуты + раздача сайта
+│   ├── brain/             # агент, маршрутизация, локальный/облачный мозг
+│   ├── services/          # деньги, календарь, задачи, заказы, заметки, память, бэкапы
+│   └── telegram/          # бот, Telegram Mini App
+├── web/                   # сайт (React + Vite)
+│   ├── src/               # исходники UI (страницы, компоненты, api-клиент)
+│   ├── site/              # собранная версия — её раздаёт Python-сервер
+│   └── node_modules/      # зависимости (в .gitignore)
+├── vite.config.ts         # сборка фронта (web/src) → dist/ для server.ts
+├── tests/                 # pytest-тесты (Python) и tests/*.mjs (Node)
+├── data/                  # база data/jarvis.db, бэкапы, файлы пользователя (в .gitignore)
+├── docs/                  # документация: install, features, brain, site, troubleshooting
+├── vendor/                # офлайн-зависимости (whisper и т.п.)
+├── mac/ phone*.* voice*.* # клиенты: macOS, телефон, голос
+└── _archive/              # старое и дубли — ничего не удалено, просто отложено (в .gitignore)
+```
+
+> **Node-стенд.** Фронт один и тот же: исходники живут в `web/src`, а `vite.config.ts` в корне собирает их в `dist/` для `server.ts`. Старая корневая копия `src/` (дубль) и старые релизные заметки — в `_archive/web/root-vite-duplicate/` и `_archive/releases-marvin/`.
+
+---
+
 ## Железо и границы приватности
 
 | Режим | Что нужно | Куда уходят данные |
