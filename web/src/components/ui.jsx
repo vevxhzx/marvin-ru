@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Trash2, Check } from 'lucide-react'
 import { parseNum } from '../lib/api'
@@ -606,47 +606,65 @@ export function PriorityDot({ value, onChange, disabled }) {
    Выбор локальный (только этот браузер), общие настройки сайта не меняются. */
 export function PageAccent({ page, className = '' }) {
   const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
   const { hex } = usePageAccent(page)
   const wrap = useRef(null)
+  const btn = useRef(null)
+  const pop = useRef(null)
   const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 
   useEffect(() => {
     if (!open) return
-    const h = (e) => { if (wrap.current && !wrap.current.contains(e.target)) setOpen(false) }
+    const h = (e) => { if (wrap.current && !wrap.current.contains(e.target) && !pop.current?.contains(e.target)) setOpen(false) }
     const k = (e) => e.key === 'Escape' && setOpen(false)
+    const s = () => setOpen(false)
     document.addEventListener('mousedown', h)
     document.addEventListener('keydown', k)
-    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
+    window.addEventListener('scroll', s, true)
+    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k); window.removeEventListener('scroll', s, true) }
+  }, [open])
+
+  /* Попап рисуем порталом в body и клеим к кнопке: внутри шапки его перекрывало
+     поле ввода (у той свой слой на transform/filter), и цвета уходили под карточки. */
+  useLayoutEffect(() => {
+    if (!open || !pop.current || !btn.current) return
+    const r = pop.current.getBoundingClientRect()
+    const b = btn.current.getBoundingClientRect()
+    const top = b.bottom + 8 + r.height > window.innerHeight - 8 ? Math.max(8, b.top - r.height - 8) : b.bottom + 8
+    const left = Math.max(8, Math.min(b.right - r.width, window.innerWidth - r.width - 8))
+    setPos((p) => (p && p.top === top && p.left === left ? p : { top, left }))
   }, [open])
 
   const pick = (c) => { setPageAccent(page, c); setOpen(false) }
 
   return (
     <span className={`pa-wrap ${className}`} ref={wrap}>
-      <button type="button" className={`btn-soft btn-sm ${open ? 'on' : ''}`} onClick={() => setOpen((v) => !v)}
-        title="Цвет этой вкладки — только для неё, другие страницы не изменятся">
+      <button ref={btn} type="button" className={`btn-soft btn-sm ${open ? 'on' : ''}`} onClick={() => setOpen((v) => !v)}
+        title="Цвет этой вкладки — только для неё, другие страницы не изменятся" aria-haspopup="dialog" aria-expanded={open}>
         <span className="pa-dot" style={{ background: hex || 'var(--acc)' }}></span>
         цвет
       </button>
-      {open && (
-        <div className="pa-pop elevated" role="dialog" aria-label="цвет вкладки">
+      {open && createPortal(
+        <div className="pa-pop elevated" ref={pop} role="dialog" aria-label="цвет вкладки"
+          style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? undefined : 'hidden' }}>
           <div className="label">цвет этой вкладки</div>
           <div className="pa-grid">
-            <button type="button" className="pa-sw pa-sw-reset" onClick={() => pick('')} title="Как в общих настройках">
+            <button type="button" className={`pa-sw pa-sw-reset ${!hex ? 'pa-sw-on' : ''}`} onClick={() => pick('')}
+              title="Как в общих настройках" aria-pressed={!hex}>
               <span>как<br />всё</span>
             </button>
             {Object.entries(ACCENTS).map(([k, a]) => {
               const raw = dark ? a.dark : a.light
               return (
-                <button key={k} type="button" className="pa-sw" title={a.label}
+                <button key={k} type="button" className={`pa-sw ${hex && hex.toLowerCase() === String(raw).toLowerCase() ? 'pa-sw-on' : ''}`}
+                  title={a.label} aria-pressed={hex === raw}
                   style={{ background: accentFor(raw, dark) }}
                   onClick={() => pick(raw)} />
               )
             })}
           </div>
           <p className="pa-note">цвет живёт только здесь — в настройках сайта он не меняется</p>
-        </div>
-      )}
+        </div>, document.body)}
     </span>
   )
 }

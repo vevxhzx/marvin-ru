@@ -174,11 +174,16 @@ export function setPageAccent(page, hex) {
   prefs.set({ pageAccents: cur })
 }
 
+/* hsl → hex; s и l приходят в процентах (как в hsl()), внутри — доли.
+   Старая версия принимала l долей, а ей передавали 50/55 — из hsl() выходил
+   «битый» 12-символьный цвет, и подсветка фона уходила в посторонний оттенок. */
 const hslHex = (h, s, l) => {
-  const a = (s / 100) * Math.min(l, 1 - l)
+  const ss = s / 100
+  const ll = l / 100
+  const a = ss * Math.min(ll, 1 - ll)
   const f = (n) => {
     const k = (n + h / 30) % 12
-    const c = l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)))
+    const c = ll - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)))
     return Math.round(255 * c).toString(16).padStart(2, '0')
   }
   return `#${f(0)}${f(8)}${f(4)}`
@@ -191,6 +196,7 @@ export function usePageAccent(page) {
     const upd = () => setDark(document.documentElement.classList.contains('dark'))
     const mo = new MutationObserver(upd)
     mo.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+    upd() // тему могут включить раньше, чем мы подписались — сверяемся сразу
     return () => mo.disconnect()
   }, [])
 

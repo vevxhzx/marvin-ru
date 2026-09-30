@@ -399,11 +399,12 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 /* Цвет вкладки: кнопка в шапке страницы и палитра под ней */
 .pa-wrap { position: relative; display: inline-flex; }
 .pa-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin-right: 6px; box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, transparent); }
-.pa-pop { position: absolute; right: 0; top: calc(100% + 8px); z-index: 90; width: 214px; padding: 12px; border-radius: 16px; animation: rise .18s var(--e); }
+.pa-pop { position: fixed; z-index: 140; width: 214px; padding: 12px; border-radius: 16px; animation: rise .18s var(--e); }
 .pa-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-top: 10px; }
 .pa-sw { width: 100%; aspect-ratio: 1; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; padding: 0;
   transition: transform .15s var(--e), box-shadow .15s var(--e); }
 .pa-sw:hover { transform: scale(1.14); box-shadow: 0 6px 16px rgba(0, 0, 0, .25); }
+.pa-sw-on { outline: 2px solid var(--acc); outline-offset: 3px; }
 .pa-sw-reset { background: var(--sf2); color: var(--ink2); font-size: 9px; line-height: 1.15; display: grid; place-items: center; text-align: center; }
 .pa-note { margin-top: 10px; font-size: 11px; color: var(--ink3); line-height: 1.35; }
 
