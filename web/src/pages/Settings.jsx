@@ -107,6 +107,7 @@ export default function Settings({ health }) {
         <Card className="grid grid-cols-1 gap-5 md:grid-cols-2">
           {items.map((it) => <SettingField key={it.key} it={it} value={val(it)} onChange={(v) => setDraft((d) => ({ ...d, [it.key]: v }))} providers={status?.gemini?.providers} />)}
           {prefix === 'brain.cloud' && <CloudHint prov={val(items.find((it) => it.key === 'brain.cloud.provider')) || 'gemini'} providers={status?.gemini?.providers} />}
+          {prefix === 'brain.cloud' && <CloudPreview />}
         </Card>
       </Section>
     )
@@ -755,6 +756,31 @@ function CloudHint({ prov, providers }) {
       {steps && <div className="muted mt-1">Как получить ключ: {steps}</div>}
       {url && <a className="text-accent mt-1 inline-block" href={url} target="_blank" rel="noreferrer">открыть страницу ключей ↗</a>}
       <div className="faint mt-1">Как это работает: «привет», «что такое …», «напиши …» → облако. Деньги, календарь, задачи, заметки → локальная модель, в облако не уходят. Принудительно: «облако, …» или «локально, …». После сохранения — перезапустить start.bat.</div>
+    </div>
+  )
+}
+
+function CloudPreview() {
+  // ФАЗА 6: «что именно уйдёт в облако» — только просмотр, ничего не отправляет (POST /api/cloud/preview).
+  const [text, setText] = useState('')
+  const [res, setRes] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const run = () => {
+    if (!text.trim()) return
+    setBusy(true)
+    api.post('/api/cloud/preview', { text }).then(setRes).catch(() => setRes(null)).finally(() => setBusy(false))
+  }
+  return (
+    <div className="md:col-span-2 rounded-2xl fill px-4 py-3">
+      <div className="label">что уйдёт в облако</div>
+      <div className="faint mt-1 text-[12.5px]">Вставьте фразу — покажу, как её увидит облако (с учётом обезличивания). Ничего не отправляется.</div>
+      <textarea className="input mt-2 w-full" rows={2} value={text} onChange={(e) => setText(e.target.value)}
+                placeholder="например: объясни, что такое инфляция" />
+      <div className="mt-2 flex flex-wrap items-center gap-2">
+        <button className="btn-ghost btn-sm" disabled={busy || !text.trim()} onClick={run}>{busy ? '…' : 'показать'}</button>
+        {res && <span className="faint text-[12px]">{res.will_send ? 'уйдёт в облако' : 'не уйдёт (локально/пусто)'}{res.anonymized ? ' · обезличено' : ''}</span>}
+      </div>
+      {res && <pre className="mt-2 whitespace-pre-wrap break-words text-[12.5px]">{res.text || '—'}</pre>}
     </div>
   )
 }

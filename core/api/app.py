@@ -343,9 +343,11 @@ class VisionIn(BaseModel):
 
 @app.post("/api/vision/ask")
 async def vision_ask(v: VisionIn):
-    """Скриншот экрана с ПК → описание/перевод. Приватные (чеки, документы) — только локальная модель."""
+    """Скриншот экрана с ПК → описание/перевод. Экран — приватный контент (как чеки): в облако он уходит
+    только если пользователь явно выбрал brain.vision.where = cloud (а не «запасным путём» в auto).
+    В local и в auto с недоступной локальной моделью — в облако НЕ отправляется (ФАЗА 6)."""
     from ..brain import llm
-    ans = await llm.describe_image(v.image_b64, v.question, private=v.private)
+    ans = await llm.describe_image(v.image_b64, v.question, private=True)
     if not ans:
         st = llm.vision_status()
         ans = ("Зрение сейчас недоступно, сэр. " + ("Поставьте локальную vision-модель: ollama pull qwen2.5vl:3b и vision_model в настройках мозга."
@@ -354,6 +356,26 @@ async def vision_ask(v: VisionIn):
     agent._log_chat("assistant", ans, v.channel)
     broadcast("chat", {"channel": v.channel, "actions": ["vision"]})
     return {"text": ans}
+
+
+class CloudPreviewIn(BaseModel):
+    text: str = Field("", max_length=8000)
+
+
+@app.post("/api/cloud/preview")
+def cloud_preview(body: CloudPreviewIn):
+    """ФАЗА 6: «что именно уйдёт в облако» — ТОЛЬКО ЧТЕНИЕ. Ничего не отправляет и не пишет.
+    Показывает текст так, как его увидит облако: с обезличиванием (brain.gemini.anonymize), если оно включено.
+    В режиме local в облако не уходит ничего — will_send=false."""
+    from ..brain import llm
+    from ..config import cfg
+    text = (body.text or "")[:8000]
+    anonymized = bool(getattr(getattr(getattr(cfg, "brain", None), "gemini", None), "anonymize", False))
+    shown = llm.anonymize(text) if anonymized else text
+    cloud = llm.cloud_enabled()
+    return {"text": shown, "anonymized": anonymized, "cloud_enabled": cloud, "mode": llm.MODE,
+            "will_send": bool(cloud and llm.MODE in ("hybrid", "cloud") and text.strip()),
+            "note": "Черновик. Ничего не отправлено. В режиме local данные остаются на компьютере."}
 
 
 @app.post("/api/finance/import")
