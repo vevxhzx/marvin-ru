@@ -27,6 +27,7 @@ web/dist/
 # --- кэши Python ---
 __pycache__/
 *.py[cod]
+*.pyc
 .venv/
 venv/
 .pytest_cache/
