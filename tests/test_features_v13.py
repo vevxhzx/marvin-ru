@@ -84,7 +84,7 @@ def test_command_cards_render(tmp_path, monkeypatch):
 
 
 def test_telegram_markdown_to_html():
-    """Команды отдают markdown — его конвертируем в HTML, иначе в Telegram видны «**». """
+    """Команды отдают markdown — конвертируем в HTML, иначе в Telegram видны «**»."""
     from core.telegram.bot import _to_html
     out = _to_html("**жирный** и `код` и <тег> и *курсив*")
     assert "<b>жирный</b>" in out
@@ -92,3 +92,33 @@ def test_telegram_markdown_to_html():
     assert "&lt;тег&gt;" in out
     assert "**" not in out
     assert _to_html("— пункт") == "— пункт"
+
+
+# ---------------------------------------------------------------- координация задача ↔ встреча
+def test_task_event_coordination(tmp_path, monkeypatch):
+    from sqlmodel import create_engine
+    from sqlalchemy import event as sa_event
+    from core import db
+
+    eng = create_engine(f"sqlite:///{tmp_path / 'c.db'}", connect_args={"check_same_thread": False})
+    sa_event.listen(eng, "connect", db._pragmas)
+    monkeypatch.setattr(db, "engine", eng)
+    db.init_db()
+
+    from core.services import calendar, tasks
+    t = tasks.add_task("встреча с врачом", due=datetime(2026, 10, 5, 10, 0))
+    ev = calendar.add_event("встреча с врачом", datetime(2026, 10, 5, 18, 0), task_id=t.id)
+    # создали встречу в 18:00 → срок задачи тоже 18:00
+    assert tasks.find_task(t.id).due.hour == 18
+    # перенесли встречу → едет и задача
+    calendar.update_event(ev.id, start=datetime(2026, 10, 6, 19, 0))
+    assert tasks.find_task(t.id).due == datetime(2026, 10, 6, 19, 0)
+    # перенесли задачу → едет и встреча
+    tasks.update_task(t.id, due=datetime(2026, 10, 7, 12, 30))
+    assert calendar.find_event(ev.id).start == datetime(2026, 10, 7, 12, 30)
+    # закрыли задачу → закрылась и встреча
+    tasks.complete_task(t.id)
+    assert calendar.find_event(ev.id).done is True
+    # вернули задачу → вернулась и встреча
+    tasks.update_task(t.id, done=False)
+    assert calendar.find_event(ev.id).done is False

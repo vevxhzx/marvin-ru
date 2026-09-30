@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from sqlmodel import select
 
 from ..db import diff_text, icontains, Task, log_action, now, remember, session
+from . import coord
 
 
 def add_task(title: str, due: datetime | None = None, priority: int = 2,
@@ -82,6 +83,10 @@ def update_task(task_id: int, **fields) -> Task | None:
         s.commit(); s.refresh(t)
     if fields.get("done") and not before["done"]:
         _after_done(t)
+    if "due" in fields:      # срок поменяли — переносим привязанную встречу
+        coord.sync_from_task(t.id)
+    if "done" in fields:     # закрыли/вернули задачу — и встречу тоже
+        coord.complete_events_for_task(t.id, bool(t.done))
     return t
 
 
@@ -138,6 +143,7 @@ def complete_task(query: str | int) -> Task | None:
         s.commit()
         s.refresh(t)
     _after_done(t)
+    coord.complete_events_for_task(t.id, True)   # закрыл задачу — закрылась и привязанная встреча
     return t
 
 

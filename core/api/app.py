@@ -618,14 +618,9 @@ def done_event(event_id: int, p: EventDoneIn):
 
     # задача из списка, показанная в календаре
     if event_id < 0:
-        with session() as s:
-            t = s.get(Task, -event_id)
-            if not t:
-                raise HTTPException(404)
-            t.done = bool(p.done)
-            t.done_at = datetime.now() if p.done else None
-            s.add(t)
-            s.commit()
+        t = tasks.update_task(-event_id, done=bool(p.done))   # с координацией: закрывается и привязанная встреча
+        if not t:
+            raise HTTPException(404)
         return {"ok": True, "linked": linked}
 
     ev = calendar.set_done(event_id, p.done, p.date)
@@ -760,13 +755,11 @@ def patch_task(task_id: int, p: TaskPatch):
 
 @app.post("/api/tasks/{task_id}/undone")
 def undone_task(task_id: int):
-    with session() as s:
-        t = s.get(Task, task_id)
-        if not t:
-            raise HTTPException(404)
-        t.done, t.done_at = False, None
-        s.add(t); s.commit(); s.refresh(t)
-        return t
+    # через сервис, а не напрямую: сработает координация со встречей (вернём и её)
+    t = tasks.update_task(task_id, done=False)
+    if not t:
+        raise HTTPException(404)
+    return t
 
 
 @app.post("/api/tasks/{task_id}/done")

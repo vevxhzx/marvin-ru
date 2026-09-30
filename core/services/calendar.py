@@ -7,6 +7,7 @@ from dateutil.relativedelta import relativedelta
 from sqlmodel import select
 
 from ..db import diff_text, icontains, Event, log_action, remember, session
+from . import coord
 
 WEEKDAYS = ["понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье"]
 WD_SHORT = ["пн", "вт", "ср", "чт", "пт", "сб", "вс"]
@@ -174,6 +175,8 @@ def add_event(title: str, start: datetime, duration_min: int = 60, location: str
         log_action(s, "add_event", "event", ev.id, title, source)
         s.commit()
     _gcal_push(ev.id)
+    if ev.task_id:      # встреча привязана к задаче — держим срок задачи на этом же времени
+        coord.sync_from_event(ev.id)
     return ev
 
 
@@ -216,6 +219,8 @@ def update_event(event_id: int, **fields) -> Event | None:
         remember(s, "event", f"Изменено событие «{ev.title}»" + (f": {changes}" if changes else " (без изменений)"), "event", ev.id)
         s.commit(); s.refresh(ev)
     _gcal_push(ev.id)
+    if ev.task_id:      # перенесли/изменили встречу — подтягиваем задачу
+        coord.sync_from_event(ev.id)
     return ev
 
 
@@ -260,6 +265,7 @@ def set_done(event_id: int, done: bool = True, when: datetime | None = None) -> 
         s.commit(); s.refresh(ev)
     if not ev.repeat:
         _gcal_push(ev.id)
+        coord.complete_task_for_event(event_id, done)   # галочка на встрече — и по задаче тоже
     return ev
 
 

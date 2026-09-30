@@ -110,7 +110,7 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
           <p className="text-sm text-[var(--ink3)]">
             {ev?.kind === 'order'
               ? 'Это дедлайн заказа. Завершение переведёт заказ в статус «сдан» — он также изменится на странице заказов.'
-              : 'Это задача, показанная в календаре. Завершение закроет её и в списке задач.'}
+              : 'Задача из списка, показанная в календаре. Завершение закроет её и везде — и задачу, и привязанную встречу.'}
           </p>
           <div className="flex justify-end gap-2 pt-2">
             <button type="button" className="btn g" onClick={onClose}>закрыть</button>
@@ -136,7 +136,7 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
           <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Zoom, переговорная, https://…" />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="привязать к задаче" hint="завершение встречи закроет и задачу">
+          <Field label="привязать к задаче" hint="срок задачи встанет на это время; ✓ закроет обоих">
             <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
               <option value="">не привязывать</option>
               {tasks.map((t) => <option key={t.id} value={t.id}>{t.done ? '✓ ' : ''}{t.title}</option>)}
