@@ -20,37 +20,15 @@ log = logging.getLogger("jarvis.insights")
 
 
 # ---------------------------------------------------------------- прогноз кассы
-def cash_forecast(days: int = 30) -> dict:
-    """Баланс по дням на N дней вперёд: регулярные платежи/доходы + средние переменные траты в день."""
-    now = datetime.now()
-    balance = finance.total_balance()
-    rec = finance.list_recurring()
-    # средние переменные траты в день за 30 дней (без авто и долгов)
-    txs = [t for t in finance.list_transactions(30, 100_000) if t.kind == "expense" and "(авто)" not in (t.note or "") and t.category != "Долги"]
-    first = min((t.date for t in txs), default=now - timedelta(days=30))
-    span = max(7, (now - first).days) if txs else 30
-    per_day = sum(t.amount for t in txs) / span if txs else 0.0
-    # события регулярных
-    sched: dict[date, list[tuple[str, float]]] = defaultdict(list)
-    for r in rec:
-        d = r.next_date
-        for _ in range(6):
-            if d.date() > (now + timedelta(days=days)).date():
-                break
-            sched[d.date()].append((r.title, r.amount if r.kind == "income" else -r.amount))
-            d = finance._next_date(r.day, r.period, d)
-    # ожидаемые оплаты по заказам (фриланс): остаток по незакрытым заказам на дату дедлайна
-    expected_total, tax_total = 0.0, 0.0
-    try:
-        from . import orders, pulse
-        rate = pulse.tax_rate()   # налог самозанятого (режим фрилансера); 0 — не считаем
-        for e in orders.expected_income(days):
-            net = e["amount"] * (1 - rate)
-            sched[e["date"].date()].append((f"ожидается: {e['title']}", net))
-            expected_total += net
-            tax_total += e["amount"] - net
-    except Exception as e:  # pragma: no cover
-        log.debug("expected income: %s", e)
+
+# Пессимистичный сценарий: те же ожидаемые оплаты по заказам, но клиенты платят с задержкой.
+# Реалистичный — оплата приходит к ожидаемой дате (как раньше). Константа, чтобы сценарий был
+# объяснимым и настраиваемым, а не «магической» случайной цифрой.
+PESSIMISTIC_DELAY_DAYS = 14
+
+
+def _project(balance: float, per_day: float, sched: dict, days: int, now: datetime):
+    """Прогон баланса по дням: ежедневные переменные траты + события из расписания дня."""
     points, cur, low, low_day = [], balance, balance, now.date()
     for i in range(days + 1):
         d = (now + timedelta(days=i)).date()
@@ -61,6 +39,78 @@ def cash_forecast(days: int = 30) -> dict:
         if cur < low:
             low, low_day = cur, d
         points.append({"date": d.isoformat(), "balance": round(cur), "events": [{"title": t, "amount": a} for t, a in items]})
+    return points, low, low_day
+
+
+def _scenario(balance: float, per_day: float, sched: dict, days: int, now: datetime,
+              expected_income: float = 0.0, delay_days: int | None = None) -> dict:
+    points, low, low_day = _project(balance, per_day, sched, days, now)
+    out = {"points": points, "low": round(low), "low_date": low_day.isoformat(),
+           "ok": low >= 0, "per_day": round(per_day), "expected_income": round(expected_income)}
+    if delay_days is not None:
+        out["delay_days"] = delay_days
+    return out
+
+
+def _clone_sched(sched: dict) -> dict:
+    return defaultdict(list, {k: list(v) for k, v in sched.items()})
+
+
+def cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) -> dict:
+    """Баланс по дням на N дней вперёд.
+
+    Учитывает регулярные платежи/доходы, ожидаемые оплаты по заказам CRM и средние переменные
+    траты в день. Возвращает два сценария: ``realistic`` (оплаты по заказам к ожидаемой дате) и
+    ``pessimistic`` (те же оплаты сдвинуты на ``pessimistic_delay_days``, по умолчанию
+    ``PESSIMISTIC_DELAY_DAYS``). Верхнеуровневые поля (points/low/low_date/ok/…) — это
+    реалистичный сценарий, как и раньше (обратная совместимость).
+    """
+    now = datetime.now()
+    balance = finance.total_balance()
+    rec = finance.list_recurring()
+    # средние переменные траты в день за 30 дней (без авто и долгов)
+    txs = [t for t in finance.list_transactions(30, 100_000) if t.kind == "expense" and "(авто)" not in (t.note or "") and t.category != "Долги"]
+    first = min((t.date for t in txs), default=now - timedelta(days=30))
+    span = max(7, (now - first).days) if txs else 30
+    per_day = sum(t.amount for t in txs) / span if txs else 0.0
+    # события регулярных платежей/доходов
+    sched_base: dict[date, list[tuple[str, float]]] = defaultdict(list)
+    for r in rec:
+        d = r.next_date
+        for _ in range(6):
+            if d.date() > (now + timedelta(days=days)).date():
+                break
+            sched_base[d.date()].append((r.title, r.amount if r.kind == "income" else -r.amount))
+            d = finance._next_date(r.day, r.period, d)
+    # ожидаемые оплаты по заказам (фриланс): остаток по незакрытым заказам на дату дедлайна
+    expected_total, tax_total = 0.0, 0.0
+    income_events: list[tuple[datetime, str, float]] = []
+    try:
+        from . import orders, pulse
+        rate = pulse.tax_rate()   # налог самозанятого (режим фрилансера); 0 — не считаем
+        for e in orders.expected_income(days):
+            net = e["amount"] * (1 - rate)
+            income_events.append((e["date"], f"ожидается: {e['title']}", net))
+            expected_total += net
+            tax_total += e["amount"] - net
+    except Exception as e:  # pragma: no cover
+        log.debug("expected income: %s", e)
+    delay = PESSIMISTIC_DELAY_DAYS if pessimistic_delay_days is None else max(0, int(pessimistic_delay_days))
+    horizon = (now + timedelta(days=days)).date()
+    sched_real, sched_pess = _clone_sched(sched_base), _clone_sched(sched_base)
+    # сценарии отличаются только датой поступления ожидаемых оплат по заказам
+    pess_expected = 0.0
+    for dt, title, net in income_events:
+        sched_real[dt.date()].append((title, net))          # orders.expected_income уже в горизонте
+        pd = dt + timedelta(days=delay)
+        if pd.date() <= horizon:
+            sched_pess[pd.date()].append((title, net))
+            pess_expected += net
+    points, low, low_day = _project(balance, per_day, sched_real, days, now)
+    scenarios = {
+        "realistic": _scenario(balance, per_day, sched_real, days, now, expected_income=expected_total, delay_days=0),
+        "pessimistic": _scenario(balance, per_day, sched_pess, days, now, expected_income=pess_expected, delay_days=delay),
+    }
     incomes = [r for r in rec if r.kind == "income"]
     next_income = min((r.next_date for r in incomes), default=None)
     days_to_income = (next_income.date() - now.date()).days if next_income else None
@@ -71,7 +121,7 @@ def cash_forecast(days: int = 30) -> dict:
             "next_income": next_income.isoformat() if next_income else None, "days_to_income": days_to_income,
             "safe_per_day": round(safe_per_day) if safe_per_day is not None else None,
             "expected_income": round(expected_total), "expected_tax": round(tax_total),
-            "ok": low >= 0}
+            "ok": low >= 0, "scenarios": scenarios}
 
 
 def cash_forecast_text() -> str:
@@ -86,6 +136,16 @@ def cash_forecast_text() -> str:
         parts.append(f"⚠️ При текущем темпе **{d:%d.%m}** уйдёте в минус ({money(f['low'])}). Стоит притормозить.")
     else:
         parts.append(f"Минимум за месяц — {money(f['low'])}, в минус не уходите. Держитесь, сэр.")
+    # второй сценарий — только если он реально отличается (иначе не засоряем ответ)
+    sc = (f.get("scenarios") or {})
+    real, pess = sc.get("realistic") or {}, sc.get("pessimistic") or {}
+    if pess and real and (pess.get("low") != real.get("low") or pess.get("ok") != real.get("ok")):
+        delay_days = pess.get("delay_days", 0) or 0
+        d = datetime.fromisoformat(pess["low_date"])
+        if not pess.get("ok"):
+            parts.append(f"Пессимистично (оплаты по заказам сдвинуты на ~{delay_days} {_days_word(delay_days)}): к **{d:%d.%m}** минимум {money(pess['low'])} — лучше иметь запас.")
+        else:
+            parts.append(f"Пессимистично (с задержкой оплат на ~{delay_days} {_days_word(delay_days)}): минимум {money(pess['low'])} — тоже в плюсе.")
     return " ".join(parts)
 
 
