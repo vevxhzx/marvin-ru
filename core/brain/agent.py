@@ -393,6 +393,14 @@ def _disputed(t: str) -> tuple[str, ...] | None:
     if n > 12 or _looks_like_question(t) or "\n" in t:
         return None
     amount, _rest = parse_amount(t)
+    # Точные шаблоны однозначны — судья им не нужен и только ломал разбор:
+    # «снял 3000 наличных» (снятие/перевод), «цель: подушка 300к к марту» (конверт),
+    # «отложил 10к в копилку», «пришёл аванс 10000 за ролик» (оплата заказа),
+    # «50/30/20» (разбор бюджета), «заказ: …» — у всех есть точный шаблон.
+    # Без этой проверки судья записывал их как доход/трату вместо своего правила.
+    if quick.CASH_RX.match(t) or quick.TRANSFER_RX.match(t) or GOAL_RX.match(t) or SAVE_RX.match(t) or PAYMENT_RX.match(t) \
+            or FIN_TECH_RX.match(t) or ORDER_RX.match(t):
+        return None
     # «3 монтажа подряд», «12 марта», «2 раза» — число меньше 10 без «руб/к» или число, ушедшее в дату, — не сумма
     has_amount = amount is not None and (amount >= 10 or re.search(r"\d\s*(?:р\b|руб|₽|к\b|тыс)", low)) \
         and not (parse_datetime(t)[0] is not None and not re.search(r"\d", parse_datetime(t)[1]))

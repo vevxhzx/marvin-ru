@@ -216,6 +216,17 @@ def list_backups(limit: int = 40) -> list[dict]:
     return out
 
 
+def _release_db_handles() -> None:
+    """Закрыть открытые соединения с базой (Windows не даёт подменить занятый файл)."""
+    try:
+        from .. import db as dbm
+        eng = getattr(dbm, "engine", None)
+        if eng is not None:
+            eng.dispose()
+    except Exception as e:   # pragma: no cover
+        log.debug("dispose engine: %s", e)
+
+
 def restore_backup(name: str) -> dict:
     """Подменить data/jarvis.db выбранным снимком. Текущая база → backup-pre-restore-… .
     Картинки (data/media) не откатываются по дате — зеркало media в backups/ актуально «как сейчас».
@@ -241,6 +252,9 @@ def restore_backup(name: str) -> dict:
     # подмена: сначала во временный, потом replace — атомарнее на одном томе
     tmp = DB_PATH.with_suffix(".db.restoring")
     shutil.copy2(src, tmp)
+    # Windows: открытые SQLite-соединения (пул engine) держат файл — replace дал бы WinError 5.
+    # Отдаём пул перед подменой; новые соединения SQLAlchemy откроет сам (перезапуск всё равно нужен).
+    _release_db_handles()
     tmp.replace(DB_PATH)
     # рядом лежат -wal/-shm от старой сессии — иначе SQLite может подмешать старый журнал
     for suf in ("-wal", "-shm"):
