@@ -199,6 +199,12 @@ if (web_dist / "index.html").exists():
             return HTMLResponse((ROOT / "core" / "api" / "setup.html").read_text(encoding="utf-8"))
         if not setup_done() and not path.startswith(("api", "media", "assets")):
             return RedirectResponse("/setup")
+        # Неизвестный /api/… не должен перехватываться SPA и отдавать HTML с кодом 200:
+        # клиент/скрипт получает «200 OK» на опечатке в URL и не видит ошибку (P2 в ревью
+        # A и E, см. reviews/review_A.md и reviews/review_E.md). Живые API-роуты
+        # регистрируются ДО catch-all, сюда они не попадают.
+        if path.startswith("api/"):
+            raise HTTPException(404, "Not Found")
         # любой не-API маршрут (/finance, /calendar…) → index.html, роутинг делает React
         # P0 (reviews/review_A.md): `web_dist / path` без resolve() позволял прочитать
         # '/../..' — сырой GET '/../../data/api_token' отдавал файл из корня репозитория,
