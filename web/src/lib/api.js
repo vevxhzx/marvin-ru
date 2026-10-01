@@ -83,7 +83,8 @@ export const api = {
   debtPayments: (id) => req('GET', `/api/finance/debts/${id}/payments`),
   updateDebt: (id, d) => req('PUT', `/api/finance/debts/${id}`, d),
   delDebt: (id) => req('DELETE', `/api/finance/debts/${id}`),
-  recurring: () => req('GET', '/api/finance/recurring'),
+  // all=true — вместе с паузами: иначе «Зарплата»/«Аренда» на паузе невидимы и не редактируются
+  recurring: (all = false) => req('GET', `/api/finance/recurring${all ? '?all=true' : ''}`),
   addRecurring: (r) => req('POST', '/api/finance/recurring', r),
   updateRecurring: (id, r) => req('PUT', `/api/finance/recurring/${id}`, r),
   delRecurring: (id) => req('DELETE', `/api/finance/recurring/${id}`),

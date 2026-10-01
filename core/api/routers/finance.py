@@ -285,8 +285,10 @@ def fin_debt_del(debt_id: int):
 
 
 @router.get("/api/finance/recurring")
-def fin_recurring():
-    return finance.list_recurring()
+def fin_recurring(all: bool = False):
+    # по умолчанию — как раньше (только активные); ?all=true отдаёт и паузы,
+    # чтобы UI мог показать «выключенные» регулярные и вернуть их в расчёт
+    return finance.list_recurring(active_only=not all)
 
 
 @router.post("/api/finance/recurring")

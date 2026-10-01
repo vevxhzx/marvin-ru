@@ -3,7 +3,7 @@ import { api, money, shortDate, toLocalISO, plural } from '../lib/api'
 import { Num, Sheet, Field, Empty, Money, useToast, PageAccent } from '../components/ui'
 import CashChart from '../components/CashChart'
 import { useRefresh } from '../App'
-import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff } from 'lucide-react'
+import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff, Play, Pause } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
@@ -62,7 +62,7 @@ export default function Finance() {
         api.txs(days).catch(() => []),
         api.accounts().catch(() => []),
         api.debts().catch(() => []),
-        api.recurring().catch(() => []),
+        api.recurring(true).catch(() => []),   // с паузами: паузы нужно видеть и включать
         api.goals().catch(() => []),
         api.categories().catch(() => []),
         api.techniques().catch(() => null),
@@ -127,6 +127,18 @@ export default function Finance() {
       .sort((a, b) => a.on - b.on)
   }, [recurring, now.getMonth(), now.getDate()])
 
+  // Активные и «на паузе»: расчёт (сводка, прогноз) считает только активные —
+  // как и бэкенд (list_recurring(active_only=True)), но паузы показываем опционально
+  const recActive = useMemo(() => recurring.filter((r) => r.active !== false), [recurring])
+  const recPaused = useMemo(() => recurring.filter((r) => r.active === false), [recurring])
+  const recExpense = recActive.filter((r) => r.kind !== 'income').reduce((s, r) => s + Number(r.amount || 0), 0)
+  const recIncome = recActive.filter((r) => r.kind === 'income').reduce((s, r) => s + Number(r.amount || 0), 0)
+  const [showPaused, setShowPaused] = useState(false)
+  const recShown = showPaused ? recurring : recActive
+  const toggleActive = async (r) => {
+    try { await api.updateRecurring(r.id, { active: r.active === false }); load(); bump() } catch (e) { show.err(e) }
+  }
+
   const daysUntil = (d0) => Math.round((d0 - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5)
   // API отдаёт список лимитов в поле budgets (категории с лимитом > 0)
   const budgetItems = Array.isArray(budgets) ? budgets : (budgets?.budgets || [])
@@ -190,7 +202,7 @@ export default function Finance() {
             {tab === 'txs' && `${shownTxs.length} ${plural(shownTxs.length, 'операция', 'операции', 'операций')}`}
             {tab === 'accounts' && `${accounts.length} ${plural(accounts.length, 'счёт', 'счёта', 'счетов')}`}
             {tab === 'debts' && `${debts.length} ${plural(debts.length, 'долг', 'долга', 'долгов')}`}
-            {tab === 'recurring' && `${recurring.length} регулярных платежей`}
+            {tab === 'recurring' && `${recActive.length} активных${recPaused.length ? ` · ${recPaused.length} на паузе` : ''}`}
             {tab === 'goals' && `${goals.length} ${plural(goals.length, 'финансовая цель', 'финансовые цели', 'финансовых целей')}`}
           </p>
         </div>
@@ -657,21 +669,42 @@ export default function Finance() {
       {tab === 'recurring' && (
         <div className="bento">
           <section className="c p1 s4 r" style={{ '--i': 3 }}>
-            <div className="hd"><h2>регулярные</h2><small>в месяц</small></div>
+            <div className="hd"><h2>регулярные</h2><small>списания в месяц</small></div>
             <div className="big">
-              <Num value={recurring.reduce((s, r) => s + (r.amount || 0), 0) || 1528} /> ₽
+              <Num value={recExpense} /> ₽
             </div>
             <span className="tag">
-              {recurring.length} {plural(recurring.length, 'подписка', 'подписки', 'подписок')}
+              {recIncome > 0 && (
+                <span style={{ color: 'var(--pos)' }}>доход +{money(recIncome)} · </span>
+              )}
+              {recActive.length} {plural(recActive.length, 'активный платёж', 'активных платежа', 'активных платежей')}
+              {recPaused.length > 0 ? `, ${recPaused.length} на паузе` : ''}
             </span>
           </section>
 
           <section className="c s8 r" style={{ '--i': 4 }}>
-            <div className="hd"><h2>список регулярных платежей</h2><small>подписки, сервис, аренда</small></div>
-            {recurring.length === 0 ? (
-              <p className="py-6 text-center text-sm text-[var(--ink3)]">нет регулярных платежей</p>
+            <div className="hd">
+              <h2>список регулярных</h2>
+              <small>подписки, сервис, аренда, доходы</small>
+            </div>
+            {recPaused.length > 0 && (
+              <div className="flex justify-end -mt-2 mb-2">
+                <button
+                  type="button"
+                  className="btn-soft btn-sm"
+                  onClick={() => setShowPaused((v) => !v)}
+                  title="На паузе не считаются в прогнозе — включите, если платёж снова активен"
+                >
+                  {showPaused ? 'спрятать паузы' : `показать паузы (${recPaused.length})`}
+                </button>
+              </div>
+            )}
+            {recShown.length === 0 ? (
+              <p className="py-6 text-center text-sm text-[var(--ink3)]">
+                {recurring.length > 0 ? 'все регулярные на паузе' : 'нет регулярных платежей'}
+              </p>
             ) : (
-              recurring.map((r) => (
+              recShown.map((r) => (
                 <div className="rowi group" key={r.id}>
                   <time>{(r.day_of_month || r.day) ? `${r.day_of_month || r.day} числа` : 'ежемес.'}</time>
                   <span className="t">
@@ -684,6 +717,14 @@ export default function Finance() {
                   <span className={`chip !ml-2 ${r.active === false ? '!opacity-50' : ''}`}>{r.active === false ? 'пауза' : 'активен'}</span>
                   <button
                     type="button"
+                    onClick={() => toggleActive(r)}
+                    className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)] transition"
+                    title={r.active === false ? 'Включить: платёж снова пойдёт в прогноз' : 'Поставить на паузу: платёж уйдёт из прогноза'}
+                  >
+                    {r.active === false ? <Play size={13} /> : <Pause size={13} />}
+                  </button>
+                  <button
+                    type="button"
                     onClick={() => { setEditingItem(r); setSheet('recurring') }}
                     className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)] opacity-0 group-hover:opacity-100 transition"
                     title="Изменить платёж"
@@ -693,11 +734,11 @@ export default function Finance() {
                   <button
                     type="button"
                     onClick={async () => {
-                      if (!confirm(`Удалить платёж «${r.name || r.title}»?`)) return
+                      if (!confirm(`Убрать регулярный платёж «${r.name || r.title}»?`)) return
                       try { await api.delRecurring(r.id); load(); bump() } catch (e) { show.err(e) }
                     }}
                     className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
-                    title="Удалить"
+                    title="Убрать (строка не исчезнет — уйдёт на паузу, оттуда её можно вернуть)"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -1083,7 +1124,7 @@ function DebtSheet({ open, debt, onClose, onDone }) {
     setSaving(true)
     try {
       const payload = {
-        name: name.trim(),
+        title: name.trim(),   // API ждёт `title`; `name` — устаревший алиас (422 «Field required»)
         creditor: creditor.trim() || undefined,
         total: parseFloat(total) || 0,
       }
@@ -1145,7 +1186,7 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={`внести платёж: ${debt?.name || ''}`}>
+    <Sheet open={open} onClose={onClose} title={`внести платёж: ${debt?.name || debt?.title || ''}`}>
       <form onSubmit={submit} className="space-y-4">
         <Field label="сумма платежа (₽)">
           <input className="input" autoFocus type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="5000" />
@@ -1171,6 +1212,7 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
   const [day, setDay] = useState('1')
+  const [kind, setKind] = useState('expense')   // expense — списание, income — регулярный доход
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
@@ -1180,6 +1222,7 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
     setAmount(item?.amount != null ? String(item.amount) : '')
     setCategory(item?.category || '')
     setDay(item?.day ? String(item.day) : '1')
+    setKind(item?.kind === 'income' ? 'income' : 'expense')
   }, [open, item])
 
   const submit = async (e) => {
@@ -1188,10 +1231,11 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
     setSaving(true)
     try {
       const payload = {
-        name: name.trim(),
+        title: name.trim(),   // API ждёт `title`; `name` — устаревший алиас (422 «Field required»)
         amount: parseFloat(amount) || 0,
         category: category.trim() || undefined,
         day: parseInt(day, 10) || 1,
+        kind,
       }
       if (isNew) {
         await api.addRecurring(payload)
@@ -1206,16 +1250,23 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
     }
   }
 
+  const isIncome = kind === 'income'
   return (
     <Sheet open={open} onClose={onClose} title={isNew ? 'новый регулярный платёж' : 'редактировать платёж'}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="название">
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Яндекс Плюс, Спортзал, Подписка…" />
+        <Field label="тип" hint={isIncome ? 'поступление: уйдёт в доход и в прогноз кассы' : 'списание: уйдёт в расход и в прогноз кассы'}>
+          <div className="sg">
+            <span className={!isIncome ? 'on' : ''} onClick={() => setKind('expense')}>списание</span>
+            <span className={isIncome ? 'on' : ''} onClick={() => setKind('income')}>доход</span>
+          </div>
         </Field>
-        <Field label="сумма в месяц (₽)">
+        <Field label="название">
+          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={isIncome ? 'Зарплата, аренда, фриланс…' : 'Яндекс Плюс, Спортзал, Подписка…'} />
+        </Field>
+        <Field label={isIncome ? 'сумма поступления в месяц (₽)' : 'сумма в месяц (₽)'}>
           <input className="input" type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="499" />
         </Field>
-        <Field label="день списания (1–31)">
+        <Field label={isIncome ? 'день поступления (1–31)' : 'день списания (1–31)'}>
           <input className="input" type="number" min="1" max="31" value={day} onChange={(e) => setDay(e.target.value)} />
         </Field>
         <div className="flex justify-end gap-2 pt-4">
