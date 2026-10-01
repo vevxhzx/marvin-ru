@@ -119,6 +119,15 @@ CLOUD_BASE_URL = (str(getattr(_cloud_cfg, "base_url", "") or "")).strip().rstrip
 CLOUD_PROXY = (str(getattr(_cloud_cfg, "proxy", "") or "")).strip() or None
 # модель для голосовых ответов (пусто = та же). У Groq «compound» ходит в интернет и думает 3–8 с — для голоса берём обычную быструю.
 CLOUD_VOICE_MODEL = (str(getattr(_cloud_cfg, "voice_model", "") or "")).strip()
+# ФАЗА 6: brain.cloud.personal_tools — согласие отдавать облачной модели личные данные (заметки/память/люди/сводки).
+# Дефолт False: в режиме brain.mode=cloud облако получает инструменты записи, но не видит личных данных.
+CLOUD_PERSONAL = bool(getattr(_cloud_cfg, "personal_tools", False))
+
+
+def cloud_personal_tools() -> bool:
+    """Можно ли облачной модели (режим brain.mode=cloud) отдавать личные данные. Дефолт — нет."""
+    return CLOUD_PERSONAL
+
 # Готовые пресеты: адрес + бесплатная модель по умолчанию. Все — OpenAI-совместимый /chat/completions.
 # Режим cloud + инструменты у Groq: модель берём из живого списка /models (Groq часто выводит модели из оборота:
 # llama-4-scout и qwen3-32b исчезли летом 2026, llama-3.x ушли в Enterprise). Порядок — предпочтение.
@@ -599,6 +608,8 @@ def reload_cloud_settings() -> str:
     CLOUD_MODEL = (str(getattr(cc, "model", "") or "")).strip()
     CLOUD_BASE_URL = (str(getattr(cc, "base_url", "") or "")).strip().rstrip("/")
     CLOUD_PROXY = (str(getattr(cc, "proxy", "") or "")).strip() or None
+    global CLOUD_PERSONAL
+    CLOUD_PERSONAL = bool(getattr(cc, "personal_tools", False))
     MODE = _c.cfg.brain.mode
     GEMINI_AUTO = bool(getattr(_c.cfg.brain.gemini, "auto", True))
     global OLLAMA_MODEL, OLLAMA_URL, VISION_MODEL

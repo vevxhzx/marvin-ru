@@ -781,6 +781,13 @@ function CloudPreview() {
         {res && <span className="faint text-[12px]">{res.will_send ? 'уйдёт в облако' : 'не уйдёт (локально/пусто)'}{res.anonymized ? ' · обезличено' : ''}</span>}
       </div>
       {res && <pre className="mt-2 whitespace-pre-wrap break-words text-[12.5px]">{res.text || '—'}</pre>}
+      {res && res.mode === 'cloud' && (
+        <div className="faint mt-2 text-[12px]">
+          {res.personal_tools
+            ? 'Режим «облако вместо ПК»: облако видит заметки, память и сводки по деньгам/заказам.'
+            : 'Режим «облако вместо ПК»: облако не получает заметки, память и сводки по деньгам/заказам — включите «личные инструменты в облаке», если это нужно.'}
+        </div>
+      )}
     </div>
   )
 }

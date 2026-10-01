@@ -375,6 +375,8 @@ def cloud_preview(body: CloudPreviewIn):
     cloud = llm.cloud_enabled()
     return {"text": shown, "anonymized": anonymized, "cloud_enabled": cloud, "mode": llm.MODE,
             "will_send": bool(cloud and llm.MODE in ("hybrid", "cloud") and text.strip()),
+            # ФАЗА 6: в режиме cloud без brain.cloud.personal_tools облако не получает личные инструменты/память
+            "personal_tools": bool(llm.cloud_personal_tools()),
             "note": "Черновик. Ничего не отправлено. В режиме local данные остаются на компьютере."}
 
 

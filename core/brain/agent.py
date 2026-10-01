@@ -1393,6 +1393,10 @@ def _cloud_tools_mode() -> bool:
 async def _chat(messages: list[dict], tools: list[dict] | None = None, **kw) -> dict:
     """Локальная модель или — в режиме cloud — облако с теми же инструментами."""
     if _cloud_tools_mode():
+        # ФАЗА 6: без явного brain.cloud.personal_tools облачная модель не получает личные инструменты
+        # (заметки/память/карточки людей/сводки) — только те, что пишут. На local/hybrid это не влияет.
+        if tools and not llm.cloud_personal_tools():
+            tools = registry.without_personal(tools)
         out = await llm.cloud_tools_chat(messages, tools or [], temperature=kw.get("temperature", 0.2))
         if out is None:
             raise RuntimeError(llm.LAST_CLOUD_ERROR or "облако не ответило")
@@ -1439,7 +1443,10 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     if not with_tools:
         # болтовня/общий вопрос, облако не ответило: без схем инструментов промпт в 4–5 раз короче → ответ в разы быстрее
         voice_hint = " Отвечай 1–2 короткими предложениями, без списков и эмодзи." if channel.endswith("voice") else ""
-        messages = [{"role": "system", "content": system_prompt(compact=not cloud_tools) + voice_hint + await memory.context(text) + _no_repeat_block()}]
+        mem = await memory.context(text)
+        if cloud_tools and not llm.cloud_personal_tools():
+            mem = ""   # ФАЗА 6: блок «что ты знаешь о хозяине» в облако без явного brain.cloud.personal_tools не идёт
+        messages = [{"role": "system", "content": system_prompt(compact=not cloud_tools) + voice_hint + mem + _no_repeat_block()}]
         for h in _history(channel, 4, current=text):
             messages.append({"role": h["role"], "content": h["text"]})
         messages.append({"role": "user", "content": text + "\n" + now_line()})
@@ -1468,6 +1475,8 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     # а перед репликой пользователя: системный промпт + схемы 40 инструментов тогда неизменны от запроса к запросу,
     # и Ollama берёт их из кэша вместо того, чтобы каждый раз заново читать ~6k токенов (на 1660 Super это 15–25 с).
     mem_ctx = await memory.context(text)
+    if cloud_tools and not llm.cloud_personal_tools():
+        mem_ctx = ""   # ФАЗА 6: личные факты в облако без явного brain.cloud.personal_tools не отдаём
     messages = [{"role": "system", "content": system_prompt() + voice_hint +
                  "\nУ тебя есть инструменты — это ЕДИНСТВЕННЫЙ способ что-то сохранить. Правила:\n"
                  "• Просят записать/добавить/запомнить/сохранить/напомнить/показать — ВЫЗОВИ инструмент. "
@@ -1597,7 +1606,11 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                                      "либо измени аргументы, либо честно скажи пользователю, что не получилось."})
                     continue
                 seen_calls[sig] = False
-                if c["name"] in ("add_note", "add_event", "add_task") and (_looks_like_question(text) or _is_analysis(text)):
+                if cloud_tools and not llm.cloud_personal_tools() and c["name"] in registry.PERSONAL_TOOLS:
+                    # ФАЗА 6: облако попросило личный инструмент, а согласия нет — не выполняем и не раскрываем данные
+                    log.info("[%s] облако запросило личный инструмент %s — запрещено (brain.cloud.personal_tools выкл)", channel, c["name"])
+                    res = "Личные данные недоступны: режим «облако вместо ПК» без brain.cloud.personal_tools. Скажите пользователю честно."
+                elif c["name"] in ("add_note", "add_event", "add_task") and (_looks_like_question(text) or _is_analysis(text)):
                     res = "Это вопрос, возражение или просьба разобраться, а не команда сохранить — НЕ сохранено. Ответь по существу; если нужны данные — вызови finance_summary / list_debts / agenda."
                     log.info("[%s] модель хотела записать вопрос в заметки — отклонено", channel)
                 elif (big := _needs_confirm(c["name"], c["arguments"] or {})) is not None:

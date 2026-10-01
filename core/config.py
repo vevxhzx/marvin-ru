@@ -8,8 +8,23 @@ from typing import Any
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-DATA_DIR = ROOT / "data"
-DATA_DIR.mkdir(exist_ok=True)
+# Тесты и внешние стенды (например e2e Playwright) уводят БД и настройки в свою папку:
+# JARVIS_DATA_DIR — вместо data/, JARVIS_CONFIG — вместо config.yaml, JARVIS_DB_PATH — вместо data/jarvis.db.
+# Переменные не заданы → всё как было: настоящие data/ и config.yaml.
+DATA_DIR = Path(os.getenv("JARVIS_DATA_DIR") or os.getenv("ASSISTANT_DATA_DIR") or ROOT / "data")
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _config_file() -> Path:
+    """Файл настроек, который нужно читать/писать: обычно config.yaml."""
+    env = os.getenv("JARVIS_CONFIG") or os.getenv("ASSISTANT_CONFIG")
+    return Path(env) if env else ROOT / "config.yaml"
+
+
+def _config_src() -> Path:
+    """Откуда читать настройки: свой config.yaml, а если его нет — config.example.yaml."""
+    path = _config_file()
+    return path if path.exists() else ROOT / "config.example.yaml"
 
 
 class _Node:
@@ -51,9 +66,7 @@ def _load_env_file() -> None:
 
 
 def _load() -> _Node:
-    path = ROOT / "config.yaml"
-    if not path.exists():
-        path = ROOT / "config.example.yaml"
+    path = _config_src()
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     # переменные окружения перекрывают файл (удобно для тестов и сервера)
@@ -74,7 +87,8 @@ def _load() -> _Node:
 
 _load_env_file()
 cfg = _load()
-DB_PATH = DATA_DIR / "jarvis.db"
+DB_PATH = Path(os.getenv("JARVIS_DB_PATH") or os.getenv("ASSISTANT_DB_PATH") or (DATA_DIR / "jarvis.db"))
+DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 TZ = cfg.owner.timezone if hasattr(cfg, "owner") else "Europe/Moscow"
 
 
@@ -110,6 +124,7 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "brain.cloud.model": ("str", "Модель облака (пусто — по умолчанию у провайдера)", False),
     "brain.cloud.base_url": ("str", "Адрес API (только для custom)", False),
     "brain.cloud.proxy": ("str", "Прокси для облака (обычно не нужен)", False),
+    "brain.cloud.personal_tools": ("bool", "Режим «облако вместо ПК» (brain.mode=cloud): отдавать облачной модели личные данные — заметки, память, карточки людей, сводки по деньгам и заказам. Выключено = облако только пишет, но не читает ваши данные", False),
     "brain.gemini.auto": ("bool", "Разговор и общие вопросы — в облако (иначе только по слову «облако, …»)", False),
     "brain.gemini.api_key": ("str", "Ключ Google Gemini (только если провайдер gemini)", True),
     "brain.gemini.model": ("str", "Модель Google Gemini (auto)", False),
@@ -184,8 +199,7 @@ def _get_path(raw: dict, path: str, default=None):
 
 def read_settings() -> dict:
     """Текущие значения редактируемых ключей (секреты маскируются)."""
-    path = ROOT / "config.yaml"
-    src = path if path.exists() else ROOT / "config.example.yaml"
+    src = _config_src()
     with open(src, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
     out = []
@@ -197,7 +211,7 @@ def read_settings() -> dict:
         if secret and val:
             shown = str(val)[:4] + "…" + str(val)[-3:] if len(str(val)) > 8 else "•••"
         out.append({"key": key, "type": typ, "label": label, "secret": secret, "value": shown, "set": bool(val)})
-    return {"file": str(src), "exists": path.exists(), "items": out}
+    return {"file": str(src), "exists": _config_file().exists(), "items": out}
 
 
 def _yaml_scalar(val, typ: str) -> str:
@@ -213,7 +227,7 @@ def write_settings(changes: dict[str, object]) -> list[str]:
     """Меняет значения в config.yaml построчно, сохраняя комментарии. Возвращает список изменённых ключей.
 
     Формат файла — 2–3 уровня вложенности с отступами по 2 пробела (как в config.example.yaml)."""
-    path = ROOT / "config.yaml"
+    path = _config_file()
     if not path.exists():
         import shutil
         shutil.copy(ROOT / "config.example.yaml", path)
@@ -291,7 +305,7 @@ def write_settings(changes: dict[str, object]) -> list[str]:
 
 def setup_done() -> bool:
     """Мастер первого запуска пройден? Критерий: есть config.yaml и в нём заполнен режим мозга и (токен ИЛИ явный отказ от Telegram)."""
-    path = ROOT / "config.yaml"
+    path = _config_file()
     if not path.exists():
         return False
     try:

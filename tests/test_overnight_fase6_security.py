@@ -183,3 +183,145 @@ def test_phone_rotate_endpoint_is_local_only():
     from core.api import auth
     remote = _client(remote=True)
     assert remote.post("/api/phone/rotate", headers={"X-Auth-Token": auth.token()}).status_code == 403
+
+
+# ---------------- 5. «личные инструменты в облаке» (brain.cloud.personal_tools, дефолт False) ----------------
+def _cloud_mode(monkeypatch, *, personal: bool):
+    """Режим «облако вместо ПК»: llm.MODE=cloud + рабочий провайдер. personal — флаг согласия."""
+    from core.brain import agent, llm
+
+    async def _down(*a, **k):
+        return False
+
+    monkeypatch.setattr(llm, "MODE", "cloud")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "groq")
+    monkeypatch.setattr(llm, "cloud_enabled", lambda: True)
+    monkeypatch.setattr(llm, "ollama_available", _down)
+    monkeypatch.setattr(llm, "CLOUD_PERSONAL", personal)
+    monkeypatch.setattr(agent, "_history", lambda *a, **k: [])
+    return llm, agent
+
+
+def test_personal_tools_flag_defaults_to_false(monkeypatch):
+    """Дефолт — личные данные облаку не отдаём (совпадает с описанием настройки в core/config.py)."""
+    from core import config
+    from core.brain import llm
+    assert "brain.cloud.personal_tools" in config.EDITABLE
+    assert config.EDITABLE["brain.cloud.personal_tools"][0] == "bool"
+    import inspect
+    assert 'getattr(_cloud_cfg, "personal_tools", False)' in inspect.getsource(llm)
+
+
+def test_cloud_mode_without_consent_gets_no_personal_tools(monkeypatch):
+    """cloud + personal_tools=False: облако получает только пишущие инструменты, личные — нет."""
+    llm, agent = _cloud_mode(monkeypatch, personal=False)
+    seen = {}
+
+    async def fake_cloud_tools(messages, tools, temperature=0.2):
+        seen["tools"] = tools
+        return {"content": "Готово.", "tool_calls": []}
+
+    monkeypatch.setattr(llm, "cloud_tools_chat", fake_cloud_tools)
+    r = asyncio.run(agent.via_ollama("сколько я потратил за неделю?", "web"))
+    assert r is not None
+    names = [t["function"]["name"] for t in seen["tools"]]
+    assert "add_expense" in names, "пишущие инструменты остаются доступны — поведение по умолчанию не ломаем"
+    for p in ("search_notes", "add_note", "finance_summary", "today_briefing", "person_card", "list_debts"):
+        assert p not in names, f"личный инструмент {p} не должен уходить в облако без согласия"
+
+
+def test_cloud_mode_with_consent_keeps_personal_tools(monkeypatch):
+    """cloud + personal_tools=True: старый режим как был — все инструменты на месте (обратная совместимость)."""
+    llm, agent = _cloud_mode(monkeypatch, personal=True)
+    seen = {}
+
+    async def fake_cloud_tools(messages, tools, temperature=0.2):
+        seen["tools"] = tools
+        return {"content": "Готово.", "tool_calls": []}
+
+    monkeypatch.setattr(llm, "cloud_tools_chat", fake_cloud_tools)
+    asyncio.run(agent.via_ollama("что в моих заметках?", "web"))
+    names = [t["function"]["name"] for t in seen["tools"]]
+    assert "search_notes" in names and "finance_summary" in names
+
+
+def test_cloud_mode_blocked_personal_call_is_not_executed(monkeypatch):
+    """Облако без согласия вызвало личный инструмент — не выполняем, результат не уходит провайдеру."""
+    from core.tools import registry
+    llm, agent = _cloud_mode(monkeypatch, personal=False)
+    calls = []
+
+    seen_msgs = []
+
+    async def fake_cloud_tools(messages, tools, temperature=0.2):
+        seen_msgs.append(messages)
+        if len(seen_msgs) == 1:
+            return {"content": "", "tool_calls": [{"name": "today_briefing", "arguments": {}}]}
+        return {"content": "Не смог посмотреть деньги, сэр.", "tool_calls": []}
+
+    orig_call = registry.call
+
+    def spy(name, args, channel="tg"):
+        calls.append(name)
+        return orig_call(name, args, channel)
+
+    monkeypatch.setattr(registry, "call", spy)
+    monkeypatch.setattr(llm, "cloud_tools_chat", fake_cloud_tools)
+    # не вопрос про данные — иначе сработал бы локальный _forced_tool (он считает данные сам, это безопасно)
+    r = asyncio.run(agent.via_ollama("ну привет", "web"))
+    assert "today_briefing" not in calls, "личный инструмент не должен выполняться по запросу облака"
+    # облако получает отказ, а не содержимое базы
+    told = [m["content"] for m in seen_msgs[-1] if m.get("role") == "tool"]
+    assert told and "недоступны" in told[-1].lower()
+    assert r is not None and "Не получилось" not in r.text
+
+
+def test_hybrid_and_local_modes_unaffected_by_flag(monkeypatch):
+    """local/hybrid идут в Ollama — флаг на них не влияет (ничего не ломаем)."""
+    from core.brain import agent, llm
+    from core.tools import registry
+
+    async def _down(*a, **k):
+        return False
+
+    monkeypatch.setattr(llm, "MODE", "hybrid")
+    monkeypatch.setattr(llm, "CLOUD_PERSONAL", False)
+
+    async def _up(*a, **k):
+        return True
+
+    monkeypatch.setattr(llm, "ollama_available", _up)
+    got = {}
+
+    async def fake_ollama(messages, tools=None, **kw):
+        got["tools"] = tools
+        return {"content": "ок", "tool_calls": []}
+
+    monkeypatch.setattr(llm, "ollama_chat", fake_ollama)
+    monkeypatch.setattr(agent, "_history", lambda *a, **k: [])
+    asyncio.run(agent.via_ollama("что в моих заметках?", "web"))
+    names = [t["function"]["name"] for t in (got["tools"] or [])]
+    assert "search_notes" in names, "на ПК личные инструменты остаются"
+
+
+def test_cloud_preview_reports_personal_tools_flag(monkeypatch):
+    """Превью «что уйдёт в облако» показывает состояние флага — владелец видит режим."""
+    from core.brain import llm
+    monkeypatch.setattr(llm, "MODE", "cloud")
+    monkeypatch.setattr(llm, "CLOUD_PERSONAL", False)
+    d = _client().post("/api/cloud/preview", json={"text": "сколько я потратил?"}).json()
+    assert d["personal_tools"] is False and d["mode"] == "cloud"
+    monkeypatch.setattr(llm, "CLOUD_PERSONAL", True)
+    d = _client().post("/api/cloud/preview", json={"text": "сколько я потратил?"}).json()
+    assert d["personal_tools"] is True
+
+
+def test_without_personal_keeps_write_tools_only():
+    """Чистая функция фильтра: убирает ровно PERSONAL_TOOLS, остальное не трогает."""
+    from core.tools import registry
+    tools = registry.tools_schema(with_cloud=False, text=None)
+    assert tools, "схема инструментов не должна быть пустой"
+    left = [t["function"]["name"] for t in registry.without_personal(tools)]
+    assert not set(left) & set(registry.PERSONAL_TOOLS)
+    assert "add_expense" in left and "add_task" in left
+    assert len(left) == len(tools) - len([t for t in tools if t["function"]["name"] in registry.PERSONAL_TOOLS])

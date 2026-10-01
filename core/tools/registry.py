@@ -1124,6 +1124,21 @@ FREELANCE_RX = re.compile(r"заказ\w*|клиент\w*|проект\w*|ава
                           r"друг\w*|подруг\w*|сестр\w*|брат\w*|мам\w*|пап\w*|жен[аы]|муж\w*|коллег\w*|"
                           r"\b[А-ЯЁ][а-яё]{2,}(?:а|я|ой|е|у|ю)?\b", re.U)   # имя с большой буквы не в начале — скорее всего человек
 
+# ФАЗА 6: инструменты, чей РЕЗУЛЬТАТ содержит личные данные (заметки, память, люди, сводки по деньгам/заказам).
+# В режиме brain.mode=cloud без явного brain.cloud.personal_tools=true облачной модели они не отдаются:
+# облако может записать (add_task/add_event/…), но не читает личные данные. Порядок и набор — только добавление.
+PERSONAL_TOOLS = ("add_note", "edit_note", "search_notes", "board_note", "board_show", "remember_fact",
+                  "person_card", "add_person", "focus_today", "list_aims", "list_tasks", "list_events",
+                  "agenda", "today_briefing", "finance_summary", "spent", "list_debts", "cash_forecast",
+                  "find_subscriptions", "finance_report", "list_orders", "late_payments")
+
+
+def without_personal(tools: list[dict] | None) -> list[dict] | None:
+    """Убрать из схемы личные инструменты (ФАЗА 6). tools=None/пусто — без изменений."""
+    if not tools:
+        return tools
+    return [t for t in tools if (t.get("function") or {}).get("name") not in PERSONAL_TOOLS]
+
 
 def tools_schema(with_cloud: bool = False, text: str | None = None) -> list[dict]:
     """Схемы инструментов для модели. text=None — все (облако, тесты); с текстом — базовые + группы по смыслу фразы."""
