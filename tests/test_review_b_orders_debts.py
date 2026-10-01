@@ -109,10 +109,7 @@ def test_delete_payment_returns_money_and_reopens_order():
     assert _acc_balance(_main()) == 10_000
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="P2: POST /api/orders/{id}/payments принимает PaymentIn без idem_key "
-                          "(и сайт его не шлёт) — повтор одного и того же запроса "
-                          "создаёт второй доход, в отличие от /api/crm/…/payments")
+# P1/P2 закрыт: PaymentIn теперь с idem_key, сайт шлёт ключ из PaySheet. Был xfail(strict).
 def test_web_payment_endpoint_honors_idem_key():
     from fastapi.testclient import TestClient
     from core.api.app import app

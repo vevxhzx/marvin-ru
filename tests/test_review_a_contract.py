@@ -146,10 +146,8 @@ def test_crm_payment_idempotent():
     assert len(_payments(c, oid)) == 1, "повтор с тем же idem_key создал дубль дохода"
 
 
-@pytest.mark.xfail(reason="P1: POST /api/orders/{id}/payments принимает PaymentIn БЕЗ idem_key — повтор "
-                          "(таймаут/двойной клик) создаёт второй доход и заказ уходит в «оплачен» дважды; "
-                          "в core/crm/router.py та же операция уже идемпотентна",
-                   strict=False)
+# P1 закрыт: PaymentIn получил idem_key (core/api/schemas.py), роут пробрасывает его в
+# orders.add_payment, сайт шлёт ключ из PaySheet (web/src/pages/Orders.jsx). Был xfail.
 def test_api_payment_idempotent():
     c = _client()
     oid = _make_order(c)
@@ -358,9 +356,8 @@ def test_no_duplicate_method_and_path():
     assert not dups, f"дубли (метод, путь): {dups}"
 
 
-@pytest.mark.xfail(reason="P1: PUT /api/facts/style перекрыт PUT /api/facts/{fid} (зарегистрирован раньше) — "
-                          "фронт (web/src/lib/api.js setStyle) получает 422 и правка стиля не сохраняется",
-                   strict=False)
+# P1 закрыт: PUT /api/facts/style перенесён ВЫШЕ PUT /api/facts/{fid} в routers/mind.py
+# (Starlette сверяет роуты по порядку регистрации). Был xfail.
 def test_put_facts_style_not_shadowed():
     r = _client().put("/api/facts/style", json={"text": "Пишу коротко"})
     assert r.status_code == 200, f"PUT /api/facts/style -> {r.status_code}"
