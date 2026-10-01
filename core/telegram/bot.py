@@ -306,7 +306,10 @@ async def diag_cmd(m: Message):
             res = {"ok": False, "detail": "не ответил за 60 с (виснет сеть до провайдера)"}
         lines.append(f"☁️ {llm.cloud_title()}: {'отвечает' if res.get('ok') else 'ОШИБКА'} · {time.monotonic() - t:.1f} с"
                      + (f"\nмодель {res.get('model')}" if res.get("ok") and res.get("model") else f"\n{res.get('detail')}"))
-        lines.append(f"маршрут: {llm._CLOUD_ROUTE_OK[0] if llm._CLOUD_ROUTE_OK else '—'} · ключ …{llm.CLOUD_KEY[-4:] if llm.CLOUD_KEY else 'НЕТ'} · модель {llm._cloud_model() or 'по умолчанию'}")
+        # ФАЗА 6 (аудит F12): хвост ключа в диагностике убран — диагностика уходит в чат/логи, ключ там не нужен
+        lines.append(f"маршрут: {llm._CLOUD_ROUTE_OK[0] if llm._CLOUD_ROUTE_OK else '—'} · "
+                     f"ключ {'задан' if llm.CLOUD_KEY else 'НЕТ'} · модель {llm._cloud_model() or 'по умолчанию'}"
+                     + (f" · личные данные в облаке: {'да' if llm.cloud_personal_tools() else 'нет'}" if llm.MODE == 'cloud' else ""))
     else:
         lines.append("☁️ облако выключено")
     lines.append(f"режим: {llm.MODE} · авто-облако: {'да' if llm.GEMINI_AUTO else 'нет'}")

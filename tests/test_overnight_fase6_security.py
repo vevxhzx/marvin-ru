@@ -316,6 +316,46 @@ def test_cloud_preview_reports_personal_tools_flag(monkeypatch):
     assert d["personal_tools"] is True
 
 
+# ---------------- 6. аудит F12: хвост ключа не показывается в диагностике ----------------
+def test_diag_does_not_leak_key_tail():
+    """/diag уходит в чат и логи — хвост ключа там не нужен (F12). Проверяем текст, а не сеть."""
+    import inspect
+    from core.telegram import bot
+    src = inspect.getsource(bot.diag_cmd)
+    assert "CLOUD_KEY[-4:]" not in src and "CLOUD_KEY[-6:]" not in src, "хвост ключа в диагностике возвращать нельзя"
+    assert "CLOUD_KEY" in src, "о самом факте «ключ задан/нет» сказать можно"
+
+
+def test_diag_key_line_has_no_key_slice():
+    """Строка про ключ собирается из признака «задан/НЕТ», без среза значения."""
+    import inspect
+    from core.telegram import bot
+    src = inspect.getsource(bot.diag_cmd)
+    assert "ключ {'задан' if llm.CLOUD_KEY else 'НЕТ'}" in src
+    assert "личные данные в облаке" in src, "диагностика показывает режим личных данных в облаке"
+
+
+def test_no_key_tail_anywhere_in_code():
+    """По всему коду (кроме .venv/vendor) нет срезов хвоста ключа — регресс на F12."""
+    import pathlib
+    import re
+    root = pathlib.Path(__file__).resolve().parents[1]
+    rx = re.compile(r"(CLOUD_KEY|GEMINI_KEY|api_key|API_KEY)\s*\[\s*-\s*\d")
+    skip = {".venv", "vendor", "node_modules", ".git", "__pycache__", "site", "data", "e2e", "tests"}
+    bad = []
+    for p in root.rglob("*.py"):
+        if any(part in skip for part in p.parts):
+            continue
+        try:
+            txt = p.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        for n, line in enumerate(txt.splitlines(), 1):
+            if rx.search(line):
+                bad.append(f"{p.relative_to(root)}:{n}")
+    assert not bad, f"хвост ключа печатается: {bad}"
+
+
 def test_without_personal_keeps_write_tools_only():
     """Чистая функция фильтра: убирает ровно PERSONAL_TOOLS, остальное не трогает."""
     from core.tools import registry
