@@ -263,7 +263,7 @@ export function Sheet({ open, onClose, title, sub, children, wide }) {
             <h3 className="h2">{title}</h3>
             {sub && <div className="muted mt-1 text-[13px]">{sub}</div>}
           </div>
-          <button className="btn-icon shrink-0" onClick={onClose}><X size={16} /></button>
+          <button className="btn-icon shrink-0" onClick={onClose} aria-label="Закрыть" data-tip="Закрыть"><X size={16} /></button>
         </div>
         {children}
       </div>

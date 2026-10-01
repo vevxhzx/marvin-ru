@@ -119,7 +119,7 @@ export default function Orders() {
       <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />
         <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder="Своими словами: «ролик для Пятёрочки, 25к, до пятницы»…" />
-        <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label="Добавить"><Plus size={16} /></button>
+        <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label="Добавить" data-tip="Добавить заказ этой фразой"><Plus size={16} /></button>
       </form>
 
       {/* сводка: смысловые плитки (лайм — деньги, янтарь — ожидание); пустые не показываем.

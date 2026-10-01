@@ -6,6 +6,7 @@ import { ClientCardSheet } from './Orders'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import { ClientStageBadge } from '../components/ClientStage'
+import ClientNextStep from '../components/ClientNextStep'
 import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageApi, loadClientStages } from '../lib/crm'
 
 // colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово
@@ -211,6 +212,9 @@ function PersonSheet({ open, person, onClose, onDone, onCrm }) {
         <Field label="контакт / телефон / telegram">
           <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="@username или +7 999 123-45-67" />
         </Field>
+        {!isNew && (
+          <ClientNextStep cid={person.id} />
+        )}
         {!isNew && HAS_STAGE.has(kind) && (
           <div className="muted text-[12.5px]">
             Стадия клиента (лид → переговоры → клиент → постоянный → спит/ушёл) — отдельная вещь от стадии заказа:
