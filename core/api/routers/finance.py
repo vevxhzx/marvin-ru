@@ -119,26 +119,33 @@ def fin_forecast(days: int = 30):
     horizon = max(7, min(int(days or 30), 365))
     hist = max(30, min(horizon, 90))
     balance = finance.total_balance()
-    today = datetime.now().date()
+    today = insights.now_tz().date()          # та же зона, что у insights.cash_series (P2 ревью B)
 
+    # дельта ОБЩЕГО баланса: перевод между своими счетами и «чисто долговые» счета его
+    # не трогают — иначе ряд расходится с total_balance() (P1 ревью B, второй случай)
+    debt_only = {a.name for a in finance.list_accounts() if a.kind == "debt_only"}
     txs = [t for t in finance.list_transactions(hist + 1, 100_000) if t.date]
     deltas: dict = {}
     spent = income = 0.0
     for t in txs:
         d0 = t.date.date()
-        deltas[d0] = deltas.get(d0, 0.0) + (t.amount if t.kind == "income" else -t.amount)
+        deltas[d0] = deltas.get(d0, 0.0) + insights._tx_balance_delta(t, debt_only)
         if t.kind == "expense":
             spent += float(t.amount)
-        else:
+        elif t.kind == "income":
             income += float(t.amount)
 
-    # баланс на конец прошедшего дня = текущий баланс − всё, что случилось после него
+    # баланс на конец дня = текущий баланс − всё, что случилось ПОСЛЕ него. Идём от сегодня
+    # вглубь и разворачиваем — ровно как в insights.cash_series: иначе в первую точку попадал
+    # баланс на НАЧАЛО дня, «сегодня» отставал от карточек, а завтрашний день зеркалил
+    # вчерашний (P1 ревью B, B1 — см. reviews/review_B.md).
     points: list[dict] = []
     after = 0.0
-    for i in range(hist, -1, -1):
+    for i in range(0, hist + 1):
         d = today - timedelta(days=i)
         points.append({"date": d.isoformat(), "balance": round(balance - after), "kind": "past"})
         after += deltas.get(d, 0.0)
+    points.reverse()
 
     fc = insights.cash_forecast(horizon)
     points.extend({"date": p["date"], "balance": p["balance"], "kind": "future", "events": p.get("events") or []}
@@ -157,6 +164,11 @@ def fin_forecast(days: int = 30):
 
 @router.get("/api/finance/transactions")
 def fin_tx(days: int = 30):
+    # Сайт шлёт days=0 для периода «всё» (Finance.jsx, переключатель периода).
+    # Раньше 0 означал «отсечка = сейчас» → пустой список; теперь это «без нижней
+    # границы», т.е. вся история (P1 ревью D, D1).
+    if days <= 0:
+        days = 36500
     return finance.list_transactions(days, 1000)
 
 
@@ -252,6 +264,10 @@ def fin_debt_pay(debt_id: int, p: PayIn):
 
 @router.get("/api/finance/debts/{debt_id}/payments")
 def fin_debt_payments(debt_id: int):
+    # Несуществующий долг → 404, а не пустой список с 200: иначе опечатка в ID выглядит
+    # как «платежей нет» (P2 ревью A; DELETE /api/finance/debts/{id} уже отдаёт 404).
+    if not any(d.id == debt_id for d in finance.list_debts(include_closed=True)):
+        raise HTTPException(404)
     return finance.debt_payments(debt_id)
 
 
