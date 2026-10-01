@@ -13,6 +13,7 @@ import { useTimer, mmss } from './Orders'
 import { TodaySummaryWidget, ScreenTimeBentoWidget } from '../components/ReportCards'
 // новые карточки главной: быстрое дело, лимит трат, цели, привычки, ближайшее дело
 import { QuickAddWidget, SpendTodayWidget, GoalsWidget, HabitsWidget, NextUpWidget } from '../components/TodayCards'
+import CashChart from '../components/CashChart'
 import { useNavigate } from 'react-router-dom'
 
 const GREETS = { morning: 'доброе утро', day: 'добрый день', evening: 'добрый вечер', night: 'доброй ночи' }
@@ -169,7 +170,9 @@ export default function Today({ openChat, address = 'вовчик' }) {
   const fcLast = fc?.points?.filter((p) => p.kind === 'future').slice(-1)[0]
   const forecastBalance = fcLast ? fcLast.balance : balance - avgDaily * 30
 
-  // 30 дней отсечек
+  // График кассы рисует CashChart (тот же, что в «финансах»): точка = баланс на конец дня,
+  // подсказка в две подписанные строки, «сегодня» — последняя точка факта
+
   const startD = new Date(now)
   const endD = new Date(now)
   endD.setDate(endD.getDate() + 30)
@@ -226,46 +229,6 @@ export default function Today({ openChat, address = 'вовчик' }) {
     type: n.tags?.[0] || 'мысль',
     date: 'сегодня',
   }))
-
-  // Скраббер графика: точки приходят из того же расчёта, что и в разделе «финансы» —
-  // здесь раньше была рисованная вручную кривая, которая врала про будущий баланс
-  const pts = fc?.points || []
-  const geo = useMemo(() => {
-    if (pts.length < 2) return null
-    const vals = pts.map((p) => p.balance)
-    let max = Math.max(...vals)
-    let min = Math.min(...vals)
-    if (min > 0) min = 0
-    if (max < 0) max = 0
-    const span = (max - min) || 1
-    const X = (i) => (i / (pts.length - 1)) * 600
-    const Y = (v) => 186 - ((v - min) / span) * 166
-    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.balance).toFixed(1)}`).join('')
-    return { X, Y, line, area: `${line}L600 200L0 200Z`, zero: Y(0), iNow: Math.max(0, pts.findIndex((p) => p.kind === 'future')) }
-  }, [fc])
-
-  const [scrubI, setScrubI] = useState(null)
-  const [scrubActive, setScrubActive] = useState(false)
-  const svRef = useRef(null)
-
-  const handlePointerMove = (e) => {
-    if (!svRef.current || !pts.length || !geo) return
-    const r = svRef.current.getBoundingClientRect()
-    const fx = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
-    setScrubI(Math.round(fx * (pts.length - 1)))
-    setScrubActive(true)
-  }
-
-  const handlePointerLeave = () => { setScrubActive(false); setScrubI(null) }
-
-  // подсказка: при наведении — день под курсором, в покое — итог на конец периода
-  const tipI = scrubActive && scrubI != null ? scrubI : pts.length - 1
-  const tipP = pts[tipI]
-  const tipLeft = geo ? Math.min(Math.max(geo.X(tipI) / 6, 9), 91) : 50
-  const tipTop = geo && tipP ? (geo.Y(tipP.balance) / 200) * 100 : 50
-  const tipText = tipP
-    ? `${z(Number(tipP.date.slice(8, 10)))}.${tipP.date.slice(5, 7)} · ${tipP.balance < 0 ? '−' : ''}${money(Math.abs(tipP.balance))}`
-    : `${endStr} · ${forecastBalance < 0 ? '−' : ''}${money(Math.abs(forecastBalance))}`
 
   // Диалоги правки
   const [editTask, setEditTask] = useState(null)
@@ -396,50 +359,15 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="chart" className={`c chart s8 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('chart', idx)}
-            <div className="hd"><h2>касса на 30 дней</h2><small>при текущем темпе</small></div>
-            <div className="cw" id="cw" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
-              {!geo ? (
-                <div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', opacity: 0.6 }}>
-                  собираю данные…
-                </div>
-              ) : (
-                <>
-                  <div className="tip mono" id="tip" style={{ left: `${tipLeft}%`, top: `${tipTop}%` }}>
-                    {tipText}
-                  </div>
-                  <svg id="sv" ref={svRef} viewBox="0 0 600 200" role="img" aria-label="касса на 30 дней">
-                    <defs>
-                      <linearGradient id="gaToday" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0" style={{ stopColor: 'var(--acc)', stopOpacity: 0.35 }} />
-                        <stop offset="1" style={{ stopColor: 'var(--acc)', stopOpacity: 0 }} />
-                      </linearGradient>
-                      <linearGradient id="glToday" x1="0" x2="1">
-                        <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
-                        <stop offset="1" style={{ stopColor: 'var(--acc)' }} />
-                      </linearGradient>
-                    </defs>
-                    <line className="zero" x1="0" x2="600" y1={geo.zero} y2={geo.zero} />
-                    <path className="ar" fill="url(#gaToday)" d={geo.area} />
-                    <path className="ln" stroke="url(#glToday)" pathLength="1" d={geo.line} />
-                    {geo.iNow > 0 && (
-                      <line className="sl" x1={geo.X(geo.iNow)} x2={geo.X(geo.iNow)} y1="0" y2="200" style={{ opacity: 0.3, strokeDasharray: '4 6' }} />
-                    )}
-                    <circle className="pulse" cx={geo.X(0)} cy={geo.Y(pts[0].balance)} r="5" />
-                    <circle className="d" style={{ '--t': '.9s' }} cx={geo.X(0)} cy={geo.Y(pts[0].balance)} r="5" fill="var(--pos)" />
-                    <circle className="d" style={{ '--t': '1.4s' }} cx={geo.X(geo.iNow)} cy={geo.Y(pts[geo.iNow].balance)} r="5" fill="var(--ink)" />
-                    <circle className="d" style={{ '--t': '2.1s' }} cx={geo.X(pts.length - 1)} cy={geo.Y(pts[pts.length - 1].balance)} r="6"
-                      fill={pts[pts.length - 1].balance < 0 ? 'var(--neg)' : 'var(--pos)'} />
-                    <line className="sl" x1={scrubActive ? geo.X(scrubI || 0) : 0} x2={scrubActive ? geo.X(scrubI || 0) : 0} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
-                    <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0}
-                      cx={scrubActive ? geo.X(scrubI || 0) : 0} cy={scrubActive ? geo.Y(pts[scrubI || 0]?.balance || 0) : 0} />
-                  </svg>
-                </>
-              )}
-            </div>
-            <div className="ax mono"><span>{startStr}</span><span>сегодня</span><span>{endStr}</span></div>
+            <div className="hd"><h2>касса на 30 дней</h2><small>{fc ? `сейчас ${money(fc.balance)} · темп ${money(fc.avg_day_spent)}/дн` : 'при текущем темпе'}</small></div>
+            {fc
+              ? <CashChart f={fc} height={200} legend={false} />
+              : <div className="cw" id="cw"><div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', opacity: 0.6 }}>собираю данные…</div></div>}
             <div className="lg">
               <span><i style={{ background: '#ff9f5c' }}></i>факт</span>
-              <span><i style={{ background: 'var(--acc)' }}></i>прогноз</span>
+              <span><i style={{ background: 'var(--accent)' }}></i>прогноз</span>
+              <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>ноль</span>
+              {fc?.runway_days != null && <span className="text-[var(--neg)]">до нуля ~{fc.runway_days} дн</span>}
               {fc?.min_balance != null && fc.min_balance >= 0 && fc.min_date && (
                 <span>минимум {money(fc.min_balance)} · {z(Number(fc.min_date.slice(8, 10)))}.{fc.min_date.slice(5, 7)}</span>
               )}

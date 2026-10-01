@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Flame, Upload, Cake } from 'lucide-react'
 import { api, money } from '../lib/api'
+import CashChart from './CashChart'
 
 /* ---------- Тепловая карта активности (как на GitHub) + стрик ---------- */
 export function Heatmap({ days = [], heatmap = [], weeks = 26 }) {
@@ -51,74 +52,22 @@ export function Streak({ streak }) {
 const plural = (n) => { const a = n % 100, b = n % 10; return a > 10 && a < 20 ? 'дней' : b === 1 ? 'день' : b > 1 && b < 5 ? 'дня' : 'дней' }
 
 /* ---------- Прогноз кассы на 30 дней ---------- */
-export function Forecast({ f, compact = false }) {
-  // хук — до раннего выхода: иначе при появлении данных менялся порядок хуков и React ронял страницу
-  const [hover, setHover] = useState(null)
+export function Forecast({ f, compact = false, txs = null }) {
+  // тот же CashChart, что и в «финансах»: точка = баланс на конец дня, подсказка в две строки
   if (!f?.points?.length) return null
-  const pts = f.points
-  // svg растягивается на всю ширину контейнера (preserveAspectRatio="none"), поэтому координаты X — в процентах,
-  // а не в пикселях viewBox: раньше при широком окне график сжимался в середину, а курсор/подсказка считались по всему блоку
-  const W = 1000, H = compact ? 90 : 160, P = 6
-  const min = Math.min(0, ...pts.map((p) => p.balance)), max = Math.max(1, ...pts.map((p) => p.balance))
-  const x = (i) => P + (i / (pts.length - 1)) * (W - 2 * P)
-  const y = (v) => P + (1 - (v - min) / (max - min || 1)) * (H - 2 * P)
-  const d = pts.map((p, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(p.balance).toFixed(1)}`).join(' ')
-  const zero = y(0)
-  const ev = pts.map((p, i) => ({ ...p, i })).filter((p) => p.events.length)
-  const lowIdx = pts.findIndex((p) => p.date === f.low_date)
-  const cur = hover != null ? pts[hover] : null
   const dm = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}`
-  // подсказка живёт в отдельной строке над графиком и никогда его не закрывает
-  const first = pts[0]
+  const perDay = f.per_day ?? f.avg_day_spent
+  const low = f.low ?? f.min_balance
+  const lowDate = f.low_date ?? f.min_date
+  const ok = f.ok ?? (low >= 0)
   return (
     <div>
-      <div className={`flex items-baseline gap-x-3 text-[12.5px] ${compact ? 'h-5' : 'h-6'}`} aria-live="polite">
-        {cur ? (
-          <>
-            <span className="muted num">{dm(cur.date)}</span>
-            <span className={`num font-medium ${cur.balance < 0 ? 'neg' : ''}`}>{money(cur.balance)}</span>
-            {cur.events.slice(0, 3).map((e, i) => <span key={i} className={`truncate ${e.amount > 0 ? 'pos' : 'muted'}`}>{e.amount > 0 ? '+' : '−'}{money(Math.abs(e.amount))} {e.title}</span>)}
-          </>
-        ) : (
-          <>
-            <span className="muted num">сегодня</span>
-            <span className="num font-medium">{money(first.balance)}</span>
-            <span className="faint">наведите на график — покажу день</span>
-          </>
-        )}
-      </div>
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="mt-1 block w-full cursor-crosshair" style={{ height: H }} onMouseLeave={() => setHover(null)}
-        onMouseMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((e.clientX - r.left) / r.width) * (pts.length - 1))))) }}
-        onTouchStart={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = e.touches[0]; setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((t.clientX - r.left) / r.width) * (pts.length - 1))))) }}
-        onTouchMove={(e) => { const r = e.currentTarget.getBoundingClientRect(); const t = e.touches[0]; setHover(Math.max(0, Math.min(pts.length - 1, Math.round(((t.clientX - r.left) / r.width) * (pts.length - 1))))) }}>
-        <defs>
-          <linearGradient id="grad-widget-cash-fill" x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0" stopColor="var(--accent)" stopOpacity=".32" />
-            <stop offset=".55" stopColor="#8a5cff" stopOpacity=".16" />
-            <stop offset="1" stopColor="#8a5cff" stopOpacity="0" />
-          </linearGradient>
-          <linearGradient id="grad-widget-cash-line" x1="0" x2="1" y1="0" y2="0">
-            <stop offset="0" stopColor="var(--accent)" />
-            <stop offset="1" stopColor="#8a5cff" />
-          </linearGradient>
-        </defs>
-        {min < 0 && <line x1={P} x2={W - P} y1={zero} y2={zero} stroke="var(--neg)" strokeDasharray="3 4" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
-        <path d={`${d} L${x(pts.length - 1)},${H - P} L${x(0)},${H - P} Z`} fill="url(#grad-widget-cash-fill)" />
-        <path d={d} fill="none" stroke={f.ok ? 'url(#grad-widget-cash-line)' : 'var(--neg)'} strokeWidth="2" strokeLinejoin="round" vectorEffect="non-scaling-stroke" style={{ strokeDasharray: 3000, strokeDashoffset: 3000, animation: 'draw 1.4s cubic-bezier(.2,.8,.2,1) forwards' }} />
-        {hover != null && <line x1={x(hover)} x2={x(hover)} y1={P} y2={H - P} stroke="var(--ink-3)" strokeWidth="1" vectorEffect="non-scaling-stroke" />}
-      </svg>
-      {/* точки — отдельным слоем поверх растянутого svg, иначе круги превращаются в овалы */}
-      <div className="pointer-events-none relative" style={{ height: 0 }}>
-        {ev.map((p) => <span key={p.i} className="absolute h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-[var(--bg)]" style={{ left: `${(x(p.i) / W) * 100}%`, top: `${y(p.balance) - H}px`, background: p.events.some((e) => e.amount > 0) ? 'var(--green, #30d158)' : 'var(--ink)' }} />)}
-        {lowIdx >= 0 && !f.ok && <span className="absolute h-[9px] w-[9px] -translate-x-1/2 -translate-y-1/2 rounded-full" style={{ left: `${(x(lowIdx) / W) * 100}%`, top: `${y(pts[lowIdx].balance) - H}px`, background: 'var(--neg)' }} />}
-        {cur && <span className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]" style={{ left: `${(x(hover) / W) * 100}%`, top: `${y(cur.balance) - H}px`, background: cur.balance < 0 ? 'var(--neg)' : 'var(--accent)' }} />}
-      </div>
-      <div className="faint mt-1 flex justify-between text-[11px] num"><span>{dm(pts[0].date)}</span><span>{dm(pts[Math.floor((pts.length - 1) / 2)].date)}</span><span>{dm(pts[pts.length - 1].date)}</span></div>
+      <CashChart f={f} height={compact ? 120 : 170} compact={compact} txs={txs} />
       {!compact && (
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
-          <span className="muted">в среднем <b className="num" style={{ color: 'var(--ink)' }}>{money(f.per_day)}</b>/день</span>
+          {perDay != null && <span className="muted">в среднем <b className="num" style={{ color: 'var(--ink)' }}>{money(perDay)}</b>/день</span>}
           {f.safe_per_day != null && <span className="muted">безопасно <b className="num accent">{money(f.safe_per_day)}</b>/день до дохода ({f.days_to_income} дн)</span>}
-          <span className={f.ok ? 'muted' : 'neg font-medium'}>{f.ok ? `минимум ${money(f.low)}` : `минус ${money(f.low)} к ${dm(f.low_date)}`}</span>
+          {low != null && <span className={ok ? 'muted' : 'neg font-medium'}>{ok ? `минимум ${money(low)}` : `минус ${money(low)} к ${dm(lowDate)}`}</span>}
         </div>
       )}
     </div>

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
 import { api, money, shortDate, toLocalISO, plural } from '../lib/api'
 import { Num, Sheet, Field, Empty, Money, useToast, PageAccent } from '../components/ui'
+import CashChart from '../components/CashChart'
 import { useRefresh } from '../App'
 import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
@@ -107,44 +108,10 @@ export default function Finance() {
   const livingSpent = spent || 40575
   const livingRemain = (cf.free || 7816) - livingSpent
 
-  // График кассы: прошлое — пересчёт баланса по операциям, будущее — прогноз сервера
-  const [scrubI, setScrubI] = useState(null)
-  const [scrubActive, setScrubActive] = useState(false)
-  const svRef = useRef(null)
+  // График кассы рисует CashChart (общий с главной): точка = баланс на конец дня
 
   const now = new Date()
   const z = (n) => ('0' + n).slice(-2)
-  const endD = new Date(now)
-  endD.setDate(endD.getDate() + (days || 90))
-  const startStr = `${z(now.getDate())}.${z(now.getMonth() + 1)}`
-  const endStr = `${z(endD.getDate())}.${z(endD.getMonth() + 1)}`
-
-  const pts = forecast?.points || []
-  const geo = useMemo(() => {
-    if (pts.length < 2) return null
-    const vals = pts.map((p) => p.balance)
-    let max = Math.max(...vals)
-    let min = Math.min(...vals)
-    if (min > 0) min = 0
-    if (max < 0) max = 0
-    const span = (max - min) || 1
-    const X = (i) => (i / (pts.length - 1)) * 600
-    const Y = (v) => 186 - ((v - min) / span) * 166
-    const line = pts.map((p, i) => `${i ? 'L' : 'M'}${X(i).toFixed(1)} ${Y(p.balance).toFixed(1)}`).join('')
-    return { X, Y, line, area: `${line}L600 200L0 200Z`, zero: Y(0), iNow: pts.findIndex((p) => p.kind === 'future') }
-  }, [forecast])
-
-  const scrubPoint = scrubI != null ? pts[scrubI] : null
-
-  const handlePointerMove = (e) => {
-    if (!svRef.current || !pts.length) return
-    const r = svRef.current.getBoundingClientRect()
-    const fx = Math.min(1, Math.max(0, (e.clientX - r.left) / r.width))
-    setScrubI(Math.round(fx * (pts.length - 1)))
-    setScrubActive(true)
-  }
-
-  const handlePointerLeave = () => { setScrubActive(false); setScrubI(null) }
 
   // Ближайшие списания: дата берётся из дня платежа, а не «ежемесячно» — так видно, когда придётся платить
   const nextPayments = useMemo(() => {
@@ -288,51 +255,18 @@ export default function Finance() {
                 <div className="hd">
                   <h2>касса на {days || 'все'} {plural(days, 'день', 'дня', 'дней')}</h2>
                   <small>
-                    {forecast ? `баланс сейчас ${money(forecast.balance)} · темп ${money(forecast.avg_day_spent)}/дн` : 'при текущем темпе'}
+                    {forecast ? `сейчас ${money(forecast.balance)} · темп ${money(forecast.avg_day_spent)}/дн · наведите на график` : 'при текущем темпе'}
                   </small>
                 </div>
-                {!geo ? (
-                  <p className="py-10 text-center text-sm text-[var(--ink3)]">мало операций для прогноза — добавьте расходы за месяц</p>
+                {!forecast ? (
+                  <p className="py-10 text-center text-sm text-[var(--ink3)]">загружаю прогноз…</p>
                 ) : (
-                  <div className="cw" onPointerMove={handlePointerMove} onPointerLeave={handlePointerLeave}>
-                    {scrubPoint && (
-                      <div className="tip mono" style={{
-                        left: `${Math.min(Math.max((geo.X(scrubI) / 600) * 100, 9), 91)}%`,
-                        top: `${(geo.Y(scrubPoint.balance) / 200) * 100}%`,
-                      }}>
-                        {z(scrubPoint.date.slice(8, 10))}.{scrubPoint.date.slice(5, 7)} · {money(scrubPoint.balance)}
-                        {scrubPoint.kind === 'future' ? ' ₅' : ''}
-                      </div>
-                    )}
-                    <svg ref={svRef} viewBox="0 0 600 200" role="img" aria-label="график баланса и прогноза">
-                      <defs>
-                        <linearGradient id="grad-cash-30-fill" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="0" style={{ stopColor: 'var(--acc)', stopOpacity: 0.38 }} />
-                          <stop offset="0.5" style={{ stopColor: '#8a5cff', stopOpacity: 0.18 }} />
-                          <stop offset="1" style={{ stopColor: '#8a5cff', stopOpacity: 0 }} />
-                        </linearGradient>
-                        <linearGradient id="grad-cash-30-line" x1="0" x2="1">
-                          <stop offset="0" style={{ stopColor: '#ff9f5c' }} />
-                          <stop offset="0.5" style={{ stopColor: 'var(--acc)' }} />
-                          <stop offset="1" style={{ stopColor: '#8a5cff' }} />
-                        </linearGradient>
-                      </defs>
-                      <line className="zero" x1="0" x2="600" y1={geo.zero} y2={geo.zero} />
-                      <path className="ar" fill="url(#grad-cash-30-fill)" d={geo.area} />
-                      <path className="ln" stroke="url(#grad-cash-30-line)" pathLength="1" d={geo.line} />
-                      {geo.iNow > 0 && (
-                        <line className="sl" x1={geo.X(geo.iNow)} x2={geo.X(geo.iNow)} y1="0" y2="200" style={{ opacity: 0.3, strokeDasharray: '4 6' }} />
-                      )}
-                      <line className="sl" x1={scrubActive ? geo.X(scrubI || 0) : 0} x2={scrubActive ? geo.X(scrubI || 0) : 0} y1="0" y2="200" style={{ opacity: scrubActive ? 0.6 : 0 }} />
-                      <circle className="sd" r="5" fill="var(--ink)" opacity={scrubActive ? 1 : 0}
-                        cx={scrubActive ? geo.X(scrubI || 0) : 0} cy={scrubActive ? geo.Y(pts[scrubI || 0]?.balance || 0) : 0} />
-                    </svg>
-                  </div>
+                  <CashChart f={forecast} height={200} txs={txs} legend={false} />
                 )}
-                <div className="ax mono"><span>{startStr}</span><span>сегодня</span><span>{endStr}</span></div>
                 <div className="lg">
                   <span><i style={{ background: '#ff9f5c' }}></i>факт</span>
-                  <span><i style={{ background: 'var(--acc)' }}></i>прогноз</span>
+                  <span><i style={{ background: 'var(--accent)' }}></i>прогноз</span>
+                  <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>ноль</span>
                   {forecast?.runway_days != null && (
                     <span className="text-[var(--neg)]">до нуля ~{forecast.runway_days} дн</span>
                   )}

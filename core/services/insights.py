@@ -11,12 +11,28 @@ from datetime import date, datetime, timedelta
 
 from sqlmodel import select
 
+from ..config import TZ
 from ..db import Memory, Note, Task, Transaction, get_setting, session, set_setting
 from . import calendar, finance
 from .finance import money
 from .plural import days as _days_word
 
 log = logging.getLogger("jarvis.insights")
+
+
+def now_tz() -> datetime:
+    """«Сейчас» в часовом поясе владельца (``config.TZ``, по умолчанию Europe/Moscow).
+
+    tzinfo убираем: в базе даты лежат без него, а в коде они сравниваются с ``datetime.now()``.
+    Единый источник «сегодня» — от него считаются прогноз, ряд графика и подписи на сайте,
+    иначе при сервере в другом часовом поясе график уезжал бы на день.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(ZoneInfo(TZ or "Europe/Moscow")).replace(tzinfo=None)
+    except Exception:  # pragma: no cover — нет tzdata
+        log.debug("zoneinfo %s недоступен, берём локальное время сервера", TZ)
+        return datetime.now()
 
 
 # ---------------------------------------------------------------- прогноз кассы
@@ -65,7 +81,7 @@ def cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) -> 
     ``PESSIMISTIC_DELAY_DAYS``). Верхнеуровневые поля (points/low/low_date/ok/…) — это
     реалистичный сценарий, как и раньше (обратная совместимость).
     """
-    now = datetime.now()
+    now = now_tz()
     balance = finance.total_balance()
     rec = finance.list_recurring()
     # средние переменные траты в день за 30 дней (без авто и долгов)
@@ -122,6 +138,95 @@ def cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) -> 
             "safe_per_day": round(safe_per_day) if safe_per_day is not None else None,
             "expected_income": round(expected_total), "expected_tax": round(tax_total),
             "ok": low >= 0, "scenarios": scenarios}
+
+
+def _tx_balance_delta(t: Transaction, debt_only: set[str]) -> float:
+    """Насколько операция меняет ОБЩИЙ баланс (``finance.total_balance``).
+
+    Перевод между своими счетами и платежи по «чисто долговым» счетам общий баланс не трогают.
+    Раньше они попадали в ряд как траты — и график рисовал фальшивый пик перед «сегодня».
+    """
+    if t.account and t.account not in debt_only:
+        d = float(t.amount) if t.kind == "income" else -float(t.amount)
+    else:
+        d = 0.0
+    if t.kind == "transfer" and t.to_account and t.to_account not in debt_only:
+        d += float(t.amount)
+    return d
+
+
+def _tx_event(t: Transaction, delta: float) -> dict:
+    """Событие дня для подсказки графика: что именно с балансом сделал этот день."""
+    if t.kind == "transfer":
+        return {"title": f"Перевод {money(t.amount)}: {t.account} → {t.to_account}", "amount": round(delta)}
+    title = t.note or t.category or ("Доход" if t.kind == "income" else "Трата")
+    return {"title": title, "amount": round(delta)}
+
+
+def cash_series(days: int = 30) -> dict:
+    """Ряд «касса на N дней» для графика: прошлое — по реальным операциям, будущее — прогноз.
+
+    Каждая точка — **баланс на конец дня** (не дневная дельта). ``delta`` — изменение баланса
+    за этот день, ``events`` — операции дня (прошлое) или запланированные поступления/списания
+    (будущее), чтобы подсказка могла объяснить скачок. Последняя точка прошлого совпадает с
+    ``finance.total_balance()`` — единым источником баланса; ``today`` — единый источник даты.
+    """
+    horizon = max(7, min(int(days or 30), 365))
+    hist = max(30, min(horizon, 90))
+    now = now_tz()
+    today = now.date()
+    balance = finance.total_balance()
+
+    accs = finance.list_accounts()
+    debt_only = {a.name for a in accs if a.kind == "debt_only"}
+
+    # операции за окно истории + 1 день (нужен день ДО первой точки, чтобы у неё тоже был delta)
+    by_day: dict[date, list[Transaction]] = defaultdict(list)
+    for t in finance.list_transactions(hist + 2, 100_000):
+        if t.date:
+            by_day[t.date.date()].append(t)
+
+    spent = income = 0.0
+    for d, items in by_day.items():
+        if d < today - timedelta(days=hist):
+            continue
+        for t in items:
+            if t.kind == "income":
+                income += float(t.amount)
+            elif t.kind == "expense":
+                spent += float(t.amount)
+
+    # баланс на конец прошедшего дня = текущий баланс − всё, что случилось ПОСЛЕ него.
+    # Идём от сегодня к прошлому: на каждом шаге «after» — сумма изменений за более поздние дни.
+    # Раньше шли от прошлого к сегодня, из-за чего в точку попадал баланс на НАЧАЛО дня —
+    # ряд уезжал на сутки и не сходился с карточками (это и был «пик перед сегодня»).
+    points: list[dict] = []
+    after = 0.0
+    for i in range(0, hist + 1):
+        d = today - timedelta(days=i)
+        day = by_day.get(d) or []
+        delta = sum(_tx_balance_delta(t, debt_only) for t in day)
+        points.append({"date": d.isoformat(), "balance": round(balance - after), "kind": "past",
+                       "delta": round(delta), "events": [_tx_event(t, _tx_balance_delta(t, debt_only)) for t in day][:8]})
+        after += delta
+    points.reverse()
+
+    fc = cash_forecast(horizon)
+    prev = points[-1]["balance"]
+    for p in fc["points"][1:]:
+        points.append({"date": p["date"], "balance": p["balance"], "kind": "future",
+                       "delta": round(p["balance"] - prev),
+                       "events": p.get("events") or []})
+        prev = p["balance"]
+
+    fut = [p for p in points if p["kind"] == "future"]
+    low = min((p["balance"] for p in fut), default=balance)
+    low_date = next((p["date"] for p in fut if p["balance"] == low), today.isoformat())
+    runway = next((i + 1 for i, p in enumerate(fut) if p["balance"] <= 0), None)
+    return {"points": points, "horizon_days": horizon, "history_days": hist, "today": today.isoformat(),
+            "avg_day_spent": round(spent / hist), "avg_day_income": round(income / hist),
+            "runway_days": runway, "min_balance": round(low), "min_date": low_date,
+            "balance": round(balance), "scenarios": fc.get("scenarios")}
 
 
 def cash_forecast_text() -> str:
