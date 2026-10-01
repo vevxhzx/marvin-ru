@@ -212,6 +212,18 @@ async def facts_add(p: FactIn):
     return f.model_dump(exclude={"vector"})
 
 
+# Литеральный путь ПЕРЕД /api/facts/{fid}: Starlette сверяет роуты по порядку
+# регистрации, иначе «style» уходит в fid как int → 422 на PUT /api/facts/style
+# (находка P1 ревью A; сайт: api.setStyle → страница «Память»).
+@router.put("/api/facts/style")
+def facts_style_set(p: StyleIn):
+    """Поправить описание стиля руками (или стереть — пустая строка)."""
+    from ...db import set_setting
+    from ...services import memory as mem
+    set_setting(mem.STYLE_KEY, p.text.strip()[:800] or None)
+    return {"style": p.text.strip()[:800], "stats": mem.stats()}
+
+
 @router.put("/api/facts/{fid}")
 async def facts_patch(fid: int, p: FactPatch):
     from ...services import memory as mem
@@ -251,15 +263,6 @@ async def facts_style():
     from ...services import memory as mem
     text = await mem.rebuild_style(force=True)
     return {"style": text or "", "stats": mem.stats()}
-
-
-@router.put("/api/facts/style")
-def facts_style_set(p: StyleIn):
-    """Поправить описание стиля руками (или стереть — пустая строка)."""
-    from ...db import set_setting
-    from ...services import memory as mem
-    set_setting(mem.STYLE_KEY, p.text.strip()[:800] or None)
-    return {"style": p.text.strip()[:800], "stats": mem.stats()}
 
 
 @router.get("/api/lessons")
