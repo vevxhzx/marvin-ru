@@ -313,17 +313,16 @@ def test_card_traversal_blocked():
                 f"{p} -> 200 не из index.html"
 
 
-@pytest.mark.xfail(reason="P0: SPA catch-all в core/api/app.py (spa(): "
-                          "`f = web_dist / path; if path and f.is_file()`) не проверяет "
-                          "resolve() — путь '/../../config.example.yaml' читает файл корня "
-                          "репозитория, путь не '/api/' → AuthMiddleware считает его публичным",
-                   strict=False)
 def test_spa_catchall_does_not_serve_files_outside_webdist(tmp_path, monkeypatch):
     """Catch-all `/{path:path}` должен отдавать только файлы внутри web/site.
 
     Сырой GET '/../../config.example.yaml' (как шлёт `curl --path-as-is`) не должен
     превращаться в чтение файла из корня репозитория: это обход и AuthMiddleware
     (путь не /api/ → публичный), и зоны статики.
+
+    Находка P0 (reviews/review_A.md): было `f = web_dist / path` без resolve() — путь
+    оставался внутри web/site только на вид. Исправлено: resolve + is_relative_to
+    (см. core/api/app.py, spa()). Был xfail → теперь проходит.
     """
     cfg = tmp_path / "config.yaml"
     cfg.write_text(SECRET_CONFIG, encoding="utf-8")

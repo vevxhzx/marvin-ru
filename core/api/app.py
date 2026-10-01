@@ -200,8 +200,12 @@ if (web_dist / "index.html").exists():
         if not setup_done() and not path.startswith(("api", "media", "assets")):
             return RedirectResponse("/setup")
         # любой не-API маршрут (/finance, /calendar…) → index.html, роутинг делает React
-        f = web_dist / path
-        if path and f.is_file():
+        # P0 (reviews/review_A.md): `web_dist / path` без resolve() позволял прочитать
+        # '/../..' — сырой GET '/../../data/api_token' отдавал файл из корня репозитория,
+        # а AuthMiddleware считает не-/api/ пути публичными. Как у media() ниже:
+        # сначала resolve, потом проверка, что путь остался внутри дистрибутива.
+        f = (web_dist / path).resolve()
+        if path and f.is_file() and f.is_relative_to(web_dist.resolve()):
             return FileResponse(f)
         return FileResponse(web_dist / "index.html")
 else:
