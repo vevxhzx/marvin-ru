@@ -369,8 +369,8 @@ Telegram проверяет `owner_id` на всех хендлерах. **Но*
 **Итог первой части:** `python -m pytest tests -q` → **438 passed, 2 warnings** (baseline-предупреждения, 428 → +10);
 `npm run build` (в `web/`) — успешно (`✓ built in 8.38s`), только baseline-предупреждения; `web/site` пересобран.
 
-**Итог фазы целиком (после дозагрузки, субагент A1):** `python -m pytest tests -q` → **467 passed,
-2 warnings** (baseline-предупреждения; 428 → +39 за фазу); `npm run build` — успешно, только
+**Итог фазы целиком (после дозагрузки, субагент A1):** `python -m pytest tests -q` → **460 passed,
+2 warnings** (baseline-предупреждения; 428 → +32 за фазу); `npm run build` — успешно, только
 baseline-предупреждения; `web/site` пересобран. Тег `checkpoint-6` переставлен на `91936b3`.
 
 ### Отложено (осознанно, не делали — рискованно/крупно)
