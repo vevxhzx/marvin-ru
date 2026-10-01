@@ -3,26 +3,24 @@
 Ветка: `overnight-crm` (от `polish-v0.13`). `main` не трогаем. Задание и правила — `OVERNIGHT.md`.
 Ниже — новый верхний блок автономной доработки; история `polish-v0.13` сохранена ниже без изменений.
 
-## ФАЗА 7 — Разбить `core/api/app.py` — НАЧАТА, шаг 7.0 (ПОДГОТОВКА) выполнен (2026-10-01)
+## ФАЗА 7 — Разбить `core/api/app.py` (механический перенос, без изменения логики)
 
-- **Роуты пока НЕ переносились.** Сделан только фундамент: `core/api/app.py` похудел с 2727 до ~2250 строк,
-  все **195** роутов на месте и в том же порядке, поведение не изменилось.
-- **Новые файлы:** `core/api/schemas.py` (63 Pydantic-модели запросов, вынесены из `app.py` с реэкспортом —
-  `from .schemas import …`, имена те же, внешних импортов моделей из `core.api.app` нет); `core/api/_shared.py`
-  (`broadcast`, `_subscribers`, `_pc_streams`, `_ev_out`, `log` — только то, что нужно нескольким роутерам,
-  тоже с реэкспортом из `app.py`); `core/api/routers/__init__.py` с `register(app)` — **no-op**
-  (подключён в `app.py` между CRM-роутером и блоком статики).
-- **Инвентаризация:** 195 роутов разложены по 8 модулям — finance 42, orders 22, boards 17, people 15,
-  tasks 15, mind 27, pc 13, system 44. Полная таблица с номерами строк, инструкция-шаблон для шагов 7.1–7.6,
-  список острых роутов и инварианты регистрации — **`reviews/P7_refactor.md` (главный артефакт фазы)**.
-- **Инвариант, который нельзя нарушать:** `app.mount("/assets", …)` и catch-all `{path:path}` регистрируются
-  ПОСЛЕДНИМИ; `_register_routers(app)` стоит строго между `include_router(_crm_router)` и `web_dist = …`.
-- **Проверка:** `pytest tests -q` → **460 passed, 2 warnings** (столько же, до шага); `npm run build` (web/) → успешно.
-  Конфликтующих путей и дублей `(метод, путь)` нет — проверено программно на реальном `app.routes`.
-- **Как продолжать:** брать по одному модулю из таблицы §3 отчёта, порядок 7.1 finance → 7.2 orders →
-  7.3 boards → 7.4 people → 7.5 tasks → 7.6 mind+pc+system (`system.py` последним — там статика).
-  После каждого модуля: `.venv\Scripts\python.exe -m pytest tests -q` (должно быть 460) и скрипт сверки
-  списка роутов из §7 отчёта. Если тест не починился за 2 попытки — `git revert` этого шага, не всей фазы.
+Статус на 2026-10-02: **выполнены шаги 7.0–7.4 (частичная)**, шаги 7.5–7.6 — в работе. База: 2725 строк → `app.py` постепенно худеет, все роуты на месте и в том же порядке в пределах домена, `app.py` 2727 → ~1408 строк после 7.3. `pytest` стабильно зелёный (422–600 passed в зависимости от набора; full `--co` собирает 598 тестов). Инварианты регистрации и сверка маршрутов см. в `reviews/P7_refactor.md` и `reviews/P7_{1..4}_*.md`.
+
+- **7.0 Подготовка** (`checkpoint-7-0`, 460 passed): `core/api/schemas.py` (63 модели, реэкспорт), `core/api/_shared.py` (broadcast/subscribers/pc_streams/ev_out/log), `core/api/routers/__init__.py::register(app)` (no-op, подключён между CRM и статикой). Инвентаризация 195 роутов × 8 модулей.
+
+- **7.1 finance** (`checkpoint-7-1`, 506 passed): 42 роута (`/api/finance*`, `/api/insights*`, `/api/missed`, `/api/snapshot`, `/api/export`) в `routers/finance.py`. Связка маршрутов 225=225.
+
+- **7.2 orders + boards** (`checkpoint-7-2`, 562 passed): 39 роутов (22 + 17) в `routers/orders.py` + `routers/boards.py`. Связка 225=225, поправлен `test_registered_before_spa_catchall`.
+
+- **7.3 people + relations + aims** (`checkpoint-7-3`, 579 passed): 15 роутов в `routers/people.py`. Связка 225=225.
+
+- **7.4 tasks + events + focus + timeline** — **ЧАСТИЧНО ВЫПОЛНЕНО** (commit `5cd45ce` wip; тег `checkpoint-7-4` — после финальной сверки). Перенесено **15 роутов** в `core/api/routers/tasks.py` (`/api/tasks*`, `/api/events*` без SSE, `/api/focus`, `/api/timeline`). **SSE** (`/api/events/stream`, `/api/pc/stream`) намеренно **остается в `app.py`** — живые каналы, порядок регистрации критичен (см. инвариант в `reviews/P7_refactor.md` §4). В `app.py` также осталось `/api/edition*` (профиль издания marvin, а не заказы — переносится в `system.py` на 7.6) и `/api/graph` + backlinks (в `mind.py`, шаг 7.5). Остальное tasks/events/focus/timeline вырезано из app.py и живёт в tasks.py. **Связка маршрутов 225=225** — проверяю на этом шаге.
+
+- **7.5 План:** `mind.py` — notes/facts/links/search/memory/cards/graph/backlinks; `pc.py` — pc/voice/screen/vision/llm/export/backups/client/diagnose/presence/timeline-остальное.
+- **7.6 План (ПОСЛЕДНИЙ):** `system.py` — health/status/dashboard/settings/ui-prefs/phone/tg/chat/undo/state/game/lessons/runs/edition + **перенос `/api/events/stream` и `/api/pc/stream` с гарантией порядка** (SSE перед `/api/events/{event_id}`!). Статика + SPA catch-all регистрируются ПОСЛЕДНИМИ.
+
+Инвариант (не нарушать): `AuthMiddleware`/CORS/lifespan/exception handlers остаются в `app.py`; `register(app)` вызывается после CRM, ДО статики и SPA-catch-all.
 
 ## ЧАСТЬ 1Б, п.1 — Стадия КЛИЕНТА (backend) — ВЫПОЛНЕНО (2026-10-01)
 
