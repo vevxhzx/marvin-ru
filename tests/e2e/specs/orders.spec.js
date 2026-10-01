@@ -143,9 +143,7 @@ test.describe('заказы: понятный интерфейс', () => {
     test.skip(testInfo.project.name !== 'desktop', 'сканер кнопок нужен один раз — на десктопе')
     const diag = watch(page, { ignore: IGNORE })
 
-    const scan = async (tabKey, note) => {
-      await openTab(page, tabKey, { testInfo })
-      await page.waitForTimeout(800)   // списки и панели успевают отрисоваться
+    const check = async (note) => {
       const bad = await page.evaluate(() => {
         const out = []
         for (const b of document.querySelectorAll('#root button, .sheet-backdrop button')) {
@@ -156,14 +154,39 @@ test.describe('заказы: понятный интерфейс', () => {
           const tip = b.getAttribute('data-tip') || ''
           const title = b.getAttribute('title') || ''
           if (!text && !label && !tip && !title) out.push(b.outerHTML.slice(0, 140))
+          // кнопка-иконка (без видимого текста): и тултип, и aria-label — требование UX
+          else if (!text && (!label || (!tip && !title))) out.push(`нет пары aria-label+тултип: ${b.outerHTML.slice(0, 120)}`)
         }
         return out
       })
       expect(bad, `${note}: кнопки без подписи, тултипа и aria-label`).toEqual([])
     }
+    const clickIf = async (...args) => {
+      const r = page.getByRole('button', ...args).first()
+      if (await r.count()) { await r.click(); await page.waitForTimeout(800) }
+    }
 
-    await scan('orders', 'заказы')
-    await scan('people', 'люди')
+    await openTab(page, 'orders', { testInfo })
+    await page.waitForTimeout(800)
+    await check('заказы: список')
+
+    await clickIf({ name: /Открыть заказ/ })
+    await check('заказы: панель заказа')
+    await closeSheet(page)
+
+    await clickIf({ name: 'заказ', exact: true })
+    await check('заказы: форма нового заказа')
+    await closeSheet(page)
+
+    await openTab(page, 'people', { testInfo })
+    await page.waitForTimeout(800)
+    await check('люди: список')
+
+    const person = page.locator('section.c').first()
+    if (await person.count()) { await person.click(); await page.waitForTimeout(800) }
+    await check('люди: контакт')
+    await closeSheet(page)
+
     await diag.expectClean('сканер кнопок')
   })
 })
