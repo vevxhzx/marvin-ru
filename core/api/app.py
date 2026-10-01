@@ -19,6 +19,15 @@ from ..config import ROOT
 from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring, Aim, Milestone, get_setting, set_setting
 from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, people, pulse, relations, tasks, screen
 from ..services.scheduler import morning_digest_text
+from .schemas import (  # ФАЗА 7 шаг 7.0: тела моделей вынесены в core/api/schemas.py, имена те же
+   ChatIn, PcPing, PcAck, PcLaunch, PcResult, PcClip, VisionIn, CloudPreviewIn, RelationIn, EventIn,
+   SkipIn, EventDoneIn, TaskIn, TaskPatch, AimIn, AimPatch, MilestoneIn, TxIn, TxPatch, CategoryIn,
+   CategoryPatch, BalanceIn, AccountIn, AccountPatch, DebtIn, PayIn, DebtPatch, RecurringIn, RecurringPatch,
+   ClientIn, OrderIn, OrderPatch, PaymentIn, TimerIn, ManualTimeIn, ScreenImportIn, PersonIn, PomoSettingsIn,
+   FreelanceIn, GoalIn, GoalPatch, GoalPut, NoteIn, LinkIn, BoardIn, BoardPatch, BoardItemIn, BoardItemPatch,
+   BoardBulk, BoardIds, BoardSync, NoteEdit, LinkEdit, FactIn, FactPatch, StyleIn, UiPrefsIn, EditionIn,
+   SettingsIn, TgLogin, VoicePick, GameBody, BackupRestoreIn,
+)
 
 log = logging.getLogger("jarvis.api")
 
@@ -36,29 +45,18 @@ app.include_router(_crm_router)
 
 
 # ---------------- живые обновления (сайт узнаёт о действиях из Telegram/голоса мгновенно) ----------------
+# ФАЗА 7 шаг 7.0: общее состояние роутов вынесено в core/api/_shared.py, здесь реэкспорт —
+# core/crm/router.py и тесты импортируют `broadcast` из core.api.app, ломать нельзя.
 import asyncio as _asyncio
 import json as _json
 from fastapi.responses import StreamingResponse
 
-_subscribers: set[_asyncio.Queue] = set()
+from ._shared import _ev_out, _pc_streams, _subscribers, broadcast  # noqa: F401  (реэкспорт)
+
 PC_ORGANIZE_LOG: list[dict] = []
 PC_ORGANIZE_PREVIEW: dict | None = None
 
-
-def broadcast(kind: str, payload: dict | None = None) -> None:
-    """Сообщить всем открытым вкладкам сайта, что данные изменились."""
-    msg = _json.dumps({"kind": kind, **(payload or {})}, ensure_ascii=False)
-    for q in list(_subscribers):
-        try:
-            q.put_nowait(msg)
-        except Exception:
-            _subscribers.discard(q)
-
-
 agent.on_change = broadcast
-
-
-_pc_streams: set[int] = set()
 
 
 @app.get("/api/events/stream")
@@ -88,11 +86,6 @@ async def stream(client: str = ""):
 
 
 # ---------------- чат ----------------
-class ChatIn(BaseModel):
-    text: str = Field(..., max_length=20000)
-    channel: str = Field("web", max_length=20)
-
-
 def _card_for(r) -> str | None:
     """URL карточки-картинки для важного ответа (или None). Одна логика с Telegram — cards.for_result."""
     try:
@@ -181,16 +174,6 @@ def chat_history(limit: int = 40):
 
 
 # ---------------- ПК-клиент (voice.bat): пульс, состояние, результаты команд, зрение ----------------
-class PcPing(BaseModel):
-    mode: str = Field("idle", max_length=20)
-    text: str = Field("", max_length=500)
-    pending_results: bool = False
-    screen: bool = False          # ПК-клиент шлёт активное окно (voice.pc.screen_time.enabled)
-    app: str = Field("", max_length=80)
-    title: str = Field("", max_length=200)
-    idle_sec: int = Field(0, ge=0, le=7 * 24 * 3600)
-
-
 @app.post("/api/pc/ping")
 def pc_ping(p: PcPing):
     """Голосовой клиент раз в 20 с сообщает, что жив и что делает (idle/listening/thinking/speaking/off).
@@ -233,10 +216,6 @@ def screen_report(day: str | None = None, days: int = 1):
             "pc_alive": pc.alive(), "projects": screen.project_sessions(d, n), "text": screen.text(d, n)}
 
 
-class PcAck(BaseModel):
-    action: str = ""
-
-
 @app.post("/api/pc/ack")
 def pc_ack(a: PcAck):
     """ПК подтверждает: команду из SSE получил и выполняет (чтобы «Смотрю, что лежит…» не оставалось без продолжения)."""
@@ -249,10 +228,6 @@ def pc_ack(a: PcAck):
 def pc_state():
     from ..services import pc
     return {"alive": pc.alive(), "seen": pc.last_seen_iso(), "age_sec": pc.age_sec(), **pc.STATE}
-
-
-class PcLaunch(BaseModel):
-    restart: bool = False
 
 
 @app.post("/api/pc/launch")
@@ -275,13 +250,6 @@ def pc_organize_log():
 def pc_organize_preview():
     """Последний план, присланный Windows-клиентом, чтобы сайт не зависел от чата."""
     return PC_ORGANIZE_PREVIEW or {"status": "empty"}
-
-
-class PcResult(BaseModel):
-    text: str
-    channel: str = "voice"
-    kind: str = "result"          # result / find / screen / clipboard / status / tidy_plan / tidy_done / tidy_undo / organize_plan
-    extra: dict = {}
 
 
 @app.post("/api/pc/result")
@@ -309,11 +277,6 @@ async def pc_result(r: PcResult):
     return {"ok": True}
 
 
-class PcClip(BaseModel):
-    text: str
-    channel: str = "voice"
-
-
 @app.post("/api/pc/clipboard")
 async def pc_clipboard(c: PcClip):
     """«Запомни это»: содержимое буфера обмена → заметка или ссылка в Мозг."""
@@ -334,13 +297,6 @@ async def pc_clipboard(c: PcClip):
     return {"ok": True, "text": msg}
 
 
-class VisionIn(BaseModel):
-    image_b64: str
-    question: str = "Что на картинке?"
-    private: bool = False
-    channel: str = "voice"
-
-
 @app.post("/api/vision/ask")
 async def vision_ask(v: VisionIn):
     """Скриншот экрана с ПК → описание/перевод. Экран — приватный контент (как чеки): в облако он уходит
@@ -356,10 +312,6 @@ async def vision_ask(v: VisionIn):
     agent._log_chat("assistant", ans, v.channel)
     broadcast("chat", {"channel": v.channel, "actions": ["vision"]})
     return {"text": ans}
-
-
-class CloudPreviewIn(BaseModel):
-    text: str = Field("", max_length=8000)
 
 
 @app.post("/api/cloud/preview")
@@ -435,10 +387,6 @@ async def link_related(lid: int):
     if relations.enabled() and key in relations.pending(10_000):
         await relations.compute(key)
     return relations.related(key)
-
-
-class RelationIn(BaseModel):
-    status: str      # yes — подтвердить / no — убрать (крестик) / auto — вернуть
 
 
 @app.put("/api/relations/{rid}")
@@ -527,39 +475,7 @@ def orders_suggest(title: str = "", client_id: Optional[int] = None):
 
 
 # ---------------- календарь ----------------
-class EventIn(BaseModel):
-    title: str = Field(..., min_length=1, max_length=300)
-    start: datetime
-    duration_min: int = Field(60, ge=0, le=24 * 60 * 14)
-    location: Optional[str] = Field(None, max_length=300)
-    notes: Optional[str] = Field(None, max_length=4000)
-    remind_minutes: int = Field(30, ge=0, le=60 * 24 * 30)
-    repeat: str = ""                       # "" / daily / weekly / monthly / yearly
-    repeat_days: list[int] = []            # для weekly: 0=пн … 6=вс
-    repeat_until: Optional[datetime] = None
-    task_id: Optional[int] = None          # привязать встречу к задаче — галочка закроет и её
-    order_id: Optional[int] = None         # привязать к заказу — галочка закроет заказ
-
-    @field_validator("title")
-    @classmethod
-    def _t(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("пустое название")
-        return v
-
-    @field_validator("repeat_days")
-    @classmethod
-    def _days(cls, v: list[int]) -> list[int]:
-        return sorted({d for d in v if 0 <= d <= 6})
-
-
-def _ev_out(e: Event) -> dict:
-    d = e.model_dump()
-    d["repeat_label"] = calendar.fmt_repeat(e)
-    d["repeat_anchor"] = getattr(e, "_anchor", e.start)
-    d["done"] = calendar.is_done(e) if e.repeat else bool(e.done)
-    return d
+# ФАЗА 7 шаг 7.0: _ev_out (общий формат события для дашборда и /api/events) живёт в core/api/_shared.py
 
 
 def _task_as_event(t: Task) -> dict:
@@ -611,15 +527,6 @@ def update_event(event_id: int, e: EventIn):
     if not ev:
         raise HTTPException(404)
     return _ev_out(ev)
-
-
-class SkipIn(BaseModel):
-    date: datetime
-
-
-class EventDoneIn(BaseModel):
-    done: bool = True
-    date: Optional[datetime] = None     # для повторов: какой именно раз
 
 
 @app.post("/api/events/{event_id}/done")
@@ -698,21 +605,6 @@ def remove_event(event_id: int):
 
 
 # ---------------- задачи ----------------
-class TaskIn(BaseModel):
-    title: str = Field(..., min_length=1, max_length=500)
-    due: Optional[datetime] = None
-    priority: int = Field(2, ge=1, le=3)
-    project: Optional[str] = Field(None, max_length=120)
-
-    @field_validator("title")
-    @classmethod
-    def _t(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("пустое название")
-        return v
-
-
 def _event_as_task(e: Event) -> dict:
     """Событие календаря в списке дел: тот же формат, что задача, + kind='event'. Отметил в делах → сделано и в календаре."""
     return {"id": -e.id, "event_id": e.id, "kind": "event", "title": e.title, "done": calendar.is_done(e), "priority": 2, "due": e.start,
@@ -745,17 +637,6 @@ def get_task(task_id: int):
 @app.post("/api/tasks")
 def create_task(t: TaskIn):
     return tasks.add_task(t.title, t.due, t.priority, t.project, "web")
-
-
-class TaskPatch(BaseModel):
-    title: Optional[str] = None
-    due: Optional[datetime] = None
-    clear_due: bool = False
-    priority: Optional[int] = None
-    project: Optional[str] = None
-    blocked_by: Optional[str] = None      # "" — снять блокировку
-    aim_id: Optional[int] = None          # 0 — отвязать
-    milestone_id: Optional[int] = None
 
 
 @app.put("/api/tasks/{task_id}")
@@ -806,29 +687,6 @@ def remove_task(task_id: int):
 
 
 # ---------------- цели (aims): цель → вехи → задачи; фокус дня ----------------
-class AimIn(BaseModel):
-    title: str = Field(..., min_length=2, max_length=120)
-    why: str = Field("", max_length=300)
-    due: Optional[datetime] = None
-    priority: int = Field(2, ge=1, le=3)
-
-
-class AimPatch(BaseModel):
-    title: Optional[str] = Field(None, min_length=2, max_length=120)
-    why: Optional[str] = Field(None, max_length=300)
-    due: Optional[datetime] = None
-    clear_due: bool = False
-    priority: Optional[int] = Field(None, ge=1, le=3)
-    status: Optional[str] = Field(None, pattern="^(active|done|paused|dropped)$")
-
-
-class MilestoneIn(BaseModel):
-    title: str = Field(..., min_length=2, max_length=120)
-    due: Optional[datetime] = None
-    order_id: Optional[int] = None
-    notes: str = Field("", max_length=500)
-
-
 @app.get("/api/aims")
 def get_aims(all: bool = False):
     from ..services import aims
@@ -937,26 +795,6 @@ async def _fin_err(_, exc: finance.FinanceError):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
 
 
-class TxIn(BaseModel):
-    amount: float
-    kind: str = "expense"
-    category: Optional[str] = None
-    note: Optional[str] = None
-    account: Optional[str] = None
-    to_account: Optional[str] = None
-    date: Optional[datetime] = None
-
-
-class TxPatch(BaseModel):
-    amount: Optional[float] = None
-    kind: Optional[str] = None
-    category: Optional[str] = None
-    note: Optional[str] = None
-    account: Optional[str] = None
-    to_account: Optional[str] = None
-    date: Optional[datetime] = None
-
-
 @app.get("/api/finance/summary")
 def fin_summary(days: int = 30):
     return finance.summary(days)
@@ -1033,23 +871,6 @@ def fin_del(tx_id: int):
     return {"ok": True}
 
 
-class CategoryIn(BaseModel):
-    name: str
-    kind: str = "expense"
-    icon: str = "•"
-    keywords: str = ""
-    budget: float = 0
-    bucket: str = ""
-
-
-class CategoryPatch(BaseModel):
-    name: Optional[str] = None
-    icon: Optional[str] = None
-    keywords: Optional[str] = None
-    budget: Optional[float] = None
-    bucket: Optional[str] = None
-
-
 @app.post("/api/finance/categories")
 def fin_cat_add(c: CategoryIn):
     return finance.add_category(c.name, c.kind, c.icon, c.keywords, c.budget, c.bucket)
@@ -1082,27 +903,9 @@ def fin_accounts():
     return finance.list_accounts()
 
 
-class BalanceIn(BaseModel):
-    name: str
-    balance: float
-
-
 @app.post("/api/finance/accounts/balance")
 def fin_balance(b: BalanceIn):
     return finance.set_balance(b.name, b.balance)
-
-
-class AccountIn(BaseModel):
-    name: str
-    kind: str = "bank"
-    balance: float = 0
-
-
-class AccountPatch(BaseModel):
-    name: Optional[str] = None
-    kind: Optional[str] = None
-    balance: Optional[float] = None
-    is_main: Optional[bool] = None
 
 
 @app.post("/api/finance/accounts")
@@ -1122,16 +925,6 @@ def fin_account_del(aid: int):
     return {"ok": True}
 
 
-class DebtIn(BaseModel):
-    title: str
-    total: float
-    remaining: Optional[float] = None
-    payment: float = 0
-    rate: float = 0
-    pay_day: int = 1
-    creditor: Optional[str] = None
-
-
 @app.get("/api/finance/debts")
 def fin_debts():
     return [{**d.model_dump(), **finance.debt_forecast(d)} for d in finance.list_debts(include_closed=True)]
@@ -1141,23 +934,6 @@ def fin_debts():
 def fin_debt_add(d: DebtIn):
     x = finance.add_debt(d.title, d.total, d.payment, d.rate, d.pay_day, d.creditor, d.remaining)
     return {**x.model_dump(), **finance.debt_forecast(x)}
-
-
-class PayIn(BaseModel):
-    amount: float
-    account: Optional[str] = None
-    date: Optional[datetime] = None
-
-
-class DebtPatch(BaseModel):
-    title: Optional[str] = None
-    creditor: Optional[str] = None
-    total: Optional[float] = None
-    remaining: Optional[float] = None
-    payment: Optional[float] = None
-    rate: Optional[float] = None
-    pay_day: Optional[int] = None
-    closed: Optional[bool] = None
 
 
 @app.post("/api/finance/debts/{debt_id}/pay")
@@ -1186,15 +962,6 @@ def fin_debt_del(debt_id: int):
     return {"ok": True}
 
 
-class RecurringIn(BaseModel):
-    title: str
-    amount: float
-    day: int = 1
-    kind: str = "expense"
-    category: Optional[str] = None
-    period: str = "monthly"
-
-
 @app.get("/api/finance/recurring")
 def fin_recurring():
     return finance.list_recurring()
@@ -1203,17 +970,6 @@ def fin_recurring():
 @app.post("/api/finance/recurring")
 def fin_recurring_add(r: RecurringIn):
     return finance.add_recurring(r.title, r.amount, r.day, r.kind, r.category, r.period)
-
-
-class RecurringPatch(BaseModel):
-    title: Optional[str] = None
-    amount: Optional[float] = None
-    day: Optional[int] = None
-    kind: Optional[str] = None
-    category: Optional[str] = None
-    period: Optional[str] = None
-    account: Optional[str] = None
-    active: Optional[bool] = None
 
 
 @app.put("/api/finance/recurring/{rid}")
@@ -1233,57 +989,6 @@ def fin_recurring_del(rid: int):
 
 
 # ---------------- заказы / фриланс ----------------
-class ClientIn(BaseModel):
-    name: str
-    contact: Optional[str] = None
-    notes: Optional[str] = None
-
-
-class OrderIn(BaseModel):
-    title: str
-    price: float = 0
-    client: Optional[str] = None
-    deadline: Optional[datetime] = None
-    notes: Optional[str] = None
-    estimate_h: float = 0
-    status: str = "work"
-
-
-class OrderPatch(BaseModel):
-    title: Optional[str] = None
-    price: Optional[float] = None
-    client: Optional[str] = None
-    deadline: Optional[datetime] = None
-    notes: Optional[str] = None
-    estimate_h: Optional[float] = None
-    status: Optional[str] = None
-
-
-class PaymentIn(BaseModel):
-    amount: float
-    note: Optional[str] = None
-    account: Optional[str] = None
-    date: Optional[datetime] = None   # когда пришли деньги (старые заказы задним числом)
-
-
-class TimerIn(BaseModel):
-    order_id: Optional[int] = None
-    minutes: Optional[int] = None      # пусто — из настроек помодоро
-    kind: str = "focus"
-
-
-class ManualTimeIn(BaseModel):
-    minutes: int = Field(..., ge=1, le=24 * 60 * 7)
-    started_at: Optional[datetime] = None
-    note: Optional[str] = Field(default=None, max_length=500)
-
-
-class ScreenImportIn(BaseModel):
-    minutes: int = Field(..., ge=1, le=24 * 60 * 7)
-    app: str = Field(..., min_length=1, max_length=80)
-    project: str = Field(default="", max_length=160)
-
-
 def _order_or_404(oid: int):
     o = orders.get_order(oid)
     if not o:
@@ -1322,19 +1027,6 @@ def clients_del(cid: int):
 
 
 # ---------------- люди и граф ----------------
-class PersonIn(BaseModel):
-    name: Optional[str] = None
-    kind: Optional[str] = None
-    contact: Optional[str] = None
-    notes: Optional[str] = None
-    aliases: Optional[str] = None
-    birthday: Optional[str] = None
-    tags: Optional[str] = None
-    pay_mode: Optional[str] = None     # each / batch / monthly — как клиент платит
-    pay_every: Optional[int] = None
-    pay_days: Optional[str] = None
-
-
 @app.get("/api/people/batch-hints")
 def people_batch_hints():
     """Клиенты, у которых 2+ заказа оплачены одним днём, а режим ещё «за каждый» — предложить «пачкой»."""
@@ -1427,30 +1119,9 @@ def orders_timer():
     return orders.timer_state()
 
 
-class PomoSettingsIn(BaseModel):
-    focus: Optional[int] = None
-    short: Optional[int] = None
-    long: Optional[int] = None
-    long_every: Optional[int] = None
-    auto_break: Optional[bool] = None
-    sound: Optional[str] = None
-    voice: Optional[bool] = None
-    volume: Optional[float] = None
-
-
 @app.get("/api/orders/pomodoro")
 def pomo_get():
     return orders.pomo_settings()
-
-
-class FreelanceIn(BaseModel):
-    enabled: Optional[bool] = None
-    late_days: Optional[int] = None
-    late_nudge: Optional[bool] = None
-    rate_check: Optional[bool] = None
-    rate_tolerance: Optional[int] = None
-    tax_percent: Optional[int] = None
-    weekly: Optional[bool] = None
 
 
 @app.get("/api/orders/freelance")
@@ -1567,29 +1238,6 @@ def orders_pay(oid: int, p: PaymentIn):
 
 
 # ---------------- цели / конверты / техники ----------------
-class GoalIn(BaseModel):
-    title: str
-    target: float
-    due: Optional[datetime] = None
-    saved: float = 0
-    icon: str = "🎯"
-
-
-class GoalPatch(BaseModel):
-    title: Optional[str] = None
-    target: Optional[float] = None
-    due: Optional[datetime] = None
-    saved: Optional[float] = None
-    icon: Optional[str] = None
-    closed: Optional[bool] = None
-
-
-class GoalPut(BaseModel):
-    amount: float
-    account: Optional[str] = None
-    record_tx: bool = True
-
-
 @app.get("/api/finance/goals")
 def goals_list(all: bool = False):
     return goals.list_goals(include_closed=all)
@@ -1637,25 +1285,6 @@ def finance_techniques():
 
 
 # ---------------- второй мозг ----------------
-class NoteIn(BaseModel):
-    text: str = Field(..., min_length=1, max_length=20000)
-    tags: list[str] = []
-
-    @field_validator("text")
-    @classmethod
-    def _t(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("пустая заметка")
-        return v
-
-
-class LinkIn(BaseModel):
-    url: str
-    comment: Optional[str] = None
-    tags: list[str] = []
-
-
 @app.get("/api/notes")
 def notes(q: Optional[str] = None):
     return brain_notes.list_notes(200, q)
@@ -1689,55 +1318,6 @@ async def note_add_photo(file: UploadFile = File(...), text: str = Form("")):
 
 
 # ---------------------------------------------------------------- доска
-class BoardIn(BaseModel):
-    title: str = Field(..., min_length=1, max_length=120)
-    kind: str = "free"
-    order_id: Optional[int] = None
-    aim_id: Optional[int] = None
-    frames: int = Field(0, ge=0, le=60)
-    ratio: str = "16:9"
-
-
-class BoardPatch(BaseModel):
-    title: Optional[str] = Field(None, max_length=120)
-    kind: Optional[str] = None
-    view: Optional[dict] = None
-    archived: Optional[bool] = None
-    order_id: Optional[int] = None
-    aim_id: Optional[int] = None
-
-
-class BoardItemIn(BaseModel):
-    type: str
-    x: float = 0
-    y: float = 0
-    w: Optional[float] = None
-    h: Optional[float] = None
-    z: Optional[int] = None
-    rot: float = 0
-    data: dict = {}
-    note_id: Optional[int] = None
-    link_id: Optional[int] = None
-
-
-class BoardItemPatch(BaseModel):
-    x: Optional[float] = None
-    y: Optional[float] = None
-    w: Optional[float] = None
-    h: Optional[float] = None
-    z: Optional[int] = None
-    rot: Optional[float] = None
-    data: Optional[dict] = None
-
-
-class BoardBulk(BaseModel):
-    items: list[dict] = []
-
-
-class BoardIds(BaseModel):
-    ids: list[int] = []
-
-
 @app.get("/api/boards")
 def boards_list(archived: bool = False):
     from ..services import boards
@@ -1868,12 +1448,6 @@ def boards_items_delete(bid: int, b: BoardIds):
     return {"deleted": boards.delete_items(bid, b.ids)}
 
 
-class BoardSync(BaseModel):
-    revision: int = Field(..., ge=0)
-    token: str = Field(..., min_length=8, max_length=100)
-    items: list[dict] = []
-
-
 @app.put("/api/boards/{bid}/sync")
 def boards_sync(bid: int, b: BoardSync):
     """Атомарное сохранение всей доски: одна ревизия — один снимок. 409 — доска изменилась в другой вкладке."""
@@ -1949,13 +1523,6 @@ async def note_polish(nid: int):
     return {"ok": ok, "note": n}
 
 
-class NoteEdit(BaseModel):
-    text: Optional[str] = None
-    title: Optional[str] = None
-    tags: Optional[list[str]] = None
-    append: Optional[str] = None
-
-
 @app.put("/api/notes/{nid}")
 def note_edit(nid: int, e: NoteEdit):
     n = brain_notes.update_note(nid, e.text, e.title, e.tags, e.append)
@@ -1984,12 +1551,6 @@ def links(q: Optional[str] = None):
 @app.post("/api/links")
 async def link_add(l: LinkIn):
     return await brain_notes.add_link(l.url, l.comment, l.tags, "web")
-
-
-class LinkEdit(BaseModel):
-    title: Optional[str] = None
-    comment: Optional[str] = None
-    tags: Optional[list[str]] = None
 
 
 @app.put("/api/links/{lid}")
@@ -2022,20 +1583,6 @@ def link_del(lid: int):
 
 
 # ---------------- память о хозяине (факты, слои, портрет) ----------------
-class FactIn(BaseModel):
-    text: str
-    layer: str = "long"
-    category: str = "быт"
-    core: bool = False
-
-
-class FactPatch(BaseModel):
-    text: Optional[str] = None
-    layer: Optional[str] = None
-    category: Optional[str] = None
-    core: Optional[bool] = None
-
-
 @app.get("/api/facts")
 def facts_list(layer: Optional[str] = None):
     from ..services import memory as mem
@@ -2093,10 +1640,6 @@ async def facts_style():
     return {"style": text or "", "stats": mem.stats()}
 
 
-class StyleIn(BaseModel):
-    text: str
-
-
 @app.put("/api/facts/style")
 def facts_style_set(p: StyleIn):
     """Поправить описание стиля руками (или стереть — пустая строка)."""
@@ -2136,10 +1679,6 @@ def memory(days: int = 30, kind: Optional[str] = None, q: Optional[str] = None):
 
 # ---------------- настройки, статус, экспорт, поиск ----------------
 # ---------------- оформление сайта: одно на все устройства ----------------
-class UiPrefsIn(BaseModel):
-    prefs: dict
-
-
 @app.get("/api/ui-prefs")
 def ui_prefs_get():
     """Тема, акцент, шрифт, обращение, порядок блоков — хранятся в базе, чтобы телефон и ПК выглядели одинаково."""
@@ -2178,10 +1717,6 @@ def edition_get():
     return _edition_payload(ed if ed in ("marvin", "jarvis") else "jarvis")
 
 
-class EditionIn(BaseModel):
-    edition: str
-
-
 @app.post("/api/edition")
 def edition_put(p: EditionIn):
     if p.edition not in ("marvin", "jarvis"):
@@ -2216,10 +1751,6 @@ async def llm_info():
 def settings_get():
     from ..config import read_settings
     return read_settings()
-
-
-class SettingsIn(BaseModel):
-    changes: dict
 
 
 @app.put("/api/settings")
@@ -2377,10 +1908,6 @@ def phone_rotate(request: Request):
     return {"ok": True}
 
 
-class TgLogin(BaseModel):
-    init_data: str
-
-
 @app.post("/api/tg/login")
 async def tg_login(body: TgLogin, request: Request):
     """Вход из Telegram Mini App: проверяем подпись initData, что это владелец — и ставим сессионную cookie.
@@ -2486,11 +2013,6 @@ async def voice_demo(engine: str = "silero", voice: str = "eugene"):
     return FileResponse(out, media_type="audio/wav" if out.suffix == ".wav" else "audio/mpeg")
 
 
-class VoicePick(BaseModel):
-    engine: str
-    voice: str
-
-
 @app.post("/api/voice/pick")
 async def voice_pick(body: VoicePick):
     """Выбрать голос: применяется сразу и пишется в config.yaml."""
@@ -2508,10 +2030,6 @@ async def voice_pick(body: VoicePick):
         changes["voice.tts.edge_voice"] = body.voice
     write_settings(changes)
     return {"ok": True, "engine": tts.ENGINE, "speaker": tts.SPEAKER, "edge_voice": tts.EDGE_VOICE}
-
-
-class GameBody(BaseModel):
-    on: bool = True
 
 
 @app.post("/api/game")
@@ -2608,10 +2126,6 @@ def backups_list():
     return list_backups()
 
 
-class BackupRestoreIn(BaseModel):
-    name: str = Field(..., min_length=8, max_length=80)
-
-
 @app.post("/api/backups/restore")
 def backups_restore(body: BackupRestoreIn):
     """Восстановить data/jarvis.db из выбранного backup-*.db. После — перезапуск start.bat."""
@@ -2694,6 +2208,15 @@ def manifest():
             {"name": "Мысль", "short_name": "Мысль", "url": "/?quick=note", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
         ],
     }
+
+
+# ---------------- роутеры по доменам (ФАЗА 7) ----------------
+# ИНВАРИАНТ: этот вызов стоит ПОСЛЕ app.include_router(crm) и ДО регистрации статики
+# и catch-all-роута SPA в конце файла. Если подключить роутеры после catch-all,
+# SPA перехватит /api/* и сайт перестанет открываться. Пока register() — no-op.
+from .routers import register as _register_routers  # noqa: E402
+
+_register_routers(app)
 
 
 # ---------------- сайт (Этап 2): раздаём собранную статику, если есть ----------------
