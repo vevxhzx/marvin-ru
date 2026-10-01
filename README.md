@@ -84,6 +84,45 @@ start.bat
 
 ---
 
+## Тесты
+
+Все прогоны работают на **временной/демо-БД**; `data/jarvis.db` тесты не открывают на запись.
+
+```bat
+:: основной прогон (офлайн, ~5 мин)
+.venv\Scripts\python.exe -m pytest tests -q
+
+:: только наборы ревью (быстрее)
+.venv\Scripts\python.exe -m pytest tests/test_review_a_*.py tests/test_review_b_*.py -q
+.venv\Scripts\python.exe -m pytest tests/test_golden_quick.py -q      :: 260 фраз, правила/парсинг
+
+:: Node-стенд (Express, порт 3999)
+npm test
+
+:: e2e (Playwright): сначала собрать сайт
+cd web
+npm run build
+npm run test:e2e                     :: порт по умолчанию 8917
+$env:E2E_PORT='8921'; npm run test:e2e   :: свой порт, если 8917 занят
+```
+
+Что где лежит:
+
+| Набор | Файлы | Что проверяет |
+|---|---|---|
+| Правила и парсинг | `tests/test_golden_quick.py` (260 фраз), `test_overnight_fase2_parsing.py` | офлайн-команды без LLM: действие, ответ и записи в 9 таблицах. Судья и LLM в фикстуре выключены — набор обязан быть одинаково зелёным каждый раз |
+| Ревью A — API и безопасность | `tests/test_review_a_{access,contract}.py` | доступ, контракты, коды ошибок, идемпотентность |
+| Ревью B — деньги | `tests/test_review_b_{balance,forecast,orders_debts}.py` | баланс, прогноз кассы, заказы и долги |
+| Ревью D — сценарии | `tests/e2e/specs/*.spec.js` (Playwright, desktop + mobile) | финансы, отчёты и CSV, задачи, оплата заказа, память, настройки, доступность |
+| Ревью E — надёжность | `tests/test_review_e_*.py` | миграции, старт, SSE, логи, ошибки |
+| Стенд фронта | `tests/*.mjs`, `npm test` | Node-версия сервера |
+
+Ожидаемое поведение, которое пока **не** починено, зафиксировано меткой `xfail`
+(и комментарием `KNOWN` в золотом наборе) со ссылкой на отчёт в `reviews/` —
+такие тесты падать не должны, а регресс ловят.
+
+---
+
 ## Структура проекта
 
 ```
