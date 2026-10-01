@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class ChatIn(BaseModel):
@@ -213,6 +213,15 @@ class DebtIn(BaseModel):
     pay_day: int = 1
     creditor: Optional[str] = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def _name_as_title(cls, data: object) -> object:
+        # Совместимость со старыми клиентами/бандлами: шлют `name` вместо `title`
+        # (веб-форма раньше падала с 422 «Field required»).
+        if isinstance(data, dict) and "title" not in data and isinstance(data.get("name"), str):
+            data = {**data, "title": data["name"]}
+        return data
+
 
 class PayIn(BaseModel):
     amount: float
@@ -238,6 +247,14 @@ class RecurringIn(BaseModel):
     kind: str = "expense"
     category: Optional[str] = None
     period: str = "monthly"
+
+    @model_validator(mode="before")
+    @classmethod
+    def _name_as_title(cls, data: object) -> object:
+        # Как и в DebtIn: `name` — устаревший алиас поля `title`.
+        if isinstance(data, dict) and "title" not in data and isinstance(data.get("name"), str):
+            data = {**data, "title": data["name"]}
+        return data
 
 
 class RecurringPatch(BaseModel):
