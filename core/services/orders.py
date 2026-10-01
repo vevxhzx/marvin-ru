@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from datetime import datetime, timedelta
 
 from sqlmodel import select
@@ -27,6 +28,12 @@ STATUS_LABEL = {"new": "обсуждение", "work": "в работе", "revie
 OPEN = ("new", "work", "review")
 UNPAID = ("new", "work", "review", "done")
 INCOME_CATEGORY = "Фриланс"
+
+# Замок на «проверку idem_key + вставку». Без него два одновременных POST с одним ключом
+# проходят SELECT до того, как второй успевает вставить, и создаётся ВТОРОЙ доход:
+# на transaction.idem_key только индекс, UNIQUE-констрейнта нет (P1 ревью D, D5).
+# Сервер один (uvicorn, один процесс) — замка потоков достаточно.
+_PAY_LOCK = threading.Lock()
 
 
 class OrderError(ValueError):
@@ -218,15 +225,16 @@ def add_payment(oid: int, amount: float, note: str | None = None, account: str |
         raise OrderError("Заказ не найден")
     if float(amount) <= 0:
         raise OrderError("Сумма оплаты должна быть больше нуля")
-    if idem_key:
+    with _PAY_LOCK:                     # проверка ключа и вставка — под одним замком, см. _PAY_LOCK
+        if idem_key:
+            with session() as s:
+                dup = s.exec(select(Transaction).where(Transaction.idem_key == idem_key)).first()
+            if dup:
+                return dup
         with session() as s:
-            dup = s.exec(select(Transaction).where(Transaction.idem_key == idem_key)).first()
-        if dup:
-            return dup
-    with session() as s:
-        cname = s.get(Client, o.client_id).name if o.client_id else None
-    t = finance.add_transaction(amount, "income", INCOME_CATEGORY, note or (f"{o.title}" + (f" · {cname}" if cname else "")),
-                                account, date=date, source=source, order_id=oid, idem_key=idem_key)
+            cname = s.get(Client, o.client_id).name if o.client_id else None
+        t = finance.add_transaction(amount, "income", INCOME_CATEGORY, note or (f"{o.title}" + (f" · {cname}" if cname else "")),
+                                    account, date=date, source=source, order_id=oid, idem_key=idem_key)
     total = paid_for(oid)
     if o.price and total >= o.price - 0.5 and o.status in UNPAID:
         update_order(oid, status="paid")
