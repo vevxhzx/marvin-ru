@@ -1,10 +1,10 @@
 """Роутеры HTTP API (ФАЗА 7, шаг 7.0 — подготовка).
 
-Здесь будет жить код из `core/api/app.py`, разложенный по доменам:
+Здесь живёт код из `core/api/app.py`, разложенный по доменам:
 `finance`, `orders`, `boards`, `people`, `tasks`, `mind`, `pc`, `system`.
 
-Пока файлы роутов не созданы, `register(app)` — no-op: поведение приложения
-не меняется, все ~195 роутов остаются в `core/api/app.py`.
+Состояние на шаг 7.1: перенесён `finance` (42 роута из 195), остальные ~153 роута
+пока остаются в `core/api/app.py`.
 
 ИНВАРИАНТЫ РЕГИСТРАЦИИ (обязательны для шагов 7.1–7.6, см. `reviews/P7_refactor.md`):
 
@@ -31,7 +31,13 @@ __all__ = ["register"]
 def register(app) -> None:
     """Подключить роутеры доменов к `app`.
 
-    Пока no-op: роутеры подключаются в шагах 7.1–7.6.
+    Шаг 7.1: подключён `finance` (42 роута: `/api/finance*`, `/api/insights*`,
+    `/api/missed`, `/api/snapshot/*`, `/api/export/*`).
+    Порядок вызовов = порядок модулей из `reviews/P7_refactor.md` §2.2 —
+    он влияет на разрешение конфликтующих путей, менять без проверки тестов нельзя.
+
     Вызывается из `core/api/app.py` ДО регистрации статики и SPA-catch-all.
     """
-    return None
+    from . import finance
+
+    finance.register(app)
