@@ -1,26 +1,21 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Plus, Check, Play, Square, Coffee, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins, Columns3, List, RefreshCw, Bell, User } from 'lucide-react'
+import { Plus, Check, Play, Square, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins, List, RefreshCw, Bell, User, HelpCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { api, money, moneyShort, dayLabel, shortDate, hhmm, plural, toLocalISO } from '../lib/api'
 import { Section, Empty, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Num, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
+import StageStepper from '../components/StageStepper'
+import OrderDrawer from '../components/OrderDrawer'
+import HowToOrders from '../components/HowToOrders'
+import MenuButton from '../components/RowMenu'
+import { ClientStageBadge, ClientStageSelect, ClientStageNote } from '../components/ClientStage'
+import {
+  ORDER_STAGES, ORDER_STAGE_LABEL, ORDER_STAGE_TONE, stageOf, NEXT_STEP, STAGE_TO_STATUS,
+} from '../lib/crm'
 
 const VIEWS = [['open', 'в работе'], ['unpaid', 'ждут оплаты'], ['all', 'все']]
-const STATUS = { new: 'новый', work: 'в работе', review: 'на правках', done: 'сдан', paid: 'оплачен', cancelled: 'отменён' }
-const STATUS_TONE = { new: '', work: 'accent', review: 'warn', done: 'pos', paid: 'pos', cancelled: '' }
 const STATUS_DOT = { new: 'var(--accent)', work: 'var(--accent)', review: 'var(--warn)', done: 'var(--pos)', paid: 'var(--pos)', cancelled: 'var(--ink-3)' }
-const NEXT = { new: 'work', work: 'done', review: 'done', done: 'paid' }
-const NEXT_LABEL = { new: 'в работу', work: 'сдан', review: 'сдан', done: 'оплачен' }
-
-// CRM-воронка (фаза 4): стадии канбана. Старый status остаётся источником для фильтров/финансов.
-const STAGES = [['lead', 'лид'], ['negotiation', 'переговоры'], ['spec', 'ТЗ согласовано'], ['in_work', 'в работе'],
-  ['revisions', 'на правках'], ['delivered', 'сдан'], ['awaiting_payment', 'ждёт оплаты'], ['paid', 'оплачен'], ['lost', 'потерян']]
-const STAGE_LABEL = Object.fromEntries(STAGES)
-const STAGE_TONE = { lead: '', negotiation: 'accent', spec: 'accent', in_work: 'accent', revisions: 'warn', delivered: 'pos', awaiting_payment: 'warn', paid: 'pos', lost: '' }
-const STATUS_STAGE = { new: 'lead', work: 'in_work', review: 'revisions', done: 'delivered', paid: 'paid', cancelled: 'lost' }
-const stageOf = (o) => (o && o.stage && STAGE_LABEL[o.stage] ? o.stage : STATUS_STAGE[o?.status] || 'lead')
-const LOST_STAGES = ['lost']
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
 const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ч` : h > 0 ? `${Math.round(h * 60)} мин` : '—')
 
@@ -52,12 +47,13 @@ export default function Orders() {
   const [view, setView] = useState('open')
   const [layout, setLayout] = useState(() => (typeof localStorage !== 'undefined' && localStorage.getItem('orders.layout')) || 'list')
   const [quick, setQuick] = useState('')
-  const [sheet, setSheet] = useState(null)      // null | 'new' | order
-  const [card, setCard] = useState(null)        // CRM-карточка заказа (rich)
+  const [sheet, setSheet] = useState(null)      // null | 'new' | order (форма заказа)
+  const [drawerId, setDrawerId] = useState(null) // боковая панель заказа — открывается кликом по строке
   const [personCard, setPersonCard] = useState(null)  // CRM-карточка клиента
   const [pay, setPay] = useState(null)          // order
   const [del, setDel] = useState(null)
-  const [openId, setOpenId] = useState(null)
+  const [lost, setLost] = useState(null)        // заказ, у которого спрашиваем причину потери
+  const [payTick, setPayTick] = useState(0)      // оплата снаружи панели — панель должна перечитать заказ
   const [followups, setFollowups] = useState([])
   const [analytics, setAnalytics] = useState(null)
   const [, show] = useToast()
@@ -90,13 +86,15 @@ export default function Orders() {
     if (status === 'paid' && o.left > 0) return setPay(o)   // деньги не записаны — сначала оплата, полная сумма сама закроет заказ
     try { await api.updateOrder(o.id, { status }); load(); bump(); if (status === 'paid') show('Заказ оплачен', '', o.title) } catch (e) { show.err(e) }
   }
-  // перетаскивание по канбану: стадия меняется через CRM (status синхронизируется на бэке)
+  // стадия заказа меняется через CRM (старый status синхронизируется на бэке).
+  // «потерян» требует причину: клик по нему открывает вопрос, а не меняет стадию сразу.
   const setStage = async (o, stage) => {
     if (stage === stageOf(o)) return
+    if (stage === 'lost') return setLost(o)
     if (stage === 'paid' && o.left > 0) return setPay(o)
-    try { await api.crmSetStage(o.id, stage); show(`Стадия: ${STAGE_LABEL[stage]}`, '', o.title); load(); bump() } catch (e) { show.err(e) }
+    try { await api.crmSetStage(o.id, stage); show(`Стадия: ${ORDER_STAGE_LABEL[stage]}`, '', o.title); load(); bump() } catch (e) { show.err(e) }
   }
-  const openCard = (o) => setCard(o.id)
+  const openDrawer = (o) => setDrawerId(o.id)
   const scanFollowups = async () => { try { const r = await api.crmScanFollowups(); await load(); show('Напоминания обновлены', r.created?.length ? `новых: ${r.created.length}` : 'новых нет') } catch (e) { show.err(e) } }
   const remove = (o) => leave(o.id, 'leaving', async () => { await api.delOrder(o.id); show('Заказ удалён', '', o.title); load(); bump() })
   const start = async (o, minutes = null) => { try { await api.startTimer(o?.id || null, minutes); load() } catch (e) { show.err(e) } }
@@ -111,8 +109,12 @@ export default function Orders() {
         right={<>
           <Seg value={layout} onChange={setLayout} options={[['list', 'список'], ['board', 'канбан']]} />
           <Seg value={view} onChange={setView} options={VIEWS} />
+          <button type="button" className="btn-icon outlined" aria-label="Как это работает: 3 шага" data-tip="Как это работает"
+            onClick={() => window.dispatchEvent(new CustomEvent('orders:howto', { detail: 'toggle' }))}><HelpCircle size={16} /></button>
           <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button>
         </>} />
+
+      <div className="-mt-4"><HowToOrders /></div>
 
       <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />
@@ -156,7 +158,7 @@ export default function Orders() {
         <div className="animate-rise -mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px]">
           <span className="muted flex items-center gap-1.5"><Bell size={13} /> follow-up:</span>
           {followups.slice(0, 5).map((f) => (
-            <button key={f.id} type="button" className="flex items-center gap-1.5 text-left" onClick={() => f.order_id && openCard({ id: f.order_id })}>
+            <button key={f.id} type="button" className="flex items-center gap-1.5 text-left" onClick={() => f.order_id && setDrawerId(f.order_id)}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: f.kind === 'overdue' ? 'var(--neg)' : 'var(--warn)' }} />
               <span className="truncate max-w-[280px]">{f.text}</span>
             </button>
@@ -167,33 +169,38 @@ export default function Orders() {
 
       {!orders ? <ListSkeleton n={4} /> : layout === 'board' ? (
         <Section title="канбан" idx={list.length}
-          tip="перетаскивайте карточки между колонками или открывайте их с изменениями правок, оплат, чек-листа и ленты. На телефоне переключатель «список» удобнее.">
-          <Board orders={list} timer={timer} onCard={openCard} onStage={setStage} onStart={start} />
+          hint="Перетащите карточку в другую колонку — это меняет стадию заказа. Без перетаскивания: выберите стадию в списке на карточке.">
+          <Board orders={list} onOpen={openDrawer} onStage={setStage} />
         </Section>
       ) : (
         <Section title={VIEWS.find((v) => v[0] === view)[1]} idx={list.length}
-          tip="как закрыть заказ: кнопка со статусом справа в строке, либо раскройте заказ (стрелка) — там «сдан», оплата и удаление. На телефоне — свайп вправо: следующий статус, влево: удалить.">
+          hint="Клик по строке открывает панель заказа: стадия, оплата, время, клиент, история. В строке одна главная кнопка «следующий шаг», остальные действия — в меню «⋯». На телефоне: свайп вправо — следующий шаг, влево — удалить.">
           <div className="stagger space-y-2.5">
             {list.length === 0 && (
               view === 'open' ? <Empty glyph="tasks" text="Заказов в работе нет" sub="Как возьмёте — скажите мне, я запомню дедлайн и буду ждать оплату" hint="заказ: монтаж свадьбы для Иванова, 60к, до 30 сентября" />
                 : view === 'unpaid' ? <Empty glyph="money" text="Все оплатили" sub="Приятная пустота" />
                   : <Empty glyph="tasks" text="Пока пусто" hint="заказ: ролик для Пятёрочки, 25к, до пятницы" />
             )}
-            {list.map((o) => <Row key={o.id} o={o} open={openId === o.id} onOpen={() => setOpenId(openId === o.id ? null : o.id)} onEdit={() => setSheet(o)} onPay={() => setPay(o)}
-              onDel={() => setDel(o)} onStatus={setStatus} onStart={() => start(o)} onCard={() => openCard(o)} timer={timer} extra={leaveCls(o.id)} />)}
+            {list.map((o) => <Row key={o.id} o={o} onOpen={() => openDrawer(o)} onEdit={() => setSheet(o)} onPay={() => setPay(o)}
+              onDel={() => setDel(o)} onStatus={setStatus} onStart={() => start(o)} onStage={(k) => setStage(o, k)} timer={timer} extra={leaveCls(o.id)} />)}
           </div>
         </Section>
       )}
 
       {stats && (stats.clients.length > 0 || stats.months.some((m) => m.income)) && <StatsBlock stats={stats} onUnpaid={() => { setView('unpaid'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
 
+      {/* Панель заказа идёт ПЕРВОЙ из модалок: всё, что открывают из неё (оплата, форма,
+          карточка клиента), должно оказываться поверх — порядок DOM определяет стек. */}
+      <OrderDrawer oid={drawerId} reloadKey={payTick} onClose={() => setDrawerId(null)} onChanged={() => { load(); bump() }} onErr={show.err} onMsg={(t) => show(t)}
+        onClient={(cid) => { setDrawerId(null); setPersonCard(cid) }} onEdit={(o) => setSheet(o)} onPay={(o) => setPay(o)}
+        onAsk={(o) => ask(`по заказу «${o.title}»: `)} timer={timer} onStartTimer={start} onStopTimer={stop} mmss={mmss} />
+
       <OrderSheet open={!!sheet} order={sheet && sheet !== 'new' ? sheet : null} onClose={() => setSheet(null)} onDone={(msg) => { setSheet(null); show(msg); load(); bump() }} onErr={show.err} />
-      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show('Заказ закрыт', 'без записи в доходы', o.title); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(r.order.status === 'paid' ? 'Заказ закрыт как оплаченный' : 'Оплата записана в доходы', '', r.order.title); load(); bump() }} onErr={show.err} />
+      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show('Заказ закрыт', 'без записи в доходы', o.title); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(r.order.status === 'paid' ? 'Заказ закрыт как оплаченный' : 'Оплата записана в доходы', '', r.order.title); setPayTick((x) => x + 1); load(); bump() }} onErr={show.err} />
       <Confirm open={!!del} title="Удалить заказ?" text={del ? `«${del.title}». Полученные оплаты останутся в доходах, время по таймеру — тоже.` : ''} danger onOk={() => { remove(del); setDel(null) }} onClose={() => setDel(null)} />
 
-      <CrmOrderSheet oid={card} onClose={() => setCard(null)} onClient={(cid) => { setCard(null); setPersonCard(cid) }}
-        onChanged={() => { load(); bump() }} onErr={show.err} />
-      <ClientCardSheet cid={personCard} onClose={() => setPersonCard(null)} onCard={(oid) => { setPersonCard(null); setCard(oid) }} />
+      <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show('Заказ помечен потерянным', '', lost.title); setLost(null); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} />
+      <ClientCardSheet cid={personCard} onClose={() => setPersonCard(null)} onOrder={(oid) => { setPersonCard(null); setDrawerId(oid) }} />
       {analytics && analytics.clients?.length > 0 && <AnalyticsBlock a={analytics} />}
     </div>
   )
@@ -219,70 +226,60 @@ function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.
     : <section className={cls} style={style}>{inner}</section>
 }
 
-function TimerCard({ timer, left, onStart, onStop, onBreak }) {
-  const active = timer?.active
-  const total = active ? timer.planned_min * 60 : 25 * 60
-  const pct = active ? 1 - left / total : 0
-  const R = 30, C = 2 * Math.PI * R
-  return (
-    <div className="flex w-full items-center gap-4">
-      <div className="relative grid h-[76px] w-[76px] shrink-0 place-items-center">
-        <svg width="76" height="76" viewBox="0 0 76 76" className="-rotate-90">
-          <circle cx="38" cy="38" r={R} fill="none" stroke="var(--fill-2)" strokeWidth="3" />
-          {active && <circle cx="38" cy="38" r={R} fill="none" stroke={timer.kind === 'break' ? 'var(--pos)' : 'var(--accent)'} strokeWidth="3" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} style={{ transition: 'stroke-dashoffset 1s linear' }} />}
-        </svg>
-        <div className={`num absolute text-[17px] font-medium tracking-tight ${active && left === 0 ? 'neg' : ''}`}>{active ? mmss(left) : `${String(timer?.focus_min || 25).padStart(2, '0')}:00`}</div>
-      </div>
-      <div className="min-w-0">
-        <div className="label">{active ? (timer.kind === 'break' ? 'перерыв' : 'фокус') : 'помодоро'}</div>
-        <div className="mt-1 truncate text-[15px] font-medium">{active ? (timer.order || 'без заказа') : (timer?.today_sessions ? `сегодня ${timer.today_min || 0} мин · ${timer.today_sessions} ${plural(timer.today_sessions, 'помидор', 'помидора', 'помидоров')}` : 'сегодня ещё не садились')}</div>
-        <div className="mt-2 flex items-center gap-1.5">
-          {active ? (
-            <>
-              <button className="btn-soft btn-sm" onClick={onStop}><Square size={12} /> стоп</button>
-              {timer.kind !== 'break' && <button className="btn-ghost btn-sm" onClick={onBreak}><Coffee size={12} /> перерыв {timer.break_min || 5}</button>}
-            </>
-          ) : (
-            <>
-              <button className="btn-soft btn-sm" onClick={onStart}><Play size={12} /> {timer?.focus_min || 25} минут</button>
-              {timer?.today_min > 0 && <span className="faint text-[12px]">сегодня {timer.today_min} мин</span>}
-            </>
-          )}
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, onCard, timer, extra = '' }) {
+/* Строка заказа: кликабельна целиком (открывает панель), одна главная кнопка «следующий шаг»
+   с понятным текстом по текущей стадии. Остальные действия — в меню «⋯» с текстовыми подписями.
+   Кнопка «карточка» убрана: панель заказа и есть карточка. */
+function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, timer, extra = '' }) {
+  const nav = useNavigate()
+  const [, show] = useToast()
+  const stage = stageOf(o)
+  const next = NEXT_STEP[stage]
   const closed = ['paid', 'cancelled'].includes(o.status)
   const running = timer?.active && timer.order_id === o.id && timer.kind === 'focus'
   const dl = o.deadline ? (o.overdue ? `просрочен · ${dayLabel(o.deadline).toLowerCase()}` : o.past_due ? `срок был ${shortDate(o.deadline).toLowerCase()}` : o.days_left === 0 ? 'сегодня' : o.days_left === 1 ? 'завтра' : `до ${shortDate(o.deadline).toLowerCase()}`) : null
   const pct = o.price > 0 ? Math.min(100, Math.round((o.paid / o.price) * 100)) : 0
+  const stop = (fn) => (e) => { e.stopPropagation(); fn() }
+  const openBoard = async () => {
+    try { const b = await api.get(`/api/boards/for-order/${o.id}?create=true`); nav(`/board/${b.id}`) } catch (e) { show.err(e) }
+  }
+  const menu = [
+    o.status !== 'cancelled' && o.left > 0 && { key: 'pay', text: 'Записать оплату', icon: <Wallet size={13} />, onClick: onPay },
+    running
+      ? { key: 'stop', text: 'Остановить таймер', icon: <Square size={13} />, onClick: onStart }
+      : { key: 'timer', text: `Таймер ${timer?.focus_min || 25} минут`, icon: <Play size={13} />, onClick: onStart },
+    { key: 'edit', text: 'Изменить заказ', icon: <Pencil size={13} />, onClick: onEdit },
+    { key: 'ask', text: 'Обсудить с ассистентом', icon: <MessageCircle size={13} />, onClick: () => ask(`по заказу «${o.title}»: `) },
+    { key: 'board', text: o.board_id ? 'Открыть доску заказа' : 'Создать доску заказа', icon: <Clapperboard size={13} />, onClick: openBoard },
+    stage === 'lost' && { key: 'restore', text: 'Вернуть в работу', icon: <RefreshCw size={13} />, onClick: () => onStage('in_work') },
+    !closed && { key: 'cancel', text: 'Отменить заказ', icon: <Square size={13} />, onClick: () => onStatus(o, 'cancelled') },
+    !closed && { key: 'del', text: 'Удалить заказ', icon: <Trash2 size={13} />, onClick: onDel, danger: true },
+  ]
   return (
-    <Swipe onLeft={!closed ? onDel : undefined} onRight={!closed && NEXT[o.status] ? () => onStatus(o, NEXT[o.status]) : undefined} rightLabel={NEXT_LABEL[o.status] || 'готово'}>
+    <Swipe onLeft={!closed ? onDel : undefined} onRight={next ? () => onStage(next.stage) : undefined} rightLabel={next?.text || 'готово'}>
       <div className={`row-slide ${extra} ${closed ? 'opacity-55' : ''}`}>
-        <div className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`} style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', borderRadius: 22, ...(o.overdue ? { boxShadow: 'inset 0 0 0 1.5px var(--neg)' } : null) }} onClick={onOpen}>
-          <div className="relative flex items-center gap-3.5 pl-1">
+        <div role="button" tabIndex={0} aria-label={`Открыть заказ «${o.title}»`} onClick={onOpen}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
+          className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`}
+          style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', borderRadius: 22, ...(o.overdue ? { boxShadow: 'inset 0 0 0 1.5px var(--neg)' } : null) }}>
+          <div className="relative flex flex-wrap items-center gap-x-3 gap-y-2 pl-1">
             <span className="absolute -left-4 bottom-1 top-1 w-1 rounded-full" style={{ background: o.overdue ? 'var(--neg)' : STATUS_DOT[o.status] }} aria-hidden />
-            <span className={`badge !hidden shrink-0 sm:!inline-flex ${STATUS_TONE[o.status]}`}>{STATUS[o.status]}</span>
-            <span className="h-2 w-2 shrink-0 rounded-full sm:hidden" style={{ background: STATUS_DOT[o.status] }} aria-label={STATUS[o.status]} />
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-col sm:flex-row sm:items-baseline sm:gap-2">
+            <div className="min-w-[200px] flex-1">
+              <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
                 <div className="min-w-0 truncate text-[15px] font-medium">{o.title}</div>
                 {o.client && <div className="muted min-w-0 truncate text-[12.5px] sm:shrink-0 sm:text-[13px]">{o.client}</div>}
               </div>
-              <div className={`flex flex-wrap items-center gap-x-1.5 text-[12px] ${o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
+              <div className={`mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] ${o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
                 {dl && <span className="flex items-center gap-1"><Clock size={11} /> {dl}</span>}
-                {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{dl ? '· ' : ''}{hours(o.hours)}{o.pulse?.estimate_h ? ` из ${hours(o.pulse.estimate_h)}` : ''}{o.rate ? ` · ${money(o.rate)}/ч` : ''}</span>}
-                {running && <span className="accent">{dl || o.hours ? '· ' : ''}идёт таймер</span>}
+                {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{o.hours}{o.pulse?.estimate_h ? ` из ${hours(o.pulse.estimate_h)}` : ''}{o.rate ? ` · ${money(o.rate)}/ч` : ''}</span>}
+                {running && <span className="accent flex items-center gap-1">идёт таймер</span>}
               </div>
+              <StageStepper compact stage={stage} onStage={onStage} revisions={o.revisions} className="mt-1.5" />
               {o.price > 0 && (
-                <div className="mt-2 flex items-center gap-2">
+                <div className="mt-1.5 flex items-center gap-2">
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
                     <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
                   </div>
-                  <span className="num faint shrink-0 text-[10.5px]">{pct}%</span>
+                  <span className="num faint shrink-0 text-[10.5px]">оплачено {pct}%</span>
                 </div>
               )}
             </div>
@@ -291,240 +288,154 @@ function Row({ o, open, onOpen, onEdit, onPay, onDel, onStatus, onStart, onCard,
               {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">осталось {money(o.left)}</div>}
               {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">не оплачен</div>}
             </div>
-            {!closed && NEXT[o.status] && (
-              <button className="btn-soft btn-sm !h-7 shrink-0 hidden sm:inline-flex" title={`перевести в статус «${STATUS[NEXT[o.status]]}»`} onClick={(e) => { e.stopPropagation(); onStatus(o, NEXT[o.status]) }}>
-                <Check size={12} /> {NEXT_LABEL[o.status]}
-              </button>
-            )}
-            {!closed && <button className="btn-icon !hidden !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100 sm:!inline-flex" data-tip={running ? 'таймер идёт' : `таймер ${timer?.focus_min || 25} мин`} onClick={(e) => { e.stopPropagation(); if (!running) onStart() }} aria-label="Таймер">{running ? <span className="h-2 w-2 animate-pulse rounded-full bg-accent" /> : <Play size={13} />}</button>}
-            <span className="btn-icon !h-7 !w-7 faint">{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</span>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {next ? (
+                <button type="button" className="btn-primary btn-sm !h-8" data-tip={next.tip} onClick={stop(() => onStage(next.stage))}>
+                  <Check size={13} /> {next.text}
+                </button>
+              ) : <span className="badge pos shrink-0">готово</span>}
+              <MenuButton items={menu} ariaLabel={`Ещё действия: ${o.title}`} />
+            </div>
           </div>
-          {open && <Details o={o} onEdit={onEdit} onPay={onPay} onDel={onDel} onStatus={onStatus} onStart={onStart} onCard={onCard} closed={closed} />}
         </div>
       </div>
     </Swipe>
   )
 }
 
-function Details({ o, onEdit, onPay, onDel, onStatus, onStart, onCard, closed }) {
-  const [d, setD] = useState(null)
-  const [manualMin, setManualMin] = useState('')
-  const [manualNote, setManualNote] = useState('')
-  const [manualBusy, setManualBusy] = useState(false)
-  const [manualMsg, setManualMsg] = useState('')
-  const [screenProjects, setScreenProjects] = useState([])
-  useEffect(() => { api.order(o.id).then(setD).catch(() => {}); api.screen(1).then((r) => setScreenProjects(r.projects || [])).catch(() => setScreenProjects([])) }, [o.id, o.paid, o.hours, o.status])
-  const addManual = async () => {
-    const minutes = Number(manualMin)
-    if (!Number.isFinite(minutes) || minutes < 1) { setManualMsg('Укажи минуты'); return }
-    setManualBusy(true); setManualMsg('')
-    try {
-      await api.addOrderTime(o.id, Math.round(minutes), { note: manualNote.trim() || 'ручной учёт' })
-      setManualMin(''); setManualNote(''); setManualMsg('Время добавлено')
-      const fresh = await api.order(o.id); setD(fresh)
-    } catch (e) { setManualMsg(e.message || 'Не удалось сохранить') } finally { setManualBusy(false) }
-  }
-  return (
-    <div className="animate-rise mt-3 space-y-3 rounded-2xl p-3.5 sm:p-4" style={{ background: 'var(--sf2)' }}>
-      {o.notes && <div className="muted whitespace-pre-wrap text-[13.5px]">{o.notes}</div>}
-      <div className="grid grid-cols-2 gap-x-6 gap-y-2 text-[13px] sm:grid-cols-4">
-        <div><div className="label">оплачено</div><div className="num mt-0.5">{money(o.paid)}{o.price ? <span className="muted"> из {money(o.price)}</span> : ''}</div></div>
-        <div><div className="label">время</div><div className="num mt-0.5">{hours(o.hours)}{o.estimate_h ? <span className="muted"> из {hours(o.estimate_h)} плана</span> : ''}</div></div>
-        <div><div className="label">ставка</div><div className={`num mt-0.5 ${o.pulse?.warn ? 'warn' : ''}`}>{o.rate ? `${money(o.rate)}/ч` : '—'}{o.pulse?.planned_rate && o.pulse.planned_rate !== o.rate ? <span className="muted"> · план {money(o.pulse.planned_rate)}</span> : ''}</div></div>
-        <div><div className="label">дедлайн</div><div className="mt-0.5">{o.deadline ? `${dayLabel(o.deadline).toLowerCase()}, ${hhmm(o.deadline)}` : '—'}</div></div>
-      </div>
-      {o.pulse?.warn && <div className="warn text-[12.5px]">заказ съедает на {o.pulse.over_pct} % больше времени, чем планировали — {hours(o.pulse.hours)} из {hours(o.pulse.estimate_h)}</div>}
-      <div className="rounded-xl border hair p-3" style={{ background: 'var(--sf)' }}>
-        <div className="label mb-2">добавить потраченное время</div>
-        <div className="flex flex-wrap items-center gap-2">
-          <input className="input !h-8 !w-24 num" type="number" min="1" max="10080" placeholder="минуты" value={manualMin} onChange={(e) => setManualMin(e.target.value)} aria-label="Потраченные минуты" />
-          <input className="input !h-8 min-w-[160px] flex-1" placeholder="что делал (необязательно)" value={manualNote} onChange={(e) => setManualNote(e.target.value)} aria-label="Комментарий к времени" />
-          <button className="btn-soft btn-sm" disabled={manualBusy} onClick={addManual}>{manualBusy ? 'сохраняю…' : 'добавить'}</button>
-        </div>
-        {manualMsg && <div className="muted mt-1 text-[12px]">{manualMsg}</div>}
-      </div>
-      {screenProjects.length > 0 && <div className="rounded-xl border hair p-3" style={{ background: 'var(--sf)' }}>
-        <div className="label mb-2">найдено за ПК сегодня</div>
-        <div className="space-y-1.5">
-          {screenProjects.map((x) => <div key={`${x.app}-${x.project}`} className="flex items-center justify-between gap-3 text-[12.5px]">
-            <span className="min-w-0 truncate"><b>{x.app}</b> · {x.project} · {hours(x.minutes / 60)}</span>
-            <button className="btn-ghost btn-sm shrink-0" onClick={async () => { try { await api.addOrderScreenTime(o.id, x); setScreenProjects((p) => p.filter((q) => q !== x)); const fresh = await api.order(o.id); setD(fresh) } catch (e) { setManualMsg(e.message || 'Не удалось добавить') } }}>добавить</button>
-          </div>)}
-        </div>
-      </div>}
-      {d?.payments?.length > 0 && (
-        <div className="text-[12.5px]"><div className="label mb-1">оплаты</div>{d.payments.map((p) => <div key={p.id} className="muted flex justify-between gap-3"><span>{dayLabel(p.date).toLowerCase()} · {p.note || 'оплата'}</span><span className="num pos">+{money(p.amount)}</span></div>)}</div>
-      )}
-      <div className="flex flex-wrap items-center gap-1.5 pt-1">
-        {!closed && NEXT[o.status] && <button className="btn-primary btn-sm" onClick={() => onStatus(o, NEXT[o.status])}><Check size={13} /> {NEXT_LABEL[o.status]}</button>}
-        {!closed && o.status === 'work' && <button className="btn-ghost btn-sm" onClick={() => onStatus(o, 'review')}>на правки</button>}
-        {o.status !== 'cancelled' && o.left > 0 && <button className="btn-soft btn-sm" onClick={onPay}><Wallet size={13} /> оплата</button>}
-        {!closed && <button className="btn-ghost btn-sm" onClick={onStart}><Play size={13} /> таймер</button>}
-        {onCard && <button className="btn-soft btn-sm" onClick={onCard}><Columns3 size={13} /> карточка</button>}
-        <button className="btn-ghost btn-sm" onClick={onEdit}><Pencil size={13} /> изменить</button>
-        <button className="btn-ghost btn-sm" onClick={() => ask(`по заказу «${o.title}»: `)}><MessageCircle size={13} /> обсудить</button>
-        <BoardButton o={o} />
-        {!closed && <button className="btn-ghost btn-sm" onClick={() => onStatus(o, 'cancelled')}>отменить</button>}
-        <button className="btn-icon !h-7 !w-7 ml-auto" data-tip="удалить" onClick={onDel}><Trash2 size={13} /></button>
-      </div>
-    </div>
-  )
-}
-
-/* Канбан CRM: нативный HTML5 drag&drop, новых зависимостей нет */
-function Board({ orders, onCard, onStage }) {
+/* Канбан CRM: нативный HTML5 drag&drop (десктоп) + список «стадия» на каждой карточке
+   (альтернатива без перетаскивания — на телефоне жест не нужен).
+   Колонка показывает стадию, количество и сумму заказов; цвет — по смыслу из DESIGN.md. */
+function Board({ orders, onOpen, onStage }) {
   const [drag, setDrag] = useState(null)
   const [over, setOver] = useState(null)
   const cols = useMemo(() => {
     const m = {}
-    STAGES.forEach(([k]) => { m[k] = [] })
+    ORDER_STAGES.forEach(([k]) => { m[k] = [] })
     orders.forEach((o) => { (m[stageOf(o)] || (m[stageOf(o)] = [])).push(o) })
     return m
   }, [orders])
   return (
     <div className="overflow-x-auto pb-3">
       <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
-        {STAGES.map(([k, label]) => (
-          <div key={k} className="w-[258px] shrink-0"
-            onDragOver={(e) => { e.preventDefault(); setOver(k) }}
-            onDragLeave={() => setOver((x) => (x === k ? null : x))}
-            onDrop={(e) => { e.preventDefault(); const d = drag; setOver(null); setDrag(null); if (d) onStage(d, k) }}>
-            <div className="mb-2 flex items-center justify-between rounded-xl px-3 py-2" style={{ background: 'var(--sf2)', outline: over === k ? '2px solid var(--acc)' : 'none' }}>
-              <span className="text-[12.5px] font-medium">{label}</span>
-              <span className="num faint text-[11px]">{cols[k].length}</span>
-            </div>
-            <div className="space-y-2" style={{ minHeight: 56 }}>
-              {cols[k].map((o) => (
-                <div key={o.id} draggable
-                  onDragStart={(e) => { try { e.dataTransfer.setData('text/plain', String(o.id)) } catch { /* ignore */ } e.dataTransfer.effectAllowed = 'move'; setDrag(o) }}
-                  onDragEnd={() => { setDrag(null); setOver(null) }}
-                  onClick={() => onCard(o)}
-                  className={`cursor-grab rounded-2xl px-3 py-2.5 transition active:cursor-grabbing ${drag?.id === o.id ? 'opacity-50' : ''}`}
-                  style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', boxShadow: 'inset 0 0 0 1px var(--line)', borderRadius: 18 }}>
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="truncate text-[13.5px] font-medium">{o.title}</div>
-                      {o.client && <div className="muted truncate text-[12px]">{o.client}</div>}
-                    </div>
-                    {o.deadline && <span className={`shrink-0 text-[10.5px] ${o.overdue ? 'neg' : 'faint'}`}>{shortDate(o.deadline)}</span>}
-                  </div>
-                  <div className="mt-1.5 flex items-center justify-between text-[11.5px]">
-                    <span className="muted num">{o.price ? money(o.price) : '—'}</span>
-                    {o.left > 0 && o.status !== 'new' && <span className="faint num">долг {money(o.left)}</span>}
-                    {o.revisions > 0 && <span className="warn">правки ×{o.revisions}</span>}
-                  </div>
-                  {o.price > 0 && (
-                    <div className="mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-                      <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((o.paid / o.price) * 100))}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
-                    </div>
-                  )}
+        {ORDER_STAGES.map(([k, label]) => {
+          const tone = ORDER_STAGE_TONE[k]
+          const col = cols[k] || []
+          const sum = col.reduce((s, o) => s + (o.price || 0), 0)
+          return (
+            <div key={k} className="w-[258px] shrink-0"
+              onDragOver={(e) => { e.preventDefault(); setOver(k) }}
+              onDragLeave={() => setOver((x) => (x === k ? null : x))}
+              onDrop={(e) => { e.preventDefault(); const d = drag; setOver(null); setDrag(null); if (d) onStage(d, k) }}>
+              <div className="mb-2 overflow-hidden rounded-xl" aria-label={`Колонка «${label}»: заказов ${col.length}${sum > 0 ? `, на ${money(sum)}` : ''}`}
+                style={{ background: 'var(--sf2)', boxShadow: 'inset 0 0 0 1px var(--line)', outline: over === k ? '2px solid var(--acc)' : 'none' }}>
+                <div className="h-[3px]" style={{ background: tone === 'pos' ? 'var(--pos)' : tone === 'warn' ? 'var(--warn)' : tone === 'neg' ? 'var(--neg)' : 'var(--acc)' }} aria-hidden />
+                <div className="flex items-center justify-between gap-2 px-3 py-2">
+                  <span className="truncate text-[12.5px] font-medium">{label}</span>
+                  <span className="num shrink-0 text-[11px]">
+                    <span className={col.length ? 'text-[var(--ink-2)]' : 'faint'}>{col.length}</span>
+                    {sum > 0 && <span className="faint"> · {moneyShort(sum)}</span>}
+                  </span>
                 </div>
-              ))}
-              {cols[k].length === 0 && <div className="rounded-xl px-3 py-4 text-center faint text-[11.5px]" style={{ border: '1px dashed var(--line)' }}>пусто</div>}
+              </div>
+              <div className="space-y-2" style={{ minHeight: 56 }}>
+                {col.map((o) => (
+                  <div key={o.id} draggable
+                    onDragStart={(e) => { try { e.dataTransfer.setData('text/plain', String(o.id)) } catch { /* ignore */ } e.dataTransfer.effectAllowed = 'move'; setDrag(o) }}
+                    onDragEnd={() => { setDrag(null); setOver(null) }}
+                    onClick={() => onOpen(o)}
+                    className={`cursor-grab rounded-2xl px-3 py-2.5 transition active:cursor-grabbing ${drag?.id === o.id ? 'opacity-50' : ''}`}
+                    style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', boxShadow: o.overdue ? 'inset 0 0 0 1.5px var(--neg)' : 'inset 0 0 0 1px var(--line)', borderRadius: 18 }}>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="truncate text-[13.5px] font-medium">{o.title}</div>
+                        {o.client && <div className="muted truncate text-[12px]">{o.client}</div>}
+                      </div>
+                      {o.deadline && <span className={`shrink-0 text-[10.5px] ${o.overdue ? 'neg' : 'faint'}`}>{shortDate(o.deadline)}</span>}
+                    </div>
+                    <div className="mt-1.5 flex items-center justify-between gap-2 text-[11.5px]">
+                      <span className="muted num">{o.price ? money(o.price) : '—'}</span>
+                      {o.left > 0 && o.status !== 'new' && <span className="faint num">долг {money(o.left)}</span>}
+                      {o.revisions > 0 && <span className="warn">правки ×{o.revisions}</span>}
+                    </div>
+                    {o.price > 0 && (
+                      <div className="mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
+                        <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((o.paid / o.price) * 100))}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
+                      </div>
+                    )}
+                    <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                      <select className="input !h-7 flex-1 !text-[12px]" value={stageOf(o)} onChange={(e) => onStage(o, e.target.value)}
+                        aria-label={`Стадия заказа «${o.title}»`} data-tip="стадия заказа">
+                        {ORDER_STAGES.map(([sk, sl]) => <option key={sk} value={sk}>{sl}</option>)}
+                      </select>
+                    </div>
+                  </div>
+                ))}
+                {col.length === 0 && (
+                  <div className="rounded-xl px-3 py-4 text-center text-[11.5px] faint" style={{ border: '1px dashed var(--line)' }}>
+                    Перетащите карточку сюда
+                  </div>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
   )
 }
 
-/* Карточка заказа CRM: стадии, деньги, правки, чек-лист, комментарии, лента, шаблоны */
-function CrmOrderSheet({ oid, onClose, onClient, onChanged, onErr }) {
-  const [d, setD] = useState(null)
-  const [comment, setComment] = useState('')
-  const [check, setCheck] = useState('')
-  const [tpl, setTpl] = useState(null)
-  const [lost, setLost] = useState(null)
-  const load = () => { if (oid) api.crmOrderCard(oid).then(setD).catch(() => {}); else setD(null) }
-  useEffect(() => { setD(null); setTpl(null); setLost(null); load() }, [oid])
-  const act = async (fn) => { try { await fn(); load(); onChanged?.() } catch (e) { onErr?.(e) } }
-  const addComment = async () => { const t = comment.trim(); if (!t) return; setComment(''); await act(() => api.crmComment(oid, t, d?.client_id)) }
-  const addCheck = async (e) => { e.preventDefault(); const t = check.trim(); if (!t) return; setCheck(''); await act(() => api.crmAddCheck(oid, t)) }
-  const useTpl = async (name) => { const t = tpl?.[name]; if (t) window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: t } })) }
+/* «Потерян» требует причину: короткая форма, дальше стадия уходит в CRM. */
+function LostSheet({ order, onClose, onDone }) {
+  const [reason, setReason] = useState('')
+  useEffect(() => { setReason('') }, [order?.id])
   return (
-    <Sheet open={!!oid} onClose={onClose} wide title={d?.title || 'заказ'} sub={d ? `${d.client || 'без клиента'}${d.deadline ? ` · до ${shortDate(d.deadline)}` : ''}` : ''}>
-      {!d ? <div className="muted text-[13px]">загружаю…</div> : (
-        <div className="space-y-4 text-[13px]">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {STAGES.map(([k, label]) => (
-              <button key={k} className={`chip ${stageOf(d) === k ? 'on' : ''}`} disabled={!!lost}
-                onClick={() => (k === 'lost' ? setLost('') : act(() => api.crmSetStage(oid, k)))}>{label}{d.revisions > 0 && k === 'revisions' ? ` ×${d.revisions}` : ''}</button>
-            ))}
-          </div>
-          {lost !== null && (
-            <div className="flex flex-wrap items-center gap-2">
-              <input className="input !h-8 min-w-[200px] flex-1" placeholder="причина потери" value={lost} onChange={(e) => setLost(e.target.value)} />
-              <button className="btn-danger btn-sm" onClick={() => act(() => api.crmSetStage(oid, 'lost', lost.trim() || null))}>потерян</button>
-              <button className="btn-ghost btn-sm" onClick={() => setLost(null)}>отмена</button>
-            </div>
-          )}
-
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
-            <div><div className="label">предоплата</div><div className="num mt-0.5">{money(d.prepaid || 0)}</div></div>
-            <div><div className="label">остаток</div><div className={`num mt-0.5 ${d.left > 0 ? 'warn' : 'pos'}`}>{money(d.remaining || 0)}</div></div>
-            <div><div className="label">оплачено</div><div className="num mt-0.5">{money(d.paid)}{d.price ? <span className="muted"> / {money(d.price)}</span> : ''}</div></div>
-            <div><div className="label">правки · часы</div><div className="num mt-0.5">{d.revisions} · {d.hours ? `${Math.round(d.hours * 10) / 10} ч` : '—'}{d.rate ? <span className="muted"> · {money(d.rate)}/ч</span> : ''}</div></div>
-          </div>
-          {d.client_id && <button className="btn-soft btn-sm" onClick={() => onClient(d.client_id)}><User size={13} /> карточка клиента</button>}
-
-          {d.payments?.length > 0 && (
-            <div><div className="label mb-1">оплаты (частичные)</div>
-              {d.payments.map((p) => <div key={p.id} className="muted flex justify-between gap-3"><span>{dayLabel(p.date).toLowerCase()} · {p.note || 'оплата'}</span><span className="num pos">+{money(p.amount)}</span></div>)}
-            </div>
-          )}
-
-          <div>
-            <div className="label mb-1.5">чек-лист этапов</div>
-            {d.checklist?.map((c) => (
-              <div key={c.id} className="flex items-center gap-2 py-0.5">
-                <button className="btn-icon !h-6 !w-6" onClick={() => act(() => api.crmToggleCheck(c.id))} aria-label="готово">{c.done ? <Check size={13} /> : <Square size={13} />}</button>
-                <span className={c.done ? 'muted line-through' : ''}>{c.title}</span>
-                <button className="btn-icon !h-6 !w-6 ml-auto faint" onClick={() => act(() => api.crmDelCheck(c.id))} aria-label="удалить"><Trash2 size={12} /></button>
-              </div>
-            ))}
-            <form onSubmit={addCheck} className="mt-1.5 flex items-center gap-2">
-              <input className="input !h-8 flex-1" placeholder="новый этап" value={check} onChange={(e) => setCheck(e.target.value)} />
-              <button className="btn-soft btn-sm" disabled={!check.trim()}>добавить</button>
-            </form>
-          </div>
-
-          <div>
-            <div className="label mb-1.5">комментарии</div>
-            {d.comments?.map((c) => <div key={c.id} className="muted py-0.5"><span className="faint">{dayLabel(c.created_at).toLowerCase()} · {c.author}:</span> {c.text}</div>)}
-            <div className="mt-1.5 flex items-center gap-2">
-              <input className="input !h-8 flex-1" placeholder="комментарий" value={comment} onChange={(e) => setComment(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && addComment()} />
-              <button className="btn-soft btn-sm" disabled={!comment.trim()} onClick={addComment}>добавить</button>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="label">лента активности</span>
-              <button className="btn-ghost btn-sm" onClick={async () => { try { setTpl(await api.crmTemplates(oid)) } catch (e) { onErr?.(e) } }}>шаблоны сообщений</button>
-            </div>
-            {tpl && <div className="mb-2 flex flex-wrap gap-1.5">{Object.entries(tpl).map(([k, t]) => <button key={k} className="chip" onClick={() => useTpl(k)}>{k}</button>)}</div>}
-            <div className="max-h-[220px] space-y-1 overflow-y-auto">
-              {d.activity?.map((a) => <div key={a.id} className="flex gap-2 text-[12.5px]"><span className="faint shrink-0 num">{dayLabel(a.created_at).toLowerCase()}</span><span className="muted">{a.text}</span></div>)}
-              {!d.activity?.length && <div className="faint text-[12px]">пока ничего не происходило</div>}
-            </div>
-          </div>
+    <Sheet open={!!order} onClose={onClose} title="пометить потерянным" sub={order ? `«${order.title}»` : ''}>
+      <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (reason.trim()) onDone(reason.trim()) }}>
+        <Field label="почему заказ потерян" hint="обязательно — по этой причине видно в ленте">
+          <input autoFocus className="input" value={reason} onChange={(e) => setReason(e.target.value)}
+            placeholder="дорого, клиент пропал, взял другого подрядчика…" />
+        </Field>
+        <div className="muted text-[12.5px]">Заказ уедет в колонку «потерян». Стадию можно вернуть в любой момент — в строке заказа или в панели.</div>
+        <div className="flex gap-2">
+          <button className="btn-primary" disabled={!reason.trim()} type="submit">пометить потерянным</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>отмена</button>
         </div>
-      )}
+      </form>
     </Sheet>
   )
 }
 
-/* Карточка клиента CRM: LTV, средний чек, долг, источник, теги, контакт, следующий шаг, история */
-export function ClientCardSheet({ cid, onClose, onCard }) {
+/* Карточка клиента CRM: стадия клиента (отдельная сущность!), LTV, средний чек, долг,
+   источник, теги, контакт, следующий шаг с датой, история заказов. */
+export function ClientCardSheet({ cid, onClose, onOrder }) {
   const [d, setD] = useState(null)
   const [step, setStep] = useState('')
-  useEffect(() => { if (cid) api.crmClientCard(cid).then((r) => { setD(r); setStep(r.next_step || '') }).catch(() => {}); else setD(null) }, [cid])
-  const save = async (p) => { try { await api.crmUpdateClient(cid, p); setD(await api.crmClientCard(cid)) } catch { /* ignore */ } }
+  const [stepAt, setStepAt] = useState('')
+  const [err, setErr] = useState('')
+  const [, show] = useToast()
+  useEffect(() => {
+    if (!cid) { setD(null); return }
+    api.crmClientCard(cid).then((r) => {
+      setD(r); setStep(r.next_step || ''); setStepAt(r.next_step_at ? toLocalISO(new Date(r.next_step_at)).slice(0, 10) : '')
+    }).catch(() => setD(null))
+  }, [cid])
+  const save = async (p) => {
+    try { await api.crmUpdateClient(cid, p); setD(await api.crmClientCard(cid)) } catch (e) { show.err(e) }
+  }
+  const saveStep = async () => {
+    setErr('')
+    await save({ next_step: step, next_step_at: stepAt ? `${stepAt}T12:00:00` : null })
+  }
   return (
     <Sheet open={!!cid} onClose={onClose} wide title={d?.client?.name || 'клиент'} sub={d?.source ? `источник: ${d.source}` : ''}>
       {!d ? <div className="muted text-[13px]">загружаю…</div> : (
         <div className="space-y-4 text-[13px]">
+          <div>
+            <div className="label mb-1.5">стадия клиента — не стадия заказа</div>
+            <ClientStageSelect view={d.stage} onView={(v) => setD({ ...d, stage: v })} onErr={show.err} label={`Стадия клиента ${d.client?.name || ''}`} />
+            <ClientStageNote view={d.stage} />
+          </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
             <div><div className="label">LTV</div><div className="num mt-0.5 pos">{money(d.ltv)}</div></div>
             <div><div className="label">средний чек</div><div className="num mt-0.5">{d.avg_check ? money(d.avg_check) : '—'}</div></div>
@@ -539,17 +450,19 @@ export function ClientCardSheet({ cid, onClose, onCard }) {
           {d.tags?.length > 0 && <div className="flex flex-wrap gap-1.5">{d.tags.map((t) => <span key={t} className="chip on">{t}</span>)}</div>}
           <div>
             <div className="label mb-1">следующий шаг</div>
-            <div className="flex items-center gap-2">
-              <input className="input !h-8 flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder="позвонить, прислать смету…" />
-              <button className="btn-soft btn-sm" disabled={step === (d.next_step || '')} onClick={() => save({ next_step: step })}>сохранить</button>
+            <div className="flex flex-wrap items-center gap-2">
+              <input className="input !h-8 min-w-[180px] flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder="позвонить, прислать смету…" aria-label="Следующий шаг" />
+              <input type="date" className="input !h-8 !w-[150px]" value={stepAt} onChange={(e) => setStepAt(e.target.value)} aria-label="Дата следующего шага" />
+              <button className="btn-soft btn-sm" disabled={step === (d.next_step || '') && stepAt === (d.next_step_at ? toLocalISO(new Date(d.next_step_at)).slice(0, 10) : '')} onClick={saveStep}>сохранить</button>
             </div>
-            {d.next_step_at && <div className="faint mt-1 text-[12px]">к {dayLabel(d.next_step_at)}</div>}
+            {err && <div className="neg mt-1 text-[12px]">{err}</div>}
+            <div className="faint mt-1 text-[12px]">{d.next_step_at ? `было: к ${dayLabel(d.next_step_at)}` : 'даты можно задать здесь — она попадёт в follow-up'}</div>
           </div>
           <div>
             <div className="label mb-1.5">история заказов</div>
             {d.orders.map((o) => (
-              <button key={o.id} type="button" className="flex w-full items-center justify-between gap-3 py-0.5 text-left" onClick={() => onCard(o.id)}>
-                <span className="min-w-0 truncate">{o.title} <span className="faint">· {STAGE_LABEL[stageOf(o)]}</span></span>
+              <button key={o.id} type="button" className="flex w-full items-center justify-between gap-3 py-0.5 text-left" onClick={() => onOrder?.(o.id)}>
+                <span className="min-w-0 truncate">{o.title} <span className="faint">· {ORDER_STAGE_LABEL[stageOf(o)]}</span></span>
                 <span className="num shrink-0">{o.price ? money(o.price) : '—'}{o.left > 0 ? <span className="faint"> · долг {money(o.left)}</span> : ''}</span>
               </button>
             ))}
@@ -655,7 +568,11 @@ function StatsBlock({ stats, onUnpaid }) {
   )
 }
 
-const blank = { title: '', price: '', client: '', deadline: '', notes: '', estimate_h: '', status: 'work' }
+/* Стадии, которые имеет смысл выбрать при создании (воронка CRM, те же подписи, что и везде).
+   «оплачен» появляется только через оплату, «потерян» — с причиной, позже. */
+const NEW_STAGES = [['lead', 'лид'], ['negotiation', 'переговоры'], ['spec', 'ТЗ согласовано'], ['in_work', 'в работе'], ['revisions', 'на правках'], ['delivered', 'сдан']]
+
+const blank = { title: '', price: '', client: '', deadline: '', notes: '', estimate_h: '', stage: 'in_work', done: false, paid: '' }
 export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   const [f, setF] = useState(blank)
   const [clients, setClients] = useState([])
@@ -663,7 +580,10 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   useEffect(() => {
     if (!open) return
     api.clients().then(setClients).catch(() => {})
-    setF(order ? { title: order.title, price: order.price ? String(order.price) : '', client: order.client || '', deadline: order.deadline ? toLocalISO(new Date(order.deadline)).slice(0, 16) : '', notes: order.notes || '', estimate_h: order.estimate_h ? String(order.estimate_h) : '', status: order.status } : blank)
+    const st = order ? stageOf(order) : 'in_work'
+    setF(order
+      ? { title: order.title, price: order.price ? String(order.price) : '', client: order.client || '', deadline: order.deadline ? toLocalISO(new Date(order.deadline)).slice(0, 16) : '', notes: order.notes || '', estimate_h: order.estimate_h ? String(order.estimate_h) : '', stage: st, done: st === 'delivered' || st === 'awaiting_payment', paid: '' }
+      : blank)
   }, [open, order])
   // Подсказка цены/часов по похожим прошлым заказам (только для нового заказа, с задержкой ввода)
   useEffect(() => {
@@ -678,12 +598,24 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   }, [f.title, open, order])
   const submit = async (e) => {
     e.preventDefault()
-    const body = { title: f.title.trim(), price: Number(String(f.price).replace(/\s/g, '').replace(',', '.')) || 0, client: f.client.trim() || null, deadline: f.deadline || null, notes: f.notes.trim() || null, estimate_h: Number(f.estimate_h) || 0, status: f.status }
+    const stage = f.done ? 'delivered' : f.stage
+    const body = {
+      title: f.title.trim(), price: Number(String(f.price).replace(/\s/g, '').replace(',', '.')) || 0,
+      client: f.client.trim() || null, deadline: f.deadline || null, notes: f.notes.trim() || null,
+      estimate_h: Number(f.estimate_h) || 0, status: STAGE_TO_STATUS[stage] || 'work',
+    }
     try {
-      if (order) await api.updateOrder(order.id, body); else await api.addOrder(body)
-      onDone(order ? 'Заказ обновлён' : 'Заказ добавлен')
+      // эндпоинт /api/orders знает только старый статус; точную стадию воронки ставим через CRM
+      const saved = order ? await api.updateOrder(order.id, body) : await api.addOrder(body)
+      const oid = order ? order.id : saved?.id
+      const now = stageOf(saved || order || {})
+      if (oid && stage !== now) { try { await api.crmSetStage(oid, stage) } catch { /* стадия не критична для сохранения */ } }
+      const paid = Number(String(f.paid).replace(/\s/g, '').replace(',', '.'))
+      if (oid && f.done && paid > 0) { try { await api.payOrder(oid, paid, { note: 'оплата при создании' }) } catch { /* покажем тост */ } }
+      onDone(order ? 'Заказ обновлён' : (f.done ? 'Заказ добавлен как сданный' : 'Заказ добавлен'))
     } catch (err) { onErr(err) }
   }
+  const toggleDone = (v) => setF({ ...f, done: v, stage: v ? 'delivered' : f.stage === 'delivered' ? 'in_work' : f.stage })
   return (
     <Sheet open={open} onClose={onClose} title={order ? 'заказ' : 'новый заказ'} sub={order ? undefined : 'или скажите ассистенту: «заказ: ролик для Пятёрочки, 25к, до пятницы»'}>
       <form onSubmit={submit} className="space-y-4">
@@ -700,10 +632,26 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
           <Field label="сумма"><Money value={f.price} onChange={(v) => setF({ ...f, price: v })} /></Field>
           <Field label="клиент"><input className="input" list="clients-list" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} placeholder="Пятёрочка" /><datalist id="clients-list">{clients.map((c) => <option key={c.id} value={c.name} />)}</datalist></Field>
           <Field label="дедлайн"><DateTimeField value={f.deadline} onChange={(v) => setF({ ...f, deadline: v })} /></Field>
-          <Field label="план по времени" hint="часов"><input type="number" min="0" step="0.5" className="input num" value={f.estimate_h} onChange={(e) => setF({ ...f, estimate_h: e.target.value })} placeholder="8" /></Field>
+          <Field label="Сколько часов планируете" hint="план по времени"><input type="number" min="0" step="0.5" className="input num" value={f.estimate_h} onChange={(e) => setF({ ...f, estimate_h: e.target.value })} placeholder="8" /></Field>
         </div>
-        <Field label="статус" hint={order ? undefined : 'старый заказ — сразу «сдан», оплату запишете после'}><Pills value={f.status} onChange={(s) => setF({ ...f, status: s })} options={Object.entries(STATUS).filter(([k]) => order || !['paid', 'cancelled'].includes(k))} /></Field>
-        <Field label="заметки"><textarea className="input min-h-[72px]" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="ТЗ, ссылки на исходники, договорённости" /></Field>
+
+        {/* чекбокс вместо непонятной подсказки про «старый заказ»: ставит «сдан» и открывает поле оплаты */}
+        <label className="flex cursor-pointer items-center gap-2.5 text-[13.5px]">
+          <input type="checkbox" className="h-4 w-4 accent-[var(--acc)]" checked={f.done} onChange={(e) => toggleDone(e.target.checked)} />
+          <span>Заказ уже выполнен — поставлю стадию «сдан»</span>
+        </label>
+        {f.done && (
+          <Field label="уже получено за заказ" hint="можно позже — в панели заказа">
+            <Money value={f.paid} onChange={(v) => setF({ ...f, paid: v })} placeholder="0" />
+          </Field>
+        )}
+
+        {!f.done && (
+          <Field label="стадия заказа" hint="воронка CRM — та же, что на канбане">
+            <Pills value={f.stage} onChange={(s) => setF({ ...f, stage: s })} options={NEW_STAGES} />
+          </Field>
+        )}
+        <Field label="заметки и ТЗ"><textarea className="input min-h-[72px]" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="ТЗ, ссылки на исходники, договорённости" /></Field>
         <button className="btn-primary btn-lg w-full">{order ? 'сохранить' : 'добавить'}</button>
       </form>
     </Sheet>
@@ -742,15 +690,4 @@ function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
       </form>
     </Sheet>
   )
-}
-
-
-/* Доска заказа: раскадровка/референсы/сценарий. Есть — открыть; нет — создать (пустая раскадровка, привязанная к заказу). */
-function BoardButton({ o }) {
-  const nav = useNavigate()
-  const [, show] = useToast()
-  const go = async () => {
-    try { const b = await api.get(`/api/boards/for-order/${o.id}?create=true`); nav(`/board/${b.id}`) } catch (e) { show.err(e) }
-  }
-  return <button className="btn-ghost btn-sm" onClick={go} data-tip={o.board_id ? 'открыть доску заказа' : 'создать доску заказа'}><Clapperboard size={13} /> {o.board_id ? 'доска' : 'доска +'}</button>
 }

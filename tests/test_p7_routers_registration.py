@@ -1,11 +1,13 @@
-"""ФАЗА 7 — инварианты подключения роутов по доменам (шаги 7.1–7.3).
+"""ФАЗА 7 — инварианты подключения роутов по доменам (шаги 7.1–7.4).
 
 Логику роутов не проверяем — она покрыта обычными тестами. Здесь только СКЕЛЕТ:
 перенесённые роутеры подключены, все пути/методы на месте, дублей нет и —
 главное — подключение стоит ДО catch-all SPA, иначе `{path:path}` перехватит
 все `/api/*` и сайт перестанет открываться (см. `reviews/P7_refactor.md` §4.2).
 
-Состояние на шаг 7.3: `finance` (42 роута), `orders` (22), `boards` (17), `people` (15).
+Состояние на шаг 7.4: `finance` (42 роута), `orders` (22), `boards` (17),
+`people` (15), `tasks` (15). `/api/events/stream` (SSE) пока в `app.py` — см.
+`test_events_stream_still_in_app`.
 
 Тест дешёвый: БД не трогается, только объект `app`.
 """
@@ -132,11 +134,36 @@ PEOPLE_ROUTES = [
     ("PUT", "/api/people/{cid}"),
 ]
 
-DOMAIN_ROUTES = FINANCE_ROUTES + ORDERS_ROUTES + BOARDS_ROUTES + PEOPLE_ROUTES
+# Полный список путей/методов tasks.py (15 роутов шага 7.4 — `core/api/app.py` до переноса):
+# `/api/events*` (6, БЕЗ SSE), `/api/tasks*` (7), `/api/focus`, `/api/timeline`.
+# `GET /api/events/stream` (SSE) здесь НЕТ: он остаётся в `core/api/app.py` до шага 7.6
+# (`reviews/P7_refactor.md` §3) — проверяется отдельно в `test_events_stream_still_in_app`.
+TASKS_ROUTES = [
+    ("GET", "/api/events"),
+    ("POST", "/api/events"),
+    ("PUT", "/api/events/{event_id}"),
+    ("POST", "/api/events/{event_id}/done"),
+    ("POST", "/api/events/{event_id}/skip"),
+    ("DELETE", "/api/events/{event_id}"),
+    ("GET", "/api/tasks"),
+    ("GET", "/api/tasks/{task_id}"),
+    ("POST", "/api/tasks"),
+    ("PUT", "/api/tasks/{task_id}"),
+    ("POST", "/api/tasks/{task_id}/undone"),
+    ("POST", "/api/tasks/{task_id}/done"),
+    ("DELETE", "/api/tasks/{task_id}"),
+    ("GET", "/api/focus"),
+    ("GET", "/api/timeline"),
+]
+
+DOMAIN_ROUTES = FINANCE_ROUTES + ORDERS_ROUTES + BOARDS_ROUTES + PEOPLE_ROUTES + TASKS_ROUTES
 
 # Домены и их префиксы — по ним находим подключённые `_IncludedRouter` (инвариант §4.2 п. 1).
+# ⚠️ Префикс домена `tasks` — `/api/events`, а НЕ `/api/tasks`: `/api/events/stream` (SSE)
+# на шаге 7.4 ещё лежит в `core/api/app.py` и уедет в `system.py` только на 7.6, а префикс
+# в `DOMAINS` должен быть УНИКАЛЬНЫМ и указывать именно на роутер домена.
 DOMAINS = (("finance", "/api/finance"), ("orders", "/api/orders"), ("boards", "/api/boards"),
-           ("people", "/api/people"))
+           ("people", "/api/people"), ("tasks", "/api/events"))
 
 
 def _flat(routes, out):
@@ -165,7 +192,7 @@ def test_route_matches(method, path):
                 .replace("{debt_id}", "1").replace("{rid}", "1").replace("{gid}", "1")
                 .replace("{oid}", "1").replace("{bid}", "1").replace("{iid}", "1")
                 .replace("{aim_id}", "1").replace("{mid}", "1").replace("{status}", "done")
-                .replace("{kind}", "client")
+                .replace("{kind}", "client").replace("{event_id}", "1").replace("{task_id}", "1")
                 .replace("{what}.{fmt}", "transactions.csv"))
     scope = {"type": "http", "method": method, "path": concrete, "root_path": "", "headers": []}
     matched = [p for r, (p, _m) in _flat(app.router.routes, []) if r.matches(scope)[0] is Match.FULL]
@@ -210,6 +237,13 @@ def test_people_router_has_exactly_15_routes():
     assert got == want
 
 
+def test_tasks_router_has_exactly_15_routes():
+    got = _router_routes("tasks")
+    want = sorted((p, (m,)) for m, p in TASKS_ROUTES)
+    assert len(got) == 15
+    assert got == want
+
+
 def test_finance_routes_registered_on_app():
     have = set(_all_routes())
     missing = [(m, p) for m, p in FINANCE_ROUTES if (p, (m,)) not in have]
@@ -234,6 +268,52 @@ def test_people_routes_registered_on_app():
     assert not missing, f"роуты people потеряны при подключении: {missing}"
 
 
+def test_tasks_routes_registered_on_app():
+    have = set(_all_routes())
+    missing = [(m, p) for m, p in TASKS_ROUTES if (p, (m,)) not in have]
+    assert not missing, f"роуты tasks потеряны при подключении: {missing}"
+
+
+def test_events_stream_still_in_app():
+    """SSE `/api/events/stream` на шаге 7.4 остаётся в `core/api/app.py` (§3 отчёта 7.0).
+
+    Проверяем: (а) он вообще зарегистрирован и (б) он НЕ попал в `routers/tasks.py` —
+    иначе шаг 7.6 (`system.py`) его потеряет. Уберётся на 7.6.
+    """
+    have = set(_all_routes())
+    assert ("/api/events/stream", ("GET",)) in have, "SSE /api/events/stream куда-то потерялся"
+    assert ("/api/events/stream", ("GET",)) not in set(_router_routes("tasks")), \
+        "SSE /api/events/stream не должен быть в tasks.py — он уезжает в system.py на 7.6"
+
+
+def test_events_stream_registered_before_event_id_and_catchall():
+    """Инвариант §4.2 п. 2 + §6.1: SSE — литерал, `/api/events/{event_id}` — параметрический.
+
+    Пока SSE лежит в `app.py` первым, конфликта нет. Этот тест — «забор» на 7.6:
+    когда `/api/events/stream` переедет в `system.py` (регистрируемого ПОСЛЕ
+    `tasks`), литерал начнёт конфликтовать с `/api/events/{event_id}`, и тест
+    покажет это раньше, чем сломается живое обновление сайта.
+    """
+    from starlette.routing import Match
+
+    flat = [info for _, info in _flat(app.router.routes, [])]
+
+    def idx(path, method):
+        hits = [i for i, (p, m) in enumerate(flat) if p == path and method in m]
+        assert hits, f"{method} {path} не зарегистрирован"
+        return hits[0]
+
+    sse = idx("/api/events/stream", "GET")
+    ev = idx("/api/events/{event_id}", "PUT")
+    spa = idx("/{path:path}", "GET")
+    assert sse < ev, f"SSE (idx {sse}) зарегистрирован позже /api/events/{{event_id}} (idx {ev})"
+    assert sse < spa, f"SSE (idx {sse}) зарегистрирован позже catch-all (idx {spa})"
+    # и фактический матч: GET /api/events/stream должен выигрывать у catch-all SPA
+    scope = {"type": "http", "method": "GET", "path": "/api/events/stream", "root_path": "", "headers": []}
+    matched = [p for r, (p, _m) in _flat(app.router.routes, []) if r.matches(scope)[0] is Match.FULL]
+    assert matched[0] == "/api/events/stream", f"SSE перебит: {matched}"
+
+
 def test_no_duplicate_method_and_path():
     seen = [r for r in _all_routes()]
     assert len(seen) == len(set(seen)), "появились дубли (путь, метод)"
@@ -245,8 +325,8 @@ def test_registered_before_spa_catchall():
     Иначе SPA перехватит `/api/*` (он матчится первым) и сайт отдаст HTML вместо JSON.
 
     Проверяется НЕ «последний роутер = finance», а «после ПОСЛЕДНЕГО подключённого
-    роутера доменов нет ни одного `/api/*`-роута»: на шаге 7.3 последним идёт
-    `people`, и список доменов будет расти до шага 7.6.
+    роутера доменов нет ни одного `/api/*`-роута»: на шаге 7.4 последним идёт
+    `tasks`, и список доменов будет расти до шага 7.6.
     """
     routes = app.router.routes
     idx = {}

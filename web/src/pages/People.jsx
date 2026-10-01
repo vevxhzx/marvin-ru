@@ -5,18 +5,24 @@ import { Sheet, Field, Empty, useToast, PageAccent, ListSkeleton } from '../comp
 import { ClientCardSheet } from './Orders'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
+import { ClientStageBadge } from '../components/ClientStage'
+import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageApi, loadClientStages } from '../lib/crm'
 
 // colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово
 const KIND_RU = { person: 'человек', family: 'семья', friend: 'друг', client: 'клиент', company: 'компания', colleague: 'коллега' }
 const kindLabel = (p) => p.kind_label || KIND_RU[p.kind] || p.kind || 'человек'
 const chip = (on) => ({ background: on ? 'var(--ink)' : 'var(--sf)', color: on ? 'var(--bg)' : 'var(--ink2)' })
 const initials = (name) => (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('')
+// стадия клиента осмысленна только у клиентов и компаний — у «своих» людей её нет
+const HAS_STAGE = new Set(['client', 'company'])
 
 export default function People() {
   const [list, setList] = useState(null)
   const pageAcc = usePageAccent('people')
   const [q, setQ] = useState('')
   const [tab, setTab] = useState('all')
+  const [stageTab, setStageTab] = useState('all')
+  const [stages, setStages] = useState({})          // id → ответ /api/crm/clients/{id}/stage
   const [sheet, setSheet] = useState(null)
   const [crm, setCrm] = useState(null)
   const [, show] = useToast()
@@ -25,14 +31,26 @@ export default function People() {
   const load = () => api.people().then(setList).catch(() => setList([]))
   useEffect(() => { load() }, [tick])
 
+  // стадия клиента — отдельная сущность и отдельный эндпоинт: тянем по одному запросу на клиента
+  useEffect(() => {
+    const ids = (list || []).filter((p) => HAS_STAGE.has(p.kind)).map((p) => p.id)
+    if (!ids.length) return
+    let on = true
+    loadClientStages(ids).then((m) => { if (on) setStages(m) }).catch(() => {})
+    return () => { on = false }
+  }, [list])
+
   const items = useMemo(() => {
     const s = q.trim().toLowerCase()
     return (list || [])
       .filter((p) => tab === 'all' || p.kind === tab)
+      .filter((p) => stageTab === 'all' || stages[p.id]?.stage === stageTab)
       .filter((p) => !s || [p.name, p.aliases, p.contact, ...listOf(p.tags)].join(' ').toLowerCase().includes(s))
       .sort((a, b) => (b.open - a.open) || (b.unpaid - a.unpaid) || a.name.localeCompare(b.name, 'ru'))
-  }, [list, q, tab])
+  }, [list, q, tab, stageTab, stages])
 
+  const stageCount = (k) => (list || []).filter((p) => HAS_STAGE.has(p.kind) && stages[p.id]?.stage === k).length
+  const withStages = (list || []).some((p) => HAS_STAGE.has(p.kind))
   const unpaidTotal = (list || []).reduce((s, p) => s + (p.unpaid || 0), 0)
   const openCount = (list || []).filter((p) => p.open).length
 
@@ -58,6 +76,19 @@ export default function People() {
           <span className="btn" onClick={() => setSheet('new')}>+ человек</span>
         </div>
       </div>
+
+      {/* Фильтр по стадии клиента — вторая, отдельная сущность (не стадия заказа) */}
+      {withStages && (
+        <div className="r flex flex-wrap items-center gap-2" style={{ '--i': 2, marginTop: '14px' }}>
+          <span className="label">стадия клиента</span>
+          <button type="button" style={chip(stageTab === 'all')} className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition" onClick={() => setStageTab('all')}>все</button>
+          {CLIENT_STAGES.map(([k, label]) => (
+            <button key={k} type="button" style={chip(stageTab === k)} className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition"
+              data-tip={CLIENT_STAGE_TONE[k] === 'pos' ? 'деньги есть' : CLIENT_STAGE_TONE[k] === 'neg' ? 'риск / ушёл' : 'стадия ставится и вручную'}
+              onClick={() => setStageTab(stageTab === k ? 'all' : k)}>{label}{stageCount(k) ? ` · ${stageCount(k)}` : ''}</button>
+          ))}
+        </div>
+      )}
 
       {/* Поиск */}
       <div className="search r" style={{ width: '100%', height: '54px', marginTop: '16px', '--i': 3 }}>
@@ -96,13 +127,26 @@ export default function People() {
               {p.unpaid ? <span className="pl y">ждём {money(p.unpaid)}</span> : null}
               {!p.open && !p.unpaid ? 'без заказов' : null}
             </div>
+            {HAS_STAGE.has(p.kind) && (
+              <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                <ClientStageBadge view={stages[p.id]} className="shrink-0" />
+                <select className="input !h-7 flex-1 !text-[12px]" value={stages[p.id]?.stage || 'lead'} disabled={!stages[p.id]}
+                  aria-label={`Стадия клиента: ${p.name}`} title="стадия клиента — ставится вручную или сама по оплатам"
+                  onChange={async (e) => {
+                    const v = e.target.value
+                    try { const nv = await clientStageApi.set(p.id, v); setStages((m) => ({ ...m, [p.id]: nv })); bump() } catch (err) { show.err(err) }
+                  }}>
+                  {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                </select>
+              </div>
+            )}
           </section>
         ))}
       </div>
 
       <PersonSheet open={!!sheet} person={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }}
         onCrm={(id) => { setSheet(null); setCrm(id) }} />
-      <ClientCardSheet cid={crm} onClose={() => setCrm(null)} onCard={() => {}} />
+      <ClientCardSheet cid={crm} onClose={() => setCrm(null)} onOrder={() => setCrm(null)} />
     </div>
   )
 }
@@ -167,6 +211,12 @@ function PersonSheet({ open, person, onClose, onDone, onCrm }) {
         <Field label="контакт / телефон / telegram">
           <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="@username или +7 999 123-45-67" />
         </Field>
+        {!isNew && HAS_STAGE.has(kind) && (
+          <div className="muted text-[12.5px]">
+            Стадия клиента (лид → переговоры → клиент → постоянный → спит/ушёл) — отдельная вещь от стадии заказа:
+            меняется сама по оплатам, вручную её меняют в карточке CRM.
+          </div>
+        )}
         <div className="flex justify-end gap-2 pt-4">
           {!isNew && <button type="button" className="btn-soft mr-auto" onClick={() => onCrm?.(person.id)}>карточка CRM</button>}
           <button type="button" className="btn-ghost" onClick={onClose}>отмена</button>
