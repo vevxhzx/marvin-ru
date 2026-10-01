@@ -346,15 +346,6 @@ async def link_related(lid: int):
     return relations.related(key)
 
 
-@app.put("/api/relations/{rid}")
-def relation_set(rid: int, p: RelationIn):
-    """Крестик на связи: status=no — пара больше никогда не предлагается. Переход по связи — status=yes."""
-    r = relations.set_status(rid, p.status)
-    if not r:
-        raise HTTPException(404)
-    return r
-
-
 @app.get("/api/health")
 async def health():
     from ..brain import llm
@@ -613,62 +604,6 @@ def remove_task(task_id: int):
     return {"ok": True}
 
 
-# ---------------- цели (aims): цель → вехи → задачи; фокус дня ----------------
-@app.get("/api/aims")
-def get_aims(all: bool = False):
-    from ..services import aims
-    return aims.list_aims(include_closed=all)
-
-
-@app.get("/api/aims/{aim_id}")
-def get_aim(aim_id: int):
-    from ..services import aims
-    v = aims.aim_view(aim_id)
-    if not v:
-        raise HTTPException(404)
-    return v
-
-
-@app.post("/api/aims")
-def create_aim(a: AimIn):
-    from ..services import aims
-    aim = aims.add_aim(a.title, a.why, a.due, a.priority, source="web")
-    return aims.aim_view(aim.id)
-
-
-@app.put("/api/aims/{aim_id}")
-def patch_aim(aim_id: int, p: AimPatch):
-    from ..services import aims
-    fields = p.model_dump(exclude_none=True)
-    fields.pop("clear_due", None)
-    if p.clear_due:
-        fields["due"] = None; fields["clear_due"] = True
-    a = aims.update_aim(aim_id, **fields)
-    if not a:
-        raise HTTPException(404)
-    return aims.aim_view(aim_id)
-
-
-@app.post("/api/aims/{aim_id}/milestones")
-def create_milestone(aim_id: int, m: MilestoneIn):
-    from ..services import aims
-    if not aims.find_aim(aim_id):
-        raise HTTPException(404)
-    ms = aims.add_milestone(aim_id, m.title, m.due, m.order_id, m.notes)
-    return aims.aim_view(ms.aim_id)
-
-
-@app.post("/api/milestones/{mid}/{status}")
-def set_milestone(mid: int, status: str):
-    from ..services import aims
-    if status not in ("done", "open", "dropped"):
-        raise HTTPException(400, "status: done | open | dropped")
-    ms = aims.close_milestone(mid, status)
-    if not ms:
-        raise HTTPException(404)
-    return aims.aim_view(ms.aim_id)
-
-
 @app.get("/api/focus")
 def get_focus():
     """Фокус дня: 1–3 шага к целям + что мешает. Пусто, если целей нет — карточка на «Сегодня» тогда не рисуется."""
@@ -720,70 +655,6 @@ async def diagnose():
 @app.exception_handler(finance.FinanceError)
 async def _fin_err(_, exc: finance.FinanceError):
     return JSONResponse(status_code=400, content={"detail": str(exc)})
-
-
-# ---------------- люди и граф ----------------
-@app.get("/api/people/batch-hints")
-def people_batch_hints():
-    """Клиенты, у которых 2+ заказа оплачены одним днём, а режим ещё «за каждый» — предложить «пачкой»."""
-    from ..services import pulse
-    return pulse.guess_batch_clients()
-
-
-@app.get("/api/people/kinds")
-def people_kinds():
-    """Типы «кто это»: встроенные + свои (people.kinds)."""
-    return people.all_kinds()
-
-
-@app.delete("/api/people/kinds/{kind}")
-def people_kind_delete(kind: str):
-    n = people.remove_custom_kind(kind)
-    broadcast("people")
-    return {"ok": True, "reassigned": n}
-
-
-@app.get("/api/people")
-def people_list():
-    from ..services import people
-    return people.list_people()
-
-
-@app.post("/api/people")
-def people_add(p: PersonIn):
-    from ..services import people
-    if not (p.name or "").strip():
-        raise HTTPException(400, "Нужно имя")
-    c = people.add_person(p.name, p.kind or None, p.contact, p.notes, p.aliases, p.birthday, p.tags)
-    broadcast("chat", {"channel": "web", "actions": ["add_person"]})
-    return people.card(c)
-
-
-@app.get("/api/people/today")
-def people_today():
-    from ..services import people
-    return people.people_today()
-
-
-@app.get("/api/people/{cid}")
-def people_card(cid: int):
-    from ..services import people
-    from ..db import Client
-    with session() as s:
-        c = s.get(Client, cid)
-    if not c:
-        raise HTTPException(404)
-    return people.card(c, limit=20)
-
-
-@app.put("/api/people/{cid}")
-def people_update(cid: int, p: PersonIn):
-    from ..services import people
-    c = people.update_person(cid, **p.model_dump(exclude_none=True))
-    if not c:
-        raise HTTPException(404)
-    broadcast("chat", {"channel": "web", "actions": ["update_person"]})
-    return people.card(c, limit=20)
 
 
 @app.get("/api/graph")
@@ -1499,8 +1370,8 @@ def manifest():
 # ИНВАРИАНТ: этот вызов стоит ПОСЛЕ app.include_router(crm) и ДО регистрации статики
 # и catch-all-роута SPA в конце файла. Если подключить роутеры после catch-all,
 # SPA перехватит /api/* и сайт перестанет открываться.
-# Шаг 7.2: подключены routers/finance.py (42), routers/orders.py (22) и
-# routers/boards.py (17) — 81 роут; остальные остаются здесь.
+# Шаг 7.3: подключены routers/finance.py (42), routers/orders.py (22),
+# routers/boards.py (17) и routers/people.py (15) — 96 роутов; остальные остаются здесь.
 from .routers import register as _register_routers  # noqa: E402
 
 _register_routers(app)

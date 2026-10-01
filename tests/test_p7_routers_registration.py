@@ -1,11 +1,11 @@
-"""ФАЗА 7 — инварианты подключения роутов по доменам (шаги 7.1–7.2).
+"""ФАЗА 7 — инварианты подключения роутов по доменам (шаги 7.1–7.3).
 
 Логику роутов не проверяем — она покрыта обычными тестами. Здесь только СКЕЛЕТ:
 перенесённые роутеры подключены, все пути/методы на месте, дублей нет и —
 главное — подключение стоит ДО catch-all SPA, иначе `{path:path}` перехватит
 все `/api/*` и сайт перестанет открываться (см. `reviews/P7_refactor.md` §4.2).
 
-Состояние на шаг 7.2: `finance` (42 роута), `orders` (22), `boards` (17).
+Состояние на шаг 7.3: `finance` (42 роута), `orders` (22), `boards` (17), `people` (15).
 
 Тест дешёвый: БД не трогается, только объект `app`.
 """
@@ -111,10 +111,32 @@ BOARDS_ROUTES = [
     ("POST", "/api/boards/{bid}/image"),
 ]
 
-DOMAIN_ROUTES = FINANCE_ROUTES + ORDERS_ROUTES + BOARDS_ROUTES
+# Полный список путей/методов people.py (15 роутов шага 7.3 — `core/api/app.py` до переноса):
+# `/api/relations/{rid}` PUT, `/api/aims*`, `/api/milestones/*`, `/api/people*`.
+# `/api/crm/clients/*` из `core/crm/router.py` — отдельный роутер, тут не участвует.
+PEOPLE_ROUTES = [
+    ("PUT", "/api/relations/{rid}"),
+    ("GET", "/api/aims"),
+    ("GET", "/api/aims/{aim_id}"),
+    ("POST", "/api/aims"),
+    ("PUT", "/api/aims/{aim_id}"),
+    ("POST", "/api/aims/{aim_id}/milestones"),
+    ("POST", "/api/milestones/{mid}/{status}"),
+    ("GET", "/api/people/batch-hints"),
+    ("GET", "/api/people/kinds"),
+    ("DELETE", "/api/people/kinds/{kind}"),
+    ("GET", "/api/people"),
+    ("POST", "/api/people"),
+    ("GET", "/api/people/today"),
+    ("GET", "/api/people/{cid}"),
+    ("PUT", "/api/people/{cid}"),
+]
+
+DOMAIN_ROUTES = FINANCE_ROUTES + ORDERS_ROUTES + BOARDS_ROUTES + PEOPLE_ROUTES
 
 # Домены и их префиксы — по ним находим подключённые `_IncludedRouter` (инвариант §4.2 п. 1).
-DOMAINS = (("finance", "/api/finance"), ("orders", "/api/orders"), ("boards", "/api/boards"))
+DOMAINS = (("finance", "/api/finance"), ("orders", "/api/orders"), ("boards", "/api/boards"),
+           ("people", "/api/people"))
 
 
 def _flat(routes, out):
@@ -142,6 +164,8 @@ def test_route_matches(method, path):
     concrete = (path.replace("{tx_id}", "1").replace("{cid}", "1").replace("{aid}", "1")
                 .replace("{debt_id}", "1").replace("{rid}", "1").replace("{gid}", "1")
                 .replace("{oid}", "1").replace("{bid}", "1").replace("{iid}", "1")
+                .replace("{aim_id}", "1").replace("{mid}", "1").replace("{status}", "done")
+                .replace("{kind}", "client")
                 .replace("{what}.{fmt}", "transactions.csv"))
     scope = {"type": "http", "method": method, "path": concrete, "root_path": "", "headers": []}
     matched = [p for r, (p, _m) in _flat(app.router.routes, []) if r.matches(scope)[0] is Match.FULL]
@@ -179,6 +203,13 @@ def test_boards_router_has_exactly_17_routes():
     assert got == want
 
 
+def test_people_router_has_exactly_15_routes():
+    got = _router_routes("people")
+    want = sorted((p, (m,)) for m, p in PEOPLE_ROUTES)
+    assert len(got) == 15
+    assert got == want
+
+
 def test_finance_routes_registered_on_app():
     have = set(_all_routes())
     missing = [(m, p) for m, p in FINANCE_ROUTES if (p, (m,)) not in have]
@@ -197,6 +228,12 @@ def test_boards_routes_registered_on_app():
     assert not missing, f"роуты boards потеряны при подключении: {missing}"
 
 
+def test_people_routes_registered_on_app():
+    have = set(_all_routes())
+    missing = [(m, p) for m, p in PEOPLE_ROUTES if (p, (m,)) not in have]
+    assert not missing, f"роуты people потеряны при подключении: {missing}"
+
+
 def test_no_duplicate_method_and_path():
     seen = [r for r in _all_routes()]
     assert len(seen) == len(set(seen)), "появились дубли (путь, метод)"
@@ -208,8 +245,8 @@ def test_registered_before_spa_catchall():
     Иначе SPA перехватит `/api/*` (он матчится первым) и сайт отдаст HTML вместо JSON.
 
     Проверяется НЕ «последний роутер = finance», а «после ПОСЛЕДНЕГО подключённого
-    роутера доменов нет ни одного `/api/*`-роута»: на шаге 7.2 последними идут
-    `orders` и `boards`, и список доменов будет расти до шага 7.6.
+    роутера доменов нет ни одного `/api/*`-роута»: на шаге 7.3 последним идёт
+    `people`, и список доменов будет расти до шага 7.6.
     """
     routes = app.router.routes
     idx = {}
