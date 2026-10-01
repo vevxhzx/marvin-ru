@@ -232,13 +232,36 @@ export function useSheetPresence(open, ms = 240) {
 let _sheetSeq = 0
 const _stack = []
 const _stackEv = new EventTarget()
+
+/* фокусируемые элементы внутри шторки: видимые, не disabled, не tabindex=-1 */
+const FOCUS_SEL = 'a[href], button, input, select, textarea, [tabindex]'
+const focusables = (root) => [...root.querySelectorAll(FOCUS_SEL)].filter((el) =>
+  !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')
+
 export function Sheet({ open, onClose, title, sub, children, wide }) {
   const [shown, closing] = useSheetPresence(open)
   const idRef = useRef(0)
+  const rootRef = useRef(null)
+  const prevFocus = useRef(null)
   const [, force] = useState(0)
   useEffect(() => {
     if (!open) return
-    const h = (e) => { if (e.key === 'Escape' && _stack[_stack.length - 1] === idRef.current) onClose() }
+    const h = (e) => {
+      if (_stack[_stack.length - 1] !== idRef.current) return   // ловушку держит только верхняя шторка
+      if (e.key === 'Escape') { onClose(); return }
+      if (e.key !== 'Tab') return
+      const root = rootRef.current
+      if (!root) return
+      const nodes = focusables(root)
+      if (!nodes.length) return
+      // циклический Tab/Shift+Tab: фокус не уходит за пределы шторки (D4)
+      const idx = nodes.indexOf(document.activeElement)
+      if (e.shiftKey) {
+        if (idx <= 0) { e.preventDefault(); nodes[nodes.length - 1].focus() }
+      } else if (idx === -1 || idx === nodes.length - 1) {
+        e.preventDefault(); nodes[0].focus()
+      }
+    }
     window.addEventListener('keydown', h)
     document.body.style.overflow = 'hidden'
     idRef.current = ++_sheetSeq; _stack.push(idRef.current)
@@ -250,13 +273,20 @@ export function Sheet({ open, onClose, title, sub, children, wide }) {
       _stackEv.dispatchEvent(new Event('change'))
     }
   }, [open, onClose])
+  // фокус возвращается на вызвавший элемент, если он ещё в DOM
+  useEffect(() => {
+    if (open) { prevFocus.current = document.activeElement; return }
+    const el = prevFocus.current
+    prevFocus.current = null
+    if (el && el !== document.body && el.isConnected && typeof el.focus === 'function') el.focus()
+  }, [open])
   useEffect(() => { const h = () => force((x) => x + 1); _stackEv.addEventListener('change', h); return () => _stackEv.removeEventListener('change', h) }, [])
   if (!shown) return null
   const behind = open && _stack.length > 1 && _stack[_stack.length - 1] !== idRef.current
   // рисуем в <body>, а не внутри страницы: иначе анимация страницы (transform/filter)
   // превращает position:fixed в «относительно страницы» и окно уезжает
   return createPortal(
-    <div className={`sheet-backdrop ${closing ? 'closing' : ''} ${behind ? 'behind' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+    <div ref={rootRef} className={`sheet-backdrop ${closing ? 'closing' : ''} ${behind ? 'behind' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className={`sheet ${wide ? 'sm:!max-w-2xl' : ''}`}>
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>

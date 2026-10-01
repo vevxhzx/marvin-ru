@@ -17,7 +17,24 @@ export const ACT = {
 }
 const VIA = { rules: ['правила', Zap], ollama: ['локально', Cpu], llm: ['облако', Cloud], gemini: ['облако', Cloud], none: ['сбой', AlertCircle] }
 const CH = { tg: 'telegram', 'tg-voice': 'telegram · голос', voice: 'голос', web: 'сайт', system: 'авто', digest: 'дайджест' }
-const fromServer = (h) => h.map((m) => ({ id: m.id, role: m.role === 'user' ? 'me' : 'bot', text: m.text, channel: m.channel, at: m.at }))
+const fromServer = (h) => h.map((m) => ({ id: m.id, role: m.role === 'user' ? 'me' : 'bot', text: m.text, channel: m.channel, at: m.at, actions: m.actions }))
+
+/* Отмена живёт столько же, сколько в ядре: undo.last_action(max_age_min=24*60) — сутки (D6) */
+const UNDO_AGE_MS = 24 * 60 * 60 * 1000
+/* что можно отменить кнопкой: clarify/ask_cloud — не действие; undo/undo_last — отметка уже сделанной отмены */
+const isUndoable = (a) => a !== 'clarify' && a !== 'ask_cloud' && a !== 'undo' && a !== 'undo_last' && !!ACT[a]
+const isUndoMark = (a) => a === 'undo' || a === 'undo_last'
+/* убрать отменяемые actions у последнего сообщения с ними (undo_last откатывает именно его) */
+const dropLastUndoable = (ms) => {
+  let i = -1
+  for (let k = ms.length - 1; k >= 0; k--) {
+    if (ms[k].role === 'bot' && (ms[k].actions || []).some(isUndoable)) { i = k; break }
+  }
+  if (i < 0) return ms
+  const copy = ms.slice()
+  copy[i] = { ...copy[i], actions: copy[i].actions.filter((a) => !isUndoable(a)) }
+  return copy
+}
 
 /* Подсказки под контекст времени суток — 4 штуки, коротко */
 function suggestions() {
@@ -37,19 +54,26 @@ export default function Chat({ open, onClose, seed }) {
   const hints = useMemo(suggestions, [open])
 
   // одна история с Telegram: подгружаем при открытии и при каждом живом обновлении.
-  // В истории карточек нет (их отдаёт только живой ответ) — переносим их по совпадению роли и текста.
+  // В истории карточек и actions нет (их отдаёт только живой ответ) — переносим их по совпадению роли и текста,
+  // иначе кнопка «отменить последнее действие» гасла бы через один RTT (D6).
   useEffect(() => {
     if (!open) return
     const key = (m) => `${m.role}|${String(m.text || '').replace(/\s*(⚡|🧠|☁️)\s*$/u, '').trim()}`
     api.chatHistory(60).then((h) => {
       setMsgs((prev) => {
         const cards = new Map()
-        for (const p of prev) if (p.card) cards.set(key(p), p.card)
+        const acts = new Map()
+        for (const p of prev) {
+          if (p.card) cards.set(key(p), p.card)
+          if (p.actions?.length) acts.set(key(p), p.actions)
+        }
         return fromServer(h).map((m) => (m)).reverse().map((m) => {
           const k = key(m)
           const card = cards.has(k) ? cards.get(k) : undefined
           if (card) cards.delete(k)          // карточку вешаем только на последнее подходящее сообщение
-          return { ...m, card }
+          const actions = acts.has(k) ? acts.get(k) : m.actions
+          if (acts.has(k)) acts.delete(k)     // …и actions тоже: живём не один RTT
+          return { ...m, card, actions }
         }).reverse()
       })
       setLoaded(true)
@@ -84,6 +108,9 @@ export default function Chat({ open, onClose, seed }) {
         })
       })
       setMsgs((m) => (streamed && m[m.length - 1]?.streaming ? m.slice(0, -1) : m).concat({ role: 'bot', text: r.text, via: r.via, actions: r.actions, card: r.card, channel: 'web', at: new Date().toISOString() }))
+      // команда «отмена» пришла ответом — гасим отменяемые actions у прежнего сообщения,
+      // иначе кнопка в шапке переживёт уже сделанную отмену
+      if (r.actions?.some(isUndoMark)) setMsgs(dropLastUndoable)
       if (r.actions?.length) bump()
     } catch (e) {
       const denied = e?.status === 401
@@ -100,9 +127,17 @@ export default function Chat({ open, onClose, seed }) {
     try {
       const r = await api.undo()
       setMsgs((m) => [...m, { role: 'bot', text: r.text, via: 'rules', channel: 'web', at: new Date().toISOString(), actions: r.ok ? ['undo'] : [] }])
-      if (r.ok) bump()
+      // ответ /api/undo в истории сервера не живёт — вычищаем actions у отменённого
+      // сообщения, иначе после перезагрузки ленты кнопка «отменить» воскреснет
+      if (r.ok) { setMsgs(dropLastUndoable); bump() }
     } catch {} finally { setBusy(false) }
   }
+
+  // свежее неотменённое отменяемое действие: последнее сообщение с такими actions
+  // (отметка undo мы её вычищает через dropLastUndoable) — кнопка живёт не один RTT (D6)
+  const pendingUndo = [...msgs].reverse().find((m) => m.role === 'bot' && (m.actions || []).some(isUndoable))
+  const undoAge = pendingUndo?.at ? Date.now() - Date.parse(pendingUndo.at) : 0
+  const canUndo = !!pendingUndo && !(Number.isFinite(undoAge) && undoAge > UNDO_AGE_MS)
 
   const onKey = (e) => {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); send() }
@@ -111,8 +146,6 @@ export default function Chat({ open, onClose, seed }) {
 
   const [shown, closing] = useSheetPresence(open)
   if (!shown) return null
-  const lastBot = [...msgs].reverse().find((m) => m.role === 'bot')
-  const canUndo = lastBot?.actions?.some((a) => a !== 'clarify' && a !== 'ask_cloud' && ACT[a])
   return (
     <div className={`sheet-backdrop ${closing ? 'closing' : ''} sm:!items-end sm:!justify-end sm:!p-4`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="elevated flex h-[calc(92dvh/var(--ui-zoom))] w-full flex-col !rounded-t-4xl !rounded-b-none sm:h-[min(760px,calc(100vh/var(--ui-zoom)-32px))] sm:w-[440px] sm:!rounded-[24px]" style={{ animation: 'rise .3s var(--ease-out) both' }}>

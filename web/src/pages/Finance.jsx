@@ -155,16 +155,17 @@ export default function Finance() {
   }, [txs, txCategory, txAccount, txSearch])
   const shownTxs = filteredTxs.list
 
-  // Экспорт выписки в CSV
+  // Экспорт выписки в CSV — повторяет то, что видит пользователь: берём shownTxs
+  // (учитывает период, фильтр по счёту/категории и поиск), а не все txs (D2)
   const exportCSV = () => {
-    if (!txs.length) return
+    if (!shownTxs.length) return
     const rows = [
       ['Дата', 'Сумма', 'Категория', 'Название', 'Счет'],
-      ...txs.map(t => [
+      ...shownTxs.map(t => [
         t.date ? t.date.slice(0, 10) : '',
         t.amount,
         t.category || '',
-        `"${(t.title || '').replace(/"/g, '""')}"`,
+        `"${(t.title || t.note || '').replace(/"/g, '""')}"`,
         t.account || ''
       ])
     ]
@@ -885,6 +886,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
   const [kind, setKind] = useState('expense')
   const [date, setDate] = useState('')
   const [saving, setSaving] = useState(false)
+  const [amountErr, setAmountErr] = useState('')
   const [, show] = useToast()
 
   useEffect(() => {
@@ -907,12 +909,17 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
       setKind('expense')
       setDate(toLocalISO(new Date()).slice(0, 10))
     }
+    setAmountErr('')
   }, [open, item])
 
   const submit = async (e) => {
     if (e) e.preventDefault()
     const a = parseFloat(amount.replace(/\s/g, ''))
-    if (!a || isNaN(a)) return
+    if (isNaN(a)) return
+    // нулевая сумма не «тихая»: кнопка активна, поэтому объясняем прямо в форме (D3);
+    // отрицательные и нечисловые значения ведут себя как раньше (Math.abs / игнор)
+    if (a === 0) { setAmountErr('сумма должна быть больше нуля'); return }
+    setAmountErr('')
     setSaving(true)
     try {
       // API принимает положительную сумму и kind; описание/комментарий кладём в note
@@ -944,8 +951,10 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
           <span className={kind === 'expense' ? 'on' : ''} onClick={() => setKind('expense')}>расход</span>
           <span className={kind === 'income' ? 'on' : ''} onClick={() => setKind('income')}>доход</span>
         </div>
-        <Field label="сумма (₽)">
-          <input className="input" autoFocus type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="1000" />
+        <Field label="сумма (₽)" error={amountErr}>
+          <input className="input" autoFocus type="number" step="any" value={amount}
+            onChange={(e) => { setAmount(e.target.value); if (amountErr) setAmountErr('') }}
+            placeholder="1000" />
         </Field>
         <Field label="описание">
           <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Супермаркет, такси, зарплата…" />
