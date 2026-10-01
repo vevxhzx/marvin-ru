@@ -3,9 +3,9 @@
 Здесь живёт код из `core/api/app.py`, разложенный по доменам:
 `finance`, `orders`, `boards`, `people`, `tasks`, `mind`, `pc`, `system`.
 
-Состояние на шаг 7.5a: перенесены `finance` (42 роута из 195), `orders` (22),
-`boards` (17), `people` (15), `tasks` (15) и `mind` (32) — итого 143 роута;
-остальные ~52 роута пока остаются в `core/api/app.py`.
+Состояние на шаг 7.5b: перенесены `finance` (42 роута из 195), `orders` (22),
+`boards` (17), `people` (15), `tasks` (15), `mind` (32) и `pc` (14) — итого 157
+роутов; остальные ~38 роутов остаются в `core/api/app.py` (SSE, статика, системное).
 
 ИНВАРИАНТЫ РЕГИСТРАЦИИ (обязательны для шагов 7.1–7.6, см. `reviews/P7_refactor.md`):
 
@@ -48,12 +48,14 @@ def register(app) -> None:
     `/api/search/*`, `/api/cards/{name}`, `/api/chat` POST, `/api/undo`,
     `/api/chat/history`; SSE `/api/chat/stream` и `/api/events/stream`
     остаются в `core/api/app.py` до шага 7.6).
+    Шаг 7.5b: подключён `pc` (14 роутов: `/api/pc/*`, `/api/screen`,
+    `/api/vision/ask`, `/api/cloud/preview`, `/api/voice/*`).
     Порядок вызовов = порядок модулей из `reviews/P7_refactor.md` §2.2 —
     он влияет на разрешение конфликтующих путей, менять без проверки тестов нельзя.
 
     Вызывается из `core/api/app.py` ДО регистрации статики и SPA-catch-all.
     """
-    from . import boards, finance, mind, orders, people, tasks
+    from . import boards, finance, mind, orders, pc, people, tasks
 
     finance.register(app)
     orders.register(app)
@@ -61,3 +63,4 @@ def register(app) -> None:
     people.register(app)
     tasks.register(app)
     mind.register(app)
+    pc.register(app)
