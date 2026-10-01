@@ -105,20 +105,21 @@ test.describe('финансы: операции, фильтры, периоды,
     await expect.poll(() => rowsOf(page).count(), { timeout: 15_000 }).toBeLessThan(n30)
     expect(await rowsOf(page).count(), 'за 7 дней операции должны быть').toBeGreaterThan(0)
 
-    // «всё» — та же история, что и за 30 дней, а не пустота
+    // «всё» — вся история: не пусто и не меньше, чем за 30 дней. days=0 означает
+    // «без нижней границы» (D1 закрыт: core/api/routers/finance.py::fin_tx)
     await periodsOf(page).getByText('всё', { exact: true }).click()
     await page.waitForTimeout(800)
     const nAll = await rowsOf(page).count()
-    expect(
-      nAll,
-      `период «всё» → days=0 → GET /api/finance/transactions?days=0 отдаёт 0 записей: показано ${nAll} из ${n30} (за 30 дней)`,
-    ).toBe(n30)
+    expect(nAll, `период «всё» → days=0 вернул ${nAll} записей — пустой список вместо истории (D1)`)
+      .toBeGreaterThan(0)
+    expect(nAll, `период «всё» (${nAll}) меньше, чем за 30 дней (${n30})`)
+      .toBeGreaterThanOrEqual(n30)
     await shot(page, 'finance-period-all', { testInfo })
 
     await diag.expectClean('периоды')
   })
 
-  test('фильтр по счёту сужает список, но выписка CSV всё равно несёт всё подряд', async ({ page }, testInfo) => {
+  test('фильтр по названию сужает список, и выписка CSV повторяет его', async ({ page }, testInfo) => {
     const diag = watch(page, { ignore: IGNORE })
     page.__e2eProject = testInfo.project
     const TITLE = `Выписка D ${uniq(testInfo.project.name)}`
@@ -149,7 +150,7 @@ test.describe('финансы: операции, фильтры, периоды,
     expect(lines[0], 'в CSV есть шапка').toMatch(/Дата/)
     expect(
       lines.length - 1,
-      `выписка игнорирует фильтр: в списке 1 операция (${TITLE}), а в CSV ${lines.length - 1} строк (exportCSV читает txs, а не shownTxs)`,
+      `выписка не повторяет фильтр: в списке 1 операция (${TITLE}), а в CSV ${lines.length - 1} строк`,
     ).toBe(1)
     expect(text).toContain(TITLE)
 
