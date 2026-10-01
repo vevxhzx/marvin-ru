@@ -56,7 +56,10 @@ def test_setup_wizard_local_only():
     c = _client(remote=True)
     assert c.get("/api/setup/state", headers={"X-Auth-Token": auth.token()}).status_code == 403
     assert c.get("/setup", headers={"X-Auth-Token": auth.token()}).status_code == 403
-    assert _client(remote=False).get("/api/setup/state").status_code == 200
+    # Роута /api/setup/state в коде нет, поэтому локальный запрос доходит до роутинга и
+    # получает 404 (catch-all SPA больше не отдаёт HTML на неизвестный /api/* — ревью A/E).
+    # Главное для теста: НЕ 403, т.е. LOCAL_ONLY_PREFIXES локального клиента не отсекает.
+    assert _client(remote=False).get("/api/setup/state").status_code in (200, 404)
 
 
 def test_phone_links_only_from_pc():
@@ -83,7 +86,8 @@ def test_docker_mode_token_counts_as_local(monkeypatch):
     monkeypatch.setattr(auth, "IN_DOCKER", True)
     c = _client(remote=True)
     assert c.get("/api/setup/state").status_code == 403
-    assert c.get("/api/setup/state", headers={"X-Auth-Token": auth.token()}).status_code == 200
+    # с ключом auth не блокирует; роута нет → 404 от catch-all, это не 403 (см. выше)
+    assert c.get("/api/setup/state", headers={"X-Auth-Token": auth.token()}).status_code in (200, 404)
 
 
 # ---------------- F2: аргументы инструментов от LLM ----------------

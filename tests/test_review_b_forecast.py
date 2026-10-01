@@ -135,10 +135,8 @@ def test_route_future_points_match_insights_forecast():
     assert got == want
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="P1: роут /api/finance/forecast идёт старой зеркальной схемой "
-                          "(for i in range(hist,-1,-1)): при трате 500 ₽ позавчера сегодняшняя "
-                          "точка показывает 10 000 вместо total_balance() = 9 500")
+# Был xfail(P1): роут шёл старой зеркальной схемой (for i in range(hist,-1,-1)) — исправлено в
+# core/api/routers/finance.py::fin_forecast (порядок обхода как в insights.cash_series).
 def test_route_today_point_equals_total_balance():
     f = _fin()
     f.set_balance(_main(), 10_000)
@@ -151,10 +149,7 @@ def test_route_today_point_equals_total_balance():
     assert today_pt["balance"] == round(f.total_balance()) == 9_500
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="P1: в роуте перевод между своими счетами считается тратой "
-                          "(+amount if income else -amount): при переводе 1 000 ₽ рисуется "
-                          "фантомный пик +1 000, хотя total_balance() и cash_series не двигаются")
+# Был xfail(P1): роут считал перевод тратой — теперь дельта берётся из insights._tx_balance_delta.
 def test_route_today_point_ignores_own_transfer():
     f = _fin()
     f.set_balance(_main(), 10_000)
@@ -166,9 +161,7 @@ def test_route_today_point_ignores_own_transfer():
     assert _past(r)[-1]["balance"] == _past(s)[-1]["balance"] == round(f.total_balance()) == 15_000
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="P2: fin_forecast income += суммирует всё, что не expense — "
-                          "перевод 1 000 ₽ попадает в avg_day_income (33 ₽/день «дохода» без дохода)")
+# Был xfail(P2): income += считал всё, что не expense — теперь только kind == "income".
 def test_route_avg_day_income_ignores_transfers():
     f = _fin()
     f.set_balance(_main(), 10_000)
@@ -177,10 +170,7 @@ def test_route_avg_day_income_ignores_transfers():
     assert _route(30)["avg_day_income"] == 0
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="P2: два источника «сегодня» — роут берёт datetime.now().date(), "
-                          "insights.now_tz() (config TZ); при поясе сервера ≠ поясе владельца "
-                          "даты графика и карточек расходятся на день (дыра/дубль в ряду)")
+# Был xfail(P2): два источника «сегодня» — роут переведён на insights.now_tz(), как cash_series.
 def test_route_and_series_share_one_today(monkeypatch):
     f = _fin()
     f.set_balance(_main(), 10_000)

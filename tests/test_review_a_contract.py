@@ -77,8 +77,7 @@ def test_finance_put_missing_404(path, body):
     assert r.status_code == 404, f"PUT {path} -> {r.status_code} (ожидали 404)"
 
 
-@pytest.mark.xfail(reason="P2: GET платежей несуществующего долга отдаёт 200 с пустым списком вместо 404",
-                   strict=False)
+# P2 закрыт: роут отдаёт 404 для несуществующего долга (core/api/routers/finance.py).
 def test_debt_payments_missing_404():
     assert _client().get("/api/finance/debts/999/payments").status_code == 404
 
@@ -116,9 +115,7 @@ def test_empty_name_is_400_by_contract():
     assert r.status_code == 400
 
 
-@pytest.mark.xfail(reason="P2: несуществующий GET-путь /api/* отдаёт 200 с HTML SPA (catch-all {path:path}) "
-                          "вместо 404 — опечатка в URL выглядит как успешный ответ",
-                   strict=False)
+# P2 закрыт: SPA catch-all отдаёт 404 на неизвестный /api/* (core/api/app.py::spa).
 def test_unknown_api_path_is_404_not_html():
     r = _client().get("/api/finances/summary")   # опечатка: такого роута нет
     assert r.status_code == 404, f"неизвестный /api/* путь -> {r.status_code}"

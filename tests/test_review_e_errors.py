@@ -45,8 +45,7 @@ def test_unknown_api_path_does_not_crash_server():
     assert c.get("/api/health").status_code == 200
 
 
-@pytest.mark.xfail(reason="FINDING P2 (review A #5): SPA catch-all отдаёт index.html со статусом 200 "
-                          "на неизвестный GET /api/* вместо 404", strict=False)
+# FINDING P2 закрыт: SPA catch-all отдаёт 404 на неизвестный GET /api/* (core/api/app.py::spa).
 def test_unknown_api_path_should_be_404():
     c = _client()
     assert c.get("/api/definitely-missing-route").status_code == 404
@@ -160,8 +159,7 @@ def test_core_logging_does_not_print_secrets():
     assert not bad, "секрет в логировании:\n" + "\n".join(bad)
 
 
-@pytest.mark.xfail(reason="FINDING P2: run.py печатает ключ доступа (?t=...) в лог первым же сообщением "
-                          "при первом запуске/Docker — любой, кто читает лог, получает полный доступ", strict=False)
+# FINDING P2 закрыт: в run.py больше нет log(..._tok()) — ключ пишется только в data/api_token.
 def test_entry_point_does_not_log_access_key():
     src = (ROOT / "run.py").read_text(encoding="utf-8")
     rx = re.compile(r"log\.(?:info|warning|error)\([^;]{0,400}?\b_tok\(\)", re.S)
