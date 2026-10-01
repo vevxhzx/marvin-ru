@@ -163,7 +163,7 @@ DOMAIN_ROUTES = FINANCE_ROUTES + ORDERS_ROUTES + BOARDS_ROUTES + PEOPLE_ROUTES +
 # на шаге 7.4 ещё лежит в `core/api/app.py` и уедет в `system.py` только на 7.6, а префикс
 # в `DOMAINS` должен быть УНИКАЛЬНЫМ и указывать именно на роутер домена.
 DOMAINS = (("finance", "/api/finance"), ("orders", "/api/orders"), ("boards", "/api/boards"),
-           ("people", "/api/people"), ("tasks", "/api/events"))
+           ("people", "/api/people"), ("tasks", "/api/events"), ("system", "/api/health"))
 
 
 def _flat(routes, out):
