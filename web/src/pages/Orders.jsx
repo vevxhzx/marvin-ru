@@ -658,19 +658,28 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   )
 }
 
+function newPaymentKey() {
+  try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID() } catch { /* старый браузер — ниже запасной вариант */ }
+  return `pay-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+}
+
+
 function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [accounts, setAccounts] = useState([])
   const [account, setAccount] = useState('')
   const [date, setDate] = useState('')
-  useEffect(() => { if (order) { setAmount(order.left ? String(order.left) : ''); setNote(''); setDate(toLocalISO(new Date()).slice(0, 10)); api.accounts().then((a) => { setAccounts(a); setAccount(a.find((x) => x.is_main)?.name || a[0]?.name || '') }).catch(() => {}) } }, [order])
+  // Ключ идемпотентности ОДИН на открытую форму: двойной клик по «записать» уходит с тем же
+  // ключом, сервер вернёт уже записанную операцию и второго дохода не появится (P1 ревью A/B).
+  const [payKey, setPayKey] = useState('')
+  useEffect(() => { if (order) { setAmount(order.left ? String(order.left) : ''); setNote(''); setDate(toLocalISO(new Date()).slice(0, 10)); setPayKey(newPaymentKey()); api.accounts().then((a) => { setAccounts(a); setAccount(a.find((x) => x.is_main)?.name || a[0]?.name || '') }).catch(() => {}) } }, [order])
   const submit = async (e) => {
     e.preventDefault()
     const n = Number(String(amount).replace(/\s/g, '').replace(',', '.'))
     if (!n || n <= 0) return onErr(new Error('Сумма должна быть больше нуля'))
     const today = toLocalISO(new Date()).slice(0, 10)
-    try { onDone(await api.payOrder(order.id, n, { note: note || null, account: account || null, date: date && date !== today ? `${date}T12:00:00` : null })) } catch (err) { onErr(err) }
+    try { onDone(await api.payOrder(order.id, n, { note: note || null, account: account || null, date: date && date !== today ? `${date}T12:00:00` : null, idem_key: payKey || null })) } catch (err) { onErr(err) }
   }
   return (
     <Sheet open={!!order} onClose={onClose} title="оплата по заказу" sub={order ? `«${order.title}»${order.left ? ` · осталось ${money(order.left)}` : ''}` : ''}>

@@ -282,6 +282,9 @@ class PaymentIn(BaseModel):
     note: Optional[str] = None
     account: Optional[str] = None
     date: Optional[datetime] = None   # когда пришли деньги (старые заказы задним числом)
+    # P1 (ревью A и B): без ключа двойной клик по «записать» создаёт ВТОРОЙ доход.
+    # Повтор с тем же ключом возвращает уже записанную операцию (см. orders.add_payment).
+    idem_key: Optional[str] = Field(default=None, max_length=120)
 
 
 class TimerIn(BaseModel):

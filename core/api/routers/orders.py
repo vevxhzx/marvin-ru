@@ -204,7 +204,8 @@ def orders_del(oid: int):
 def orders_pay(oid: int, p: PaymentIn):
     _order_or_404(oid)
     try:
-        t = orders.add_payment(oid, p.amount, p.note, p.account, source="web", date=p.date)
+        t = orders.add_payment(oid, p.amount, p.note, p.account, source="web", date=p.date,
+                               idem_key=p.idem_key)
     except (orders.OrderError, finance.FinanceError) as e:
         raise HTTPException(400, str(e))
     broadcast("order", {"id": oid, "action": "pay"})
