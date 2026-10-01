@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx server.ts",
     "build": "vite build",
-    "test": "node --test tests/server_api.test.mjs",
+    "test": "node --test tests/server_api.test.mjs tests/color_contrast.test.mjs",
     "start": "NODE_ENV=production tsx server.ts",
     "desktop": "node desktop.mjs"
   },

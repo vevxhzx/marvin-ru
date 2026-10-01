@@ -1,11 +1,12 @@
 import { createPortal } from 'react-dom'
 import { useEffect, useState } from 'react'
-import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2 } from 'lucide-react'
+import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2, ChevronDown } from 'lucide-react'
 import { playChime } from '../lib/sound'
 import { api, relTime, kb } from '../lib/api'
 import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm } from '../components/ui'
 import { enableNotifications, disableNotifications, notifyEnabled, notifyState } from '../lib/notify'
 import { usePrefs, prefs as PREFS, ACCENTS, TINTS, FONT_SIZES, RADII, setPageAccent } from '../lib/prefs'
+import { SwatchRow } from '../components/ColorSwatches'
 import { useTheme, NAV_GROUPS, useRefresh } from '../App'
 import { RotateCcw } from 'lucide-react'
 
@@ -260,7 +261,6 @@ export default function Settings({ health }) {
   )
 }
 
-const ACCENT_SWATCHES = ['#0a3cff', '#1d1d24', '#5b5bf0', '#8a5cff', '#c04cff', '#ff4d8d', '#ff4b4b', '#ff7a1a', '#f5b400', '#8bc32a', '#19b34a', '#12b5a5', '#21a0f0']
 /* Список вкладок для персонального цвета (переехал сюда из шапок страниц). */
 const PAGE_ACCENT_LIST = [['today', 'сегодня'], ['tasks', 'задачи'], ['calendar', 'календарь'], ['finance', 'финансы'], ['orders', 'заказы'], ['mind', 'мозг'], ['people', 'люди']]
 
@@ -268,9 +268,11 @@ const PAGE_ACCENT_LIST = [['today', 'сегодня'], ['tasks', 'задачи']
 function Appearance() {
   const [p, set] = usePrefs()
   const [mode, setMode] = useTheme()
+  const [colorsOpen, setColorsOpen] = useState(false) // «цвет для каждого раздела» — аккордеон, по умолчанию закрыт
   const activeAcc = p.accentHex || '#0a3cff'
 
   const applyAccent = (hex) => set({ accentHex: hex })
+  const resetPageAccents = () => PREFS.set({ pageAccents: {} }) // возврат всех разделов к цвету приложения
 
   const toggleMotion = () => {
     const next = !p.motion
@@ -289,12 +291,8 @@ function Appearance() {
           <span className={mode === 'light' ? 'on' : ''} onClick={() => setMode('light')}>светлая</span>
           <span className={mode === 'dark' ? 'on' : ''} onClick={() => setMode('dark')}>тёмная</span>
         </div>
-        <div className="lbl">акцент — попробуй, меняется прямо сейчас</div>
-        <div className="sw">
-          {ACCENT_SWATCHES.map((hex) => (
-            <i key={hex} style={{ '--c': hex }} className={activeAcc === hex ? 'on' : ''} onClick={() => applyAccent(hex)}></i>
-          ))}
-        </div>
+        <div className="lbl">акцент приложения — меняется прямо сейчас</div>
+        <SwatchRow value={activeAcc} onChange={applyAccent} />
         <div className="lbl">оттенок поверхностей</div>
         <div className="sg">
           {[['neutral', 'нейтральный'], ['warm', 'тёплый'], ['cool', 'холодный'], ['ink', 'чернильный'], ['accent', 'в тон акценту']].map(([id, label]) => (
@@ -304,27 +302,32 @@ function Appearance() {
       </section>
 
       <section className="c r" style={{ '--i': 3 }}>
-        <div className="hd"><h2>цвет вкладок</h2><small></small></div>
-        <p style={{ color: 'var(--ink2)' }}>каждая вкладка может жить в своём цвете — только в этом браузере, общая тема не меняется.</p>
-        <div className="mt-4 space-y-4">
-          {PAGE_ACCENT_LIST.map(([id, label]) => {
-            const cur = (p.pageAccents || {})[id] || ''
-            return (
-              <div key={id}>
-                <div className="flex items-center justify-between gap-3">
-                  <span className="text-[13px] font-medium">{label}</span>
-                  {cur && <button className="btn-ghost btn-sm" onClick={() => setPageAccent(id, '')}>сброс</button>}
-                </div>
-                <div className="pa-grid !mt-2" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
-                  <button type="button" className={`pa-sw ${!cur ? 'pa-sw-on' : ''}`} style={{ background: 'var(--sf2)' }} onClick={() => setPageAccent(id, '')} title="как всё" />
-                  {ACCENT_SWATCHES.map((hex) => (
-                    <button type="button" key={hex} className={`pa-sw ${cur === hex ? 'pa-sw-on' : ''}`} style={{ background: hex }} onClick={() => setPageAccent(id, hex)} title={hex} />
-                  ))}
-                </div>
-              </div>
-            )
-          })}
+        <div className="hd" style={{ marginBottom: colorsOpen ? undefined : 0 }}>
+          <button type="button" className="flex min-w-0 items-center gap-1.5"
+            style={{ background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }}
+            onClick={() => setColorsOpen((v) => !v)} aria-expanded={colorsOpen}
+            title={colorsOpen ? 'свернуть' : 'показать'}>
+            <h2 className="truncate">цвет для каждого раздела</h2>
+            <ChevronDown size={16} className="faint shrink-0 transition-transform" style={{ transform: colorsOpen ? 'rotate(180deg)' : 'none' }} />
+          </button>
+          <button type="button" className="btn-ghost btn-sm shrink-0" onClick={resetPageAccents}
+            title="вернуть всем разделам цвет приложения">
+            <RotateCcw size={13} /> сбросить
+          </button>
         </div>
+        {colorsOpen && (
+          <div className="space-y-3">
+            <p style={{ color: 'var(--ink2)' }}>
+              каждый раздел может жить в своём цвете — только в этом браузере, общая тема не меняется.
+              смысловые цвета статусов от выбора не зависят: просрочка — красный, ожидание — янтарь, деньги/ок — лайм, ИИ — фиолетовый.
+            </p>
+            {PAGE_ACCENT_LIST.map(([id, label]) => (
+              <SwatchRow key={id} label={label} showDefault
+                value={(p.pageAccents || {})[id] || ''}
+                onChange={(hex) => setPageAccent(id, hex)} />
+            ))}
+          </div>
+        )}
       </section>
 
       <section className="c r" style={{ '--i': 4 }}>

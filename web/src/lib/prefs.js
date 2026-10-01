@@ -1,6 +1,9 @@
 // Оформление и поведение сайта. Один источник: prefs.get()/prefs.set(); изменения применяются к <html> мгновенно.
 // Хранится в localStorage (мгновенный старт) и зеркалится на сервер (/api/ui-prefs) — телефон и ПК выглядят одинаково.
 import { useEffect, useState } from 'react'
+import { rgbOf, lumOf, mixHex, fitAccentInk } from './color'
+
+export { lumOf } // обратная совместимость: раньше lumOf жил здесь
 
 /* Акценты: пара light/dark на каждый, чтобы контраст держался в обеих темах. hue — для «фон в тон». */
 export const ACCENTS = {
@@ -89,17 +92,6 @@ export const prefs = {
 const BOOT_AT = Date.now()
 let _lastAccent = null, _lastAccentHex = null, _lastTint = null, _lastDark = null
 
-const rgbOf = (hex) => {
-  const s = String(hex || '').replace('#', '')
-  const h = s.length === 3 ? s.split('').map((c) => c + c).join('') : s.padEnd(6, '0').slice(0, 6)
-  const n = parseInt(h, 16)
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255]
-}
-export const lumOf = (hex) => {
-  const [r, g, b] = rgbOf(hex).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 })
-  return 0.2126 * r + 0.7152 * g + 0.0722 * b
-}
-const mixHex = (from, to, k) => '#' + rgbOf(from).map((v, i) => Math.round(v + (rgbOf(to)[i] - v) * k).toString(16).padStart(2, '0')).join('')
 /* HSL из hex: нужен hue для «оттенка в тон акценту» и насыщенность,
    чтобы у серого акцента (графит) не получался синий подтон фона. */
 export function hexHsl(hex) {
@@ -138,11 +130,14 @@ export function apply(p = _cur) {
   }
   _lastAccent = p.accent; _lastAccentHex = accentHex; _lastTint = p.tint; _lastDark = dark
 
-  const acc = accentFor(accentHex, dark)
+  /* Контраст текста на акценте ≥ 4.5:1 (WCAG AA): текст подбирается по яркости,
+     при необходимости сам фон чуть подправляется (см. fitAccentInk). */
+  const fit = fitAccentInk(accentFor(accentHex, dark))
+  const acc = fit.bg
   r.style.setProperty('--acc', acc)
   r.style.setProperty('--accent-light', accentFor(accentHex, false))
   r.style.setProperty('--accent-dark', accentFor(accentHex, true))
-  r.style.setProperty('--accent-ink', lumOf(acc) > 0.45 ? '#101114' : '#ffffff')
+  r.style.setProperty('--accent-ink', fit.ink)
   r.style.setProperty('--accent-ink-dark', '#ffffff')
   r.style.setProperty('--ui-zoom', String((FONT_SIZES[p.font] || FONT_SIZES.md)[1]))
   r.style.setProperty('--r-k', String((RADII[p.radius] || RADII.soft)[1]))
@@ -208,7 +203,8 @@ export function usePageAccent(page) {
   const hex = (p.pageAccents || {})[page]
   if (!hex) return { style: {}, hex: '' }
 
-  const acc = accentFor(hex, dark)
+  const fit = fitAccentInk(accentFor(hex, dark))
+  const acc = fit.bg
   const [hue, sat] = hexHsl(acc)
   const nearGrey = sat < 14
   // подкраска фонов — аккуратная, как в глобальном «оттенке», но в тон вкладки
@@ -223,7 +219,7 @@ export function usePageAccent(page) {
       '--accent': acc,
       '--accent-light': accentFor(hex, false),
       '--accent-dark': accentFor(hex, true),
-      '--accent-ink': lumOf(acc) > 0.45 ? '#101114' : '#ffffff',
+      '--accent-ink': fit.ink,
       '--accent-soft': `color-mix(in srgb, ${acc} 16%, transparent)`,
       '--bg': paint(dark ? '#0f1530' : '#e9ecf3', dark ? 2.4 : 1.7),
       '--sf': paint(dark ? '#151c3d' : '#ffffff', dark ? 2 : 1),
