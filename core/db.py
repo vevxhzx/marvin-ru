@@ -181,6 +181,12 @@ class Client(SQLModel, table=True):
     last_contact_at: Optional[datetime] = None
     next_step: str = ""                # что сделать дальше («прислать смету», «позвонить»)
     next_step_at: Optional[datetime] = None
+    # CRM (стадия клиента, миграция v3): '' — стадия вычисляется автоматически по заказам
+    # (core/crm/client_stages.py). stage_manual=True — выставлено руками, авто не перетирает.
+    stage: str = Field(default="", index=True)   # lead/negotiation/client/permanent/asleep
+    stage_manual: bool = False                  # ручной режим
+    stage_auto: str = ""                        # последний авто-сигнал ('' — сигнала нет)
+    stage_updated_at: Optional[datetime] = None  # когда меняли стадию
 
 
 class Order(SQLModel, table=True):

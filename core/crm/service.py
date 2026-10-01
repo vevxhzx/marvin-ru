@@ -92,6 +92,13 @@ def payment(oid: int, amount: float, note: str | None = None, account: str | Non
     if not duplicate:
         log_event(order_id=oid, client_id=order.client_id, kind="payment",
                   text=f"Оплата {money(float(amount))}" + (f" · {note}" if note else ""), channel=channel)
+    if order.client_id:
+        # авто-стадия клиента: оплата заказа — сигнал «клиент/постоянный». Ручную стадию не трогает.
+        try:
+            from . import client_stages
+            client_stages.recalc(order.client_id, channel=channel)
+        except Exception:  # pragma: no cover — стадия клиента не должна ломать оплату
+            log.warning("стадия клиента: не пересчитать для %s", order.client_id, exc_info=True)
     return {"tx": tx.model_dump(), "order": orders.order_view(orders.get_order(oid)), "duplicate": duplicate}
 
 
@@ -239,6 +246,21 @@ def templates(order_id: int | None = None) -> dict:
 
 
 # ---------------------------------------------------------------- карточки
+def _client_stage(cid: int, client_dump: dict) -> dict:
+    """Стадия клиента для карточки (read-only). Ошибки не ломают карточку."""
+    try:
+        from . import client_stages
+        from ..db import Client, session as _s
+        with _s() as s:
+            c = s.get(Client, cid)
+            if c is None:
+                return {}
+            return client_stages.view(c)
+    except Exception:  # pragma: no cover — на старой БД без новых колонок карточка должна работать
+        log.warning("стадия клиента: не прочитать для %s", cid, exc_info=True)
+        return {"client_id": cid, "stage": client_dump.get("stage") or "", "manual": False}
+
+
 def customer_card(cid: int) -> dict | None:
     with session() as s:
         c = s.get(Client, cid)
@@ -261,6 +283,8 @@ def customer_card(cid: int) -> dict | None:
     source = client.get("source") or next((v.get("source") for v in views if v.get("source")), "")
     return {
         "client": client,
+        # стадия клиента (отдельная сущность, миграция v3) — только чтение, ничего не перетирает
+        "stage": _client_stage(cid, client),
         "orders": views,
         "orders_count": len(views),
         "ltv": ltv,

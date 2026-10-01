@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from ..services import orders
 from ..services.orders import OrderError
-from . import service, stages
+from . import client_stages, service, stages
 
 router = APIRouter(prefix="/api/crm", tags=["crm"])
 
@@ -66,6 +66,11 @@ class FollowupIn(BaseModel):
     client_id: Optional[int] = None
     kind: str = "manual"
     due_at: Optional[datetime] = None
+
+
+class ClientStageIn(BaseModel):
+    """Стадия клиента, выставленная ВРУЧНУЮ (stage_manual=True)."""
+    stage: str
 
 
 @router.get("/stages")
@@ -225,3 +230,52 @@ def crm_templates(order_id: Optional[int] = None):
 @router.get("/analytics")
 def crm_analytics(months: int = 6):
     return service.analytics(months)
+
+
+# ------------------------------------------------ стадия КЛИЕНТА (отдельная сущность)
+@router.get("/client-stages")
+def crm_client_stages():
+    """Справочник стадий клиента + пороги авто-логики (2 оплаченных / 90 дней)."""
+    return client_stages.stages_payload()
+
+
+@router.get("/clients/{cid}/stage")
+def crm_get_client_stage(cid: int):
+    """Текущая стадия клиента (read-only, БД не меняется)."""
+    try:
+        return client_stages.get(cid)
+    except client_stages.ClientStageError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.put("/clients/{cid}/stage")
+def crm_set_client_stage(cid: int, p: ClientStageIn):
+    """Поставить стадию клиента вручную: стадия закрепляется, авто-логика её не перетирает."""
+    try:
+        return client_stages.set_stage(cid, p.stage)
+    except client_stages.ClientStageError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/clients/{cid}/stage/manual")
+def crm_clear_client_stage_manual(cid: int):
+    """Снять ручной режим («вернуть авто»): стадия сразу пересчитывается по заказам."""
+    try:
+        return client_stages.clear_manual(cid)
+    except client_stages.ClientStageError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/clients/{cid}/stage/recalc")
+def crm_recalc_client_stage(cid: int):
+    """Пересчитать авто-стадию одного клиента по его заказам (ручную не трогает)."""
+    try:
+        return client_stages.recalc(cid)
+    except client_stages.ClientStageError as e:
+        raise HTTPException(404, str(e))
+
+
+@router.post("/client-stages/recalc")
+def crm_recalc_all_client_stages():
+    """Пересчитать авто-стадии по всем клиентам (ручные значения не трогаем)."""
+    return client_stages.recalc_all()

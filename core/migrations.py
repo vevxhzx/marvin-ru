@@ -98,10 +98,24 @@ def _v2_crm(conn) -> None:
         ))
 
 
+def _v3_client_stage(conn) -> None:
+    """Стадия КЛИЕНТА (вторая сущность рядом с воронкой заказа): аддитивные колонки в `client`.
+
+    Только новые колонки со значениями по умолчанию — существующие клиенты, заказы и
+    финансы не меняются. Пустая `stage` означает «стадия считается автоматически по заказам».
+    """
+    add_column(conn, "client", "stage", "VARCHAR DEFAULT ''")
+    add_column(conn, "client", "stage_manual", "BOOLEAN DEFAULT 0")
+    add_column(conn, "client", "stage_auto", "VARCHAR DEFAULT ''")
+    add_column(conn, "client", "stage_updated_at", "DATETIME")
+    create_index(conn, "ix_client_stage", "client", '"stage"')
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
     (2, "crm: order.stage/revisions/next_step, client.source, transaction.idem_key, crm-таблицы", _v2_crm),
+    (3, "crm: client.stage/stage_manual/stage_auto/stage_updated_at", _v3_client_stage),
 ]
 
 

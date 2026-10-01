@@ -111,14 +111,14 @@ def test_migration_existing_db_copy(tmp_path):
 
     eng = create_engine(f"sqlite:///{db_file}")
     res = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")
-    assert res["applied"] == [1, 2] and res["backup"] and os.path.exists(res["backup"])
+    assert res["applied"] == [1, 2, 3] and res["backup"] and os.path.exists(res["backup"])
 
     with eng.connect() as conn:
         cols = {r[1] for r in conn.execute(text('PRAGMA table_info("order")')).all()}
         assert {"stage", "revisions", "lost_reason", "next_step"}.issubset(cols)
         rows = {r[0]: r[1] for r in conn.execute(text('SELECT title, stage FROM "order"')).all()}
         assert rows["Старый ролик"] == "delivered" and rows["Текущий"] == "in_work"
-        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == 2
+        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == 3
 
     again = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")
     assert again["applied"] == [] and again["backup"] is None
