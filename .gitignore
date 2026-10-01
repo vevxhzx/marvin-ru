@@ -46,3 +46,8 @@ shots/
 # --- локальные скриншоты/временные файлы ---
 *.tmp
 *.swp
+
+# --- e2e-стенд Playwright: артефакты прогонов (демо-БД и так во временной папке) ---
+tests/e2e/screens/
+tests/e2e/report/
+tests/e2e/test-results/

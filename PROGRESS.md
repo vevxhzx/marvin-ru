@@ -40,6 +40,27 @@
   `backups/jarvis-overnight-crm-20261001.db` (2 396 160 байт). `data/` не изменялся.
 - Реальный файл БД — `data/jarvis.db` (WAL), не `assistant.db` (в OVERNIGHT указано ориентировочно).
 
+## E2E-СТЕНД (Playwright) — A3, 2026-10-01
+
+- **Что сделано:** временная демо-БД (`tests/e2e/demo_db.py`, 5 клиентов / 10 заказов по всем 9 стадиям /
+  42 операции за 45 дней / задачи / события / заметки / доски / факты / follow-up), сервер-стенд
+  `tests/e2e/serve.py`, конфиг `web/playwright.config.js` (проекты `desktop` 1440×900 и `mobile` 375×812
+  с `isMobile`+`hasTouch`), хелперы `tests/e2e/helpers/`, smoke-тест `tests/e2e/specs/smoke.spec.js`
+  + пример `orders.spec.js`. Сайт раздаёт сам FastAPI из `web/site`.
+- **Запуск одной командой:** из `web/` → `npm run test:e2e` (или `npx playwright test`). Разово после клона:
+  `npm run test:e2e:install` (= `playwright install chromium`).
+- **Прогон:** `8 passed, 2 skipped` (desktop 5 + mobile 3; пропуски — тесты, помеченные только для desktop),
+  ~42 с. Скриншоты 10 вкладок × 2 проекта в `tests/e2e/screens/<проект>-smoke-<вкладка>.png`.
+- **Playwright — единственная новая зависимость:** `@playwright/test` в `devDependencies` файла `web/package.json`
+  (только для e2e, в рантайм сайта не входит), npm-скрипты `test:e2e*`. Chromium только; firefox/webkit не ставились.
+- **Безопасность стенда:** путь к БД приходит только через переменные `JARVIS_DB_PATH` / `JARVIS_DATA_DIR` /
+  `JARVIS_CONFIG` (точечная правка `core/config.py`), стенд ставит их **до** `import core.*` и трижды проверяет
+  `assert_safe()` — реальная `data/jarvis.db` недостижима; папка стенда — `%TEMP%\jarvis-e2e-playwright`,
+  порт 8917 (не 8765 — это живой ассистент). Настоящие `config.yaml`/`.env`/`data/` не читались и не менялись.
+- **Ограничения:** состояние БД общее на весь прогон (workers=1, тесты не изолированы по БД); SSE
+  `/api/events/stream` и favicon исключены из проверки ошибок; в demo-конфиге мозг `local`, облако выключено,
+  поэтому фичи, требующие LLM, на стенде не проверяются. Подробная инструкция — `reviews/A3_e2e_harness.md`.
+
 ## Статусы фаз (порядок: 0 → 1 → 2 → 4 → 3 → 5 → 6 → 7)
 
 - [x] **ФАЗА 0 — Подготовка** (baseline, бэкап, структура PROGRESS.md)
