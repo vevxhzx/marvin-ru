@@ -384,8 +384,16 @@ def test_pc_launcher_running_pids_is_list():
 
 
 def test_pc_launcher_missing_bat_is_safe(monkeypatch, tmp_path):
-    """Если voice.bat рядом с ядром нет — понятная ошибка, а не падение и не запуск чего попало."""
+    """voice.bat не найден — понятный отказ, а не падение и не запуск чего попало.
+
+    Проверка ветви по ОС: `launcher.launch` на не-Windows честно отказывается раньше, чем вообще
+    смотрит на файл (core/pc/launcher.py: «только Windows»). Раньше тест ждал «nope.bat» в ошибке
+    на любой системе — на Linux/macOS падал, хотя код верен."""
     from core.pc import launcher
     monkeypatch.setattr(launcher, "BAT", tmp_path / "nope.bat")
     r = launcher.launch(restart=False)
-    assert r["ok"] is False and "nope.bat" in r["error"]
+    assert r["ok"] is False, r
+    if os.name == "nt":
+        assert "nope.bat" in r["error"], r
+    else:
+        assert "voice.bat" in r["error"], r   # подсказка «запустите вручную», а не имя отсутствующего файла

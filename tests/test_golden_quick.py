@@ -185,7 +185,12 @@ def _resolve(spec, t0: datetime):
         elif head.casefold() in _WD_NAMES:                        # ближайший такой день недели (Wed/wed — одинаково)
             wd = _WD_NAMES[head.casefold()]
             delta = (wd - t0.weekday()) % 7
-            d = t0 + timedelta(days=(delta or 7))
+            # Как в core/brain/dates.py:179: сегодня — это «сегодня», пока указанное время не прошло;
+            # прошло — следующая неделя. Раньше тут стояло «delta or 7», и кейс вроде
+            # «ужин в субботу» падал всякий раз, когда прогон попадал на саму субботу до 10:00.
+            d = t0 + timedelta(days=delta)
+            if delta == 0 and (h, m) <= (t0.hour, t0.minute):
+                d += timedelta(days=7)
         elif head.count("-") == 2:                             # 2027-09-25@10:00 — точная дата
             y, mo, dd = map(int, head.split("-"))
             return datetime(y, mo, dd, h, m)
@@ -216,11 +221,15 @@ def _resolve(spec, t0: datetime):
     if parts[0].startswith("wd"):                                # wd4_11:00 / wd1_10:00~
         wd = int(parts[0][2:])
         h, m = _hm(parts[1])
-        no_time = parts[1].rstrip("~").endswith("~") or parts[1].endswith("~")
+        no_time = parts[1].endswith("~")                          # в фразе не было времени
         delta = (wd - t0.weekday()) % 7
-        # «~» — в фразе не было времени: вечером (после 20:00) такой день относят к следующей неделе
+        # Ровно как в core/brain/dates.py:179 — две РАЗНЫЕ ветки, а не «или»:
+        # время названо явно → следующая неделя, только если это время уже прошло;
+        # время не названо («~») → следующая неделя только вечером (после 20:00).
+        # Раньше тут стояло «(h, m) <= now ИЛИ вечер», и для «~» подставлялось время по умолчанию
+        # 10:00 — в 19:16 тест ждал событие через неделю, а продукт (правильно) ставил на сегодня.
         d = t0 + timedelta(days=delta)
-        if delta == 0 and ((h, m) <= (t0.hour, t0.minute) or (no_time and t0.hour >= 20)):
+        if delta == 0 and ((no_time and t0.hour >= 20) or (not no_time and (h, m) <= (t0.hour, t0.minute))):
             d += timedelta(days=7)
         return d.replace(hour=h, minute=m, second=0, microsecond=0)
     if parts[0] == "dl":                                         # dl_wd4 — дедлайн «до пятницы» (строго следующей)

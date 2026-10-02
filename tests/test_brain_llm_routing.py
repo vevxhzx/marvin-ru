@@ -69,6 +69,12 @@ def test_hybrid_order_is_rules_then_local_then_cloud(monkeypatch):
         return None
 
     monkeypatch.setattr(agent.llm, "MODE", "hybrid")
+    # Облако включаем ЯВНО, а не «как сложилось по config.yaml»: без ключа облака cloud_enabled()
+    # равно False, и общего вопроса не было бы куда направить. Тест про маршрутизацию, а не про
+    # наличие ключей у машины, на которой он запущен (на CI секретов нет, локально есть).
+    monkeypatch.setattr(agent.llm, "cloud_enabled", lambda: True)
+    monkeypatch.setattr(agent.llm, "gemini_enabled", lambda: True)
+    monkeypatch.setattr(agent.llm, "GEMINI_AUTO", True)
     monkeypatch.setattr(agent, "via_ollama", local)
     monkeypatch.setattr(agent, "via_gemini", cloud)
     monkeypatch.setattr(agent, "is_personal", lambda t: False)

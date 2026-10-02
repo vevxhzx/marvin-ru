@@ -194,17 +194,28 @@ def test_backup_restore_traversal_is_rejected(name):
 
 
 def test_media_traversal_does_not_leak_files():
-    """/media/… не отдаёт файл вне data/media (в т.ч. api_token и config.yaml)."""
+    """/media/… не отдаёт файл вне data/media (в т.ч. api_token и config.yaml).
+
+    Проверяем НАСТОЯЩЕЕ содержимое файла настроек, а не случайную подстроку вроде "cloud:":
+    на CI (нет config.yaml → откат на config.example.yaml, setup_done() == False) SPA отдаёт мастер
+    установки, где такая строка встречается законно, и проверка ловила сама себя."""
     from core.api import auth
+    from core.config import _config_src
+
     c = _client()
     h = _token_headers()
+    # самая длинная непустая строка настроек — надёжный отпечаток файла
+    cfg_lines = [ln.strip() for ln in _config_src().read_text(encoding="utf-8").splitlines()
+                 if ln.strip() and not ln.strip().startswith("#")]
+    probe = max(cfg_lines, key=len) if cfg_lines else ""
     for p in ("/media/../api_token", "/media/../../config.yaml",
               "/media/%2e%2e/api_token", "/media/..%5Capi_token",
               "/media/%2e%2e%2f%2e%2e%2fconfig.yaml"):
         r = c.get(p, headers=h)
         assert auth.token()[:10] not in r.text, f"{p} отдал ключ доступа"
-        assert "cloud:" not in r.text, f"{p} отдал файл вне data/media"
-        # 404 — маршрут не нашёл файл; 200 — SPA отдал index.html, но ключа/конфига там нет
+        if probe:
+            assert probe not in r.text, f"{p} отдал файл вне data/media"
+        # 404 — маршрут не нашёл файл; 200 — SPA отдала index.html/мастер, но ключа/конфига там нет
         assert r.status_code in (200, 404), f"{p} → неожиданный {r.status_code}"
 
 

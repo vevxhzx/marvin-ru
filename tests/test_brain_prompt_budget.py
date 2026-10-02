@@ -130,12 +130,21 @@ def test_vision_never_goes_to_cloud_in_local_mode(monkeypatch, no_network):
 
 # ============================================================ 2. порядок «правила → локальная → облако»
 def _route(monkeypatch, *, local_ok, cloud_text):
-    """Подменить оба пути логгером вызовов и вернуть функцию, читающую лог."""
+    """Подменить оба пути логгером вызовов и вернуть функцию, читающую лог.
+
+    `cloud_enabled`/`gemini_auto` задаются ЯВНО — см. комментарий ниже."""
     from core.brain import agent, llm
 
     calls: list[str] = []
 
     monkeypatch.setattr(llm, "MODE", "hybrid")
+    # Облако включаем ЯВНО, а не «как сложилось по config.yaml»: без ключа облака cloud_enabled()
+    # равно False, и общий вопрос ушёл бы в локальную модель — проверять порядок
+    # «правило → локальная → облако» просто было бы не на чем. Тест про маршрутизацию,
+    # а не про наличие ключей у машины, на которой он запущен (CI/local).
+    monkeypatch.setattr(llm, "cloud_enabled", lambda: True)
+    monkeypatch.setattr(llm, "gemini_enabled", lambda: True)
+    monkeypatch.setattr(llm, "GEMINI_AUTO", True)
 
     async def avail(force=False):
         return local_ok
@@ -241,13 +250,25 @@ def test_phrase_works_offline_without_llm(phrase, action, no_network):
 def test_offline_commands_are_fast(phrase, _action, no_network):
     """Проверка «не тормозим ~40 офлайн-команд»: правила обязаны быть быстрее локальной модели.
 
-    Локальный ответ — это сотни миллисекунд и выше (даже в кэше), а здесь просто чтение и запись в БД."""
+    Локальный ответ — это сотни миллисекунд и выше (даже в кэше), а здесь просто чтение и запись в БД.
+
+    Замеряем минимум из нескольких прогонов после прогрева, а не первый заход: на нагруженном
+    раннере (CI) один холодный замер ловит планировщик ОС и первый импорт, и проверка ломалась
+    без всякой причины (335 мс на «списали 3к» при норме в единицы мс)."""
+    from core.brain import agent
+
+    agent.rules(phrase, "chat")                      # прогрев: импорты, движок БД, кэши
+    dt_ms = min(_timed_rules(phrase) for _ in range(3))
+    assert dt_ms < 250, f"«{phrase}» шёл {dt_ms:.0f} мс — это уже не быстрый путь"
+
+
+def _timed_rules(phrase: str) -> float:
+    """Один прогон agent.rules() в миллисекундах."""
     from core.brain import agent
 
     t0 = time.perf_counter()
     agent.rules(phrase, "chat")
-    dt_ms = (time.perf_counter() - t0) * 1000
-    assert dt_ms < 250, f"«{phrase}» шёл {dt_ms:.0f} мс — это уже не быстрый путь"
+    return (time.perf_counter() - t0) * 1000
 
 
 def test_payment_goes_to_existing_debt_not_to_expense():
@@ -413,7 +434,7 @@ def test_summary_keeps_topics_and_is_short():
 # ============================================================ 6. граница «LLM → данные»
 def test_destructive_tool_requires_confirmation(monkeypatch):
     """Инструмент удаления без подтверждения НЕ выполняется: пользователю задаётся вопрос."""
-    from core.brain import agent
+    from core.brain import agent, llm
     from core.services import calendar
 
     _add_event("Встреча с клиентом", "2026-03-10T15:00:00")
@@ -422,8 +443,15 @@ def test_destructive_tool_requires_confirmation(monkeypatch):
         return {"content": "удалил, сэр", "tool_calls": [
             {"name": "delete_event", "arguments": {"query": "Встреча с клиентом"}}]}
 
+    async def _up(force=False):
+        return True
+
+    # Локальная модель «жива»: ответ модели и так подменён (_chat), а без этой заглушки
+    # via_ollama() честно вернёт None на машине без Ollama — и тест проверял бы уже не то.
+    monkeypatch.setattr(llm, "ollama_available", _up)
     monkeypatch.setattr(agent, "_chat", fake_chat)
     r = asyncio.run(agent.via_ollama("удали встречу с клиентом", "chat"))
+    assert r is not None, "via_ollama вернул None — тест должен был подменить доступность модели"
     assert "clarify" in r.actions
     assert "?" in r.text, "нужен явный вопрос «точно удалить?»"
     assert calendar.find_event("Встреча с клиентом") is not None, "событие удалили без подтверждения!"

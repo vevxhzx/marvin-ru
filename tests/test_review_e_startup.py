@@ -1,6 +1,6 @@
 """Ревью E «Надёжность» — часть 4: старт/остановка `run.py`.
 
-Сценарии (каждый — реальный подпроцесс `.venv\\Scripts\\python.exe run.py --no-tg`,
+Сценарии (каждый — реальный подпроцесс `<текущий интерпретатор> run.py --no-tg`,
 свободный порт, всё в tmp: JARVIS_CONFIG / JARVIS_DATA_DIR / JARVIS_DB_PATH):
 
   * занятый порт → процесс завершается с кодом 3 и внятным сообщением, а не висит;
@@ -18,6 +18,7 @@ import os
 import re
 import socket
 import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -28,7 +29,10 @@ import httpx  # noqa: E402
 import pytest  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
-PY = ROOT / ".venv" / "Scripts" / "python.exe"
+# Интерпретатор ТОГО ЖЕ окружения, в котором идёт pytest: в venv локально это .venv/Scripts/python.exe
+# (или .venv/bin/python на mac), а в CI — системный python с установленными requirements.
+# Хардкод .venv/Scripts не работал ни на Linux, ни на macOS (FileNotFoundError).
+PY = sys.executable
 EXAMPLE_CONFIG = ROOT / "config.example.yaml"
 
 
