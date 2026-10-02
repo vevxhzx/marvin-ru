@@ -180,10 +180,8 @@ def test_route_and_series_share_one_today(monkeypatch):
     assert _past(_route(30))[-1]["date"] == s["today"]
 
 
-@pytest.mark.xfail(strict=True,
-                   reason="P2: cash_forecast режет повторы регулярных платежей "
-                          "(for _ in range(6)): недельная подписка на 90 дней даёт 6 событий "
-                          "вместо ~12 — прогноз занижает траты и всплывает в день оплаты")
+# P2 закрыт: cash_forecast считает число повторов регулярных от горизонта (недельный платёж за
+# 90 дней — ~13 событий, а не 6). Был xfail(strict) в core/services/insights.py.
 def test_weekly_recurring_is_not_capped_at_six_occurrences():
     f = _fin()
     f.set_balance(_main(), 100_000)

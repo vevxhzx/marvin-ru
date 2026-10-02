@@ -224,7 +224,8 @@ def test_migration_v3_additive_and_idempotent_on_copy(tmp_path):
     eng = create_engine(f"sqlite:///{db_file}")
 
     res = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")
-    assert res["applied"] == [1, 2, 3] and res["backup"] and os.path.exists(res["backup"])
+    all_versions = [v for v, _, _ in migrations.MIGRATIONS]
+    assert res["applied"] == all_versions and res["backup"] and os.path.exists(res["backup"])
     assert str(tmp_path) in res["backup"]                      # бэкап только во временную папку
 
     with eng.connect() as conn:
@@ -235,12 +236,13 @@ def test_migration_v3_additive_and_idempotent_on_copy(tmp_path):
         assert row[0][0] == "Иван" and row[0][1] == "@ivan" and row[0][2] == "client"
         assert (row[0][3] or "") == "" and not row[0][4] and (row[0][5] or "") == ""
         assert conn.execute(text('SELECT title FROM "order" WHERE status=\'paid\'')).scalar() == "Старый ролик"
-        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == 3
+        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == max(
+            v for v, _, _ in migrations.MIGRATIONS)
 
     # идемпотентно: повторный запуск — no-op, без бэкапа
     again = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")
     assert again["applied"] == [] and again["backup"] is None
-    assert migrations.current_version(eng) == 3
+    assert migrations.current_version(eng) == all_versions[-1]
 
     # реальная БД не открывалась
     if before is not None:
@@ -256,7 +258,8 @@ def test_migration_v3_noop_without_client_table(tmp_path):
     con.execute("CREATE TABLE \"order\" (id INTEGER PRIMARY KEY, title TEXT, status TEXT)")
     con.commit(); con.close()
     eng = create_engine(f"sqlite:///{db_file}")
-    assert migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")["applied"] == [1, 2, 3]
+    assert migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")["applied"] == [
+        v for v, _, _ in migrations.MIGRATIONS]
     with eng.connect() as conn:
         assert {r[1] for r in conn.execute(text('PRAGMA table_info("order")')).all()} >= {"stage"}
 

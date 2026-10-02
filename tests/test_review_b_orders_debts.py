@@ -165,10 +165,8 @@ def test_delete_debt_payment_restores_remaining_and_balance():
 
 
 # ---------------------------------------------------------------- конверты (цели)
-@pytest.mark.xfail(strict=True,
-                   reason="P2: goals.put_to_goal фиксирует g.saved (commit) ДО того, как "
-                          "add_transaction проверит сумму — FinanceError на сумме 1e15 "
-                          "оставляет цель с saved=1e15 и closed=True, а операции нет")
+# P2 закрыт: goals.put_to_goal валидирует сумму ДО записи (сначала проверки, потом операция и
+# «отложено») — FinanceError не портит цель. Был xfail(strict) в core/services/goals.py.
 def test_put_to_goal_invalid_amount_leaves_goal_intact():
     f, g = _fin(), _goals()
     f.set_balance(_main(), 10_000)

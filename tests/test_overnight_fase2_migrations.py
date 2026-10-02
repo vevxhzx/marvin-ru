@@ -40,8 +40,11 @@ def test_sqlite_pragmas_wal_and_busy_timeout():
 # ---------------------------------------------------------------- 5. schema_version и миграции
 def test_fresh_db_has_schema_version():
     from sqlalchemy import text
+    from core import migrations
     with db.engine.connect() as conn:
-        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == 3
+        # версия в свежей БД = последняя известная (список миграций растёт — не зашиваем конкретную)
+        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == max(
+            v for v, _, _ in migrations.MIGRATIONS)
 
 
 def test_migrations_apply_on_existing_copy_with_backup(tmp_path):
@@ -59,8 +62,9 @@ def test_migrations_apply_on_existing_copy_with_backup(tmp_path):
     eng = create_engine(f"sqlite:///{db_file}")
     result = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")
 
-    assert result["applied"] == [1, 2, 3]
-    assert migrations.current_version(eng) == 3
+    all_versions = [v for v, _, _ in migrations.MIGRATIONS]
+    assert result["applied"] == all_versions        # на старой БД применяются ВСЕ миграции
+    assert migrations.current_version(eng) == all_versions[-1]
     assert result["backup"] and os.path.exists(result["backup"])
     with eng.connect() as conn:
         assert conn.execute(text("SELECT title FROM orders")).scalar() == "старый заказ"
@@ -74,7 +78,7 @@ def test_migrations_skip_backup_on_fresh_db(tmp_path):
     from core import migrations
     eng = create_engine(f"sqlite:///{tmp_path / 'new.db'}")
     result = migrations.apply(eng, had_db=False, backup_dir=tmp_path / "bk")
-    assert result["applied"] == [1, 2, 3] and result["backup"] is None
+    assert result["applied"] == [v for v, _, _ in migrations.MIGRATIONS] and result["backup"] is None
 
 
 # ---------------------------------------------------------------- 3. экспорт (только чтение)

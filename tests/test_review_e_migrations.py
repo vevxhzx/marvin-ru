@@ -201,7 +201,8 @@ def test_init_db_twice_is_idempotent(legacy_db, tmp_path):
     assert counts_1 == counts_2, "повторный init_db продублировал данные"
     with db.engine.connect() as conn:
         assert conn.execute(text("SELECT COUNT(*) FROM schema_version")).scalar() == v1
-        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == 3
+        assert conn.execute(text("SELECT MAX(version) FROM schema_version")).scalar() == max(
+            v for v, _, _ in migrations.MIGRATIONS)
     # второй бэкап не нужен: миграций больше нет
     assert len(_backups(tmp_path)) == 1, "повторный запуск не должен плодить бэкапы"
     # дефолтные категории/счета не задублированы
@@ -216,7 +217,7 @@ def test_migrations_apply_twice_on_same_engine(tmp_path, monkeypatch):
     eng = _engine_on(path)
     first = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")
     second = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "bk")
-    assert first["applied"] == [1, 2, 3]
+    assert first["applied"] == [v for v, _, _ in migrations.MIGRATIONS]
     assert second["applied"] == [] and second["backup"] is None
     assert len(list((tmp_path / "bk").glob("*.db"))) == 1
 
@@ -283,7 +284,7 @@ def test_real_db_copy_survives_migration(tmp_path, monkeypatch):
     res = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "backups")
     res2 = migrations.apply(eng, had_db=True, backup_dir=tmp_path / "backups")
 
-    assert res["applied"] == [1, 2, 3] and res["backup"], "миграции не применились или бэкапа нет"
+    assert res["applied"] == [v for v, _, _ in migrations.MIGRATIONS] and res["backup"], "миграции не применились или бэкапа нет"
     assert res2["applied"] == []
     assert len(_backups(tmp_path)) == 1
 

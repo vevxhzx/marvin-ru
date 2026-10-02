@@ -303,8 +303,8 @@ def test_delete_after_edit_returns_seed():
     assert _count() == 0
 
 
-@pytest.mark.xfail(strict=True, reason="P2: update_transaction(kind=...) не пересчитывает категорию — "
-                                        "доход остаётся в категории расхода («Еда»)")
+# P2 закрыт: update_transaction(kind=...) при смене типа пересчитывает конфликтующую категорию
+# (доход уходит из «Еды» в подходящую ему). Был xfail(strict) в core/services/finance.py.
 def test_edit_kind_rerecalculates_category():
     f = _fin()
     f.set_balance(M, 10_000)

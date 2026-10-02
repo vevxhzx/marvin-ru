@@ -78,23 +78,33 @@ def find_goal(query: str | int) -> Goal | None:
 def put_to_goal(goal_id: int, amount: float, from_account: str | None = None, source: str = "web", record_tx: bool = True) -> dict:
     """Отложить в конверт. По умолчанию — это расход с основного счёта в категорию «Накопления» (деньги ушли из
     «свободных»), привязанный к цели; так баланс и «безопасно тратить» честные. record_tx=False — просто отметить."""
-    amount = float(amount)
+    # 1. Валидация ДО любых записей: раньше цель коммитилась раньше, чем add_transaction проверял
+    #    сумму — FinanceError оставлял цель с испорченным saved (P2 ревью B).
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        raise finance.FinanceError("Сумма: введите число")
     if amount == 0:
         raise finance.FinanceError("Сумма не может быть нулём")
-    with session() as s:
+    finance._num(abs(amount), "Сумма", 0, strict_min=True)   # те же лимиты, что у операции (0 < |сумма| ≤ 1e9)
+    with session() as s:                                     # цель существует? — тоже до записи
         g = s.get(Goal, goal_id)
         if not g:
             raise finance.FinanceError("Цель не найдена")
+        title = g.title
+    # 2. Запись: сначала операция (она ещё может отказать — например, неизвестным счётом),
+    #    и только потом двигаем «отложено» — цель не портится ни при одной ошибке.
+    if record_tx:
+        _ensure_save_category()
+        finance.add_transaction(abs(amount), "expense" if amount > 0 else "income", "Накопления",
+                                f"{'в' if amount > 0 else 'из'} «{title}»", from_account, source=source, goal_id=goal_id)
+    with session() as s:
+        g = s.get(Goal, goal_id)
         g.saved = max(0.0, g.saved + amount)
         reached = g.saved >= g.target - 0.5
         if reached and not g.closed:
             g.closed = True
         s.add(g); s.commit(); s.refresh(g)
-        title = g.title
-    if record_tx:
-        _ensure_save_category()
-        finance.add_transaction(abs(amount), "expense" if amount > 0 else "income", "Накопления",
-                                f"{'в' if amount > 0 else 'из'} «{title}»", from_account, source=source, goal_id=goal_id)
     return {"goal": goal_view(g), "reached": reached}
 
 

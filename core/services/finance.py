@@ -8,12 +8,28 @@ from datetime import datetime, timedelta
 
 from dateutil.relativedelta import relativedelta
 from sqlmodel import select
+from starlette.exceptions import HTTPException as _HTTPException
 
-from ..db import icontains, Account, Category, Debt, Recurring, Transaction, log_action, remember, session
+from ..db import cached, icontains, Account, Category, Debt, Recurring, Transaction, log_action, remember, session
 
 
 class FinanceError(ValueError):
     """Понятная человеку ошибка ввода (сумма больше остатка и т.п.). API отдаёт её как 400."""
+
+
+class FinanceNotFound(_HTTPException, FinanceError):
+    """Сущность не найдена: API отдаёт 404, а не 400 — «нет такого» ≠ ошибка валидации (P2 ревью A).
+
+    Наследуемся и от HTTPException (роут отвечает 404, DELETE того же ресурса уже так отвечал),
+    и от FinanceError — все существующие `except FinanceError` в правилах/инструментах
+    ловили такие ошибки раньше и ловят теперь, с тем же текстом.
+    """
+
+    def __init__(self, detail: str = "Не найдено"):
+        super().__init__(404, detail)       # по MRO — HTTPException.__init__
+
+    def __str__(self) -> str:
+        return str(self.detail)             # текст для чат-правил без префикса «404: »
 
 
 def _num(x, name: str = "Сумма", min_: float | None = 0, max_: float | None = None, strict_min: bool = False) -> float:
@@ -96,7 +112,7 @@ def update_category(cid: int, **fields) -> Category:
     with session() as s:
         c = s.get(Category, cid)
         if not c:
-            raise FinanceError("Категория не найдена")
+            raise FinanceNotFound("Категория не найдена")
         if fields.get("name") is not None and fields["name"].strip() != c.name:
             new = _title(fields["name"], "Категория")
             if s.exec(select(Category).where(Category.name == new)).first():
@@ -142,11 +158,13 @@ def budgets() -> list[dict]:
     m0 = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     with session() as s:
         cats = [c for c in s.exec(select(Category).where(Category.kind == "expense")) if c.budget > 0]
-        txs = s.exec(select(Transaction).where(Transaction.kind == "expense", Transaction.date >= m0)).all()
+        # только две колонки: годятся категория и сумма, а текст заметки и прочее тянуть не нужно
+        txs = s.exec(select(Transaction.category, Transaction.amount)
+                     .where(Transaction.kind == "expense", Transaction.date >= m0)).all()
     out = []
     days_in_month = ((m0 + relativedelta(months=1)) - m0).days
     for c in cats:
-        spent = sum(t.amount for t in txs if t.category == c.name)
+        spent = sum(amount for cat, amount in txs if cat == c.name)
         pct = spent / c.budget if c.budget else 0
         out.append({"id": c.id, "name": c.name, "icon": c.icon, "budget": c.budget, "spent": spent, "left": c.budget - spent,
                     "pct": pct, "pace": (now.day / days_in_month),  # где «должны» быть по времени
@@ -155,17 +173,21 @@ def budgets() -> list[dict]:
     return out
 
 
-def safe_to_spend() -> dict:
-    """Сколько можно тратить в день до следующей зарплаты, чтобы хватило на обязательные платежи."""
+def safe_to_spend(recurring: list[Recurring] | None = None, accounts: list[Account] | None = None) -> dict:
+    """Сколько можно тратить в день до следующей зарплаты, чтобы хватило на обязательные платежи.
+
+    recurring/accounts можно передать готовыми, когда они уже прочитаны (сводка читает их
+    один раз и переиспользует) — цифры от этого не меняются.
+    """
     now = datetime.now()
-    rec = list_recurring()
+    rec = list_recurring() if recurring is None else recurring
     incomes = [r for r in rec if r.kind == "income"]
     if incomes:
         next_income = min(r.next_date for r in incomes)
     else:
         next_income = (now.replace(day=1) + relativedelta(months=1))
     days_left = max(1, (next_income.date() - now.date()).days)
-    balance = total_balance()
+    balance = total_balance(accounts)
     # обязательные платежи до зарплаты: регулярные расходы (в т.ч. по долгам), чья дата раньше зарплаты
     upcoming = [r for r in rec if r.kind == "expense" and r.next_date < next_income]
     reserved = sum(r.amount for r in upcoming)
@@ -196,13 +218,15 @@ def list_accounts() -> list[Account]:
         return list(s.exec(select(Account)))
 
 
-def total_balance() -> float:
+def total_balance(accounts: list[Account] | None = None) -> float:
     """Единый источник «баланса»: сумма по всем счетам, кроме чисто долговых.
 
     Главная и «финансы» обязаны показывать одно и то же число — любое место,
     где нужен баланс, должно звать эту функцию, а не суммировать счета заново.
+    Список счетов можно передать готовым, если он уже прочитан.
     """
-    return sum(a.balance for a in list_accounts() if a.kind != "debt_only")
+    accs = list_accounts() if accounts is None else accounts
+    return sum(a.balance for a in accs if a.kind != "debt_only")
 
 
 def set_balance(name: str, balance: float) -> Account:
@@ -238,7 +262,7 @@ def update_account(account_id: int, name: str | None = None, balance=None, kind:
     with session() as s:
         a = s.get(Account, account_id)
         if not a:
-            raise FinanceError("Счёт не найден")
+            raise FinanceNotFound("Счёт не найден")
         if name is not None and name.strip() != a.name:
             new = _title(name, "Счёт")
             if s.exec(select(Account).where(Account.name == new)).first():
@@ -382,12 +406,27 @@ def delete_transaction(tx_id: int) -> bool:
         return True
 
 
+def _category_conflicts(s, name: str | None, kind: str) -> bool:
+    """Категория не подходит типу операции: доход не должен числиться в «Еда» (P2 ревью B).
+
+    Пользовательская категория не теряется без причины: конфликт — только когда её тип
+    (expense/income) расходится с новым типом операции; совместимая категория остаётся.
+    """
+    if not name or kind not in ("expense", "income"):
+        return False
+    c = s.exec(select(Category).where(Category.name == name)).first()
+    if c is not None:
+        return c.kind != kind
+    # категории уже нет в справочнике: «Прочий доход» — доходная, остальное исторически расходное
+    return name != "Прочий доход" if kind == "income" else name == "Прочий доход"
+
+
 def update_transaction(tx_id: int, **fields) -> Transaction:
     """Правка операции: балансы пересчитываются (старая откатывается, новая проводится)."""
     with session() as s:
         t = s.get(Transaction, tx_id)
         if not t:
-            raise FinanceError("Операция не найдена")
+            raise FinanceNotFound("Операция не найдена")
         if t.debt_id and "amount" in fields and fields["amount"] is not None:
             d = s.get(Debt, t.debt_id)
             new_amt = _num(fields["amount"], "Сумма", 0, strict_min=True)
@@ -402,10 +441,15 @@ def update_transaction(tx_id: int, **fields) -> Transaction:
         _apply(s, t, -1)
         if fields.get("amount") is not None:
             t.amount = _num(fields["amount"], "Сумма", 0, strict_min=True)
+        kind_changed = fields.get("kind") in ("expense", "income", "transfer") and fields["kind"] != t.kind
         if fields.get("kind") in ("expense", "income", "transfer"):
             t.kind = fields["kind"]
         if "category" in fields and t.kind != "transfer":
             t.category = (fields["category"] or "").strip() or guess_category(fields.get("note") or t.note or "", t.kind)
+        elif kind_changed and t.kind != "transfer" and _category_conflicts(s, t.category, t.kind):
+            # смена типа: категория чужого типа («Еда» у дохода) не должна переехать в новый
+            # тип вместе с операцией — подбираем подходящую по названию (P2 ревью B)
+            t.category = guess_category(fields.get("note") or t.note or "", t.kind)
         if "note" in fields:
             t.note = (fields["note"] or "").strip() or None
         if fields.get("account"):
@@ -440,16 +484,19 @@ def list_transactions(days: int = 30, limit: int = 200) -> list[Transaction]:
                            .order_by(Transaction.date.desc()).limit(limit)))
 
 
-def cashflow() -> dict:
-    """Месячный поток: доход − регулярные − платежи по долгам = свободно."""
-    rec = list_recurring()
+def cashflow(recurring: list[Recurring] | None = None, txs: list[Transaction] | None = None) -> dict:
+    """Месячный поток: доход − регулярные − платежи по долгам = свободно.
+
+    recurring/txs можно передать готовыми (сводка читает регулярные один раз).
+    """
+    rec = list_recurring() if recurring is None else recurring
     rec_income = sum(r.amount for r in rec if r.kind == "income")
     rec_income_cats = {r.category for r in rec if r.kind == "income"}
     rec_expense = sum(r.amount for r in rec if r.kind == "expense" and not r.debt_id)
     debt_pay = sum(d.payment for d in list_debts() if not d.closed)
 
-    txs = list_transactions(90, 100_000)
-    real = [t for t in txs if "(авто)" not in (t.note or "")]
+    all_txs = list_transactions(90, 100_000) if txs is None else txs
+    real = [t for t in all_txs if "(авто)" not in (t.note or "")]
 
     def span_months(items: list) -> float:
         if not items:
@@ -497,7 +544,15 @@ def daily_series(days: int = 30) -> list[dict]:
 
 
 def summary(days: int = 30) -> dict:
-    """Сводка: траты/доходы за период, по категориям, балансы, долги."""
+    """Сводка: траты/доходы за период, по категориям, балансы, долги.
+
+    Считается по всей базе, поэтому результат кэшируется на пару секунд (core.db.cached):
+    главная и дашборд зовут сводку по several раз. Любая запись в базу кэш сразу сбрасывает.
+    """
+    return cached(f"summary:{int(days or 30)}", lambda: _summary(days))
+
+
+def _summary(days: int = 30) -> dict:
     txs = list_transactions(days, limit=10_000)
     spent = sum(t.amount for t in txs if t.kind == "expense")
     earned = sum(t.amount for t in txs if t.kind == "income")
@@ -506,9 +561,12 @@ def summary(days: int = 30) -> dict:
         if t.kind == "expense":
             by_cat[t.category or "Другое"] = by_cat.get(t.category or "Другое", 0) + t.amount
     by_cat = dict(sorted(by_cat.items(), key=lambda kv: -kv[1]))
+    # счета и регулярные платежи читаем ОДИН раз на всю сводку: раньше каждая из вложенных
+    # функций (баланс, поток, безопасная трата) ходила в базу за ними сама — 4 лишних запроса
     accounts = list_accounts()
     debts = list_debts()
-    balance = total_balance()
+    rec = list_recurring()
+    balance = total_balance(accounts)
 
     # Столбики для главной («траты» по дням недели и по дням месяца) — из реальных
     # операций текущего календарного месяца. Раньше этих полей в сводке не было и
@@ -543,10 +601,10 @@ def summary(days: int = 30) -> dict:
         "accounts": [{"name": a.name, "balance": a.balance, "is_main": a.is_main} for a in accounts],
         "debts_total": sum(d.remaining for d in debts if not d.closed),
         "monthly_debt_payments": sum(d.payment for d in debts if not d.closed),
-        "recurring_monthly": sum(r.amount for r in list_recurring() if r.kind == "expense"),
-        "cashflow": cashflow(),
+        "recurring_monthly": sum(r.amount for r in rec if r.kind == "expense"),
+        "cashflow": cashflow(rec),
         "budgets": budgets(),
-        "safe": safe_to_spend(),
+        "safe": safe_to_spend(rec, accounts),
     }
 
 
@@ -577,7 +635,7 @@ def update_recurring(rid: int, **fields) -> Recurring:
     with session() as s:
         r = s.get(Recurring, rid)
         if not r:
-            raise FinanceError("Регулярный платёж не найден")
+            raise FinanceNotFound("Регулярный платёж не найден")
         if fields.get("title") is not None:
             r.title = _title(fields["title"])
         if fields.get("amount") is not None:
@@ -826,7 +884,7 @@ def update_debt(debt_id: int, **fields) -> Debt:
     with session() as s:
         d = s.get(Debt, debt_id)
         if not d:
-            raise FinanceError("Долг не найден")
+            raise FinanceNotFound("Долг не найден")
         if fields.get("title") is not None:
             d.title = _title(fields["title"])
         if fields.get("creditor") is not None:
