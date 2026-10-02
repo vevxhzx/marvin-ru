@@ -31,7 +31,7 @@ copy /Y backups\jarvis-20260930-1414.db data\jarvis.db
 
 (`.db-wal`/`.db-shm` удалить, если остались: `del data\jarvis.db-wal data\jarvis.db-shm`.)
 
-**Вся папка целиком**: закройте Jarvis и замените `jarvis-main\` на `..\marvin-backup-20260930-1414\` (та же структура).
+**Вся папка целиком**: закройте Marvin и замените `jarvis-main\` на `..\marvin-backup-20260930-1414\` (та же структура).
 
 ## Правило на будущее
 

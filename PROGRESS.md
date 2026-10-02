@@ -1,4 +1,4 @@
-# PROGRESS — Marvin / Jarvis
+# PROGRESS — Marvin
 
 Журнал доработок. Правила безопасности вынесены в отдельный файл **[SECURITY.md](SECURITY.md)**.
 Ветка работы: `overnight-crm`. Собирается: `install.bat` → `start.bat`, тесты `pytest tests -q`, сайт `web/` → `build_web.bat`.

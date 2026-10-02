@@ -30,7 +30,7 @@
 Короткий путь: скачайте ZIP, распакуйте **в свою папку** (например `~/Assistant`),
 правый клик по **`Install-Mac.command`** → «Открыть» → дождитесь установки.
 `Install-Mac.command` поставит зависимости, создаст `config.yaml` и соберёт
-значок «J.A.R.V.I.S.» в `~/Applications` (приложение в строке меню, без чёрных окон).
+значок «Marvin» в `~/Applications` (приложение в строке меню, без чёрных окон).
 
 Нужен **Python 3.10+** (на Apple Silicon `python3` из Command Line Tools — это 3.9,
 поэтому ставьте Homebrew: `brew install python@3.12`). `sudo` не требуется.

@@ -73,7 +73,7 @@ class Aim(SQLModel, table=True):
     а если вех нет — по задачам с aim_id; поле progress — ручная поправка, когда считать не по чему."""
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
-    why: str = ""                      # зачем — одна фраза; Джарвис напоминает её, когда цель буксует
+    why: str = ""                      # зачем — одна фраза; ассистент напоминает её, когда цель буксует
     status: str = Field(default="active", index=True)   # active / paused / done / dropped
     priority: int = 2                  # 1 главная сейчас, 2 обычная, 3 фоновая
     due: Optional[datetime] = None
@@ -333,7 +333,7 @@ class SchemaVersion(SQLModel, table=True):
 
 
 class ActionLog(SQLModel, table=True):
-    """Что Джарвис сделал по команде — чтобы «отмени» работало для чего угодно и переживало перезапуск."""
+    """Что ассистент сделал по команде — чтобы «отмени» работало для чего угодно и переживало перезапуск."""
     id: Optional[int] = Field(default=None, primary_key=True)
     kind: str = Field(index=True)      # add_event / add_task / add_expense / add_income / add_debt / add_note / add_link / add_recurring / pay_debt
     ref_table: str

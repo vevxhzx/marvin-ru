@@ -1106,7 +1106,7 @@ async def run_polling_forever(bot: Bot, dp: Dispatcher, on_connected=None) -> No
                 return
             except Exception as e:
                 if "Conflict" in str(e) or "terminated by other getUpdates" in str(e):
-                    log.error("ДВА ДЖАРВИСА НА ОДНОМ БОТЕ: где-то запущено ещё одно окно (автозагрузка? старая копия?). "
+                    log.error("ДВА МАРВИНА НА ОДНОМ БОТЕ: где-то запущено ещё одно окно (автозагрузка? старая копия?). "
                               "Сообщения уходят туда, а не сюда. Закройте все окна ассистента и запустите start.bat один раз.")
                     _record_error("tg: конфликт — запущен второй экземпляр бота")
                 log.warning("Polling прервался: %s — переподключаюсь", type(e).__name__)

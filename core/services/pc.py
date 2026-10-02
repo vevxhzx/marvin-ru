@@ -53,7 +53,7 @@ SITES = {
     "гитхаб": "https://github.com", "github": "https://github.com", "хабр": "https://habr.com", "чат гпт": "https://chatgpt.com", "chatgpt": "https://chatgpt.com", "джипити": "https://chatgpt.com",
     "озон": "https://ozon.ru", "вайлдберриз": "https://wildberries.ru", "авито": "https://avito.ru", "карты": "https://yandex.ru/maps", "погоду": "https://yandex.ru/pogoda", "погода": "https://yandex.ru/pogoda",
     "нетфликс": "https://netflix.com", "спотифай": "https://open.spotify.com", "spotify": "https://open.spotify.com", "яндекс музыку": "https://music.yandex.ru", "музыку": "https://music.yandex.ru",
-    "джарвиса": "__self__", "сайт джарвиса": "__self__", "джарвис сайт": "__self__",
+    "марвина": "__self__", "сайт марвина": "__self__", "марвин сайт": "__self__",
 }
 APPS = {
     "телегу": "telegram", "телеграм": "telegram", "telegram": "telegram", "дискорд": "discord", "discord": "discord", "стим": "steam", "steam": "steam",
@@ -159,7 +159,7 @@ def parse(text: str) -> PcCommand | None:
         return PcCommand("find", m.group(2).strip(" «»\"'"), say=f"Ищу «{m.group(2).strip()}» на компьютере…")
     m = OPEN_RX.match(t)
     if m and re.search(r"\b(задач|дел[аоы]?|встреч|событи|календар|финанс|баланс|долг|трат|расход|доход|заметк|мысл|ссылк|мозг|памят|бриф|план|подписк|прогноз|отч[её]т|сводк|напомина|регулярн)", low):
-        m = None   # «покажи задачи», «открой календарь» — это про данные Джарвиса, не про ПК
+        m = None   # «покажи задачи», «открой календарь» — это про данные ассистента, не про ПК
     if m:
         target = m.group(2).strip(" «»\"'").lower()
         if re.search(r"^(https?://|www\.)|\.(ru|com|org|net|io|tv|me|dev|app)(/|$)", target):

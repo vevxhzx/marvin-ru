@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Второй Джарвис на этом же ПК — для мамы (или любого близкого человека). Запускается из mama.bat.
+"""Второй ассистент на этом же ПК — для мамы (или любого близкого человека). Запускается из mama.bat.
 
 Что делает, по шагам и с вопросами:
   1. копирует проект в соседнюю папку (без вашей базы, конфига и голосовых моделей);
@@ -68,10 +68,10 @@ def copy_project(dst: Path) -> None:
                             ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".pytest_cache"))
         else:
             shutil.copy2(item, target)
-    # её start.bat — с другим заголовком окна: два одинаковых «J.A.R.V.I.S.» на панели задач не различить
+    # её start.bat — с другим заголовком окна: два одинаковых «Marvin» на панели задач не различить
     try:
         bat = (dst / "start.bat").read_text(encoding="utf-8", errors="replace")
-        bat = bat.replace("title J.A.R.V.I.S.\r\n", "title J.A.R.V.I.S. - MAMA (port 8766)\r\n", 1).replace("title J.A.R.V.I.S.\n", "title J.A.R.V.I.S. - MAMA (port 8766)\n", 1)
+        bat = bat.replace("title Marvin\r\n", "title Marvin - MAMA (port 8766)\r\n", 1).replace("title Marvin\n", "title Marvin - MAMA (port 8766)\n", 1)
         bat = bat.replace("echo Jarvis is ALREADY RUNNING", "echo Jarvis (mama) is ALREADY RUNNING").replace("echo Jarvis stopped.", "echo Jarvis (mama) stopped.")
         (dst / "start.bat").write_text(bat, encoding="utf-8")
     except OSError as e:
@@ -225,7 +225,7 @@ def setup_funnel() -> str | None:
     _, st = tailscale("funnel", "status")
     m = re.search(r"(https://[\w.-]+\.ts\.net)", st)
     if not m:
-        print("  У вашего Джарвиса Funnel ещё не включён (funnel.bat). Сначала он, потом снова mama.bat.")
+        print("  У вашего ассистента Funnel ещё не включён (funnel.bat). Сначала он, потом снова mama.bat.")
         return None
     base = m.group(1)
     if f":{FUNNEL_PORT}" in st and str(PORT) in st:
@@ -252,7 +252,7 @@ def add_autostart(dst: Path, title: str) -> None:
 
 def main() -> int:
     print("\n  ================================================")
-    print("    J.A.R.V.I.S. для мамы — вторая копия на этом ПК")
+    print("    Marvin для мамы — вторая копия на этом ПК")
     print("  ================================================")
     print("  Понадобятся: токен нового бота (@BotFather → /newbot) и ключ Groq")
     print("  (console.groq.com/keys, бесплатно, лучше отдельный аккаунт). Телефон мамы — под рукой.")
@@ -272,7 +272,7 @@ def main() -> int:
         values = None
     else:
         hr("2. Обращение")
-        assistant = "Джарвис"
+        assistant = "Марвин"
         owner = ask("Как ему обращаться к ней («мам», «Наталья», «Наталья Петровна»)", "мам")
         tz = ask("Часовой пояс", "Europe/Moscow")
 
@@ -286,7 +286,7 @@ def main() -> int:
                 print(f"        ок: @{res['username']}"); break
             print(f"  ✗ {res['detail']}")
             if "VPN" in res["detail"] and not proxy:
-                proxy = ask("Прокси для Telegram (как у вашего Джарвиса; пусто — попробовать снова)", "")
+                proxy = ask("Прокси для Telegram (как у вашего ассистента; пусто — попробовать снова)", "")
                 proxy = "" if proxy in ("-", "нет") else proxy
         print(f"\n  Теперь с ТЕЛЕФОНА МАМЫ откройте https://t.me/{res['username']} и нажмите «Start».")
         print("  (Можно с вашего телефона, если бот будет у вас — тогда ID будет ваш.)")
@@ -334,7 +334,7 @@ def main() -> int:
 
     hr("6. Автозагрузка")
     if yes("Запускать её копию вместе с Windows (вместе с вашей)?"):
-        add_autostart(dst, "Jarvis - mama")
+        add_autostart(dst, "Marvin - mama")
 
     print("\n  ================================================")
     print("    Готово. Что дальше:")
@@ -343,7 +343,7 @@ def main() -> int:
     print("        (перешлите ей файл или распечатайте).")
     if url:
         print(f"     3. Кнопка «Открыть» появится в её боте после запуска. Адрес: {url}")
-    print("     Обе копии независимы: разные боты, базы и ключи; ваш Джарвис её сообщений не видит.")
+    print("     Обе копии независимы: разные боты, базы и ключи; ваш ассистент её сообщений не видит.")
     print("  ================================================\n")
     if sys.platform == "win32" and ask("Запустить её копию прямо сейчас? (д/н)", "д").lower().startswith(("д", "y")):
         subprocess.Popen(["cmd", "/c", "start", "", str(dst / "start.bat")], cwd=str(dst))

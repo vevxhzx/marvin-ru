@@ -1,5 +1,5 @@
 @echo off
-title J.A.R.V.I.S. - second copy for mom
+title Marvin - second copy for mom
 cd /d "%~dp0"
 chcp 65001 >nul
 if not exist .venv\Scripts\python.exe (

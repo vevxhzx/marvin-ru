@@ -71,7 +71,7 @@
     <h2>как его зовут?</h2>
     <div class="sub">Имя — это и обращение в чате, и слово, на которое он откликается голосом. Лучше 2–3 слога по-русски.</div>
     <label class="label">имя ассистента</label>
-    <input class="input" id="name" placeholder="Джарвис" value="Джарвис" />
+    <input class="input" id="name" placeholder="Марвин" value="Марвин" />
     <div class="row" style="margin-top:10px;flex-wrap:wrap;gap:6px" id="nameChips"></div>
     <label class="label">как обращаться к вам</label>
     <input class="input" id="owner" placeholder="сэр / босс / Андрей" value="Сэр" />
@@ -165,7 +165,7 @@ const api = async (m, p, b) => { const r = await fetch(p, { method: m, headers: 
 const st = (id, kind, html) => { const e = $(id); e.className = 'status show ' + (kind || ''); e.innerHTML = html }
 const S = { step: 1, style: 'swag', mode: 'hybrid', model: '', provider: 'groq', hw: null, rec: null, tgOk: false, cloudOk: false, botUser: '' }
 
-const NAMES = ['Джарвис', 'Веспер', 'Атлас', 'Ирис', 'Оскар', 'Нова', 'Феликс', 'Юна']
+const NAMES = ['Марвин', 'Веспер', 'Атлас', 'Ирис', 'Оскар', 'Нова', 'Феликс', 'Юна']
 $('#nameChips').innerHTML = NAMES.map((n) => `<button class="btn" style="padding:7px 12px;font-size:13px" onclick="$('#name').value='${n}'">${n}</button>`).join('')
 
 function pick(boxId, key, cb) { const box = $(boxId); box.addEventListener('click', (e) => { const c = e.target.closest('.card'); if (!c) return; box.querySelectorAll('.card').forEach((x) => x.classList.remove('on')); c.classList.add('on'); S[key] = c.dataset.v; cb && cb(c.dataset.v) }) }
@@ -189,7 +189,7 @@ function go(n) {
   if (n === 2 && !S.hw) loadHw()
   if (n === 3) refreshOllama()
   if (n === 4 && !$('#providers').children.length) loadProviders()
-  if (n === 5) $('#h1').innerHTML = ($('#name').value || 'джарвис').toLowerCase() + '<span class="a">*</span>'
+  if (n === 5) $('#h1').innerHTML = ($('#name').value || 'марвин').toLowerCase() + '<span class="a">*</span>'
 }
 
 async function loadHw() {
@@ -290,7 +290,7 @@ async function waitOwner() {
 }
 
 async function finish(noTg) {
-  const name = ($('#name').value || 'Джарвис').trim()
+  const name = ($('#name').value || 'Марвин').trim()
   const ch = {
     'assistant.name': name, 'assistant.name_latin': translit(name), 'owner.name': ($('#owner').value || 'Сэр').trim(),
     'persona.style': S.style, 'brain.mode': S.mode, 'setup.done': true,

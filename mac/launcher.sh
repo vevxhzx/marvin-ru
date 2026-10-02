@@ -11,7 +11,7 @@ if [ -f "$RES/project_root" ]; then
 elif [ -f "$HERE/../../../run.py" ]; then
   ROOT="$(cd "$HERE/../../.." && pwd)"
 else
-  osascript -e 'display alert "J.A.R.V.I.S." message "Не найден проект. Запустите Install-Mac.command из папки ассистента."' 2>/dev/null || true
+  osascript -e 'display alert "Marvin" message "Не найден проект. Запустите Install-Mac.command из папки ассистента."' 2>/dev/null || true
   exit 1
 fi
 
@@ -34,7 +34,7 @@ if [ ! -x "$PY" ]; then
 fi
 PY="$ROOT/.venv/bin/python"
 if [ ! -x "$PY" ]; then
-  osascript -e 'display alert "J.A.R.V.I.S." message "Нужен Python 3.10 или новее. Поставьте с python.org или: brew install python@3.12 — и снова Install-Mac.command. Подробности: data/host.log"' 2>/dev/null || true
+  osascript -e 'display alert "Marvin" message "Нужен Python 3.10 или новее. Поставьте с python.org или: brew install python@3.12 — и снова Install-Mac.command. Подробности: data/host.log"' 2>/dev/null || true
   exit 1
 fi
 

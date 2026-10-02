@@ -45,7 +45,7 @@ LABELS = {
     "background_started": "фон: {job} запущен",
     "background_done": "фон: {job} завершён",
     "background_failed": "фон: {job} упал — {error}",
-    "assistant_notified": "Джарвис написал: {what}",
+    "assistant_notified": "Марвин написал: {what}",
     "restart": "ядро перезапущено",
 }
 

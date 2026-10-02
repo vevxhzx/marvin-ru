@@ -593,10 +593,10 @@ def test_cards_render_and_evening_text_card_style(tmp_path):
         assert im.width == cards.W and 400 < im.height < 2600
     txt = cards.evening_text()
     # Подвал подписан ИМЕНЕМ АССИСТЕНТА ИЗ КОНФИГУрации (core/identity.py → assistant.name),
-    # а не захардкоженным «джарвис»: в CI нет config.yaml (он в .gitignore), и подпись там
+    # а не захардкоженным «марвин»: в CI нет config.yaml (он в .gitignore), и подпись там
     # «марвин ·» из config.example.yaml. Проверяем само правило, а не имя конкретной установки.
     from core import identity
-    name = (identity.NAME or "джарвис").lower()
+    name = (identity.NAME or "марвин").lower()
     assert "ИТОГИ ДНЯ" in txt and "ЗАКРЫТО" in txt and f"{name} ·" in txt.lower()
     assert len(txt) < 1500          # карточка, а не простыня
 

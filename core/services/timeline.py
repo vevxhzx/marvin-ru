@@ -1,4 +1,4 @@
-"""Лента дня: что делал человек и что делал Джарвис — одной хронологией.
+"""Лента дня: что делал человек и что делал ассистент — одной хронологией.
 
 Сшивает четыре источника, которые раньше жили порознь:
 • Memory — действия (записал трату, закрыл задачу, поставил цель) и события (сел/ушёл/рендер/фон);
@@ -26,16 +26,16 @@ def _bounds(day: datetime | None) -> tuple[datetime, datetime]:
 
 
 def build(day: datetime | None = None, query: str | None = None, min_block: int = MIN_BLOCK_MIN) -> list[dict]:
-    """[{at, kind, text, who}] отсортировано. who: «я» (человек) / «джарвис» / «пк». query — фильтр по словам."""
+    """[{at, kind, text, who}] отсортировано. who: «я» (человек) / «марвин» / «пк». query — фильтр по словам."""
     d0, d1 = _bounds(day)
     items: list[dict] = []
     with session() as s:
         for m in s.exec(select(Memory).where(Memory.created_at >= d0, Memory.created_at < d1).order_by(Memory.created_at)).all():
             if m.kind == "chat":
                 continue
-            who = "джарвис" if m.channel == "system" or m.kind == "presence" else "я"
+            who = "марвин" if m.channel == "system" or m.kind == "presence" else "я"
             if m.kind == "presence":
-                who = "пк" if m.text.startswith(("сел", "отошёл", "вернулся", "давно нет", "без перерыва", "запущена", "тяжёлая", "переключился")) else "джарвис"
+                who = "пк" if m.text.startswith(("сел", "отошёл", "вернулся", "давно нет", "без перерыва", "запущена", "тяжёлая", "переключился")) else "марвин"
             items.append({"at": m.created_at, "kind": m.kind, "text": m.text, "who": who})
         # экран: сессии и длинные блоки
         rows = s.exec(select(ScreenSlot).where(ScreenSlot.end >= d0, ScreenSlot.start < d1).order_by(ScreenSlot.start)).all()
@@ -61,10 +61,10 @@ def build(day: datetime | None = None, query: str | None = None, min_block: int 
         for c in chats:
             by_hour[c.created_at.hour] = by_hour.get(c.created_at.hour, 0) + 1
         for h, n in by_hour.items():
-            items.append({"at": d0.replace(hour=h), "kind": "chat", "text": f"разговор с Джарвисом ({n} сообщ.)", "who": "я"})
+            items.append({"at": d0.replace(hour=h), "kind": "chat", "text": f"разговор с Марвином ({n} сообщ.)", "who": "я"})
         # упавшие ходы
         for r in s.exec(select(Run).where(Run.created_at >= d0, Run.created_at < d1, Run.ok == False)).all():  # noqa: E712
-            items.append({"at": r.created_at, "kind": "fail", "text": f"не справился: «{(r.text or '')[:50]}»", "who": "джарвис"})
+            items.append({"at": r.created_at, "kind": "fail", "text": f"не справился: «{(r.text or '')[:50]}»", "who": "марвин"})
     # блоки экрана короче min_block — убираем; оформляем длительность
     out = []
     for it in items:
@@ -90,7 +90,7 @@ def text(day: datetime | None = None, query: str | None = None, limit: int = 40)
         return f"За {label} в ленте пусто" + (f" по «{query}»" if query else "") + "."
     lines = [f"Лента за {label}" + (f" · «{query}»" if query else "") + ":"]
     for it in items[-limit:]:
-        mark = {"я": "", "джарвис": "🤖 ", "пк": "🖥 "}[it["who"]]
+        mark = {"я": "", "марвин": "🤖 ", "пк": "🖥 "}[it["who"]]
         lines.append(f"{it['at']:%H:%M} — {mark}{it['text']}")
     return "\n".join(lines)
 

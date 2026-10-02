@@ -34,7 +34,7 @@ from .schemas import (  # ФАЗА 7 шаг 7.0: тела моделей вын�
 
 log = logging.getLogger("jarvis.api")
 
-app = FastAPI(title="J.A.R.V.I.S. Core", version="0.1")
+app = FastAPI(title="Marvin Core", version="0.1")
 
 # доступ с других устройств — только с токеном (см. core/api/auth.py); с самого ПК — свободно
 from .auth import AuthMiddleware, is_loopback  # noqa: E402

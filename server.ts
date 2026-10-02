@@ -352,7 +352,7 @@ app.get('/api/events/stream', (req, res) => {
   })
 })
 
-// По умолчанию — «Марвин»: репозиторий и сайт проекта marvin-ru. Личный профиль «Джарвис» — только по явному EDITION=jarvis.
+// По умолчанию — «Марвин»: репозиторий и сайт проекта marvin-ru. Издание «личное» — только по явному EDITION=jarvis.
 let currentEdition = process.env.EDITION === 'marvin' ? 'marvin' : 'jarvis'
 
 // Health
@@ -365,8 +365,8 @@ app.get('/api/health', (req, res) => {
     time: new Date().toISOString(),
     version: '1.0.0',
     edition: currentEdition,
-    name: isMarvin ? 'Марвин' : 'Джарвис',
-    name_latin: isMarvin ? 'Marvin' : 'Jarvis',
+    name: 'Марвин',
+    name_latin: 'Marvin',
   })
 })
 
@@ -375,8 +375,8 @@ app.get('/api/edition', (req, res) => {
   const isMarvin = currentEdition === 'marvin'
   res.json({
     edition: currentEdition,
-    name: isMarvin ? 'Марвин' : 'Джарвис',
-    name_latin: isMarvin ? 'Marvin' : 'Jarvis',
+    name: 'Марвин',
+    name_latin: 'Marvin',
     is_marvin: isMarvin,
     is_jarvis: !isMarvin,
   })
@@ -391,8 +391,8 @@ app.post('/api/edition', (req, res) => {
   const isMarvin = currentEdition === 'marvin'
   res.json({
     edition: currentEdition,
-    name: isMarvin ? 'Марвин' : 'Джарвис',
-    name_latin: isMarvin ? 'Marvin' : 'Jarvis',
+    name: 'Марвин',
+    name_latin: 'Marvin',
     is_marvin: isMarvin,
     is_jarvis: !isMarvin,
   })
@@ -1729,7 +1729,7 @@ app.delete('/api/orders/:id/time/:timeId', (req, res) => {
 // Desktop Client Info
 app.get('/api/client/info', (req, res) => {
   res.json({
-    app_name: currentEdition === 'marvin' ? 'Марвин' : 'Джарвис',
+    app_name: 'Марвин',
     version: '1.0.0',
     platform: process.platform,
     mode: 'desktop_projection',
@@ -2890,7 +2890,7 @@ async function llmAnswer(text: string): Promise<string | null> {
         {
           role: 'system',
           content:
-            'Ты — Марвин (Джарвис), личный ассистент владельца. Отвечай коротко, по-русски, спокойно и по делу. ' +
+            'Ты — Марвин, личный ассистент владельца. Отвечай коротко, по-русски, спокойно и по делу. ' +
             'Никогда не выдумывай суммы, даты и статусы — используй только данные ниже. ' +
             'Если вопрос про действия в приложении (записать трату, поставить задачу) — просто подскажи, как это сказать одной фразой.\n\n' +
             llmContext(),

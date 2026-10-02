@@ -1,5 +1,5 @@
 @echo off
-title Jarvis
+title Marvin
 cd /d "%~dp0"
 if not exist .venv\Scripts\python.exe (
     echo Run install.bat first.

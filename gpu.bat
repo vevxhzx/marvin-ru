@@ -1,5 +1,5 @@
 @echo off
-title J.A.R.V.I.S. - GPU speech recognition (optional)
+title Marvin - GPU speech recognition (optional)
 cd /d "%~dp0"
 echo   Speech recognition on NVIDIA GPU: whisper 0.3 s instead of 2-3 s.
 echo   Downloads CUDA libraries (about 1 GB). Needs NVIDIA driver (GeForce Experience / nvidia.com).

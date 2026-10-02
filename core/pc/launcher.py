@@ -92,7 +92,7 @@ def launch(restart: bool = False) -> dict:
                 "message": "голосовой клиент уже запущен — используйте «перезапустить», если он не отвечает"}
     stopped = stop() if (restart and pids) else {"stopped": 0, "pids": []}
     # voice.bat сам перезапускается и берёт .venv-питон; вызываем через cmd start, чтобы окно жило отдельно
-    _spawn_detached(["cmd", "/c", "start", "Jarvis Voice", str(BAT)])
+    _spawn_detached(["cmd", "/c", "start", "Marvin Voice", str(BAT)])
     log.info("Запускаю голосовой клиент: %s (restart=%s, погашено=%s)", BAT.name, restart, stopped.get("stopped"))
     time.sleep(0.6)   # дать окну появиться, чтобы пульс успел прийти к первому же опросу статуса
     return {"ok": True, "restarted": bool(restart), "stopped": stopped.get("stopped", 0),

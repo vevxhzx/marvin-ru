@@ -35,7 +35,7 @@ def test_hotwords_includes_own_data(monkeypatch):
         s.add(Client(name="Пятёрочка"))
         s.commit()
     hint = stt._hotwords()
-    assert "Пятёрочка" in hint and "Джарвис" in hint
+    assert "Пятёрочка" in hint and "Марвин" in hint
 
 
 def test_cloud_stt_only_outside_local(monkeypatch):

@@ -1,8 +1,8 @@
 @echo off
-title J.A.R.V.I.S. - Silero offline voice (optional)
+title Marvin - Silero offline voice (optional)
 cd /d "%~dp0"
 echo   Installing offline voice: torch, about 2 GB download, 3 GB disk.
-echo   Without it Jarvis speaks via Microsoft voice and needs internet.
+echo   Without it Marvin speaks via Microsoft voice and needs internet.
 echo   Press Ctrl+C to cancel, or
 pause
 .venv\Scripts\python.exe -m pip install -r requirements-silero.txt --disable-pip-version-check --index-url https://download.pytorch.org/whl/cpu

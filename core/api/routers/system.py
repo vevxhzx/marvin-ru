@@ -147,8 +147,8 @@ def ui_prefs_put(p: UiPrefsIn, request: Request):
 def _edition_payload(ed: str) -> dict:
     is_marvin = ed == "marvin"
     return {"edition": ed,
-            "name": "Марвин" if is_marvin else "Джарвис",
-            "name_latin": "Marvin" if is_marvin else "Jarvis",
+            "name": "Марвин",
+            "name_latin": "Marvin",
             "is_marvin": is_marvin, "is_jarvis": not is_marvin}
 
 
@@ -172,7 +172,7 @@ def client_info():
     """Карточка десктоп-клиента в настройках (WebView2 / App Mode)."""
     import platform as _platform
     from ... import identity, VERSION
-    return {"app_name": identity.NAME or "Джарвис", "version": VERSION,
+    return {"app_name": identity.NAME or "Марвин", "version": VERSION,
             "platform": _platform.system().lower(), "mode": "desktop_projection",
             "single_instance": True, "tray_enabled": True, "webview2_ready": True}
 
@@ -466,7 +466,7 @@ def _esc(value: object) -> str:
 @router.get("/api/google/callback", response_class=HTMLResponse)
 async def google_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     gcal = _gcal_reload()
-    page = "<html><head><meta charset='utf-8'><title>Джарвис · Google</title></head><body style='font-family:-apple-system,Segoe UI,sans-serif;background:#f4f3f1;color:#1d1d1f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center;max-width:520px;padding:32px'>{}</div></body></html>"
+    page = "<html><head><meta charset='utf-8'><title>Марвин · Google</title></head><body style='font-family:-apple-system,Segoe UI,sans-serif;background:#f4f3f1;color:#1d1d1f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center;max-width:520px;padding:32px'>{}</div></body></html>"
     if error or not code:
         return page.format(f"<h1 style='font-weight:500'>Не вышло</h1><p>{_esc(error or 'Google не вернул код')}.</p><p><a href='/settings'>← назад в настройки</a></p>")
     try:

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>джарвис · сегодня</title>
+<title>марвин · сегодня</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter+Tight:wght@400;500;600&family=JetBrains+Mono:wght@400&display=swap">
 <style>
 :root{--bg:#e9ecf3;--sf:#fff;--sf2:#f0f1f6;--ink:#101114;--ink2:#5d6068;--ink3:#9a9da6;--line:rgba(16,17,20,.07);--acc:#0a3cff;--neg:#ff3b5c;--pos:#19b34a;--warn:#f5a800;--p1:#ece9ff;--p1b:#d3cdff;--p2:#e3f7ea;--p2b:#c2ecd1;--spot:rgba(10,60,255,.07);--g1:rgba(10,60,255,.16);--g2:rgba(160,100,255,.16);--p1i:#2a2470;--p2i:#0f5a2b;
@@ -160,7 +160,7 @@ h1{font-size:clamp(34px,5vw,54px);font-weight:600;letter-spacing:-.045em;line-he
 <div class="aur"><i></i><i></i></div>
 <div class="app">
 <aside>
-  <div class="logo"><i></i>джарвис</div>
+  <div class="logo"><i></i>марвин</div>
   <nav>
     <a class="on" href="#today" data-p="today"><svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="2"/></svg>сегодня</a>
     <a href="#tasks" data-p="tasks"><svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="4"/><path d="m7 10 2 2 4-4"/></svg>задачи</a>
@@ -319,7 +319,7 @@ h1{font-size:clamp(34px,5vw,54px);font-weight:600;letter-spacing:-.045em;line-he
   document.addEventListener('pointermove',function(e){var c=e.target.closest&&e.target.closest('.c');if(!c)return;var r=c.getBoundingClientRect();c.style.setProperty('--mx',(e.clientX-r.left)+'px');c.style.setProperty('--my',(e.clientY-r.top)+'px')});
   var ph=$('ph');
   var s=['700 такси','встреча в среду в 15 с Димой','мозг: идея для ролика','куда ушли деньги','напомни через 20 минут'];
-  if(rm){ph.textContent='сказать джарвису';return}
+  if(rm){ph.textContent='сказать марвину';return}
   var a=0,c=0,del=false;
   (function tick(){
     var w=s[a];

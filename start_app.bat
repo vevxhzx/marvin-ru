@@ -1,5 +1,5 @@
 @echo off
-title Jarvis app
+title Marvin app
 cd /d "%~dp0"
 
 :: Ядро живёт в .venv — окно должно запускаться тем же интерпретатором, иначе нет fastapi/aiogram и run.py падает.

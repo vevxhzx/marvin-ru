@@ -34,7 +34,7 @@ done
 clear 2>/dev/null || true
 printf '\n'
 printf '  ╔══════════════════════════════════════════╗\n'
-printf '  ║   J.A.R.V.I.S. — установка как приложения Mac  ║\n'
+printf '  ║   Marvin — установка как приложения Mac  ║\n'
 printf '  ╚══════════════════════════════════════════╝\n'
 printf '\n'
 printf '  Папка проекта: %s\n' "$ROOT"

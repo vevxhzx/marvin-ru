@@ -498,7 +498,7 @@ def upload_backup(path, cfg=None) -> dict:
         "enc_size": len(enc),
         "sha256": _sha256(data),
         "created_at": datetime.now().isoformat(timespec="seconds"),
-        "app": "jarvis",
+        "app": "marvin",
         "version": _app_version(),
         "format": "aes-256-gcm/scrypt",
     }
