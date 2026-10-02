@@ -224,3 +224,45 @@ def test_pre_migration_backups_listed_and_trimmed(backup_env, monkeypatch):
     # restore по-прежнему принимает только backup-*.db — поведение не менялось
     with pytest.raises(ValueError):
         scheduler.restore_backup(old.name)
+
+
+def test_pre_migration_backup_never_leaves_an_empty_file(tmp_path):
+    """Страховка перед миграцией: снимок проверяется до того, как попадёт в backups/.
+
+    Пустой или битый снимок опаснее отсутствия снимка — его принимают за рабочую копию.
+    """
+    import sqlmodel
+
+    from core import migrations
+
+    db_file = tmp_path / "src.db"
+    con = sqlite3.connect(db_file)
+    con.execute("CREATE TABLE t (x INT)")
+    con.execute("INSERT INTO t VALUES (42)")
+    con.commit()
+    con.close()
+    engine = sqlmodel.create_engine(f"sqlite:///{db_file}")
+
+    out = migrations.backup_before_migration(engine, backup_dir=tmp_path / "backups")
+    assert out and Path(out).stat().st_size > 0, "бэкап должен быть непустым"
+    chk = sqlite3.connect(out)
+    try:
+        assert chk.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+        assert chk.execute("SELECT x FROM t").fetchone()[0] == 42
+    finally:
+        chk.close()
+
+    # небоевая база (тест/tmp) не должна писать бэкапы в боевой каталог из config.yaml
+    real_dir = migrations._backup_dir()
+    before = set(real_dir.glob("pre-migration-*.db")) if real_dir.exists() else set()
+    migrations.backup_before_migration(engine)
+    after = set(real_dir.glob("pre-migration-*.db")) if real_dir.exists() else set()
+    assert after == before, "тестовая БД не должна оставлять файлы в боевом каталоге бэкапов"
+
+    # битый источник - не оставляем ни файла, ни «полу-бэкапа»
+    broken = tmp_path / "broken.db"
+    broken.write_bytes(b"not a database at all")
+    eng2 = sqlmodel.create_engine(f"sqlite:///{broken}")
+    assert migrations.backup_before_migration(eng2, backup_dir=tmp_path / "backups2") is None
+    left = list((tmp_path / "backups2").glob("*")) if (tmp_path / "backups2").exists() else []
+    assert not [p for p in left if p.stat().st_size == 0], "пустых файлов быть не должно"

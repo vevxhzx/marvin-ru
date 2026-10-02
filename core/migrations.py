@@ -248,22 +248,61 @@ def _backup_dir() -> Path:
 
 
 def backup_before_migration(engine: Engine, backup_dir: str | Path | None = None) -> str | None:
-    """Копия файла БД через SQLite backup API. Возвращает путь к бэкапу или None."""
+    """Копия файла БД через SQLite backup API. Возвращает путь к бэкапу или None.
+
+    Гарантии (важно: это единственная страховка перед миграцией):
+    - снимок сначала пишется во временный файл рядом и переезжает на место только
+      после проверки размера и `PRAGMA integrity_check` — «пустышка» в `backups/` не появится;
+    - временная/тестовая БД (не `config.DB_PATH`) никогда не пишет в боевой каталог бэкапов,
+      иначе прогоны тестов засоряли бы его файлами в 0 байт;
+    - при ошибке возвращается None, а partial-файл удаляется.
+    """
     db = _db_file(engine)
     if not db or not os.path.exists(db):
         return None
-    bdir = Path(backup_dir) if backup_dir else _backup_dir()
+    if backup_dir is not None:
+        bdir = Path(backup_dir)
+    else:
+        try:
+            from .config import DB_PATH
+            if os.path.normcase(os.path.abspath(db)) != os.path.normcase(os.path.abspath(DB_PATH)):
+                # не боевая база (тесты, tmp) — бэкап рядом с ней, боевой каталог не трогаем
+                bdir = Path(db).resolve().parent / "backups"
+            else:
+                bdir = _backup_dir()
+        except Exception:  # pragma: no cover
+            bdir = _backup_dir()
     bdir.mkdir(parents=True, exist_ok=True)
     dst = bdir / f"pre-migration-{datetime.now():%Y%m%d-%H%M%S}.db"
+    tmp = dst.with_suffix(".db.part")
     src = sqlite3.connect(db)
-    out = sqlite3.connect(str(dst))
+    out = sqlite3.connect(str(tmp))
     try:
-        with out:
-            src.backup(out)
-    finally:
+        src.backup(out)
+        out.close()
+        size = tmp.stat().st_size if tmp.exists() else 0
+        if size <= 0:
+            raise RuntimeError("снимок БД пустой")
+        chk = sqlite3.connect(str(tmp))
+        try:
+            if chk.execute("PRAGMA integrity_check").fetchone()[0] != "ok":
+                raise RuntimeError("снимок БД не проходит проверку целостности")
+        finally:
+            chk.close()
+        os.replace(tmp, dst)
+    except Exception as e:
         out.close()
         src.close()
-    log.info("миграция: бэкап БД → %s", dst)
+        for p in (tmp, dst):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+        log.warning("миграция: не удалось сделать бэкап БД — %s", e)
+        return None
+    finally:
+        src.close()
+    log.info("миграция: бэкап БД → %s (%s)", dst, f"{dst.stat().st_size} байт")
     return str(dst)
 
 
