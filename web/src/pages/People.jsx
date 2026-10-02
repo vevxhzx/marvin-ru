@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Users } from 'lucide-react'
-import { api, money, plural, listOf } from '../lib/api'
+import { api, money, listOf } from '../lib/api'
 import { Sheet, Field, Empty, useToast, PageAccent, ListSkeleton } from '../components/ui'
 import { ClientCardSheet } from './Orders'
 import { useRefresh } from '../App'
@@ -8,16 +8,19 @@ import { usePageAccent } from '../lib/prefs'
 import { ClientStageBadge } from '../components/ClientStage'
 import ClientNextStep from '../components/ClientNextStep'
 import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageApi, loadClientStages } from '../lib/crm'
+import { useI18n, SERVER, t as T } from '../lib/i18n'
 
-// colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово
-const KIND_RU = { person: 'человек', family: 'семья', friend: 'друг', client: 'клиент', company: 'компания', colleague: 'коллега' }
-const kindLabel = (p) => p.kind_label || KIND_RU[p.kind] || p.kind || 'человек'
+// colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово.
+// Подписи типов — ключи словаря (см. lib/i18n.js)
+const KIND_RU = { person: 'people.k_person', family: 'people.k_family', friend: 'people.k_friend', client: 'people.k_client', company: 'people.k_company', colleague: 'people.k_colleague' }
+const kindLabel = (p) => p.kind_label || (KIND_RU[p.kind] ? T(KIND_RU[p.kind]) : null) || p.kind || T('people.k_person')
 const chip = (on) => ({ background: on ? 'var(--ink)' : 'var(--sf)', color: on ? 'var(--bg)' : 'var(--ink2)' })
 const initials = (name) => (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('')
 // стадия клиента осмысленна только у клиентов и компаний — у «своих» людей её нет
 const HAS_STAGE = new Set(['client', 'company'])
 
 export default function People() {
+  const { t } = useI18n()
   const [list, setList] = useState(null)
   const pageAcc = usePageAccent('people')
   const [q, setQ] = useState('')
@@ -60,33 +63,33 @@ export default function People() {
       {/* Шапка */}
       <div className="top">
         <div>
-          <h1 className="r" style={{ '--i': 0 }}>люди</h1>
+          <h1 className="r" style={{ '--i': 0 }}>{T('nav.people')}</h1>
           <p className="sub r" style={{ '--i': 1 }}>
-            {openCount} с открытыми заказами · не оплачено {money(unpaidTotal)}
+            {t('people.open_orders', { n: openCount })} · {t('people.unpaid', { m: money(unpaidTotal) })}
           </p>
         </div>
         <div className="hr r" style={{ '--i': 1 }}>
           {/* переносимые «пилюли», а не .sg: шесть-семь пунктов в одну таблетку
               не влезали и превращались в странную пустую подложку */}
           <div className="flex flex-wrap gap-2">
-            <button type="button" style={chip(tab === 'all')} className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition" onClick={() => setTab('all')}>все</button>
+            <button type="button" style={chip(tab === 'all')} className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition" onClick={() => setTab('all')}>{t('common.all')}</button>
             {Object.entries(KIND_RU).map(([k, label]) => (
-              <button type="button" key={k} style={chip(tab === k)} className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition" onClick={() => setTab(k)}>{label}</button>
+              <button type="button" key={k} style={chip(tab === k)} className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition" onClick={() => setTab(k)}>{t(label)}</button>
             ))}
           </div>
-          <span className="btn" onClick={() => setSheet('new')}>+ человек</span>
+          <button type="button" className="btn" onClick={() => setSheet('new')}>{t('people.add')}</button>
         </div>
       </div>
 
       {/* Фильтр по стадии клиента — вторая, отдельная сущность (не стадия заказа) */}
       {withStages && (
         <div className="r flex flex-wrap items-center gap-2" style={{ '--i': 2, marginTop: '14px' }}>
-          <span className="label">стадия клиента</span>
-          <button type="button" style={chip(stageTab === 'all')} className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition" onClick={() => setStageTab('all')}>все</button>
+          <span className="label">{t('cstage.title')}</span>
+          <button type="button" style={chip(stageTab === 'all')} className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition" onClick={() => setStageTab('all')}>{t('common.all')}</button>
           {CLIENT_STAGES.map(([k, label]) => (
             <button key={k} type="button" style={chip(stageTab === k)} className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition"
-              data-tip={CLIENT_STAGE_TONE[k] === 'pos' ? 'деньги есть' : CLIENT_STAGE_TONE[k] === 'neg' ? 'риск / ушёл' : 'стадия ставится и вручную'}
-              onClick={() => setStageTab(stageTab === k ? 'all' : k)}>{label}{stageCount(k) ? ` · ${stageCount(k)}` : ''}</button>
+              data-tip={t(CLIENT_STAGE_TONE[k] === 'pos' ? 'people.tip_money' : CLIENT_STAGE_TONE[k] === 'neg' ? 'people.tip_risk' : 'people.tip_manual')}
+              onClick={() => setStageTab(stageTab === k ? 'all' : k)}>{t(label)}{stageCount(k) ? ` · ${stageCount(k)}` : ''}</button>
           ))}
         </div>
       )}
@@ -101,7 +104,7 @@ export default function People() {
           value={q}
           onChange={(e) => setQ(e.target.value)}
           style={{ background: 'transparent', border: 0, outline: 'none', width: '100%', color: 'inherit', font: 'inherit', marginLeft: '8px' }}
-          placeholder="имя, прозвище, тег, контакт…"
+          placeholder={t('people.search_ph')}
         />
       </div>
 
@@ -110,34 +113,41 @@ export default function People() {
         {list === null ? <ListSkeleton n={6} /> : !items.length ? (
           <Empty
             icon={<Users size={38} />}
-            text={list?.length ? 'Никого не нашлось' : 'Никого пока нет'}
-            sub={list?.length ? 'Попробуйте другой запрос или другую вкладку' : 'Добавьте человека кнопкой «+ человек» или скажите в чате «человек: …»'}
+            text={t(list?.length ? 'people.none_found' : 'people.none_yet')}
+            sub={t(list?.length ? 'people.none_found_hint' : 'people.none_yet_hint')}
           />
         ) : items.map((p, idx) => (
-          <section className="c r" key={p.id} style={{ '--i': 4 + (idx % 6), cursor: 'pointer' }} onClick={() => setSheet(p)}>
+          <section className="c r" key={p.id} style={{ '--i': 4 + (idx % 6), cursor: 'pointer' }}
+            role="button" tabIndex={0} aria-label={t('people.open_card', { name: p.name })}
+            onClick={() => setSheet(p)}
+            onKeyDown={(e) => {
+              // Enter/Пробел открывают карточку, но не когда фокус на встроенном select стадии
+              if (e.target !== e.currentTarget && e.target.closest?.('select, input, textarea, button, a')) return
+              if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSheet(p) }
+            }}>
             <div className="pp">
               <span className="av2">{initials(p.name)}</span>
               <div>
                 <b>{p.name}</b>
-                <p>{p.aliases ? (p.aliases.startsWith('она') || p.aliases.startsWith('он') ? p.aliases : `также ${p.aliases}`) : (listOf(p.tags).map((t) => `#${t}`).join(' ') || '')}</p>
+                <p>{p.aliases ? (p.aliases.startsWith(SERVER.alias_she.ru) || p.aliases.startsWith(SERVER.alias_he.ru) ? p.aliases : t('people.also', { names: p.aliases })) : (listOf(p.tags).map((t2) => `#${t2}`).join(' ') || '')}</p>
               </div>
               <small>{kindLabel(p)}</small>
             </div>
             <div className="pps">
-              {p.open ? <span className="pl">{p.open} {plural(p.open, 'заказ в работе', 'заказа в работе', 'заказов в работе')}</span> : null}
-              {p.unpaid ? <span className="pl y">ждём {money(p.unpaid)}</span> : null}
-              {!p.open && !p.unpaid ? 'без заказов' : null}
+              {p.open ? <span className="pl">{t('people.open_in_work', { n: p.open })}</span> : null}
+              {p.unpaid ? <span className="pl y">{t('people.awaiting', { m: money(p.unpaid) })}</span> : null}
+              {!p.open && !p.unpaid ? t('people.no_orders') : null}
             </div>
             {HAS_STAGE.has(p.kind) && (
               <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                 <ClientStageBadge view={stages[p.id]} className="shrink-0" />
                 <select className="input !h-7 flex-1 !text-[12px]" value={stages[p.id]?.stage || 'lead'} disabled={!stages[p.id]}
-                  aria-label={`Стадия клиента: ${p.name}`} title="стадия клиента — ставится вручную или сама по оплатам"
+                  aria-label={t('cstage.for', { name: p.name })} title={t('people.stage_tip')}
                   onChange={async (e) => {
                     const v = e.target.value
                     try { const nv = await clientStageApi.set(p.id, v); setStages((m) => ({ ...m, [p.id]: nv })); bump() } catch (err) { show.err(err) }
                   }}>
-                  {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+                  {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}
                 </select>
               </div>
             )}
@@ -153,6 +163,7 @@ export default function People() {
 }
 
 function PersonSheet({ open, person, onClose, onDone, onCrm }) {
+  const { t } = useI18n()
   const isNew = person === 'new' || !person?.id
   const [name, setName] = useState('')
   const [aliases, setAliases] = useState('')
@@ -175,7 +186,7 @@ function PersonSheet({ open, person, onClose, onDone, onCrm }) {
     setSaving(true)
     try {
       if (isNew) {
-        await api.chat(`человек: ${name.trim()}${aliases ? `, ${aliases}` : ''}${contact ? `, ${contact}` : ''}`)
+        await api.chat(`человек: ${name.trim()}${aliases ? `, ${aliases}` : ''}${contact ? `, ${contact}` : ''}`)   // i18n-raw — фраза для ядра
       } else {
         await api.updatePerson(person.id, { name: name.trim(), aliases: aliases.trim(), contact: contact.trim(), kind })
       }
@@ -188,15 +199,15 @@ function PersonSheet({ open, person, onClose, onDone, onCrm }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новый контакт' : 'контакт'}>
+    <Sheet open={open} onClose={onClose} title={t(isNew ? 'people.new_title' : 'people.title')}>
       <form onSubmit={save} className="space-y-4">
-        <Field label="имя">
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Иван Васильев" />
+        <Field label={t('common.name')}>
+          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('people.name_ph')} />
         </Field>
-        <Field label="псевдоним / также">
-          <input className="input" value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder="Ваня, ivan_dev" />
+        <Field label={t('people.alias_label')}>
+          <input className="input" value={aliases} onChange={(e) => setAliases(e.target.value)} placeholder={t('people.alias_ph')} />
         </Field>
-        <Field label="тип контакта">
+        <Field label={t('people.kind_label')}>
           {/* обычные «пилюли» с переносом: .sg — это одна кнопка-таблетка, в неё
               пять пунктов не влезают и получалась странная пустая подложка */}
           <div className="flex flex-wrap gap-2">
@@ -204,27 +215,26 @@ function PersonSheet({ open, person, onClose, onDone, onCrm }) {
               <button type="button" key={k} onClick={() => setKind(k)}
                 className="rounded-full px-3.5 py-2 text-[13.5px] font-medium transition"
                 style={chip(kind === k)}>
-                {label}
+                {t(label)}
               </button>
             ))}
           </div>
         </Field>
-        <Field label="контакт / телефон / telegram">
-          <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} placeholder="@username или +7 999 123-45-67" />
+        <Field label={t('people.contact_label')}>
+          <input className="input" value={contact} onChange={(e) => setContact(e.target.value)} placeholder={t('people.contact_ph')} />
         </Field>
         {!isNew && (
           <ClientNextStep cid={person.id} />
         )}
         {!isNew && HAS_STAGE.has(kind) && (
           <div className="muted text-[12.5px]">
-            Стадия клиента (лид → переговоры → клиент → постоянный → спит/ушёл) — отдельная вещь от стадии заказа:
-            меняется сама по оплатам, вручную её меняют в карточке CRM.
+            {t('people.stage_note')}
           </div>
         )}
         <div className="flex justify-end gap-2 pt-4">
-          {!isNew && <button type="button" className="btn-soft mr-auto" onClick={() => onCrm?.(person.id)}>карточка CRM</button>}
-          <button type="button" className="btn-ghost" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn-primary" disabled={saving || !name.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+          {!isNew && <button type="button" className="btn-soft mr-auto" onClick={() => onCrm?.(person.id)}>{t('people.crm_card')}</button>}
+          <button type="button" className="btn-ghost" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn-primary" disabled={saving || !name.trim()}>{saving ? t('people.saving') : t('common.save')}</button>
         </div>
       </form>
     </Sheet>

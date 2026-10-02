@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, money, plural, shortDate, hhmm } from '../lib/api'
+import { api, money, shortDate, hhmm } from '../lib/api'
+import { useI18n, localeOf, t as T } from '../lib/i18n'
 import { Num } from './ui'
 import { Check, Sparkles, AlertCircle, Calendar, ArrowUpRight, ArrowDownRight, Wallet, Target, Clock } from 'lucide-react'
 
@@ -12,6 +13,7 @@ import { Check, Sparkles, AlertCircle, Calendar, ArrowUpRight, ArrowDownRight, W
  */
 
 export function MorningDigestCard({ data, ownerName }) {
+  const { t } = useI18n()
   // Настоящие цифры дня из /api/dashboard: раньше карточка рисовала захардкоженные 15 761 / 3 940,
   // поэтому на сайте и в Telegram (там дайджест из базы) были разные числа. Теперь источник один.
   const [live, setLive] = useState(null)
@@ -31,9 +33,7 @@ export function MorningDigestCard({ data, ownerName }) {
   }, [data])
   const d = data || live || {}
   const now = new Date()
-  const WD_RU = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
-  const MONTHS_RU = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-  const dateStr = `${WD_RU[now.getDay()]}, ${now.getDate()} ${MONTHS_RU[now.getMonth()]}`
+  const dateStr = now.toLocaleDateString(localeOf(), { weekday: 'long', day: 'numeric', month: 'long' })
 
   const who = String(ownerName || '').trim()
   const balance = d.balance ?? 0
@@ -48,13 +48,13 @@ export function MorningDigestCard({ data, ownerName }) {
         <div className="flex items-center justify-between">
           <span className="report-tag">
             <Sparkles size={13} className="text-[var(--acc)]" />
-            утренний дайджест
+            {t('rc.morning_digest')}
           </span>
           <span className="mono text-[11px] opacity-50">
             {('0' + now.getHours()).slice(-2)}:{('0' + now.getMinutes()).slice(-2)}
           </span>
         </div>
-        <h2 className="report-title">доброе утро{who ? `, ${who}` : ''}</h2>
+        <h2 className="report-title">{t('rc.good_morning')}{who ? `, ${who}` : ''}</h2>
         <p className="report-subtitle">{dateStr}</p>
       </div>
 
@@ -63,8 +63,8 @@ export function MorningDigestCard({ data, ownerName }) {
         {/* Баланс - карточка с градиентом */}
         <div className="c hero !p-4 !rounded-2xl">
           <div className="hd !mb-2">
-            <h3 className="text-[13px] font-semibold opacity-90">баланс</h3>
-            <small className="opacity-75">свободно</small>
+            <h3 className="text-[13px] font-semibold opacity-90">{t('rc.balance')}</h3>
+            <small className="opacity-75">{t('rc.free')}</small>
           </div>
           <div className="text-[26px] font-semibold tracking-[-0.03em]"><Num value={balance} /> ₽</div>
         </div>
@@ -72,8 +72,8 @@ export function MorningDigestCard({ data, ownerName }) {
         {/* Можно тратить в день - p2 изумрудный градиент */}
         <div className="c p2 !p-4 !rounded-2xl">
           <div className="hd !mb-2">
-            <h3 className="text-[13px] font-semibold">можно тратить</h3>
-            <small>в день</small>
+            <h3 className="text-[13px] font-semibold">{t('rc.can_spend')}</h3>
+            <small>{t('rc.per_day')}</small>
           </div>
           <div className="text-[26px] font-semibold tracking-[-0.03em] text-[var(--pos)]">
             <Num value={dailyBudget ?? 0} /> ₽
@@ -84,11 +84,11 @@ export function MorningDigestCard({ data, ownerName }) {
       {/* Блок События сегодня */}
       <div className="report-section mt-4">
         <div className="report-section-title">
-          <span>СЕГОДНЯ</span>
+          <span>{t('rc.today')}</span>
           <span className="count">{events.length}</span>
         </div>
         {events.length === 0 ? (
-          <div className="report-empty-row">встреч нет — день ваш</div>
+          <div className="report-empty-row">{t('rc.no_events')}</div>
         ) : (
           <div className="space-y-1.5 mt-2">
             {events.map((ev, i) => (
@@ -104,11 +104,11 @@ export function MorningDigestCard({ data, ownerName }) {
       {/* Блок Задачи */}
       <div className="report-section mt-4">
         <div className="report-section-title">
-          <span>ЗАДАЧИ</span>
+          <span>{t('rc.tasks')}</span>
           <span className="count">{tasks.length}</span>
         </div>
         {tasks.length === 0 ? (
-          <div className="report-empty-row">задач нет. подозрительно.</div>
+          <div className="report-empty-row">{t('rc.no_tasks')}</div>
         ) : (
           <div className="space-y-1.5 mt-2">
             {tasks.map((t, i) => (
@@ -123,7 +123,7 @@ export function MorningDigestCard({ data, ownerName }) {
 
       {/* Подвал карточки с брендингом */}
       <div className="report-footer mt-4 pt-3 flex items-center justify-between text-[11.5px] opacity-40">
-        <span>джарвис</span>
+        <span>{t('rc.jarvis')}</span>
         <span className="mono">{shortDate(now)}</span>
       </div>
     </div>
@@ -131,6 +131,7 @@ export function MorningDigestCard({ data, ownerName }) {
 }
 
 export function WeekSummaryCard({ data, ownerName }) {
+  const { t } = useI18n()
   // Реальные цифры недели: раньше карточка рисовала выдуманные 6 589 ₽ / 205 700 ₽ и категории «алкоголь 605 ₽».
   const [live, setLive] = useState(null)
   useEffect(() => {
@@ -190,13 +191,13 @@ export function WeekSummaryCard({ data, ownerName }) {
         <div className="flex items-center justify-between">
           <span className="report-tag">
             <Sparkles size={13} className="text-[#a07bff]" />
-            недельный отчёт
+            {t('rc.weekly_report')}
           </span>
           <span className="mono text-[11px] opacity-50">
             {('0' + now.getHours()).slice(-2)}:{('0' + now.getMinutes()).slice(-2)}
           </span>
         </div>
-        <h2 className="report-title">итоги недели</h2>
+        <h2 className="report-title">{t('rc.week_summary')}</h2>
         <p className="report-subtitle">{`${from.getDate()}.${('0' + (from.getMonth() + 1)).slice(-2)} — ${now.getDate()}.${('0' + (now.getMonth() + 1)).slice(-2)}.${now.getFullYear()}`}</p>
       </div>
 
@@ -204,15 +205,15 @@ export function WeekSummaryCard({ data, ownerName }) {
       <div className="grid grid-cols-2 gap-3 mt-4">
         <div className="c hero !p-4 !rounded-2xl">
           <div className="hd !mb-1.5 text-xs opacity-85">
-            <span>потрачено</span>
-            <span className="tag !mt-0 !text-[10px] !py-0.5 !px-1.5">{deltaSpent < 0 ? `${deltaSpent}% к прошлому` : `+${deltaSpent}%`}</span>
+            <span>{t('rc.spent')}</span>
+            <span className="tag !mt-0 !text-[10px] !py-0.5 !px-1.5">{t(deltaSpent < 0 ? 'rc.vs_last' : 'rc.up', { n: Math.abs(deltaSpent) })}</span>
           </div>
           <div className="text-[22px] sm:text-[26px] font-semibold tracking-[-0.03em]"><Num value={spent} /> ₽</div>
         </div>
 
         <div className="c p2 !p-4 !rounded-2xl">
           <div className="hd !mb-1.5 text-xs opacity-85">
-            <span>заработано</span>
+            <span>{t('rc.earned')}</span>
           </div>
           <div className="text-[22px] sm:text-[26px] font-semibold tracking-[-0.03em] text-[var(--pos)]">
             <Num value={earned} /> ₽
@@ -223,14 +224,14 @@ export function WeekSummaryCard({ data, ownerName }) {
       {/* Куда ушло */}
       <div className="report-section mt-5">
         <div className="report-section-title">
-          <span>КУДА УШЛО</span>
+          <span>{t('rc.where_it_went')}</span>
           <span className="count">{categories.length}</span>
         </div>
         <div className="space-y-3 mt-3">
           {categories.map((cat, idx) => (
             <div key={idx} className="category-progress-item">
               <div className="flex justify-between items-baseline text-[13.5px]">
-                <span className="font-medium text-[var(--ink)]">{cat.name}</span>
+                <span className="font-medium text-[var(--ink)]">{t.sv(cat.name) || cat.name}</span>
                 <span className="mono font-semibold text-[13.5px]">{money(cat.amount)}</span>
               </div>
               <div className="progress-bar-track mt-1.5">
@@ -250,19 +251,19 @@ export function WeekSummaryCard({ data, ownerName }) {
       {/* Дела (пилюли статистики активности) */}
       <div className="report-section mt-5">
         <div className="report-section-title">
-          <span>ДЕЛА</span>
+          <span>{t('rc.things')}</span>
         </div>
         <div className="flex flex-wrap gap-2 mt-2.5">
           <span className="report-pill">
             <Check size={13} className="text-[var(--pos)]" />
-            {habits.tasksDone} {plural(habits.tasksDone, 'задача закрыта', 'задачи закрыто', 'задач закрыто')}
+            {t('rc.tasks_done', { count: habits.tasksDone })}
           </span>
           <span className="report-pill">
-            {habits.notesSaved} {plural(habits.notesSaved, 'заметка', 'заметки', 'заметок')}
+            {t('rc.notes_saved', { count: habits.notesSaved })}
           </span>
           <span className="report-pill active-glow">
             <span className="w-2 h-2 rounded-full bg-white shrink-0"></span>
-            {habits.streakDays ? `${habits.streakDays} ${plural(habits.streakDays, 'день', 'дня', 'дней')} подряд с записями` : 'пока без стрика'}
+            {habits.streakDays ? t('rc.streak', { count: habits.streakDays }) : t('rc.no_streak')}
           </span>
         </div>
       </div>
@@ -271,7 +272,7 @@ export function WeekSummaryCard({ data, ownerName }) {
       {limits.length > 0 && (
         <div className="report-section mt-5">
           <div className="report-section-title">
-            <span>ЛИМИТЫ</span>
+            <span>{t('rc.limits')}</span>
             <span className="count">{limits.length}</span>
           </div>
           <div className="space-y-2 mt-2.5">
@@ -299,18 +300,18 @@ export function WeekSummaryCard({ data, ownerName }) {
       {/* Нижний баланс и долги */}
       <div className="grid grid-cols-2 gap-3 mt-5">
         <div className="c blk !p-3.5 !rounded-2xl">
-          <small className="block text-[11.5px] opacity-70 mb-1">баланс сейчас</small>
+          <small className="block text-[11.5px] opacity-70 mb-1">{t('rc.balance_now')}</small>
           <div className="text-[19px] sm:text-[22px] font-semibold tracking-[-0.03em]"><Num value={balance} /> ₽</div>
         </div>
         <div className="c blk !p-3.5 !rounded-2xl">
-          <small className="block text-[11.5px] opacity-70 mb-1">долги</small>
+          <small className="block text-[11.5px] opacity-70 mb-1">{t('rc.debts')}</small>
           <div className="text-[19px] sm:text-[22px] font-semibold tracking-[-0.03em]"><Num value={debts} /> ₽</div>
         </div>
       </div>
 
       {/* Подвал карточки */}
       <div className="report-footer mt-4 pt-3 flex items-center justify-between text-[11.5px] opacity-40">
-        <span>джарвис</span>
+        <span>{t('rc.jarvis')}</span>
         <span className="mono">{shortDate(now)}</span>
       </div>
     </div>
@@ -323,6 +324,7 @@ export function WeekSummaryCard({ data, ownerName }) {
  * финансовый баланс и дневной лимит в единую информативную Bento-карточку.
  */
 export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFinance }) {
+  const { t } = useI18n()
   const d = data || {}
   const now = new Date()
   const tasks = d.tasks || []
@@ -342,10 +344,10 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
           <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-500/15 text-blue-500">
             <Sparkles size={15} />
           </span>
-          <h2 className="text-[17px] font-semibold tracking-[-0.02em]">сводка дня</h2>
+          <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{t('rc.day_summary')}</h2>
         </div>
         <small className="mono text-[12px] opacity-60">
-          {now.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' })}
+          {now.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\.?\s*г\.$/u, '')}
         </small>
       </div>
 
@@ -356,14 +358,14 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
           className="rounded-2xl p-3 bg-[var(--sf2)] border border-[var(--line)] hover:border-[var(--acc)] transition cursor-pointer flex flex-col justify-between"
         >
           <div className="flex items-center justify-between text-xs opacity-70 mb-1">
-            <span>деньги</span>
+            <span>{t('rc.money')}</span>
             <Wallet size={13} className="text-blue-400" />
           </div>
           <div className="text-[17px] font-semibold mono tracking-tight text-[var(--ink)]">
             <Num value={balance} /> ₽
           </div>
           <div className="text-[11px] opacity-60 mt-1">
-            траты: −{money(spentToday)}
+            {t('rc.spent_short', { m: money(spentToday) })}
           </div>
         </div>
 
@@ -373,14 +375,14 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
           className="rounded-2xl p-3 bg-[var(--sf2)] border border-[var(--line)] hover:border-[var(--acc)] transition cursor-pointer flex flex-col justify-between"
         >
           <div className="flex items-center justify-between text-xs opacity-70 mb-1">
-            <span>встречи</span>
+            <span>{t('rc.meetings')}</span>
             <Calendar size={13} className="text-purple-400" />
           </div>
           <div className="text-[17px] font-semibold mono tracking-tight text-[var(--ink)]">
-            {events.length} {plural(events.length, 'событие', 'события', 'событий')}
+            {t('rc.events_n', { count: events.length })}
           </div>
           <div className="text-[11px] opacity-60 mt-1 truncate">
-            {events[0] ? `${events[0].title.slice(0, 16)}…` : 'день свободен'}
+            {events[0] ? `${events[0].title.slice(0, 16)}…` : t('nextup.day_free')}
           </div>
         </div>
 
@@ -390,14 +392,14 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
           className="rounded-2xl p-3 bg-[var(--sf2)] border border-[var(--line)] hover:border-[var(--acc)] transition cursor-pointer flex flex-col justify-between"
         >
           <div className="flex items-center justify-between text-xs opacity-70 mb-1">
-            <span>дела</span>
+            <span>{t('rc.things')}</span>
             <Check size={13} className="text-emerald-400" />
           </div>
           <div className="text-[17px] font-semibold mono tracking-tight text-[var(--ink)]">
-            {openTasks.length} {plural(openTasks.length, 'задача', 'задачи', 'задач')}
+            {t('rc.tasks_n', { count: openTasks.length })}
           </div>
           <div className="text-[11px] opacity-60 mt-1">
-            {doneTasks.length ? `${doneTasks.length} закрыто` : 'всё впереди'}
+            {doneTasks.length ? t('rc.closed_n', { count: doneTasks.length }) : t('rc.all_ahead')}
           </div>
         </div>
       </div>
@@ -406,9 +408,9 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
       <div className="mt-3 pt-3 border-t border-[var(--line)] flex items-center justify-between text-xs text-[var(--ink2)]">
         <span className="flex items-center gap-1.5">
           <span className="h-2 w-2 rounded-full bg-[var(--pos)] animate-pulseSoft"></span>
-          доступно сегодня: <b className="text-[var(--ink)] num font-semibold">{money(dailyBudget)}</b>
+          {t('rc.available_today')}: <b className="text-[var(--ink)] num font-semibold">{money(dailyBudget)}</b>
         </span>
-        <span className="mono text-[11px] opacity-70">фокус дня: активен</span>
+        <span className="mono text-[11px] opacity-70">{t('rc.focus_active')}</span>
       </div>
     </div>
   )
@@ -418,6 +420,7 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
  * Виджет «Экранное время за ПК» (Bento-стиль)
  */
 export function ScreenTimeBentoWidget({ data }) {
+  const { t } = useI18n()
   const d = data
   // Пустой виджет: раньше здесь были захардкоженные демо-данные. Теперь честно и компактно.
   if (!d || !(d.active_min > 0) || !(d.hours || []).some((v) => v > 0)) {
@@ -428,10 +431,10 @@ export function ScreenTimeBentoWidget({ data }) {
             <span className="flex h-7 w-7 items-center justify-center rounded-xl" style={{ background: 'color-mix(in srgb, var(--ai) 14%, transparent)', color: 'var(--ai)' }}>
               <Clock size={15} />
             </span>
-            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">время за пк</h2>
+            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{t('screen.title')}</h2>
           </div>
         </div>
-        <div className="muted py-6 text-center text-[13px]">{d?.pc_alive === false ? 'пк офлайн — данных нет' : 'пока нет данных — включите учёт экранного времени'}</div>
+        <div className="muted py-6 text-center text-[13px]">{t(d?.pc_alive === false ? 'screen.empty_dead' : 'screen.off_hint')}</div>
       </div>
     )
   }
@@ -455,10 +458,10 @@ export function ScreenTimeBentoWidget({ data }) {
           <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-purple-500/15 text-purple-400">
             <Clock size={15} />
           </span>
-          <h2 className="text-[17px] font-semibold tracking-[-0.02em]">время за пк</h2>
+          <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{t('screen.title')}</h2>
         </div>
         <small className="mono font-semibold text-[13px] text-[var(--acc)]">
-          {hours} ч {mins} мин
+          {hours} {t('unit.hour')} {mins} {t('unit.min')}
         </small>
       </div>
 
@@ -480,7 +483,7 @@ export function ScreenTimeBentoWidget({ data }) {
                       : val > 0 ? 'color-mix(in srgb, #8a5cff 55%, transparent)'
                       : 'var(--line)',
                   }}
-                  title={`${h}:00 — ${val} мин`}
+                  title={t('rc.hour_min', { h, m: val })}
                 />
               </div>
             )

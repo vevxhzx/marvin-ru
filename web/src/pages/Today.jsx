@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { api, money, hhmm, plural } from '../lib/api'
-import { Num, useToast, PageAccent } from '../components/ui'
+import { api, money, hhmm, shortDate, relTime, WD_SHORT_MON as WD_SHORT } from '../lib/api'
+import { Num, useToast, PageAccent, Skeleton, Empty } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import { EventSheet } from './Calendar'
@@ -15,35 +15,34 @@ import { TodaySummaryWidget, ScreenTimeBentoWidget } from '../components/ReportC
 import { QuickAddWidget, SpendTodayWidget, GoalsWidget, HabitsWidget, NextUpWidget } from '../components/TodayCards'
 import CashChart from '../components/CashChart'
 import { useNavigate } from 'react-router-dom'
+import { useI18n, localeOf, t as T } from '../lib/i18n'
 
-const GREETS = { morning: 'доброе утро', day: 'добрый день', evening: 'добрый вечер', night: 'доброй ночи' }
+const GREETS = { morning: 'td.greet_morning', day: 'td.greet_day', evening: 'td.greet_evening', night: 'td.greet_night' }
 const part = (h) => (h < 5 ? 'night' : h < 12 ? 'morning' : h < 18 ? 'day' : 'evening')
-const WD = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
-const MONTHS_RU = ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь']
-const MONTHS_GEN = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
 
-const SUGGESTIONS = ['700 такси', 'встреча в среду в 15 с Димой', 'мозг: идея для ролика', 'куда ушли деньги', 'напомни через 20 минут']
+/* Подсказки уходят в ядро — остаются на русском в обоих режимах (i18n-raw) */
+const SUGGESTIONS = ['700 такси', 'встреча в среду в 15 с Димой', 'мозг: идея для ролика', 'куда ушли деньги', 'напомни через 20 минут'] // i18n-raw
 
 const ALL_WIDGET_DEFS = {
-  summary: { id: 'summary', name: 'сводка дня', desc: 'Единый агрегатор задач, встреч и бюджета', defaultCol: 's8' },
-  screen: { id: 'screen', name: 'время за пк', desc: 'Почасовая активность и фокус в программах', defaultCol: 's4' },
-  balance: { id: 'balance', name: 'баланс', desc: 'Остаток средств, дней запаса и темп трат', defaultCol: 's4' },
-  chart: { id: 'chart', name: 'касса на 30 дней', desc: 'Интерактивный график прогноза кассы', defaultCol: 's8' },
-  expenses: { id: 'expenses', name: 'траты', desc: 'Расход за 30 дней и столбики по дням недели', defaultCol: 's4' },
-  free: { id: 'free', name: 'свободно', desc: 'Свободный остаток в месяц и разбивка', defaultCol: 's4' },
-  debts: { id: 'debts', name: 'долги', desc: 'Остаток долгов и шкала закрытия', defaultCol: 's4' },
-  today: { id: 'today', name: 'сегодня', desc: 'Список событий на текущий день', defaultCol: 's4' },
-  calendar: { id: 'calendar', name: 'календарь', desc: 'Мини-сетка текущего месяца с метками', defaultCol: 's4' },
-  brain: { id: 'brain', name: 'мозг', desc: 'Последние сохранённые мысли и заметки', defaultCol: 's4' },
-  pomo: { id: 'pomo', name: 'помодоро', desc: 'Виджет фокус-сессии и таймера', defaultCol: 's4' },
-  orders: { id: 'orders', name: 'заказы в работе', desc: 'Активные заказы и дедлайны', defaultCol: 's8' },
-  missed: { id: 'missed', name: 'что я упускаю', desc: 'Просроченные оплаты, дела без срока, цели без движения', defaultCol: 's8' },
+  summary: { id: 'summary', name: 'td.w_summary', desc: 'td.d_summary', defaultCol: 's8' },
+  screen: { id: 'screen', name: 'td.w_screen', desc: 'td.d_screen', defaultCol: 's4' },
+  balance: { id: 'balance', name: 'td.w_balance', desc: 'td.d_balance', defaultCol: 's4' },
+  chart: { id: 'chart', name: 'td.w_chart', desc: 'td.d_chart', defaultCol: 's8' },
+  expenses: { id: 'expenses', name: 'td.w_expenses', desc: 'td.d_expenses', defaultCol: 's4' },
+  free: { id: 'free', name: 'td.w_free', desc: 'td.d_free', defaultCol: 's4' },
+  debts: { id: 'debts', name: 'td.w_debts', desc: 'td.d_debts', defaultCol: 's4' },
+  today: { id: 'today', name: 'td.w_today', desc: 'td.d_today', defaultCol: 's4' },
+  calendar: { id: 'calendar', name: 'td.w_calendar', desc: 'td.d_calendar', defaultCol: 's4' },
+  brain: { id: 'brain', name: 'td.w_brain', desc: 'td.d_brain', defaultCol: 's4' },
+  pomo: { id: 'pomo', name: 'td.w_pomo', desc: 'td.d_pomo', defaultCol: 's4' },
+  orders: { id: 'orders', name: 'td.w_orders', desc: 'td.d_orders', defaultCol: 's8' },
+  missed: { id: 'missed', name: 'td.w_missed', desc: 'td.d_missed', defaultCol: 's8' },
   // новые карточки — по умолчанию спрятаны (как pomo/orders/missed), включаются кнопкой «добавить карточку»
-  quick: { id: 'quick', name: 'быстрое дело', desc: 'Дело или трата одной строкой, не уходя со страницы', defaultCol: 's4' },
-  spend: { id: 'spend', name: 'можно потратить', desc: 'Безопасный дневной лимит и ближайший платёж', defaultCol: 's4' },
-  goals: { id: 'goals', name: 'цели', desc: 'Прогресс целей и фокус дня', defaultCol: 's4' },
-  habits: { id: 'habits', name: 'привычки', desc: 'Стрик ведения дня и тепловая карта', defaultCol: 's4' },
-  next: { id: 'next', name: 'ближайшее дело', desc: 'Следующая встреча и свободное окно до неё', defaultCol: 's4' },
+  quick: { id: 'quick', name: 'td.w_quick', desc: 'td.d_quick', defaultCol: 's4' },
+  spend: { id: 'spend', name: 'td.w_spend', desc: 'td.d_spend', defaultCol: 's4' },
+  goals: { id: 'goals', name: 'td.w_goals', desc: 'td.d_goals', defaultCol: 's4' },
+  habits: { id: 'habits', name: 'td.w_habits', desc: 'td.d_habits', defaultCol: 's4' },
+  next: { id: 'next', name: 'td.w_next', desc: 'td.d_next', defaultCol: 's4' },
 }
 
 const DEFAULT_ORDER = ['summary', 'screen', 'balance', 'chart', 'expenses', 'free', 'debts', 'today', 'calendar', 'brain']
@@ -62,13 +61,16 @@ try {
   }
 } catch {}
 
-export default function Today({ openChat, address = 'вовчик' }) {
+export default function Today({ openChat, address = '' }) {
+  const { t } = useI18n()
   const nav = useNavigate()
   const [d, setD] = useState(null)
   const [fin, setFin] = useState(null)
   const [fc, setFc] = useState(null)
   const [screenData, setScreenData] = useState(null)
   const [missed, setMissed] = useState(null)
+  // данные главной загружены (хоть бы попытка была): карточки рисуют Skeleton, а не выдуманные суммы
+  const [loaded, setLoaded] = useState(false)
   const { tick, bump } = useRefresh()
   const [prefs, setPrefs] = usePrefs()
   const [, show] = useToast()
@@ -106,15 +108,15 @@ export default function Today({ openChat, address = 'вовчик' }) {
       if (fe) setFc(fe)
       if (sc) setScreenData(sc)
       if (ms) setMissed(ms)
-    })
+    }).finally(() => setLoaded(true))
   }
 
   useEffect(() => { load() }, [tick])
 
   const now = new Date()
-  const greeting = GREETS[part(now.getHours())]
-  const ownerName = prefs.address || address || 'вовчик'
-  const daySubtitle = `${WD[now.getDay()]}, ${now.getDate()} ${MONTHS_GEN[now.getMonth()]}`
+  const greeting = t(GREETS[part(now.getHours())])
+  const ownerName = prefs.address || address || t('common.sir')
+  const daySubtitle = now.toLocaleDateString(localeOf(), { weekday: 'long', day: 'numeric', month: 'long' })
 
   // Печатающийся плейсхолдер
   const [typed, setTyped] = useState('')
@@ -201,7 +203,21 @@ export default function Today({ openChat, address = 'вовчик' }) {
   // Сегодня события
   const todayEvents = (d?.today || []).slice(0, 3)
 
-  // Календарь
+  // Календарь: точки на днях, где реально есть что-то (события недели с главной + сроки задач).
+  // Данные приходят с дашбордом — отдельных запросов не делаем; за пределами окна недели точек нет.
+  const dayMarks = useMemo(() => {
+    const key = (s) => {
+      if (!s) return null
+      const x = new Date(s)
+      if (Number.isNaN(+x)) return null
+      return `${x.getFullYear()}-${x.getMonth() + 1}-${x.getDate()}`
+    }
+    const ev = new Set(); const tk = new Set()
+    for (const e of [...(d?.week || []), ...(d?.today || [])]) { const k = key(e?.start); if (k) ev.add(k) }
+    for (const t of d?.tasks || []) { const k = key(t?.due); if (k) tk.add(k) }
+    return { ev, tk }
+  }, [d])
+
   const calCells = useMemo(() => {
     const curYear = now.getFullYear()
     const curMonth = now.getMonth()
@@ -215,19 +231,22 @@ export default function Today({ openChat, address = 'вовчик' }) {
       const isOut = dayIdx < 1 || dayIdx > daysInMonth
       const num = dayIdx < 1 ? daysInPrev + dayIdx : dayIdx > daysInMonth ? dayIdx - daysInMonth : dayIdx
       const isToday = !isOut && num === now.getDate()
-      const hasEvents = !isOut && [7, 10, 12, 15, 16, 18, 19, 25, 27, 29].includes(num)
-      const dotType = [25, 27].includes(num) ? 'y' : 'd'
+      const mk = `${curYear}-${curMonth + 1}-${num}`
+      const hasEvents = !isOut && (dayMarks.ev.has(mk) || dayMarks.tk.has(mk))
+      // жёлтая точка — срок задачи, тёмная — событие
+      const dotType = !isOut && dayMarks.tk.has(mk) && !dayMarks.ev.has(mk) ? 'y' : 'd'
       cells.push({ num, isOut, isToday, hasEvents, dotType, key: i })
     }
     return cells
-  }, [now.getMonth(), now.getFullYear(), now.getDate()])
+  }, [now.getMonth(), now.getFullYear(), now.getDate(), dayMarks])
 
-  // Мозг записи
+  // Мозг записи: подпись — реальный вид записи и её возраст, а не заложенное «сегодня»
+  const KIND_RU = { note: 'graph.one_note', link: 'graph.one_link', task: 'graph.one_task', event: 'graph.one_event', finance: 'rc.money', chat: 'mem.k_chat', system: 'mem.k_system' }
   const recentNotes = (d?.memory || []).slice(0, 3).map((n) => ({
     id: n.id,
-    title: n.text ? n.text.slice(0, 40) : 'Заметка',
-    type: n.tags?.[0] || 'мысль',
-    date: 'сегодня',
+    title: n.text ? n.text.slice(0, 40) : t('common.notes'),
+    type: KIND_RU[n.kind] ? t(KIND_RU[n.kind]) : (n.kind || t('mem.entries_n', { count: 1 })),
+    date: n.created_at ? relTime(n.created_at) : '',
   }))
 
   // Диалоги правки
@@ -281,18 +300,26 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="summary" className={`c s8 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('summary', idx)}
-            <TodaySummaryWidget
-              data={{
-                tasks: d?.tasks || [],
-                events: todayEvents || [],
-                balance: balance,
-                spentToday: d?.finance?.spent_today ?? 450,
-                dailyBudget: Math.round(balance / Math.max(1, daysLeft)),
-              }}
-              onOpenTasks={() => nav('/tasks')}
-              onOpenCalendar={() => nav('/calendar')}
-              onOpenFinance={() => nav('/finance')}
-            />
+            {!d ? (
+              // сводка не выдумывает траты: пока данных нет — скелет, если запрос упал — честное «нет данных»
+              loaded
+                ? <Empty compact glyph="money" text={t('td.no_summary')} sub={t('td.no_summary_hint')} />
+                : <Skeleton h={172} />
+            ) : (
+              <TodaySummaryWidget
+                data={{
+                  tasks: d.tasks || [],
+                  events: todayEvents || [],
+                  balance: balance,
+                  // поле есть в finance.summary() — ноль означает «сегодня не тратили», а не «нет данных»
+                  spentToday: d.finance?.spent_today ?? 0,
+                  dailyBudget: Math.round(balance / Math.max(1, daysLeft)),
+                }}
+                onOpenTasks={() => nav('/tasks')}
+                onOpenCalendar={() => nav('/calendar')}
+                onOpenFinance={() => nav('/finance')}
+              />
+            )}
           </section>
         )
 
@@ -307,19 +334,19 @@ export default function Today({ openChat, address = 'вовчик' }) {
       case 'missed': {
         const m = missed || {}
         const rows = [
-          ...(m.unpaid || []).map((o) => ({ k: 'unpaid', t: o.title, s: o.client || '', v: `${money(o.left)} ₽` })),
-          ...(m.overdue_debts || []).map((d) => ({ k: 'debt', t: d.title, s: `платёж ${d.pay_day}-го`, v: `${money(d.payment)} ₽` })),
-          ...(m.tasks_no_due || []).map((t) => ({ k: 'task', t: t.title, s: 'без срока', v: '' })),
-          ...(m.goals_stale || []).map((g) => ({ k: 'goal', t: g.title, s: `${g.pct}%`, v: g.left ? `${money(g.left)} ₽` : '' })),
+          ...(m.unpaid || []).map((o) => ({ k: 'unpaid', t: o.title, s: o.client || '', v: money(o.left) })),
+          ...(m.overdue_debts || []).map((d) => ({ k: 'debt', t: d.title, s: t('td.pay_on', { d: d.pay_day }), v: money(d.payment) })),
+          ...(m.tasks_no_due || []).map((x) => ({ k: 'task', t: x.title, s: t('task.when_none'), v: '' })),
+          ...(m.goals_stale || []).map((g) => ({ k: 'goal', t: g.title, s: `${g.pct}%`, v: g.left ? money(g.left) : '' })),
         ]
         return (
           <section key="missed" className={`c s8 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('missed', idx)}
-            <div className="hd"><h2>что я упускаю</h2><small>{rows.length ? `${rows.length} пункт(ов)` : 'чисто'}</small></div>
+            <div className="hd"><h2>{t('td.w_missed')}</h2><small>{rows.length ? t('td.items_n', { n: rows.length }) : t('td.clean')}</small></div>
             {!missed ? (
-              <div className="muted py-3 text-[13px]">считаю…</div>
+              <div className="muted py-3 text-[13px]">{t('common.loading')}</div>
             ) : rows.length === 0 ? (
-              <div className="muted py-3 text-[13.5px]">Ничего не упускаете, сэр. Редкое и подозрительное состояние.</div>
+              <div className="muted py-3 text-[13.5px]">{t('td.nothing_missed')}</div>
             ) : (
               <div className="mt-1 space-y-1.5">
                 {rows.slice(0, 8).map((r, i) => (
@@ -339,9 +366,9 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="balance" className={`c hero s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('balance', idx)}
-            <div className="hd"><h2>баланс</h2><small>хватит на</small></div>
+            <div className="hd"><h2>{t('td.w_balance')}</h2><small>{t('td.lasts_for')}</small></div>
             <div className="big"><Num value={balance} /> ₽</div>
-            <span className="tag">{daysLeft} {plural(daysLeft, 'день', 'дня', 'дней')} из 30</span>
+            <span className="tag">{t('td.days_of_30', { count: daysLeft })}</span>
             <div className="days" id="days">
               {Array.from({ length: 30 }, (_, i) => (
                 <i key={i} className={i < daysLeft ? 'on' : ''} style={{ '--k': i }} />
@@ -349,8 +376,8 @@ export default function Today({ openChat, address = 'вовчик' }) {
             </div>
             <div className="dl mono"><span>{startStr}</span><span>{endStr}</span></div>
             <div className="hm">
-              <div><small>в среднем в день</small><b>{money(avgDaily)}</b></div>
-              <div><small>к {endStr}</small><b>{forecastBalance < 0 ? '−' : ''}{money(Math.abs(forecastBalance))}</b></div>
+              <div><small>{t('td.avg_day')}</small><b>{money(avgDaily)}</b></div>
+              <div><small>{t('aims.by', { date: endStr })}</small><b>{forecastBalance < 0 ? '−' : ''}{money(Math.abs(forecastBalance))}</b></div>
             </div>
           </section>
         )
@@ -359,17 +386,17 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="chart" className={`c chart s8 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('chart', idx)}
-            <div className="hd"><h2>касса на 30 дней</h2><small>{fc ? `сейчас ${money(fc.balance)} · темп ${money(fc.avg_day_spent)}/дн` : 'при текущем темпе'}</small></div>
+            <div className="hd"><h2>{t('td.w_chart')}</h2><small>{fc ? t('td.chart_now', { bal: money(fc.balance), pace: money(fc.avg_day_spent) }) : t('fc.by_pace')}</small></div>
             {fc
               ? <CashChart f={fc} height={200} legend={false} />
-              : <div className="cw" id="cw"><div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', opacity: 0.6 }}>собираю данные…</div></div>}
+              : <div className="cw" id="cw"><div style={{ position: 'absolute', inset: 0, display: 'grid', placeItems: 'center', opacity: 0.6 }}>{t('common.loading')}</div></div>}
             <div className="lg">
-              <span><i style={{ background: '#ff9f5c' }}></i>факт</span>
-              <span><i style={{ background: 'var(--accent)' }}></i>прогноз</span>
-              <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>ноль</span>
-              {fc?.runway_days != null && <span className="text-[var(--neg)]">до нуля ~{fc.runway_days} дн</span>}
+              <span><i style={{ background: '#ff9f5c' }}></i>{t('chart.fact')}</span>
+              <span><i style={{ background: 'var(--accent)' }}></i>{t('chart.forecast')}</span>
+              <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>{t('chart.zero')}</span>
+              {fc?.runway_days != null && <span className="text-[var(--neg)]">{t('td.to_zero', { n: fc.runway_days })}</span>}
               {fc?.min_balance != null && fc.min_balance >= 0 && fc.min_date && (
-                <span>минимум {money(fc.min_balance)} · {z(Number(fc.min_date.slice(8, 10)))}.{fc.min_date.slice(5, 7)}</span>
+                <span>{t('fc.min', { m: money(fc.min_balance) })} · {z(Number(fc.min_date.slice(8, 10)))}.{fc.min_date.slice(5, 7)}</span>
               )}
             </div>
           </section>
@@ -379,14 +406,14 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="expenses" className={`c p1 s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('expenses', idx)}
-            <div className="hd"><h2>траты</h2><small>30 дней</small></div>
+            <div className="hd"><h2>{t('td.w_expenses')}</h2><small>{t('td.d30')}</small></div>
             <div className="mid"><Num value={expenses30} /> ₽</div>
             <div className="bars">
               {weekdayHeights.map((h, bidx) => (
                 <i key={bidx} className={h ? '' : 'z'} style={{ '--h': `${h}%`, '--k': bidx }} />
               ))}
             </div>
-            <div className="bl mono"><span>пн</span><span>вт</span><span>ср</span><span>чт</span><span>пт</span><span>сб</span><span>вс</span></div>
+            <div className="bl mono">{WD_SHORT.map((w, i) => <span key={i}>{w}</span>)}</div>
           </section>
         )
 
@@ -394,7 +421,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="free" className={`c p2 s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('free', idx)}
-            <div className="hd"><h2>свободно</h2><small>в месяц</small></div>
+            <div className="hd"><h2>{t('td.w_free')}</h2><small>{t('td.per_month')}</small></div>
             <div className="mid"><Num value={freeMonth} /> ₽</div>
             <div className="bars">
               {monthDayHeights.map((h, bidx) => (
@@ -409,14 +436,14 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="debts" className={`c blk s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('debts', idx)}
-            <div className="hd"><h2>долги</h2><small>всего</small></div>
+            <div className="hd"><h2>{t('td.w_debts')}</h2><small>{t('common.total')}</small></div>
             <div className="mid"><Num value={debtTotal} /> ₽</div>
             <div className="seg" id="seg">
               {Array.from({ length: 16 }, (_, i) => (
                 <i key={i} className={i < closedSegments ? 'on' : ''} style={{ '--k': i }} />
               ))}
             </div>
-            <div className="cap mono">закрыто {debtClosedPct}%</div>
+            <div className="cap mono">{t('td.closed_pct', { pct: debtClosedPct })}</div>
           </section>
         )
 
@@ -425,11 +452,11 @@ export default function Today({ openChat, address = 'вовчик' }) {
           <section key="today" className={`c s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('today', idx)}
             <div className="hd">
-              <h2>сегодня</h2>
-              <small>{todayEvents.length} {plural(todayEvents.length, 'событие', 'события', 'событий')}</small>
+              <h2>{t('common.today')}</h2>
+              <small>{t('cal.events_n', { count: todayEvents.length })}</small>
             </div>
             {todayEvents.length === 0 ? (
-              <div className="py-4 text-center text-sm" style={{ color: 'var(--ink3)' }}>нет событий на сегодня</div>
+              <div className="py-4 text-center text-sm" style={{ color: 'var(--ink3)' }}>{t('td.no_events_today')}</div>
             ) : (
               todayEvents.map((e, eidx) => (
                 <div className="rowi" key={e.id || eidx} onClick={() => setEditEvent(e)} style={{ cursor: 'pointer' }}>
@@ -445,9 +472,9 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="calendar" className={`c s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('calendar', idx)}
-            <div className="hd"><h2>{MONTHS_RU[now.getMonth()]}</h2><small className="mono">{now.getFullYear()}</small></div>
+            <div className="hd"><h2>{now.toLocaleDateString(localeOf(), { month: 'long' })}</h2><small className="mono">{now.getFullYear()}</small></div>
             <div className="cal" id="cal">
-              {'пн вт ср чт пт сб вс'.split(' ').map((w) => (
+              {WD_SHORT.slice(1).concat(WD_SHORT[0]).join(' ').split(' ').map((w) => (
                 <span key={w} className="w mono">{w}</span>
               ))}
               {calCells.map((c) => (
@@ -462,8 +489,8 @@ export default function Today({ openChat, address = 'вовчик' }) {
               ))}
             </div>
             <div className="nx">
-              <small className="mono">сегодня, {hhmm(todayEvents[0]?.start || now)}</small>
-              <span>{todayEvents[0]?.title || 'день свободен'}</span>
+              <small className="mono">{t('common.today')}, {hhmm(todayEvents[0]?.start || now)}</small>
+              <span>{todayEvents[0]?.title || t('nextup.day_free')}</span>
             </div>
           </section>
         )
@@ -473,16 +500,16 @@ export default function Today({ openChat, address = 'вовчик' }) {
           <section key="brain" className={`c s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('brain', idx)}
             <div className="hd">
-              <h2>мозг</h2>
-              <small>{(d?.memory || []).length} {plural((d?.memory || []).length, 'запись', 'записи', 'записей')}</small>
+              <h2>{t('nav.mind')}</h2>
+              <small>{t('mem.entries_n', { count: (d?.memory || []).length })}</small>
             </div>
             {recentNotes.length ? recentNotes.map((n) => (
               <div className="note" key={n.id}>
                 <b>{n.title}</b>
-                <small>{n.type} · {n.date}</small>
+                <small>{[n.type, n.date].filter(Boolean).join(' · ')}</small>
               </div>
             )) : (
-              <div className="muted text-[13px]">записей пока нет — скажите в чате «запиши: …»</div>
+              <div className="muted text-[13px]">{t('td.no_notes')}</div>
             )}
           </section>
         )
@@ -491,7 +518,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
         return (
           <section key="pomo" className={`c p1 s4 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('pomo', idx)}
-            <div className="hd"><h2>помодоро</h2><small>{timer?.today_sessions ? `${timer.today_sessions} за день` : ''}</small></div>
+            <div className="hd"><h2>{t('unit.pomodoro')}</h2><small>{timer?.today_sessions ? t('td.sessions_day', { n: timer.today_sessions }) : ''}</small></div>
             <div className="pomo2">
               <div className="pomo-ring-wrap relative flex-none">
                 <svg className="pomo-circle-lg" viewBox="0 0 80 80">
@@ -518,7 +545,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
               </div>
               <div className="flex-1 min-w-0">
                 <b style={{ fontSize: '16px', fontWeight: 600 }} className="truncate block">
-                  {timer?.active ? (timer.order || 'фокус-сессия') : 'сегодня ещё не садились'}
+                  {timer?.active ? (timer.order || t('unit.focus')) : t('td.not_started')}
                 </b>
                 <div className="mt-2.5 flex items-center gap-2">
                   <button
@@ -538,9 +565,9 @@ export default function Today({ openChat, address = 'вовчик' }) {
                     }}
                   >
                     {timer?.active ? (
-                      <><Square size={11} fill="currentColor" /> остановить</>
+                      <><Square size={11} fill="currentColor" /> {t('pomo.stop_short')}</>
                     ) : (
-                      <><Play size={11} fill="currentColor" /> 25 минут</>
+                      <><Play size={11} fill="currentColor" /> {t('pomo.start_25')}</>
                     )}
                   </button>
                   {timer?.active && <span className="text-xs text-[var(--ink2)] mono">{timer.planned_min} мин</span>}
@@ -550,25 +577,41 @@ export default function Today({ openChat, address = 'вовчик' }) {
           </section>
         )
 
-      case 'orders':
+      case 'orders': {
+        // реальные активные заказы из дашборда (d.orders.open): статус, клиент, срок, остаток к оплате
+        const open = d?.orders?.open || []
+        const unpaid = d?.orders?.unpaid || 0
         return (
           <section key="orders" className={`c s8 r ${isWig}`} style={animStyle} {...dragProps}>
             {renderCardControls('orders', idx)}
-            <div className="hd"><h2>заказы в работе</h2><small></small></div>
-            <div className="space-y-1">
-              <div className="rowi">
-                <span className="pl y">на правках</span>
-                <span className="t">Монтаж узбекам2<small>кот прод · срок был вс 27 сен</small></span>
-                <span className="amt">2 000 ₽<small>не оплачен</small></span>
-              </div>
-              <div className="rowi">
-                <span className="pl">в работе</span>
-                <span className="t">Вставка скаммерсу<small>илья (монтажер скаммерса)</small></span>
-                <span className="amt">500 ₽<small>не оплачен</small></span>
-              </div>
+            <div className="hd">
+              <h2>{t('td.w_orders')}</h2>
+              <small>{open.length ? t('tk.open_n', { n: open.length }) + (unpaid ? ` · ${t('or.st_awaiting', { m: money(unpaid) })}` : '') : ''}</small>
             </div>
+            {!loaded ? (
+              <Skeleton h={96} />
+            ) : !open.length ? (
+              <Empty glyph="tasks" text={t('or.empty_open')}
+                sub={t('td.no_orders_sub')}
+                hint={t('or.empty_open_hint')} />
+            ) : (
+              <div className="space-y-1">
+                {open.map((o) => {
+                  const left = Number(o.left ?? 0)
+                  const sub = [o.client || '', o.deadline ? t('td.due', { date: shortDate(o.deadline) }) : t('td.no_due')].filter(Boolean).join(' · ')
+                  return (
+                    <div className="rowi cursor-pointer" key={o.id} onClick={() => nav('/orders')} title={t('td.open_orders')}>
+                      <span className={`pl ${o.overdue ? 'y' : ''}`}>{o.status_label || o.status}</span>
+                      <span className="t">{o.title}<small>{sub}</small></span>
+                      <span className="amt">{money(left || o.price || 0)}<small>{t(left > 0 ? 'status_unpaid' : 'status_paid')}</small></span>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
           </section>
         )
+      }
 
       case 'quick':
         return (
@@ -641,24 +684,25 @@ export default function Today({ openChat, address = 'вовчик' }) {
             onBlur={() => { if (!inputVal.trim()) setIsTypingManual(false) }}
           />
         ) : (
-          <span className="ph" id="ph" onClick={() => setIsTypingManual(true)} style={{ cursor: 'text' }}>
-            {typed}
-          </span>
+          <button type="button" className="ph" id="ph" onClick={() => setIsTypingManual(true)}
+            style={{ cursor: 'text', background: 'transparent', border: 0, textAlign: 'left' }}>
+            {typed || t('td.tap_to_write')}
+          </button>
         )}
-        <span className="send" onClick={handleSend} style={{ cursor: 'pointer' }}>
-          <svg viewBox="0 0 20 20"><path d="M10 16V4M5 9l5-5 5 5" /></svg>
-        </span>
+        <button type="button" className="send" onClick={handleSend} aria-label={t('chat.send')} title={t('chat.send')}>
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4M5 9l5-5 5 5" /></svg>
+        </button>
       </div>
 
       {/* Чипсы быстрых команд */}
       <div className="chips r" style={{ '--i': 3 }}>
-        <span onClick={() => { setIsTypingManual(true); setInputVal('задача: ') }}>задача</span>
-        <span onClick={() => { setIsTypingManual(true); setInputVal('трата: ') }}>трата</span>
-        <span onClick={() => { setIsTypingManual(true); setInputVal('встреча: ') }}>встреча</span>
-        <span onClick={() => { setIsTypingManual(true); setInputVal('мысль: ') }}>мысль</span>
-        <span onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: 'доброе утро', send: true } }))}>☀️ дайджест</span>
-        <span onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: 'итоги недели', send: true } }))}>📊 итоги недели</span>
-        <span onClick={() => window.open('/api/snapshot/month.png', '_blank')}>🗓 снимок месяца</span>
+        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_task') + ': ') }}>{t('graph.one_task')}</button>
+        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_expense') + ': ') }}>{t('qa.expense')}</button>
+        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('ev_seed') + ': ') }}>{t('graph.one_event')}</button>
+        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('nt_seed') + ': ') }}>{t('graph.one_note')}</button>
+        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_digest'), send: true } }))}>☀️ {t('rc.morning_digest')}</button>
+        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_week'), send: true } }))}>📊 {t('rc.week_summary')}</button>
+        <button type="button" onClick={() => window.open('/api/snapshot/month.png', '_blank')}>🗓 {t('td.month_snapshot')}</button>
       </div>
 
       {/* Панель режима правки главной страницы */}
@@ -669,9 +713,9 @@ export default function Today({ openChat, address = 'вовчик' }) {
               <Sparkles size={18} />
             </span>
             <div>
-              <b className="block text-[15px] font-semibold">режим настройки главного экрана</b>
+              <b className="block text-[15px] font-semibold">{t('td.edit_mode')}</b>
               <span className="text-[13px] text-[var(--ink2)]">
-                перетаскивайте карточки мышью или стрелками, меняйте ширину (кнопка с числом столбцов), скрывайте и добавляйте новые
+                {t('td.edit_mode_hint')}
               </span>
             </div>
           </div>
@@ -681,13 +725,13 @@ export default function Today({ openChat, address = 'вовчик' }) {
               className="btn g !h-9 !px-4 text-[13px]"
               onClick={() => setAddSheetOpen(true)}
             >
-              <Plus size={15} /> добавить карточку
+              <Plus size={15} /> {t('td.add_card')}
             </button>
             <button
               type="button"
               className="btn g !h-9 !px-3 text-[13px]"
               onClick={resetWidgets}
-              title="Сбросить порядок и ширину карточек"
+              title={t('tk.layout_tip')}
             >
               <RotateCcw size={14} />
             </button>
@@ -696,7 +740,7 @@ export default function Today({ openChat, address = 'вовчик' }) {
               className="btn !h-9 !px-5 text-[13px]"
               onClick={() => setEditMode(false)}
             >
-              <Check size={15} /> готово
+              <Check size={15} /> {t('common.done')}
             </button>
           </div>
         </div>
@@ -708,12 +752,12 @@ export default function Today({ openChat, address = 'вовчик' }) {
       </div>
 
       {/* Кнопка «настроить главную» */}
-      <div className="cfg" onClick={() => setEditMode((v) => !v)}>
-        {editMode ? 'завершить настройку' : 'настроить главную'}
-      </div>
+      <button type="button" className="cfg" onClick={() => setEditMode((v) => !v)}>
+        {t(editMode ? 'td.finish_setup' : 'td.setup_home')}
+      </button>
 
       {/* Sheets для правки событий и задач */}
-      <TaskSheet open={!!editTask} task={editTask} onClose={() => setEditTask(null)} onDone={() => { setEditTask(null); load(); bump() }} />
+      <TaskSheet open={!!editTask} task={editTask} onClose={() => setEditTask(null)} onDone={(msg) => { setEditTask(null); load(); bump(); if (msg) show(msg) }} />
       <EventSheet open={!!editEvent} ev={editEvent} day={now} onClose={() => setEditEvent(null)} onDone={() => { setEditEvent(null); load(); bump() }} />
 
       {/* Sheet для добавления скрытых карточек */}
@@ -728,11 +772,12 @@ export default function Today({ openChat, address = 'вовчик' }) {
 }
 
 function AddWidgetSheet({ open, onClose, hiddenWidgets, onAdd }) {
+  const { t } = useI18n()
   return (
-    <Sheet open={open} onClose={onClose} title="добавить виджет на главную">
+    <Sheet open={open} onClose={onClose} title={t('td.add_widget_title')}>
       <div className="space-y-3">
         {hiddenWidgets.length === 0 ? (
-          <p className="text-center py-6 text-sm text-[var(--ink3)]">Все доступные карточки уже добавлены на главный экран.</p>
+          <p className="text-center py-6 text-sm text-[var(--ink3)]">{t('td.all_cards_added')}</p>
         ) : (
           hiddenWidgets.map((id) => {
             const def = ALL_WIDGET_DEFS[id]
@@ -744,18 +789,18 @@ function AddWidgetSheet({ open, onClose, hiddenWidgets, onAdd }) {
                 className="flex items-center justify-between p-4 rounded-2xl border border-[var(--line)] hover:bg-[var(--sf2)] transition cursor-pointer"
               >
                 <div>
-                  <b className="block text-[15px] font-medium">{def.name}</b>
-                  <span className="text-[13px] text-[var(--ink2)]">{def.desc}</span>
+                  <b className="block text-[15px] font-medium">{t(def.name)}</b>
+                  <span className="text-[13px] text-[var(--ink2)]">{t(def.desc)}</span>
                 </div>
                 <span className="btn !h-8 !px-3 text-[12px] shrink-0">
-                  <Plus size={14} /> добавить
+                  <Plus size={14} /> {t('common.add')}
                 </span>
               </div>
             )
           })
         )}
         <div className="pt-4 flex justify-end">
-          <button type="button" className="btn g !h-9 text-[13px]" onClick={onClose}>закрыть</button>
+          <button type="button" className="btn g !h-9 text-[13px]" onClick={onClose}>{t('common.close')}</button>
         </div>
       </div>
     </Sheet>

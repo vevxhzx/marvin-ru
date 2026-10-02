@@ -2,10 +2,11 @@
    Одна логика для «Сегодня», «Задач» и «Финансов» — переключатель «настроить» в шапке,
    стрелки — порядок, кнопка ширины — размер, глаз — спрятать. Хранится в localStorage. */
 import { useEffect, useState, useCallback } from 'react'
+import { t } from './i18n'
 
 export const COLS = [3, 4, 6, 8, 12]
-const WIDTH_LABEL = { 3: 'компактная', 4: 'обычная', 6: 'половина', 8: 'широкая', 12: 'во всю ширину' }
-export const widthLabel = (n) => WIDTH_LABEL[n] || 'обычная'
+const WIDTH_LABEL = { 3: 'layout.w3', 4: 'layout.w4', 6: 'layout.w6', 8: 'layout.w8', 12: 'layout.w12' }
+export const widthLabel = (n) => t(WIDTH_LABEL[n] || 'layout.w4')
 
 /** страница широкая (≥1061px): там имеет смысл задавать ширину вручную,
     на планшете и телефоне карточки и так подстраиваются под экран */
@@ -94,10 +95,10 @@ export function CardCtl({ id, order, edit, onMove, onHide, onWidth, width, wide,
   return (
     <div className="absolute top-3 right-3 z-30 flex items-center gap-1 rounded-full p-1 bg-[var(--sf)] shadow-md border border-[var(--line)]"
       onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()}>
-      <Btn disabled={i <= 0} onClick={() => onMove(id, -1)} title="Переместить раньше"><Icon size={14} /></Btn>
-      <Btn disabled={i < 0 || i >= order.length - 1} onClick={() => onMove(id, 1)} title="Переместить позже"><Icon size={14} className="rotate-180" /></Btn>
-      {wide && onWidth && <Btn onClick={() => onWidth(id)} title={`Ширина: ${widthLabel(width)} — нажать, чтобы поменять`}><span className="mono text-[11px] px-0.5">{width}</span></Btn>}
-      {onHide && <Btn className="!text-[var(--neg)]" onClick={() => onHide(id)} title="Спрятать карточку"><HideIcon size={14} /></Btn>}
+      <Btn disabled={i <= 0} onClick={() => onMove(id, -1)} title={t('layout.move_up')}><Icon size={14} /></Btn>
+      <Btn disabled={i < 0 || i >= order.length - 1} onClick={() => onMove(id, 1)} title={t('layout.move_down')}><Icon size={14} className="rotate-180" /></Btn>
+      {wide && onWidth && <Btn onClick={() => onWidth(id)} title={t('layout.width_hint', { w: widthLabel(width) })}><span className="mono text-[11px] px-0.5">{width}</span></Btn>}
+      {onHide && <Btn className="!text-[var(--neg)]" onClick={() => onHide(id)} title={t('layout.hide_card')}><HideIcon size={14} /></Btn>}
     </div>
   )
 }

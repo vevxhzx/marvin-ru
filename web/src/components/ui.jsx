@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { X, Trash2, Check, CalendarDays, Clock } from 'lucide-react'
 import { parseNum } from '../lib/api'
 import { ACCENTS, accentFor, usePageAccent, setPageAccent } from '../lib/prefs'
+import { useI18n, t as T } from '../lib/i18n'
 
 export function Card({ className = '', variant = '', col = '', i = 0, children, lift, ...p }) {
   const vClass = variant === 'hero' ? 'hero' : variant === 'p1' ? 'p1' : variant === 'p2' ? 'p2' : variant === 'blk' ? 'blk' : variant === 'chart' ? 'chart' : ''
@@ -39,9 +40,11 @@ export function useCountUp(target, { duration = 1800, delay = 500 } = {}) {
 }
 
 /* Обёртка: <Num value={84007} fmt={money} /> — анимированное число */
-export function Num({ value, fmt = (n) => Math.round(n).toLocaleString('ru-RU').replace(/\s/g, '\u00a0'), className = '' }) {
+export function Num({ value, fmt, className = '' }) {
   const v = useCountUp(typeof value === 'number' ? value : 0)
-  return <span className={`n ${className}`}>{fmt(v)}</span>
+  const { locale } = useI18n()
+  const f = fmt || ((n) => Math.round(n).toLocaleString(locale).replace(/\s/g, '\u00a0'))
+  return <span className={`n ${className}`}>{f(v)}</span>
 }
 
 /* Заголовок раздела: компактный, спокойный. idx — счётчик справа от названия.
@@ -77,7 +80,7 @@ export function PageHead({ kicker, title, idx, right, children, sub }) {
         </h1>
         {sub && <p className="sub">{sub}</p>}
       </div>
-      {right && <div className="hr">{right}</div>}
+      {right && <div className="hr head-actions">{right}</div>}
       {children}
     </header>
   )
@@ -112,7 +115,8 @@ export function Empty({ icon, glyph, text, sub, hint, onHint, compact }) {
 /* Свайп как в iOS: короткий свайп раскрывает кнопку (удалить / готово), длинный — выполняет сразу.
    Открытая строка одна на всю страницу; тап по строке или в стороне — закрывает. Только touch. */
 let _closeOpenSwipe = null
-export function Swipe({ children, onLeft, onRight, leftLabel = 'удалить', rightLabel = 'готово', leftIcon, rightIcon, className = '', disabled }) {
+export function Swipe({ children, onLeft, onRight, leftLabel, rightLabel, leftIcon, rightIcon, className = '', disabled }) {
+  const { t } = useI18n()
   const [dx, setDx] = useState(0)
   const [openSide, setOpenSide] = useState(null)   // 'left' | 'right' | null — кнопка раскрыта
   const [flying, setFlying] = useState(false)
@@ -198,14 +202,14 @@ export function Swipe({ children, onLeft, onRight, leftLabel = 'удалить',
       {onRight && (
         <div className={`swipe-bg right ${dx > 0 ? 'show' : ''} ${armed && dx > 0 ? 'armed' : ''}`}>
           <button type="button" tabIndex={-1} className="swipe-act" onClick={(e) => { e.stopPropagation(); go('right') }} style={{ width: Math.max(BTN, reveal) }}>
-            {RI}<span>{rightLabel}</span>
+            {RI}<span>{rightLabel || t('common.done')}</span>
           </button>
         </div>
       )}
       {onLeft && (
         <div className={`swipe-bg left ${dx < 0 ? 'show' : ''} ${armed && dx < 0 ? 'armed' : ''}`}>
           <button type="button" tabIndex={-1} className="swipe-act" onClick={(e) => { e.stopPropagation(); go('left') }} style={{ width: Math.max(BTN, reveal) }}>
-            {LI}<span>{leftLabel}</span>
+            {LI}<span>{leftLabel || t('common.delete')}</span>
           </button>
         </div>
       )}
@@ -239,9 +243,11 @@ const focusables = (root) => [...root.querySelectorAll(FOCUS_SEL)].filter((el) =
   !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')
 
 export function Sheet({ open, onClose, title, sub, children, wide }) {
+  const { t } = useI18n()
   const [shown, closing] = useSheetPresence(open)
   const idRef = useRef(0)
   const rootRef = useRef(null)
+  const sheetRef = useRef(null)
   const prevFocus = useRef(null)
   const [, force] = useState(0)
   useEffect(() => {
@@ -281,25 +287,67 @@ export function Sheet({ open, onClose, title, sub, children, wide }) {
     if (el && el !== document.body && el.isConnected && typeof el.focus === 'function') el.focus()
   }, [open])
   useEffect(() => { const h = () => force((x) => x + 1); _stackEv.addEventListener('change', h); return () => _stackEv.removeEventListener('change', h) }, [])
+  // свайп за «ручку» вниз — закрыть, как в обычном приложении
+  const drag = useSheetDrag(sheetRef, onClose, open)
   if (!shown) return null
   const behind = open && _stack.length > 1 && _stack[_stack.length - 1] !== idRef.current
   // рисуем в <body>, а не внутри страницы: иначе анимация страницы (transform/filter)
   // превращает position:fixed в «относительно страницы» и окно уезжает
   return createPortal(
     <div ref={rootRef} className={`sheet-backdrop ${closing ? 'closing' : ''} ${behind ? 'behind' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className={`sheet ${wide ? 'sm:!max-w-2xl' : ''}`}>
+      <div
+        ref={sheetRef}
+        role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}
+        className={`sheet ${wide ? 'sm:!max-w-2xl' : ''} ${drag.dragging ? 'sheet-dragging' : ''}`}
+        style={drag.dy ? { transform: `translateY(${drag.dy}px)` } : undefined}
+      >
+        <div className="sheet-grip" aria-hidden="true" {...drag.grip} />
         <div className="mb-5 flex items-start justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <h3 className="h2">{title}</h3>
             {sub && <div className="muted mt-1 text-[13px]">{sub}</div>}
           </div>
-          <button className="btn-icon shrink-0" onClick={onClose} aria-label="Закрыть" data-tip="Закрыть"><X size={16} /></button>
+          <button className="btn-icon shrink-0" onClick={onClose} aria-label={t('common.close')} data-tip={t('common.close')}><X size={16} /></button>
         </div>
         {children}
       </div>
     </div>,
     document.body
   )
+}
+
+/* Свайп шторки вниз за «ручку»: тянем — шторка едет за пальцем, отпустил далеко/быстро — закрылась.
+   Работает только для верхней шторки и только на телефоне (проверка по ширине окна). */
+function useSheetDrag(sheetRef, onClose, open) {
+  const [dy, setDy] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  const st = useRef(null)
+  useEffect(() => { if (!open) { setDy(0); setDragging(false); st.current = null } }, [open])
+  const grip = {
+    onTouchStart: (e) => {
+      if (window.innerWidth >= 640 || !e.touches?.length) return
+      const t = e.touches[0]
+      st.current = { y: t.clientY, at: Date.now() }
+      setDragging(true)
+    },
+    onTouchMove: (e) => {
+      if (!st.current || !e.touches?.length) return
+      const d = e.touches[0].clientY - st.current.y
+      // тянем только вниз и с сопротивлением у самого верха — как в iOS
+      setDy(d <= 0 ? d * 0.25 : Math.min(320, d))
+    },
+    onTouchEnd: () => {
+      const s = st.current
+      st.current = null
+      setDragging(false)
+      const fast = s && Date.now() - s.at < 260
+      if (!s) { setDy(0); return }
+      setDy(0)
+      if (dy > 110 || (fast && dy > 45)) onClose?.()
+    },
+    onTouchCancel: () => { st.current = null; setDragging(false); setDy(0) },
+  }
+  return { dy, dragging, grip }
 }
 
 export function Field({ label, hint, error, children, className = '' }) {
@@ -332,12 +380,13 @@ function _openPicker(ref) {
 }
 
 export function DateTimeField({ value, onChange, required, className = '' }) {
+  const { t } = useI18n()
   const ref = useRef(null)
   const label = _dtLabel(value)
   return (
     <div className="dt-field">
       <div className={`input flex items-center justify-between gap-2 pointer-events-none ${className}`}>
-        <span className={label ? '' : 'faint'}>{label || 'выбрать дату и время'}</span>
+        <span className={label ? '' : 'faint'}>{label || t('common.choose_date')}</span>
         <CalendarDays size={16} className="faint shrink-0" />
       </div>
       <input ref={ref} type="datetime-local" value={value || ''} required={required}
@@ -381,7 +430,8 @@ export function Money({ value, onChange, min, max, placeholder = '0', className 
 }
 
 /* Число, редактируемое прямо на месте (Enter — сохранить, Esc — отмена) */
-export function Inline({ value, onSave, fmt = (v) => v, min, max, className = '', type = 'num', title = 'Нажмите, чтобы изменить' }) {
+export function Inline({ value, onSave, fmt = (v) => v, min, max, className = '', type = 'num', title }) {
+  const { t } = useI18n()
   const [edit, setEdit] = useState(false)
   const [v, setV] = useState('')
   const [err, setErr] = useState('')
@@ -393,15 +443,15 @@ export function Inline({ value, onSave, fmt = (v) => v, min, max, className = ''
     let out = v
     if (type === 'num') {
       const n = parseNum(v)
-      if (Number.isNaN(n)) { setErr('число'); return }
+      if (Number.isNaN(n)) { setErr(t('common.number')); return }
       if (min != null && n < min) { setErr(`≥ ${fmt(min)}`); return }
       if (max != null && n > max) { setErr(`≤ ${fmt(max)}`); return }
       out = n
-    } else if (!String(v).trim()) { setErr('пусто'); return }
+    } else if (!String(v).trim()) { setErr(t('common.empty_value')); return }
     if (out === value) { setEdit(false); return }
-    try { await onSave(out); setEdit(false) } catch (e) { setErr(e.message || 'ошибка') }
+    try { await onSave(out); setEdit(false) } catch (e) { setErr(e.message || t('common.error')) }
   }
-  if (!edit) return <button type="button" title={title} onClick={start} className={`editable text-left ${className}`}>{fmt(value)}</button>
+  if (!edit) return <button type="button" title={title || t('common.click_to_edit')} onClick={start} className={`editable text-left ${className}`}>{fmt(value)}</button>
   return (
     <span className="relative inline-flex flex-col">
       <input ref={ref} value={v} onChange={(e) => setV(e.target.value)} inputMode={type === 'num' ? 'decimal' : 'text'}
@@ -608,7 +658,7 @@ export function Toast() { return null }
 export function useToast() {
   const [t] = useState({ msg: '', kind: '' })
   const show = (msg, kind = '', sub) => { if (msg) toast(msg, { kind: kind === 'err' ? 'err' : kind || 'ok', sub }) }
-  show.err = (e) => show(typeof e === 'string' ? e : (e?.message || 'Ошибка'), 'err')
+  show.err = (e) => show(typeof e === 'string' ? e : (e?.message || T('common.error')), 'err')
   return [t, show]
 }
 
@@ -629,22 +679,25 @@ export function ListSkeleton({ n = 4 }) {
 
 /* Подтверждение вместо window.confirm */
 export function Confirm({ open, title, text, onOk, onClose, danger }) {
+  const { t } = useI18n()
   return (
     <Sheet open={open} onClose={onClose} title={title}>
       {text && <div className="muted mb-5 text-[14px] leading-relaxed">{text}</div>}
       <div className="flex gap-2">
-        <button className="btn-ghost flex-1" onClick={onClose}>Отмена</button>
-        <button className={`btn-primary flex-1 ${danger ? '!bg-red' : ''}`} style={danger ? { background: 'var(--neg)' } : {}} onClick={onOk}>Да</button>
+        <button className="btn-ghost flex-1" onClick={onClose}>{t('common.cancel')}</button>
+        <button className={`btn-primary flex-1 ${danger ? '!bg-red' : ''}`} style={danger ? { background: 'var(--neg)' } : {}} onClick={onOk}>{t('common.yes')}</button>
       </div>
     </Sheet>
   )
 }
 
-export const PRIORITY = { 1: { dot: 'bg-red', label: 'Важно', cls: 'neg' }, 2: { dot: 'bg-orange', label: 'Обычная', cls: 'warn' }, 3: { dot: 'bg-green', label: 'Низкая', cls: 'pos' } }
+/* Приоритеты: label — ключ словаря (см. lib/i18n.js) */
+export const PRIORITY = { 1: { dot: 'bg-red', label: 'task.prio_high', cls: 'neg' }, 2: { dot: 'bg-orange', label: 'task.prio_normal', cls: 'warn' }, 3: { dot: 'bg-green', label: 'task.prio_low', cls: 'pos' } }
 
 /* Точка приоритета → всплывающий выбор. Рисуется через портал в body: строки задач лежат внутри
    .swipe с overflow:hidden, и обычный absolute-попап там просто обрезался. */
 export function PriorityDot({ value, onChange, disabled }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState(null)
   const btn = useRef(null)
@@ -667,15 +720,15 @@ export function PriorityDot({ value, onChange, disabled }) {
   }, [open])
   return (
     <>
-      <button ref={btn} type="button" className="btn-icon !h-7 !w-7" data-tip={open ? undefined : PRIORITY[value]?.label} onClick={toggle} aria-label="Приоритет" aria-expanded={open}>
+      <button ref={btn} type="button" className="btn-icon !h-7 !w-7" data-tip={open ? undefined : t(PRIORITY[value]?.label)} onClick={toggle} aria-label={t('common.priority')} aria-expanded={open}>
         <span className={`h-2 w-2 rounded-full ${PRIORITY[value]?.dot}`} />
       </button>
       {open && pos && createPortal(
         <div data-pr-menu className="elevated fixed z-[120] w-[152px] !p-1" style={{ left: pos.left, top: pos.top, bottom: pos.bottom, animation: 'rise .16s var(--ease-out)' }}>
-          <div className="label px-2.5 pb-1 pt-1.5 !text-[10px]">важность</div>
+          <div className="label px-2.5 pb-1 pt-1.5 !text-[10px]">{t('common.importance')}</div>
           {[1, 2, 3].map((p) => (
             <button key={p} type="button" className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] hover:bg-[var(--fill)] ${p === value ? 'font-medium' : ''}`} onClick={() => { setOpen(false); if (p !== value) onChange(p) }}>
-              <span className={`h-2 w-2 rounded-full ${PRIORITY[p].dot}`} />{PRIORITY[p].label}{p === value && <Check size={12} className="ml-auto text-accent" />}
+              <span className={`h-2 w-2 rounded-full ${PRIORITY[p].dot}`} />{t(PRIORITY[p].label)}{p === value && <Check size={12} className="ml-auto text-accent" />}
             </button>
           ))}
         </div>, document.body)}
@@ -686,6 +739,7 @@ export function PriorityDot({ value, onChange, disabled }) {
 /* Цвет самой вкладки: «заказы» могут быть оранжевыми, «финансы» — зелёными.
    Выбор локальный (только этот браузер), общие настройки сайта не меняются. */
 export function PageAccent({ page, className = '' }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState(null)
   const { hex } = usePageAccent(page)
@@ -721,30 +775,30 @@ export function PageAccent({ page, className = '' }) {
   return (
     <span className={`pa-wrap ${className}`} ref={wrap}>
       <button ref={btn} type="button" className={`btn-soft btn-sm ${open ? 'on' : ''}`} onClick={() => setOpen((v) => !v)}
-        title="Цвет этой вкладки — только для неё, другие страницы не изменятся" aria-haspopup="dialog" aria-expanded={open}>
+        title={t('page_accent.hint')} aria-haspopup="dialog" aria-expanded={open}>
         <span className="pa-dot" style={{ background: hex || 'var(--acc)' }}></span>
-        цвет
+        {t('page_accent.short')}
       </button>
       {open && createPortal(
-        <div className="pa-pop elevated" ref={pop} role="dialog" aria-label="цвет вкладки"
+        <div className="pa-pop elevated" ref={pop} role="dialog" aria-label={t('page_accent.title')}
           style={{ top: pos?.top ?? -9999, left: pos?.left ?? -9999, visibility: pos ? undefined : 'hidden' }}>
-          <div className="label">цвет этой вкладки</div>
+          <div className="label">{t('page_accent.title')}</div>
           <div className="pa-grid">
             <button type="button" className={`pa-sw pa-sw-reset ${!hex ? 'pa-sw-on' : ''}`} onClick={() => pick('')}
-              title="Как в общих настройках" aria-pressed={!hex}>
-              <span>как<br />всё</span>
+              title={t('page_accent.as_global')} aria-pressed={!hex}>
+              <span>{t('page_accent.as_all')}</span>
             </button>
             {Object.entries(ACCENTS).map(([k, a]) => {
               const raw = dark ? a.dark : a.light
               return (
                 <button key={k} type="button" className={`pa-sw ${hex && hex.toLowerCase() === String(raw).toLowerCase() ? 'pa-sw-on' : ''}`}
-                  title={a.label} aria-pressed={hex === raw}
+                  title={t(a.label)} aria-pressed={hex === raw}
                   style={{ background: accentFor(raw, dark) }}
                   onClick={() => pick(raw)} />
               )
             })}
           </div>
-          <p className="pa-note">цвет живёт только здесь — в настройках сайта он не меняется</p>
+          <p className="pa-note">{t('page_accent.note')}</p>
         </div>, document.body)}
     </span>
   )

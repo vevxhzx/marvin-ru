@@ -4,27 +4,29 @@
    Данные — только из тех же ответов API, что уже грузит Today.jsx (dashboard/finance). */
 import { useState } from 'react'
 import { ArrowUpRight, Flame, Plus, Target, Timer, Zap } from 'lucide-react'
-import { api, hhmm, isAllDay, money, plural } from '../lib/api'
+import { api, hhmm, isAllDay, money } from '../lib/api'
+import { useI18n, t as T } from '../lib/i18n'
 import { Streak, Heatmap } from './Widgets'
 
 const dm = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}`
 
 /* ---------- «быстрое дело»: добавляем задачу или трату одной строкой ---------- */
 export function QuickAddWidget({ onDone, onErr }) {
+  const { t } = useI18n()
   const [mode, setMode] = useState('task')   // task | expense
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
 
   const send = async () => {
-    const t = text.trim()
-    if (!t || busy) return
+    const txt = text.trim()
+    if (!txt || busy) return
     setBusy(true)
     try {
       // те же шаблоны, что и на странице задач и в чипсах: «задача: …» / «трата: …».
       // Правила ядра понимают их без LLM, поэтому строка уходит мгновенно.
-      await api.chat(`${mode === 'task' ? 'задача' : 'трата'}: ${t}`)
+      await api.chat(`${mode === 'task' ? T('qa.seed_task') : T('qa.seed_expense')}: ${txt}`)
       setText('')
-      onDone?.(mode === 'task' ? 'Дело добавлено' : 'Трата записана')
+      onDone?.(t(mode === 'task' ? 'qa.added' : 'qa.expense_added'))
     } catch (e) {
       onErr?.(e)
     } finally {
@@ -39,14 +41,14 @@ export function QuickAddWidget({ onDone, onErr }) {
           <span className="grid h-7 w-7 place-items-center rounded-xl" style={{ background: 'var(--accent-soft)', color: 'var(--acc)' }}>
             <Zap size={15} />
           </span>
-          <h2>быстрое дело</h2>
+          <h2>{t('qa.title')}</h2>
         </div>
-        <small>не уходя со страницы</small>
+        <small>{t('qa.sub')}</small>
       </div>
 
       {/* переключатель: дело или трата */}
       <div className="mb-2.5 inline-flex self-start rounded-full p-[3px] text-[13px]" style={{ background: 'var(--sf2)', border: '1px solid var(--line)' }}>
-        {[['task', 'дело'], ['expense', 'трата']].map(([k, label]) => (
+        {[['task', 'qa.task'], ['expense', 'qa.expense']].map(([k, lk]) => (
           <button
             key={k}
             type="button"
@@ -54,7 +56,7 @@ export function QuickAddWidget({ onDone, onErr }) {
             className="rounded-full px-3 py-1 transition"
             style={mode === k ? { background: 'var(--sf)', color: 'var(--ink)', boxShadow: '0 1px 5px rgba(0,0,0,.16)' } : { color: 'var(--ink2)' }}
           >
-            {label}
+            {t(lk)}
           </button>
         ))}
       </div>
@@ -64,7 +66,7 @@ export function QuickAddWidget({ onDone, onErr }) {
           value={text}
           onChange={(e) => setText(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && send()}
-          placeholder={mode === 'task' ? 'позвонить маме завтра в 18' : '450 такси'}
+          placeholder={t(mode === 'task' ? 'qa.ph_task' : 'qa.ph_expense')}
           className="min-w-0 flex-1 bg-transparent text-[14px] outline-none"
           style={{ color: 'var(--ink)' }}
         />
@@ -73,15 +75,15 @@ export function QuickAddWidget({ onDone, onErr }) {
           onClick={send}
           disabled={busy || !text.trim()}
           className="btn !h-9 !w-9 !p-0 disabled:opacity-40"
-          aria-label="добавить"
+          aria-label={t('common.add')}
         >
           <Plus size={17} />
         </button>
       </div>
 
       <div className="mt-3 flex flex-wrap gap-1.5">
-        {(mode === 'task' ? ['позвонить маме', 'оплатить коммуналку'] : ['700 такси', 'кофе 250']).map((s) => (
-          <button key={s} type="button" className="chip !mt-0 !py-1 !text-[12px]" onClick={() => setText(s)}>{s}</button>
+        {(mode === 'task' ? ['qa.ex_task1', 'qa.ex_task2'] : ['qa.ex_exp1', 'qa.ex_exp2']).map((k) => (
+          <button key={k} type="button" className="chip !mt-0 !py-1 !text-[12px]" onClick={() => setText(t(k))}>{t(k)}</button>
         ))}
       </div>
     </div>
@@ -90,6 +92,7 @@ export function QuickAddWidget({ onDone, onErr }) {
 
 /* ---------- «можно потратить сегодня» + ближайший платёж ---------- */
 export function SpendTodayWidget({ runway, payments }) {
+  const { t } = useI18n()
   const rw = runway || {}
   const pay = payments || {}
   const list = (pay.payments || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date))
@@ -103,38 +106,39 @@ export function SpendTodayWidget({ runway, payments }) {
   return (
     <div className="flex h-full flex-col">
       <div className="hd">
-        <h2>можно потратить</h2>
-        <small>сегодня</small>
+        <h2>{t('spend.title')}</h2>
+        <small>{t('common.today')}</small>
       </div>
       <div className="big">{money(safe)}</div>
       <span className="tag">
-        {days != null ? `до дохода ${days} ${plural(days, 'день', 'дня', 'дней')}` : 'по текущему темпу'}
+        {t(days != null ? 'spend.until_income' : 'spend.by_pace', { count: days })}
       </span>
 
       <div className="hm">
-        <div><small>свободно</small><b>{money(free)}</b></div>
-        <div><small>трачу в день</small><b>{money(perDay)}</b></div>
+        <div><small>{t('spend.free')}</small><b>{money(free)}</b></div>
+        <div><small>{t('spend.per_day')}</small><b>{money(perDay)}</b></div>
       </div>
 
       <div className="mt-3 flex items-center gap-2 text-[12.5px]">
         <Timer size={13} className="shrink-0" />
         {next ? (
           <>
-            <span className="min-w-0 flex-1 truncate">ближайший: {next.title}</span>
+            <span className="min-w-0 flex-1 truncate">{t('spend.next', { title: next.title })}</span>
             <b className="shrink-0 whitespace-nowrap">{money(next.amount)}</b>
             <span className="mono shrink-0 opacity-80">{dm(next.date)}</span>
           </>
         ) : (
-          <span className="opacity-80">ближайших платежей нет</span>
+          <span className="opacity-80">{t('spend.no_payments')}</span>
         )}
       </div>
-      {short > 0 && <div className="mt-1 text-[12px] font-semibold">не хватает {money(short)}</div>}
+      {short > 0 && <div className="mt-1 text-[12px] font-semibold">{t('spend.short', { m: money(short) })}</div>}
     </div>
   )
 }
 
 /* ---------- «цели»: прогресс + фокус дня ---------- */
 export function GoalsWidget({ goals, tasks, onOpen }) {
+  const { t } = useI18n()
   const list = (goals || []).slice().sort((a, b) => {
     const ax = a.days_left == null ? 9e9 : a.days_left
     const bx = b.days_left == null ? 9e9 : b.days_left
@@ -149,16 +153,16 @@ export function GoalsWidget({ goals, tasks, onOpen }) {
           <span className="grid h-7 w-7 place-items-center rounded-xl" style={{ background: 'var(--accent-soft)', color: 'var(--acc)' }}>
             <Target size={15} />
           </span>
-          <h2>цели</h2>
+          <h2>{t('goals.title')}</h2>
         </div>
-        <small>{list.length ? `${list.length} в работе` : 'пока пусто'}</small>
+        <small>{list.length ? t('goals.active_n', { count: list.length }) : t('goals.empty')}</small>
       </div>
 
       {focus && (
         <div className="mb-3 rounded-2xl p-3" style={{ background: 'var(--sf2)' }}>
-          <div className="faint text-[11px] uppercase tracking-wide">фокус дня</div>
+          <div className="faint text-[11px] uppercase tracking-wide">{t('focus.title')}</div>
           <div className="mt-1 line-clamp-2 text-[14px] font-medium leading-snug">{focus.title}</div>
-          {focus.due && <div className="faint mt-0.5 text-[12px]">до {hhmm(focus.due)}</div>}
+          {focus.due && <div className="faint mt-0.5 text-[12px]">{t('goals.by', { time: hhmm(focus.due) })}</div>}
         </div>
       )}
 
@@ -177,17 +181,17 @@ export function GoalsWidget({ goals, tasks, onOpen }) {
               </div>
               <div className="faint mt-1 flex justify-between text-[11.5px]">
                 <span>{money(g.saved)} из {money(g.target)}</span>
-                <span>{g.days_left != null ? (g.days_left < 0 ? 'просрочена' : `${g.days_left} дн`) : (g.per_month ? `${money(g.per_month)}/мес` : '')}</span>
+                <span>{g.days_left != null ? (g.days_left < 0 ? t('goals.overdue') : t('goals.in_days', { count: g.days_left })) : (g.per_month ? t('goals.per_month', { m: money(g.per_month) }) : '')}</span>
               </div>
             </div>
           )
         })}
-        {!list.length && <div className="muted text-[13px]">Целей пока нет — скажите в чате «цель: …»</div>}
+        {!list.length && <div className="muted text-[13px]">{t('goals.none')}</div>}
       </div>
 
       {onOpen && (
         <button type="button" className="chip !mt-3 self-start !py-1.5 !text-[12.5px]" onClick={onOpen}>
-          все цели <ArrowUpRight size={13} />
+          {t('goals.all')} <ArrowUpRight size={13} />
         </button>
       )}
     </div>
@@ -196,6 +200,7 @@ export function GoalsWidget({ goals, tasks, onOpen }) {
 
 /* ---------- «привычки»: стрик ведения дня + тепловая карта ---------- */
 export function HabitsWidget({ streak }) {
+  const { t } = useI18n()
   return (
     <div className="flex h-full flex-col">
       <div className="hd">
@@ -203,14 +208,14 @@ export function HabitsWidget({ streak }) {
           <span className="grid h-7 w-7 place-items-center rounded-xl" style={{ background: 'var(--warn-soft)', color: 'var(--warn)' }}>
             <Flame size={15} />
           </span>
-          <h2>привычки</h2>
+          <h2>{t('habits.title')}</h2>
         </div>
-        <small>ведение дня</small>
+        <small>{t('habits.sub')}</small>
       </div>
 
       <Streak streak={streak} />
       {!streak?.current && (
-        <div className="muted mt-2 text-[13px]">Начните вести день — запишите трату, дело или мысль.</div>
+        <div className="muted mt-2 text-[13px]">{t('habits.hint')}</div>
       )}
       {!!(streak?.heatmap || []).length && (
         <div className="mt-auto pt-4">
@@ -223,6 +228,7 @@ export function HabitsWidget({ streak }) {
 
 /* ---------- «ближайшее дело»: следующая встреча/задача и свободное окно до неё ---------- */
 export function NextUpWidget({ events, tasks, onOpen }) {
+  const { t } = useI18n()
   const now = new Date()
   const items = []
   for (const e of events || []) {
@@ -246,8 +252,8 @@ export function NextUpWidget({ events, tasks, onOpen }) {
   return (
     <div className="flex h-full flex-col">
       <div className="hd">
-        <h2>ближайшее</h2>
-        <small>{next ? hhmm(next.at) : 'день свободен'}</small>
+        <h2>{t('nextup.title')}</h2>
+        <small>{next ? hhmm(next.at) : t('nextup.day_free')}</small>
       </div>
 
       {next ? (
@@ -256,13 +262,13 @@ export function NextUpWidget({ events, tasks, onOpen }) {
           <div className="mt-1 line-clamp-2 text-[15px] font-medium leading-snug">{next.title}</div>
           <div className="mt-3 inline-flex items-center gap-1.5 self-start rounded-full px-3 py-1 text-[12.5px] font-medium"
             style={{ background: 'var(--accent-soft)', color: 'var(--acc)' }}>
-            <Timer size={13} /> свободно {fh ? `${fh} ч ` : ''}{fm} мин
+            <Timer size={13} /> {t('nextup.free')} {fh ? `${fh} ${t('unit.hour')} ` : ''}{fm} {t('unit.min')}
           </div>
         </>
       ) : (
         <>
-          <div className="mid">свободно</div>
-          <div className="muted mt-1 text-[13.5px]">дел с конкретным временем больше нет — день ваш.</div>
+          <div className="mid">{t('nextup.free')}</div>
+          <div className="muted mt-1 text-[13.5px]">{t('nextup.all_free')}</div>
         </>
       )}
 
@@ -279,7 +285,7 @@ export function NextUpWidget({ events, tasks, onOpen }) {
 
       {next && onOpen && (
         <button type="button" className="chip !mt-3 self-start !py-1.5 !text-[12.5px]" onClick={() => onOpen(next.kind)}>
-          {next.kind === 'event' ? 'в календарь' : 'к задачам'} <ArrowUpRight size={13} />
+          {t(next.kind === 'event' ? 'nextup.to_cal' : 'nextup.to_tasks')} <ArrowUpRight size={13} />
         </button>
       )}
     </div>

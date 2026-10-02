@@ -52,14 +52,14 @@ export function fitAccentInk(bg, target = 4.5) {
    Выбор меняет ТОЛЬКО --accent: смысловые цвета статусов (--pos/--neg/--warn/--ai)
    от выбора не зависят и остаются как в DESIGN.md. */
 export const ACCENT_PALETTE = [
-  { id: 'blue', name: 'синий', hex: '#0a3cff' },
-  { id: 'indigo', name: 'индиго', hex: '#5b5bf0' },
-  { id: 'violet', name: 'фиолетовый', hex: '#8a5cff' },
-  { id: 'rose', name: 'розовый', hex: '#ff4d8d' },
-  { id: 'red', name: 'красный', hex: '#ff5b7a' },
-  { id: 'orange', name: 'оранжевый', hex: '#ff7a1a' },
-  { id: 'amber', name: 'янтарь', hex: '#f5b400' },
-  { id: 'lime', name: 'лайм', hex: '#c6f24a' },
-  { id: 'green', name: 'зелёный', hex: '#19b34a' },
-  { id: 'teal', name: 'бирюза', hex: '#12b5a5' },
+  { id: 'blue', name: 'accent.blue', hex: '#0a3cff' },
+  { id: 'indigo', name: 'accent.indigo', hex: '#5b5bf0' },
+  { id: 'violet', name: 'accent.violet', hex: '#8a5cff' },
+  { id: 'rose', name: 'accent.rose', hex: '#ff4d8d' },
+  { id: 'red', name: 'accent.red', hex: '#ff5b7a' },
+  { id: 'orange', name: 'accent.orange', hex: '#ff7a1a' },
+  { id: 'amber', name: 'accent.amber', hex: '#f5b400' },
+  { id: 'lime', name: 'accent.lime', hex: '#c6f24a' },
+  { id: 'green', name: 'accent.green', hex: '#19b34a' },
+  { id: 'teal', name: 'accent.teal', hex: '#12b5a5' },
 ]

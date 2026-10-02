@@ -4,8 +4,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { MoreHorizontal } from 'lucide-react'
+import { useI18n } from '../lib/i18n'
 
-export default function MenuButton({ items, ariaLabel = 'Ещё действия', tip = 'Ещё действия', align = 'right', className = '', onOpen }) {
+export default function MenuButton({ items, ariaLabel, tip, align = 'right', className = '', onOpen }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const [pos, setPos] = useState(null)
   const btn = useRef(null)
@@ -38,7 +40,7 @@ export default function MenuButton({ items, ariaLabel = 'Ещё действия
   return (
     <>
       <button ref={btn} type="button" className={`btn-icon !h-7 !w-7 ${className}`} onClick={(e) => { e.stopPropagation(); toggle() }}
-        aria-label={ariaLabel} data-tip={open ? undefined : tip} aria-haspopup="menu" aria-expanded={open}>
+        aria-label={ariaLabel || t('common.more_actions')} data-tip={open ? undefined : (tip || t('common.more_actions'))} aria-haspopup="menu" aria-expanded={open}>
         <MoreHorizontal size={15} />
       </button>
       {open && pos && createPortal(

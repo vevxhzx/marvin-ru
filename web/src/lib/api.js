@@ -1,4 +1,5 @@
 const BASE = ''
+import { getLang, localeOf, t, fmtDate, fmtNumber, fmtMoney, pluralIndex } from './i18n'
 
 async function req(method, path, body, timeoutMs = 30000) {
   const ctrl = new AbortController()
@@ -13,7 +14,7 @@ async function req(method, path, body, timeoutMs = 30000) {
     })
   } catch (err) {
     if (err?.name === 'AbortError') {
-      const e = new Error(`${method} ${path} → нет ответа за ${Math.round(timeoutMs / 1000)} с`)
+      const e = new Error(t('api.no_response', { method, path, sec: Math.round(timeoutMs / 1000) }))
       e.status = 0
       throw e
     }
@@ -24,8 +25,8 @@ async function req(method, path, body, timeoutMs = 30000) {
   if (r.status === 401) {
     const { tg } = await import('./tg')
     const msg = tg.active
-      ? (tg.error ? `Telegram не подтвердил вход: ${tg.error}. Закройте приложение и откройте снова.` : 'Сессия Telegram истекла — закройте приложение и откройте снова.')
-      : 'Нет доступа с этого устройства. Откройте сайт по QR из ⚙ Настроек → «с телефона» на компьютере.'
+      ? (tg.error ? t('api.tg_denied', { err: tg.error }) : t('api.tg_session_expired'))
+      : t('api.no_access_device')
     const e = new Error(msg); e.status = 401
     window.dispatchEvent(new CustomEvent('assistant:denied', { detail: { msg, tg: tg.active, tgError: tg.error } }))
     throw e
@@ -94,7 +95,7 @@ export const api = {
   addNotePhoto: async (file, text = '') => {
     const fd = new FormData(); fd.append('file', file); fd.append('text', text)
     const r = await fetch(BASE + '/api/notes/photo', { method: 'POST', body: fd })
-    if (!r.ok) { let msg = `фото → ${r.status}`; try { const j = await r.json(); if (j?.detail) msg = j.detail } catch {} throw new Error(msg) }
+    if (!r.ok) { let msg = t('api.photo_failed', { status: r.status }); try { const j = await r.json(); if (j?.detail) msg = j.detail } catch {} throw new Error(msg) }
     return r.json()
   },
   delNote: (id) => req('DELETE', `/api/notes/${id}`),
@@ -159,7 +160,7 @@ export const api = {
   crmOrderCard: (id) => req('GET', `/api/crm/orders/${id}/card`),
   crmSetStage: (id, stage, lost_reason = null) => req('PUT', `/api/crm/orders/${id}/stage`, { stage, lost_reason }),
   crmPay: (id, amount, extra = {}) => req('POST', `/api/crm/orders/${id}/payments`, { amount, ...extra }),
-  crmComment: (id, text, client_id = null, author = 'вы') => req('POST', `/api/crm/orders/${id}/comments`, { text, client_id, author }),
+  crmComment: (id, text, client_id = null, author = null) => req('POST', `/api/crm/orders/${id}/comments`, { text, client_id, author }),
   crmChecklist: (id) => req('GET', `/api/crm/orders/${id}/checklist`),
   crmAddCheck: (id, title) => req('POST', `/api/crm/orders/${id}/checklist`, { title }),
   crmToggleCheck: (cid, done = null) => req('PATCH', `/api/crm/checklist/${cid}`, { done }),
@@ -217,58 +218,50 @@ export async function chatStream(text, onToken) {
   throw new Error('stream ended')
 }
 
-export const REPEAT_LABELS = { '': 'не повторять', daily: 'каждый день', weekly: 'каждую неделю', monthly: 'каждый месяц', yearly: 'каждый год' }
-export const WD_SHORT_MON = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс']
+export const REPEAT_LABELS = { '': 'repeat_none', daily: 'repeat_daily', weekly: 'repeat_weekly', monthly: 'repeat_monthly', yearly: 'repeat_yearly' }
+/* Дни недели коротко: берём из Intl, чтобы в EN было «Mon», а в RU «пн» */
+export const WD_SHORT_MON = Array.from({ length: 7 }, (_, i) => new Date(2024, 0, 1 + ((i + 6) % 7))
+  .toLocaleDateString(localeOf(), { weekday: 'short' }))
 
 // ---------- формат ----------
-export const money = (x, opts = {}) => {
-  const n = Math.round(Number(x) || 0)
-  const s = Math.abs(n).toLocaleString('ru-RU')
-  return `${n < 0 ? '−' : opts.plus && n > 0 ? '+' : ''}${s} ₽`
-}
-export const moneyShort = (x) => {
-  const n = Number(x) || 0
-  const a = Math.abs(n)
-  const sign = n < 0 ? '−' : ''
-  if (a >= 1_000_000) return `${sign}${(a / 1_000_000).toFixed(1).replace('.0', '')} млн`
-  if (a >= 10_000) return `${sign}${Math.round(a / 1000)}к`
-  if (a >= 1000) return `${sign}${(a / 1000).toFixed(1).replace('.0', '')}к`
-  return `${sign}${a}`
-}
+/* Деньги: «1 500 ₽» в RU и «₽1,500» в EN — знак минус тот же (U+2212), как был. */
+export const money = (x, opts = {}) => fmtMoney(x, opts)
+export const moneyShort = (x) => fmtMoney(x, { compact: true })
 
-const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
-const WD_FULL = ['Воскресенье', 'Понедельник', 'Вторник', 'Среда', 'Четверг', 'Пятница', 'Суббота']
-export const MONTHS = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня', 'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря']
-export const MONTHS_NOM = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
-
+/* Базовые форматы остаются на месте (их импортируют десятки мест), но текст и разделители
+   теперь берутся из текущего языка: RU — «2 октября 2026», EN — «Oct 2, 2026». */
 export const d = (s) => (s instanceof Date ? s : new Date(s))
 export const isSameDay = (a, b) => d(a).toDateString() === d(b).toDateString()
-export const hhmm = (s) => d(s).toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })
+export const hhmm = (s) => d(s).toLocaleTimeString(localeOf(), { hour: '2-digit', minute: '2-digit' })
 export const isAllDay = (s) => { const x = d(s); return x.getHours() === 23 && x.getMinutes() === 59 }   // задача «на день» хранится как 23:59
 export const dayLabel = (s) => {
   const x = d(s), now = new Date()
-  const t = new Date(now); t.setDate(now.getDate() + 1)
-  if (isSameDay(x, now)) return 'Сегодня'
-  if (isSameDay(x, t)) return 'Завтра'
+  const tmw = new Date(now); tmw.setDate(now.getDate() + 1)
+  if (isSameDay(x, now)) return t('common.today_caps')
+  if (isSameDay(x, tmw)) return t('common.tomorrow_caps')
   const diff = (new Date(x.toDateString()) - new Date(now.toDateString())) / 864e5
-  if (diff > 0 && diff < 7) return `${WD_FULL[x.getDay()]}`
-  return `${x.getDate()} ${MONTHS[x.getMonth()]}`
+  if (diff > 0 && diff < 7) return x.toLocaleDateString(localeOf(), { weekday: 'long' })
+  return fmtDate(x)
 }
-export const shortDate = (s) => { const x = d(s); return `${WD[x.getDay()]} ${x.getDate()} ${MONTHS[x.getMonth()].slice(0, 3)}` }
-export const fullDate = (s) => { const x = d(s); return `${x.getDate()} ${MONTHS[x.getMonth()]} ${x.getFullYear()}` }
+export const shortDate = (s) => {
+  const x = d(s)
+  return `${x.toLocaleDateString(localeOf(), { weekday: 'short' })} ${x.getDate()} ${x.toLocaleDateString(localeOf(), { month: 'short' }).replace(/\.$/, '')}`
+}
+export const fullDate = (s) => fmtDate(s)
 export const toLocalISO = (date) => {
   const x = d(date); const p = (n) => String(n).padStart(2, '0')
   return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())}T${p(x.getHours())}:${p(x.getMinutes())}`
 }
 export const relTime = (s) => {
   const diff = (Date.now() - d(s)) / 1000
-  if (diff < 60) return 'только что'
-  if (diff < 3600) return `${Math.floor(diff / 60)} мин назад`
-  if (diff < 86400) return `${Math.floor(diff / 3600)} ч назад`
-  if (diff < 172800) return 'вчера'
+  if (diff < 60) return t('time.just_now')
+  if (diff < 3600) return t('time.min_ago', { n: Math.floor(diff / 60) })
+  if (diff < 86400) return t('time.hour_ago', { n: Math.floor(diff / 3600) })
+  if (diff < 172800) return t('common.yesterday')
   return shortDate(s)
 }
-export const plural = (n, one, few, many) => { const a = Math.abs(n) % 100, b = a % 10; if (a > 10 && a < 20) return many; if (b > 1 && b < 5) return few; if (b === 1) return one; return many }
+/* Русская плюрализация (день/дня/дней) — одна реализация на всё приложение, в lib/i18n.js */
+export const plural = (n, one, few, many) => [one, few, many][pluralIndex(n, getLang())]
 
 // Теги из API приходят строкой ("а,б") — приводим к массиву, чтобы .map не падал.
 export const listOf = (v) => {
@@ -282,8 +275,14 @@ export const parseNum = (v) => {
   const n = Number(String(v).replace(/\s|\u00a0/g, '').replace(',', '.'))
   return Number.isFinite(n) ? n : NaN
 }
-export const fmtInput = (n) => (n == null || n === '' || Number.isNaN(Number(n)) ? '' : Math.round(Number(n) * 100) / 100).toLocaleString('ru-RU')
+export const fmtInput = (n) => (n == null || n === '' || Number.isNaN(Number(n)) ? '' : fmtNumber(Math.round(Number(n) * 100) / 100, { maximumFractionDigits: 2 }))
 
+/* Месяцы через Intl: RU — «октября» (родительный), EN — «October» */
+export const MONTHS = Array.from({ length: 12 }, (_, i) => new Date(2024, i, 1).toLocaleDateString(localeOf(), { month: 'long' }))
+export const MONTHS_NOM = Array.from({ length: 12 }, (_, i) => new Date(2024, i, 1).toLocaleDateString(localeOf(), { month: 'long' }))
+
+/* Цвета и иконки категорий: ключи — как в базе (русские), подпись для интерфейса переводит
+   словарь t.cat_* в i18n.js (см. catLabel). */
 export const CAT_COLORS = {
   'Еда': '#ff9f0a', 'Транспорт': '#0a84ff', 'Жильё': '#5e5ce6', 'Подписки': '#bf5af2', 'Здоровье': '#30d158',
   'Развлечения': '#ff375f', 'Одежда': '#64d2ff', 'Техника': '#ffd60a', 'Долги': '#ff453a', 'Другое': '#8e8e93',
@@ -292,6 +291,14 @@ export const CAT_COLORS = {
 export const catColor = (c) => CAT_COLORS[c] || '#8e8e93'
 export const CAT_ICONS = { 'Еда': '🍔', 'Транспорт': '🚕', 'Жильё': '🏠', 'Подписки': '📱', 'Здоровье': '💊', 'Развлечения': '🎮', 'Одежда': '👕', 'Техника': '💻', 'Долги': '💳', 'Другое': '📦', 'Зарплата': '💰', 'Фриланс': '🧑‍💻', 'Прочий доход': '🎁' }
 export const catIcon = (c) => CAT_ICONS[c] || '•'
+/* Подпись категории для показа: EN переводит только «штучные» названия из БД,
+   всё что ввёл сам пользователь — остаётся как есть. */
+export const CAT_LABEL_KEYS = {
+  'Еда': 'cat_food', 'Транспорт': 'cat_transport', 'Жильё': 'cat_housing', 'Подписки': 'cat_subscriptions',
+  'Здоровье': 'cat_health', 'Развлечения': 'cat_fun', 'Одежда': 'cat_clothes', 'Техника': 'cat_tech',
+  'Долги': 'cat_debts', 'Зарплата': 'cat_salary', 'Фриланс': 'cat_freelance', 'Прочий доход': 'cat_other_income',
+}
+export const catLabel = (c) => (CAT_LABEL_KEYS[c] ? t(CAT_LABEL_KEYS[c]) : c)
 
 /* Подписи горячих клавиш под платформу: на маке ⌘/⌥, на Windows/Linux — Ctrl/Alt */
 export const isMac = /Mac|iPhone|iPad|iPod/.test(navigator.platform || '') || /Mac OS X/.test(navigator.userAgent || '')

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
+import { useI18n } from '../lib/i18n'
 
 /* Граф «второго мозга»: люди · заказы · заметки · ссылки · теги. Связи выводятся сами (имена, теги, [[скобки]], смысл).
    Простой force-layout на canvas без библиотек. Клик по узлу — фокус на его окрестности; двойной клик — открыть. */
@@ -8,14 +9,16 @@ const COLORS = {
   person: 'var(--accent)', order: 'var(--warn)', note: 'var(--ink)', link: 'var(--pos)', tag: 'var(--ink-3)',
   debt: 'var(--neg)', goal: 'var(--pos)', task: 'var(--ink-2)', event: 'var(--ink-2)', money: 'var(--warn)', project: 'var(--ink-3)',
 }
-const KIND_RU = { person: 'люди', order: 'заказы', note: 'мысли', link: 'ссылки', tag: 'теги', debt: 'долги', goal: 'цели', task: 'задачи', event: 'встречи', money: 'деньги', project: 'проекты' }
-const KIND_ONE = { person: 'человек', order: 'заказ', note: 'мысль', link: 'ссылка', tag: 'тег', debt: 'долг', goal: 'цель', task: 'задача', event: 'встреча', money: 'категория', project: 'проект' }
-// как связаны — по-русски, для подсказки при наведении
-const REL_RU = { client: 'клиент', mention: 'упоминание', tag: 'тег', wiki: '[[ссылка]]', similar: 'по смыслу', debt: 'кредитор', work: 'работа', project: 'проект', pay: 'оплата', same: 'та же тема' }
+/* Подписи узлов и связей — ключи словаря (см. lib/i18n.js) */
+const KIND_RU = { person: 'graph.kind_people', order: 'graph.kind_orders', note: 'graph.kind_notes', link: 'graph.kind_links', tag: 'graph.kind_tags', debt: 'graph.kind_debts', goal: 'graph.kind_goals', task: 'graph.kind_tasks', event: 'graph.kind_events', money: 'graph.kind_money', project: 'graph.kind_projects' }
+const KIND_ONE = { person: 'graph.one_person', order: 'graph.one_order', note: 'graph.one_note', link: 'graph.one_link', tag: 'graph.one_tag', debt: 'graph.one_debt', goal: 'graph.one_goal', task: 'graph.one_task', event: 'graph.one_event', money: 'graph.one_category', project: 'graph.one_project' }
+// как связаны — подпись при наведении
+const REL_RU = { client: 'graph.rel_client', mention: 'graph.rel_mention', tag: 'graph.one_tag', wiki: 'graph.rel_wiki', similar: 'graph.rel_similar', debt: 'graph.rel_debt', work: 'graph.rel_work', project: 'graph.one_project', pay: 'graph.rel_pay', same: 'graph.rel_same' }
 const LEGEND = ['person', 'order', 'money', 'note', 'link', 'tag', 'debt', 'task']
 const cssVar = (name, el) => getComputedStyle(el || document.documentElement).getPropertyValue(name.slice(4, -1)).trim() || '#888'
 
 export default function Graph({ height = 520, focus: initialFocus = null, compact = false }) {
+  const { t, fmtNumber } = useI18n()
   const [data, setData] = useState(null)
   const [focus, setFocus] = useState(initialFocus)
   const [hover, setHover] = useState(null)
@@ -182,7 +185,7 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
       const other = e.a.id === hover.id ? e.b : e.b.id === hover.id ? e.a : null
       if (other) (by[e.rel] = by[e.rel] || []).push(other.label)
     }
-    return Object.entries(by).map(([r, ls]) => `${REL_RU[r] || r}: ${ls.length <= 2 ? ls.map((l) => (l.length > 22 ? l.slice(0, 21) + '…' : l)).join(', ') : ls.length}`).join(' · ')
+    return Object.entries(by).map(([r, ls]) => `${t(REL_RU[r]) || r}: ${ls.length <= 2 ? ls.map((l) => (l.length > 22 ? l.slice(0, 21) + '…' : l)).join(', ') : ls.length}`).join(' · ')
   }, [hover, layout])
   return (
     <div className="relative">
@@ -192,18 +195,18 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
           {LEGEND.map((k) => (
             <button key={k} type="button" className={`pointer-events-auto chip !bg-[var(--bg)] ${hidden.has(k) ? 'opacity-40' : ''}`} onClick={() => setHidden((h) => { const n = new Set(h); n.has(k) ? n.delete(k) : n.add(k); return n })}>
-              <span className="h-2 w-2 rounded-full" style={k === 'money' || k === 'tag' || k === 'note' ? { border: `1.5px solid ${COLORS[k]}` } : { background: COLORS[k] }} />{KIND_RU[k]}
+              <span className="h-2 w-2 rounded-full" style={k === 'money' || k === 'tag' || k === 'note' ? { border: `1.5px solid ${COLORS[k]}` } : { background: COLORS[k] }} />{t(KIND_RU[k])}
             </button>
           ))}
         </div>
       )}
-      {focus && <button type="button" className="btn-soft btn-sm absolute right-3 top-3" onClick={() => { viewRef.current.user = false; setFocus(null) }}>весь граф</button>}
+      {focus && <button type="button" className="btn-soft btn-sm absolute right-3 top-3" onClick={() => { viewRef.current.user = false; setFocus(null) }}>{t('graph.whole')}</button>}
       {hover && <div className="pointer-events-none absolute bottom-3 left-3 max-w-[70%] rounded-xl px-3 py-1.5 text-[12.5px]" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
-        {KIND_ONE[hover.kind] || hover.kind} · {hover.label}{hover.kind === 'money' && hover.total ? ` · ${hover.total.toLocaleString('ru-RU')} ₽` : ''}{hover.kind === 'order' && hover.price ? ` · ${hover.paid ? `${hover.paid.toLocaleString('ru-RU')} из ` : ''}${hover.price.toLocaleString('ru-RU')} ₽` : ''}
+        {t(KIND_ONE[hover.kind]) || hover.kind} · {hover.label}{hover.kind === 'money' && hover.total ? ` · ${fmtNumber(hover.total)} ₽` : ''}{hover.kind === 'order' && hover.price ? ` · ${hover.paid ? `${fmtNumber(hover.paid)} ${t('graph.of')} ` : ''}${fmtNumber(hover.price)} ₽` : ''}
         {hoverRels && <div className="mt-0.5 text-[11.5px] opacity-75">{hoverRels}</div>}
       </div>}
-      {!compact && data && !empty && <div className="faint absolute bottom-3 right-3 text-[11.5px]">{st.people || 0} людей · {st.notes || 0} мыслей · {st.links || 0} ссылок · {st.edges || 0} связей{st.lonely ? ` · без связей: ${st.lonely}` : ''}</div>}
-      {empty && <div className="absolute inset-0 grid place-items-center text-center"><div><div className="text-[14px] font-medium">Связей пока нет</div><div className="muted mt-1 max-w-[320px] text-[12.5px]">Заведите людей («человек: Лена, сестра»), ставьте #теги в мыслях и ссылайтесь на другие мысли через [[двойные скобки]] — граф соберётся сам.</div></div></div>}
+      {!compact && data && !empty && <div className="faint absolute bottom-3 right-3 text-[11.5px]">{t('graph.stats', { people: st.people || 0, notes: st.notes || 0, links: st.links || 0, edges: st.edges || 0 })}{st.lonely ? ` · ${t('graph.lonely', { n: st.lonely })}` : ''}</div>}
+      {empty && <div className="absolute inset-0 grid place-items-center text-center"><div><div className="text-[14px] font-medium">{t('graph.empty_title')}</div><div className="muted mt-1 max-w-[320px] text-[12.5px]">{t('graph.empty_hint')}</div></div></div>}
     </div>
   )
 }

@@ -5,8 +5,10 @@
 import { useEffect, useState } from 'react'
 import { api, dayLabel, toLocalISO } from '../lib/api'
 import { useToast } from './ui'
+import { useI18n } from '../lib/i18n'
 
 export default function ClientNextStep({ cid, onErr, className = '' }) {
+  const { t } = useI18n()
   const [loaded, setLoaded] = useState(false)
   const [step, setStep] = useState('')
   const [at, setAt] = useState('')
@@ -32,24 +34,24 @@ export default function ClientNextStep({ cid, onErr, className = '' }) {
     try {
       await api.crmUpdateClient(cid, { next_step: step.trim(), next_step_at: at ? `${at}T12:00:00` : null })
       setBase({ step: step.trim(), at })
-      setNote('сохранено')
+      setNote(t('common.saved'))
       setTimeout(() => setNote(''), 2500)
     } catch (e) { if (onErr) onErr(e); else show.err(e) } finally { setBusy(false) }
   }
 
-  if (!loaded) return <div className={`faint text-[12px] ${className}`}>загружаю следующий шаг…</div>
+  if (!loaded) return <div className={`faint text-[12px] ${className}`}>{t('next_step.loading')}</div>
 
   return (
     <div className={className}>
-      <div className="label mb-1">следующий шаг</div>
+      <div className="label mb-1">{t('next_step.title')}</div>
       <div className="flex flex-wrap items-center gap-2">
         <input className="input !h-8 min-w-[160px] flex-1" value={step} onChange={(e) => setStep(e.target.value)}
-          placeholder="позвонить, прислать смету…" aria-label="Следующий шаг" />
-        <input type="date" className="input !h-8 !w-[150px]" value={at} onChange={(e) => setAt(e.target.value)} aria-label="Дата следующего шага" />
-        <button type="button" className="btn-soft btn-sm" onClick={save} disabled={!dirty || busy} aria-label="Сохранить следующий шаг">{busy ? 'сохраняю…' : 'сохранить'}</button>
+          placeholder={t('next_step.ph')} aria-label={t('next_step.title')} />
+        <input type="date" className="input !h-8 !w-[150px]" value={at} onChange={(e) => setAt(e.target.value)} aria-label={t('next_step.date')} />
+        <button type="button" className="btn-soft btn-sm" onClick={save} disabled={!dirty || busy} aria-label={t('next_step.save')}>{busy ? t('common.loading') : t('common.save')}</button>
       </div>
       <div className="faint mt-1 text-[12px]">
-        {note ? <span className="pos">{note}</span> : at ? `к ${dayLabel(at).toLowerCase()} — попадёт в follow-up` : 'дата не задана; без неё напоминание не создастся'}
+        {note ? <span className="pos">{note}</span> : at ? t('next_step.hint_dated', { when: dayLabel(at) }) : t('next_step.hint_nodate')}
       </div>
     </div>
   )

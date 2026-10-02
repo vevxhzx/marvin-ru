@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Plus, Check, Play, Square, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins, List, RefreshCw, Bell, User, HelpCircle } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
-import { api, money, moneyShort, dayLabel, shortDate, hhmm, plural, toLocalISO } from '../lib/api'
+import { api, money, moneyShort, dayLabel, shortDate, hhmm, toLocalISO } from '../lib/api'
 import { Section, Empty, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Num, PageAccent } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
@@ -13,11 +13,12 @@ import { ClientStageBadge, ClientStageSelect, ClientStageNote } from '../compone
 import {
   ORDER_STAGES, ORDER_STAGE_LABEL, ORDER_STAGE_TONE, stageOf, NEXT_STEP, STAGE_TO_STATUS,
 } from '../lib/crm'
+import { useI18n, t as T } from '../lib/i18n'
 
-const VIEWS = [['open', 'в работе'], ['unpaid', 'ждут оплаты'], ['all', 'все']]
+const VIEWS = [['open', 'or.v_open'], ['unpaid', 'or.v_unpaid'], ['all', 'common.all']]
 const STATUS_DOT = { new: 'var(--accent)', work: 'var(--accent)', review: 'var(--warn)', done: 'var(--pos)', paid: 'var(--pos)', cancelled: 'var(--ink-3)' }
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
-const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ч` : h > 0 ? `${Math.round(h * 60)} мин` : '—')
+const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ${T('unit.hour')}` : h > 0 ? `${Math.round(h * 60)} ${T('unit.min')}` : '—')
 
 /* Мягкая карточка строки: нейтральная тень, на hover — чуть сильнее (и подъём через hover:-translate-y-px) */
 const CARD_SHADOW = 'shadow-[inset_0_0_0_1px_var(--line),0_16px_34px_-24px_rgba(16,17,20,0.35)] hover:shadow-[inset_0_0_0_1px_var(--line),0_22px_42px_-24px_rgba(16,17,20,0.5)]'
@@ -40,6 +41,7 @@ export function useTimer() {
 export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`
 
 export default function Orders() {
+  const { t } = useI18n()
   const [orders, setOrders] = useState(null)
   const pageAcc = usePageAccent('orders')
   const [stats, setStats] = useState(null)
@@ -79,12 +81,12 @@ export default function Orders() {
 
   const addQuick = async (e) => {
     e.preventDefault(); if (!quick.trim()) return
-    try { await api.chat(`заказ: ${quick.trim()}`); setQuick(''); load(); bump() } catch (err) { show.err(err) }
+    try { await api.chat(T('or.seed_order', { text: quick.trim() })); setQuick(''); load(); bump() } catch (err) { show.err(err) }
   }
   const [leaveCls, leave] = useLeave()
   const setStatus = async (o, status) => {
     if (status === 'paid' && o.left > 0) return setPay(o)   // деньги не записаны — сначала оплата, полная сумма сама закроет заказ
-    try { await api.updateOrder(o.id, { status }); load(); bump(); if (status === 'paid') show('Заказ оплачен', '', o.title) } catch (e) { show.err(e) }
+    try { await api.updateOrder(o.id, { status }); load(); bump(); if (status === 'paid') show(t('or.paid'), '', o.title) } catch (e) { show.err(e) }
   }
   // стадия заказа меняется через CRM (старый status синхронизируется на бэке).
   // «потерян» требует причину: клик по нему открывает вопрос, а не меняет стадию сразу.
@@ -92,54 +94,54 @@ export default function Orders() {
     if (stage === stageOf(o)) return
     if (stage === 'lost') return setLost(o)
     if (stage === 'paid' && o.left > 0) return setPay(o)
-    try { await api.crmSetStage(o.id, stage); show(`Стадия: ${ORDER_STAGE_LABEL[stage]}`, '', o.title); load(); bump() } catch (e) { show.err(e) }
+    try { await api.crmSetStage(o.id, stage); show(t('stage.of', { label: t(ORDER_STAGE_LABEL[stage]) }), '', o.title); load(); bump() } catch (e) { show.err(e) }
   }
   const openDrawer = (o) => setDrawerId(o.id)
-  const scanFollowups = async () => { try { const r = await api.crmScanFollowups(); await load(); show('Напоминания обновлены', r.created?.length ? `новых: ${r.created.length}` : 'новых нет') } catch (e) { show.err(e) } }
-  const remove = (o) => leave(o.id, 'leaving', async () => { await api.delOrder(o.id); show('Заказ удалён', '', o.title); load(); bump() })
+  const scanFollowups = async () => { try { const r = await api.crmScanFollowups(); await load(); show(t('or.fu_updated'), r.created?.length ? t('or.fu_new', { n: r.created.length }) : t('or.fu_none')) } catch (e) { show.err(e) } }
+  const remove = (o) => leave(o.id, 'leaving', async () => { await api.delOrder(o.id); show(t('or.deleted'), '', o.title); load(); bump() })
   const start = async (o, minutes = null) => { try { await api.startTimer(o?.id || null, minutes); load() } catch (e) { show.err(e) } }
   const stop = async () => { try { await api.stopTimer(); load() } catch (e) { show.err(e) } }
 
-  const kicker = overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : openN ? `${openN} ${plural(openN, 'заказ в работе', 'заказа в работе', 'заказов в работе')}` : 'свободен'
+  const kicker = overdue ? t('or.overdue_n', { count: overdue }) : openN ? t('or.open_n', { count: openN }) : t('or.free')
   const month = stats?.months?.at(-1)?.income || 0
   const prevMonth = stats?.months?.at(-2)
   return (
     <div className="bento-page space-y-8 pt-4" style={{ ...pageAcc.style, '--acc2': 'color-mix(in srgb, var(--acc) 55%, #8a5cff)' }}>
-      <PageHead kicker={kicker} title="заказы" idx={openN}
+      <PageHead kicker={kicker} title={t('nav.orders')} idx={openN}
         right={<>
-          <Seg value={layout} onChange={setLayout} options={[['list', 'список'], ['board', 'канбан']]} />
-          <Seg value={view} onChange={setView} options={VIEWS} />
-          <button type="button" className="btn-icon outlined" aria-label="Как это работает: 3 шага" data-tip="Как это работает"
+          <Seg value={layout} onChange={setLayout} options={[['list', t('or.layout_list')], ['board', t('or.layout_board')]]} />
+          <Seg value={view} onChange={setView} options={VIEWS.map(([v, k]) => [v, t(k)])} />
+          <button type="button" className="btn-icon outlined" aria-label={t('howto.show')} data-tip={t('howto.title')}
             onClick={() => window.dispatchEvent(new CustomEvent('orders:howto', { detail: 'toggle' }))}><HelpCircle size={16} /></button>
-          <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> заказ</button>
+          <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
         </>} />
 
       <div className="-mt-4"><HowToOrders /></div>
 
       <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />
-        <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder="Своими словами: «ролик для Пятёрочки, 25к, до пятницы»…" />
-        <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label="Добавить" data-tip="Добавить заказ этой фразой"><Plus size={16} /></button>
+        <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('or.quick_ph')} />
+        <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label={t('common.add')} data-tip={t('or.quick_tip')}><Plus size={16} /></button>
       </form>
 
       {/* сводка: смысловые плитки (лайм — деньги, янтарь — ожидание); пустые не показываем.
           Помодоро живёт в сайдбаре и в шапке-таймере — на странице заказов не дублируем. */}
       <div className="bento" style={{ marginTop: 26 }}>
         <Tile span="s4" icon={<Play size={16} />}
-          label="в работе" value={<Num value={openN} />}
-          sub={overdue ? `${overdue} ${plural(overdue, 'дедлайн горит', 'дедлайна горят', 'дедлайнов горят')}` : 'всё под контролем'} />
+          label={t('or.v_open')} value={<Num value={openN} />}
+          sub={overdue ? t('or.overdue_n', { count: overdue }) : t('or.all_ok')} />
         <Tile span="s4" tone="warn" icon={<Wallet size={16} />}
-          label="ждут оплаты" value={<Num value={unpaid} fmt={money} />} onClick={() => setView('unpaid')} tip={unpaid ? 'показать, кто не заплатил' : undefined}
-          sub={unpaid ? 'нажмите, чтобы найти должников' : 'все рассчитались'} />
+          label={t('or.v_unpaid')} value={<Num value={unpaid} fmt={money} />} onClick={() => setView('unpaid')} tip={unpaid ? t('or.show_debtors') : undefined}
+          sub={unpaid ? t('or.find_debtors') : t('or.all_settled')} />
         {stats && <Tile span="s4" tone="ok" icon={<TrendingUp size={16} />}
-          label="за этот месяц" value={<Num value={month} fmt={money} />}
-          sub={prevMonth ? `прошлый · ${money(prevMonth.income)}` : 'первый месяц в работе'} />}
+          label={t('or.this_month')} value={<Num value={month} fmt={money} />}
+          sub={prevMonth ? t('or.prev_month', { m: money(prevMonth.income) }) : t('or.first_month')} />}
         {stats?.rate ? <Tile span="s4" icon={<Clock size={16} />}
-          label="ставка в час" value={money(stats.rate)}
-          sub={stats.total_hours ? `${hours(stats.total_hours)} по таймеру` : 'по таймеру'} /> : null}
+          label={t('or.rate_hour')} value={money(stats.rate)}
+          sub={stats.total_hours ? `${hours(stats.total_hours)} ${t('or.by_timer')}` : t('or.by_timer')} /> : null}
         {stats?.avg_check ? <Tile span="s4" icon={<Coins size={16} />}
-          label="средний чек" value={money(stats.avg_check)}
-          sub={stats.avg_lead_days ? `~${stats.avg_lead_days} дн. на заказ` : 'по закрытым заказам'} /> : null}
+          label={t('or.avg_check')} value={money(stats.avg_check)}
+          sub={stats.avg_lead_days ? t('or.lead_days', { n: stats.avg_lead_days }) : t('or.by_closed')} /> : null}
       </div>
 
       {pulse?.enabled && (pulse.late?.length > 0 || pulse.tax?.tax_total > 0) && (
@@ -147,10 +149,10 @@ export default function Orders() {
           {pulse.late.map((x) => (
             <button key={x.order_id} type="button" className="flex items-center gap-1.5 text-left" onClick={() => setView('unpaid')}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--warn)' }} />
-              <span><b className="font-medium">{x.client || x.title}</b><span className="muted"> задерживает {money(x.left)} · {x.days} {plural(x.days, 'день', 'дня', 'дней')}{x.typical_days != null ? ` · обычно за ${x.typical_days}` : ''}</span></span>
+              <span><b className="font-medium">{x.client || x.title}</b><span className="muted"> {t('or.delays', { m: money(x.left), count: x.days }) + (x.typical_days != null ? t('or.typically', { n: x.typical_days }) : '')}</span></span>
             </button>
           ))}
-          {pulse.tax?.tax_total > 0 && <span className="muted">налог {pulse.tax.percent} % за месяц ~<b className="num font-medium" style={{ color: 'var(--ink)' }}>{money(pulse.tax.tax_total)}</b>{pulse.tax.tax_expected ? <span className="faint"> (из них {money(pulse.tax.tax_expected)} с ожидаемого)</span> : ''}</span>}
+          {pulse.tax?.tax_total > 0 && <span className="muted">{t('or.tax', { percent: pulse.tax.percent })} ~<b className="num font-medium" style={{ color: 'var(--ink)' }}>{money(pulse.tax.tax_total)}</b>{pulse.tax.tax_expected ? <span className="faint"> {t('or.tax_expected', { m: money(pulse.tax.tax_expected) })}</span> : ''}</span>}
         </div>
       )}
 
@@ -163,23 +165,23 @@ export default function Orders() {
               <span className="truncate max-w-[280px]">{f.text}</span>
             </button>
           ))}
-          <button type="button" className="btn-ghost btn-sm" onClick={scanFollowups}><RefreshCw size={12} /> обновить</button>
+          <button type="button" className="btn-ghost btn-sm" onClick={scanFollowups}><RefreshCw size={12} /> {t('common.retry')}</button>
         </div>
       )}
 
       {!orders ? <ListSkeleton n={4} /> : layout === 'board' ? (
-        <Section title="канбан" idx={list.length}
-          hint="Перетащите карточку в другую колонку — это меняет стадию заказа. Без перетаскивания: выберите стадию в списке на карточке.">
+        <Section title={t('or.layout_board')} idx={list.length}
+          hint={t('or.board_hint')}>
           <Board orders={list} onOpen={openDrawer} onStage={setStage} />
         </Section>
       ) : (
-        <Section title={VIEWS.find((v) => v[0] === view)[1]} idx={list.length}
-          hint="Клик по строке открывает панель заказа: стадия, оплата, время, клиент, история. В строке одна главная кнопка «следующий шаг», остальные действия — в меню «⋯». На телефоне: свайп вправо — следующий шаг, влево — удалить.">
+        <Section title={t(VIEWS.find((v) => v[0] === view)[1])} idx={list.length}
+          hint={t('or.list_hint')}>
           <div className="stagger space-y-2.5">
             {list.length === 0 && (
-              view === 'open' ? <Empty glyph="tasks" text="Заказов в работе нет" sub="Как возьмёте — скажите мне, я запомню дедлайн и буду ждать оплату" hint="заказ: монтаж свадьбы для Иванова, 60к, до 30 сентября" />
-                : view === 'unpaid' ? <Empty glyph="money" text="Все оплатили" sub="Приятная пустота" />
-                  : <Empty glyph="tasks" text="Пока пусто" hint="заказ: ролик для Пятёрочки, 25к, до пятницы" />
+              view === 'open' ? <Empty glyph="tasks" text={t('or.empty_open')} sub={t('or.empty_open_sub')} hint={t('or.empty_open_hint')} />
+                : view === 'unpaid' ? <Empty glyph="money" text={t('or.empty_unpaid')} sub={t('or.empty_unpaid_sub')} />
+                  : <Empty glyph="tasks" text={t('or.empty_all')} hint={t('or.empty_all_hint')} />
             )}
             {list.map((o) => <Row key={o.id} o={o} onOpen={() => openDrawer(o)} onEdit={() => setSheet(o)} onPay={() => setPay(o)}
               onDel={() => setDel(o)} onStatus={setStatus} onStart={() => start(o)} onStage={(k) => setStage(o, k)} timer={timer} extra={leaveCls(o.id)} />)}
@@ -193,13 +195,13 @@ export default function Orders() {
           карточка клиента), должно оказываться поверх — порядок DOM определяет стек. */}
       <OrderDrawer oid={drawerId} reloadKey={payTick} onClose={() => setDrawerId(null)} onChanged={() => { load(); bump() }} onErr={show.err} onMsg={(t) => show(t)}
         onClient={(cid) => { setDrawerId(null); setPersonCard(cid) }} onEdit={(o) => setSheet(o)} onPay={(o) => setPay(o)}
-        onAsk={(o) => ask(`по заказу «${o.title}»: `)} timer={timer} onStartTimer={start} onStopTimer={stop} mmss={mmss} />
+        onAsk={(o) => ask(T('or.ask_seed', { title: o.title }))} timer={timer} onStartTimer={start} onStopTimer={stop} mmss={mmss} />
 
       <OrderSheet open={!!sheet} order={sheet && sheet !== 'new' ? sheet : null} onClose={() => setSheet(null)} onDone={(msg) => { setSheet(null); show(msg); load(); bump() }} onErr={show.err} />
-      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show('Заказ закрыт', 'без записи в доходы', o.title); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(r.order.status === 'paid' ? 'Заказ закрыт как оплаченный' : 'Оплата записана в доходы', '', r.order.title); setPayTick((x) => x + 1); load(); bump() }} onErr={show.err} />
-      <Confirm open={!!del} title="Удалить заказ?" text={del ? `«${del.title}». Полученные оплаты останутся в доходах, время по таймеру — тоже.` : ''} danger onOk={() => { remove(del); setDel(null) }} onClose={() => setDel(null)} />
+      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show(t('or.closed'), t('or.no_income'), o.title); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(t(r.order.status === 'paid' ? 'or.closed_paid' : 'or.pay_to_income'), '', r.order.title); setPayTick((x) => x + 1); load(); bump() }} onErr={show.err} />
+      <Confirm open={!!del} title={t('or.del_q')} text={del ? t('or.del_text', { title: del.title }) : ''} danger onOk={() => { remove(del); setDel(null) }} onClose={() => setDel(null)} />
 
-      <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show('Заказ помечен потерянным', '', lost.title); setLost(null); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} />
+      <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show(t('od.lost_marked'), '', lost.title); setLost(null); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} />
       <ClientCardSheet cid={personCard} onClose={() => setPersonCard(null)} onOrder={(oid) => { setPersonCard(null); setDrawerId(oid) }} />
       {analytics && analytics.clients?.length > 0 && <AnalyticsBlock a={analytics} />}
     </div>
@@ -230,34 +232,35 @@ function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.
    с понятным текстом по текущей стадии. Остальные действия — в меню «⋯» с текстовыми подписями.
    Кнопка «карточка» убрана: панель заказа и есть карточка. */
 function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, timer, extra = '' }) {
+  const { t } = useI18n()
   const nav = useNavigate()
   const [, show] = useToast()
   const stage = stageOf(o)
   const next = NEXT_STEP[stage]
   const closed = ['paid', 'cancelled'].includes(o.status)
   const running = timer?.active && timer.order_id === o.id && timer.kind === 'focus'
-  const dl = o.deadline ? (o.overdue ? `просрочен · ${dayLabel(o.deadline).toLowerCase()}` : o.past_due ? `срок был ${shortDate(o.deadline).toLowerCase()}` : o.days_left === 0 ? 'сегодня' : o.days_left === 1 ? 'завтра' : `до ${shortDate(o.deadline).toLowerCase()}`) : null
+  const dl = o.deadline ? (o.overdue ? t('or.dl_overdue', { date: dayLabel(o.deadline).toLowerCase() }) : o.past_due ? t('or.dl_was', { date: shortDate(o.deadline).toLowerCase() }) : o.days_left === 0 ? t('common.today') : o.days_left === 1 ? t('common.tomorrow') : t('aims.by', { date: shortDate(o.deadline).toLowerCase() })) : null
   const pct = o.price > 0 ? Math.min(100, Math.round((o.paid / o.price) * 100)) : 0
   const stop = (fn) => (e) => { e.stopPropagation(); fn() }
   const openBoard = async () => {
     try { const b = await api.get(`/api/boards/for-order/${o.id}?create=true`); nav(`/board/${b.id}`) } catch (e) { show.err(e) }
   }
   const menu = [
-    o.status !== 'cancelled' && o.left > 0 && { key: 'pay', text: 'Записать оплату', icon: <Wallet size={13} />, onClick: onPay },
+    o.status !== 'cancelled' && o.left > 0 && { key: 'pay', text: t('or.m_pay'), icon: <Wallet size={13} />, onClick: onPay },
     running
-      ? { key: 'stop', text: 'Остановить таймер', icon: <Square size={13} />, onClick: onStart }
-      : { key: 'timer', text: `Таймер ${timer?.focus_min || 25} минут`, icon: <Play size={13} />, onClick: onStart },
-    { key: 'edit', text: 'Изменить заказ', icon: <Pencil size={13} />, onClick: onEdit },
-    { key: 'ask', text: 'Обсудить с ассистентом', icon: <MessageCircle size={13} />, onClick: () => ask(`по заказу «${o.title}»: `) },
-    { key: 'board', text: o.board_id ? 'Открыть доску заказа' : 'Создать доску заказа', icon: <Clapperboard size={13} />, onClick: openBoard },
-    stage === 'lost' && { key: 'restore', text: 'Вернуть в работу', icon: <RefreshCw size={13} />, onClick: () => onStage('in_work') },
-    !closed && { key: 'cancel', text: 'Отменить заказ', icon: <Square size={13} />, onClick: () => onStatus(o, 'cancelled') },
-    !closed && { key: 'del', text: 'Удалить заказ', icon: <Trash2 size={13} />, onClick: onDel, danger: true },
+      ? { key: 'stop', text: t('or.m_stop_timer'), icon: <Square size={13} />, onClick: onStart }
+      : { key: 'timer', text: t('or.m_timer', { n: timer?.focus_min || 25 }), icon: <Play size={13} />, onClick: onStart },
+    { key: 'edit', text: t('or.m_edit'), icon: <Pencil size={13} />, onClick: onEdit },
+    { key: 'ask', text: t('or.m_ask'), icon: <MessageCircle size={13} />, onClick: () => ask(T('or.ask_seed', { title: o.title })) },
+    { key: 'board', text: t(o.board_id ? 'or.m_board_open' : 'or.m_board_new'), icon: <Clapperboard size={13} />, onClick: openBoard },
+    stage === 'lost' && { key: 'restore', text: t('or.m_restore'), icon: <RefreshCw size={13} />, onClick: () => onStage('in_work') },
+    !closed && { key: 'cancel', text: t('or.m_cancel'), icon: <Square size={13} />, onClick: () => onStatus(o, 'cancelled') },
+    !closed && { key: 'del', text: t('or.m_del'), icon: <Trash2 size={13} />, onClick: onDel, danger: true },
   ]
   return (
-    <Swipe onLeft={!closed ? onDel : undefined} onRight={next ? () => onStage(next.stage) : undefined} rightLabel={next?.text || 'готово'}>
+    <Swipe onLeft={!closed ? onDel : undefined} onRight={next ? () => onStage(next.stage) : undefined} rightLabel={next ? t(next.text) : t('common.done')}>
       <div className={`row-slide ${extra} ${closed ? 'opacity-55' : ''}`}>
-        <div role="button" tabIndex={0} aria-label={`Открыть заказ «${o.title}»`} onClick={onOpen}
+        <div role="button" tabIndex={0} aria-label={t('or.open_order', { title: o.title })} onClick={onOpen}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
           className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`}
           style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', borderRadius: 22, ...(o.overdue ? { boxShadow: 'inset 0 0 0 1.5px var(--neg)' } : null) }}>
@@ -270,8 +273,8 @@ function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, time
               </div>
               <div className={`mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] ${o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
                 {dl && <span className="flex items-center gap-1"><Clock size={11} /> {dl}</span>}
-                {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{o.hours}{o.pulse?.estimate_h ? ` из ${hours(o.pulse.estimate_h)}` : ''}{o.rate ? ` · ${money(o.rate)}/ч` : ''}</span>}
-                {running && <span className="accent flex items-center gap-1">идёт таймер</span>}
+                {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{o.hours}{o.pulse?.estimate_h ? ` ${t('od.of', { h: hours(o.pulse.estimate_h) })}` : ''}{o.rate ? ` · ${money(o.rate)}/${T('unit.hour')}` : ''}</span>}
+                {running && <span className="accent flex items-center gap-1">{t('or.timer_running')}</span>}
               </div>
               <StageStepper compact stage={stage} onStage={onStage} revisions={o.revisions} className="mt-1.5" />
               {o.price > 0 && (
@@ -279,22 +282,22 @@ function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, time
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
                     <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
                   </div>
-                  <span className="num faint shrink-0 text-[10.5px]">оплачено {pct}%</span>
+                  <span className="num faint shrink-0 text-[10.5px]">{t('or.paid_pct', { pct })}</span>
                 </div>
               )}
             </div>
             <div className="num shrink-0 text-right">
-              <div className="text-[15px] font-medium">{o.price ? money(o.price) : <span className="faint">без суммы</span>}</div>
-              {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">осталось {money(o.left)}</div>}
-              {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">не оплачен</div>}
+              <div className="text-[15px] font-medium">{o.price ? money(o.price) : <span className="faint">{t('or.no_amount')}</span>}</div>
+              {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">{t('or.left', { m: money(o.left) })}</div>}
+              {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">{t('status_unpaid')}</div>}
             </div>
             <div className="flex shrink-0 items-center gap-1.5">
               {next ? (
                 <button type="button" className="btn-primary btn-sm !h-8" data-tip={next.tip} onClick={stop(() => onStage(next.stage))}>
-                  <Check size={13} /> {next.text}
+                  <Check size={13} /> {t(next.text)}
                 </button>
-              ) : <span className="badge pos shrink-0">готово</span>}
-              <MenuButton items={menu} ariaLabel={`Ещё действия: ${o.title}`} />
+              ) : <span className="badge pos shrink-0">{t('common.done')}</span>}
+              <MenuButton items={menu} ariaLabel={t('or.more_aria', { title: o.title })} />
             </div>
           </div>
         </div>
@@ -307,6 +310,7 @@ function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, time
    (альтернатива без перетаскивания — на телефоне жест не нужен).
    Колонка показывает стадию, количество и сумму заказов; цвет — по смыслу из DESIGN.md. */
 function Board({ orders, onOpen, onStage }) {
+  const { t } = useI18n()
   const [drag, setDrag] = useState(null)
   const [over, setOver] = useState(null)
   const cols = useMemo(() => {
@@ -316,7 +320,7 @@ function Board({ orders, onOpen, onStage }) {
     return m
   }, [orders])
   return (
-    <div className="overflow-x-auto pb-3">
+    <div className="kanban-scroll pb-3">
       <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
         {ORDER_STAGES.map(([k, label]) => {
           const tone = ORDER_STAGE_TONE[k]
@@ -327,11 +331,11 @@ function Board({ orders, onOpen, onStage }) {
               onDragOver={(e) => { e.preventDefault(); setOver(k) }}
               onDragLeave={() => setOver((x) => (x === k ? null : x))}
               onDrop={(e) => { e.preventDefault(); const d = drag; setOver(null); setDrag(null); if (d) onStage(d, k) }}>
-              <div className="mb-2 overflow-hidden rounded-xl" aria-label={`Колонка «${label}»: заказов ${col.length}${sum > 0 ? `, на ${money(sum)}` : ''}`}
+              <div className="mb-2 overflow-hidden rounded-xl" aria-label={t('or.column_aria', { label: t(label), n: col.length }) + (sum > 0 ? `, ${money(sum)}` : '')}
                 style={{ background: 'var(--sf2)', boxShadow: 'inset 0 0 0 1px var(--line)', outline: over === k ? '2px solid var(--acc)' : 'none' }}>
                 <div className="h-[3px]" style={{ background: tone === 'pos' ? 'var(--pos)' : tone === 'warn' ? 'var(--warn)' : tone === 'neg' ? 'var(--neg)' : 'var(--acc)' }} aria-hidden />
                 <div className="flex items-center justify-between gap-2 px-3 py-2">
-                  <span className="truncate text-[12.5px] font-medium">{label}</span>
+                  <span className="truncate text-[12.5px] font-medium">{t(label)}</span>
                   <span className="num shrink-0 text-[11px]">
                     <span className={col.length ? 'text-[var(--ink-2)]' : 'faint'}>{col.length}</span>
                     {sum > 0 && <span className="faint"> · {moneyShort(sum)}</span>}
@@ -355,8 +359,8 @@ function Board({ orders, onOpen, onStage }) {
                     </div>
                     <div className="mt-1.5 flex items-center justify-between gap-2 text-[11.5px]">
                       <span className="muted num">{o.price ? money(o.price) : '—'}</span>
-                      {o.left > 0 && o.status !== 'new' && <span className="faint num">долг {money(o.left)}</span>}
-                      {o.revisions > 0 && <span className="warn">правки ×{o.revisions}</span>}
+                      {o.left > 0 && o.status !== 'new' && <span className="faint num">{t('or.debt', { m: money(o.left) })}</span>}
+                      {o.revisions > 0 && <span className="warn">{t('or.rev', { n: o.revisions })}</span>}
                     </div>
                     {o.price > 0 && (
                       <div className="mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
@@ -365,15 +369,15 @@ function Board({ orders, onOpen, onStage }) {
                     )}
                     <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                       <select className="input !h-7 flex-1 !text-[12px]" value={stageOf(o)} onChange={(e) => onStage(o, e.target.value)}
-                        aria-label={`Стадия заказа «${o.title}»`} data-tip="стадия заказа">
-                        {ORDER_STAGES.map(([sk, sl]) => <option key={sk} value={sk}>{sl}</option>)}
+                        aria-label={t('or.stage_aria', { title: o.title })} data-tip={t('stage.aria')}>
+                        {ORDER_STAGES.map(([sk, sl]) => <option key={sk} value={sk}>{t(sl)}</option>)}
                       </select>
                     </div>
                   </div>
                 ))}
                 {col.length === 0 && (
                   <div className="rounded-xl px-3 py-4 text-center text-[11.5px] faint" style={{ border: '1px dashed var(--line)' }}>
-                    Перетащите карточку сюда
+                    {t('or.drop_here')}
                   </div>
                 )}
               </div>
@@ -387,19 +391,20 @@ function Board({ orders, onOpen, onStage }) {
 
 /* «Потерян» требует причину: короткая форма, дальше стадия уходит в CRM. */
 function LostSheet({ order, onClose, onDone }) {
+  const { t } = useI18n()
   const [reason, setReason] = useState('')
   useEffect(() => { setReason('') }, [order?.id])
   return (
-    <Sheet open={!!order} onClose={onClose} title="пометить потерянным" sub={order ? `«${order.title}»` : ''}>
+    <Sheet open={!!order} onClose={onClose} title={t('or.mark_lost')} sub={order ? `«${order.title}»` : ''}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (reason.trim()) onDone(reason.trim()) }}>
-        <Field label="почему заказ потерян" hint="обязательно — по этой причине видно в ленте">
+        <Field label={t('or.why_lost')} hint={t('or.why_lost_hint')}>
           <input autoFocus className="input" value={reason} onChange={(e) => setReason(e.target.value)}
-            placeholder="дорого, клиент пропал, взял другого подрядчика…" />
+            placeholder={t('or.why_lost_ph')} />
         </Field>
-        <div className="muted text-[12.5px]">Заказ уедет в колонку «потерян». Стадию можно вернуть в любой момент — в строке заказа или в панели.</div>
+        <div className="muted text-[12.5px]">{t('or.lost_note')}</div>
         <div className="flex gap-2">
-          <button className="btn-primary" disabled={!reason.trim()} type="submit">пометить потерянным</button>
-          <button type="button" className="btn-ghost" onClick={onClose}>отмена</button>
+          <button className="btn-primary" disabled={!reason.trim()} type="submit">{t('or.mark_lost')}</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>{t('common.cancel')}</button>
         </div>
       </form>
     </Sheet>
@@ -409,6 +414,7 @@ function LostSheet({ order, onClose, onDone }) {
 /* Карточка клиента CRM: стадия клиента (отдельная сущность!), LTV, средний чек, долг,
    источник, теги, контакт, следующий шаг с датой, история заказов. */
 export function ClientCardSheet({ cid, onClose, onOrder }) {
+  const { t } = useI18n()
   const [d, setD] = useState(null)
   const [step, setStep] = useState('')
   const [stepAt, setStepAt] = useState('')
@@ -428,48 +434,48 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
     await save({ next_step: step, next_step_at: stepAt ? `${stepAt}T12:00:00` : null })
   }
   return (
-    <Sheet open={!!cid} onClose={onClose} wide title={d?.client?.name || 'клиент'} sub={d?.source ? `источник: ${d.source}` : ''}>
-      {!d ? <div className="muted text-[13px]">загружаю…</div> : (
+    <Sheet open={!!cid} onClose={onClose} wide title={d?.client?.name || t('graph.one_client')} sub={d?.source ? t('mem.source', { what: d.source }) : ''}>
+      {!d ? <div className="muted text-[13px]">{t('common.loading')}</div> : (
         <div className="space-y-4 text-[13px]">
           <div>
-            <div className="label mb-1.5">стадия клиента — не стадия заказа</div>
-            <ClientStageSelect view={d.stage} onView={(v) => setD({ ...d, stage: v })} onErr={show.err} label={`Стадия клиента ${d.client?.name || ''}`} />
+            <div className="label mb-1.5">{t('or.cc_stage_note')}</div>
+            <ClientStageSelect view={d.stage} onView={(v) => setD({ ...d, stage: v })} onErr={show.err} label={t('cstage.for', { name: d.client?.name || '' })} />
             <ClientStageNote view={d.stage} />
           </div>
           <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
             <div><div className="label">LTV</div><div className="num mt-0.5 pos">{money(d.ltv)}</div></div>
-            <div><div className="label">средний чек</div><div className="num mt-0.5">{d.avg_check ? money(d.avg_check) : '—'}</div></div>
-            <div><div className="label">текущий долг</div><div className={`num mt-0.5 ${d.debt > 0 ? 'warn' : ''}`}>{money(d.debt)}</div></div>
-            <div><div className="label">заказов</div><div className="num mt-0.5">{d.orders_count}</div></div>
+            <div><div className="label">{t('or.avg_check')}</div><div className="num mt-0.5">{d.avg_check ? money(d.avg_check) : '—'}</div></div>
+            <div><div className="label">{t('or.cc_debt')}</div><div className={`num mt-0.5 ${d.debt > 0 ? 'warn' : ''}`}>{money(d.debt)}</div></div>
+            <div><div className="label">{t('or.cc_orders')}</div><div className="num mt-0.5">{d.orders_count}</div></div>
           </div>
           <div className="grid gap-2 sm:grid-cols-2">
-            <div><div className="label mb-1">источник лида</div>
-              <input className="input !h-8" defaultValue={d.source} placeholder="рекомендация, сайт…" onBlur={(e) => e.target.value !== d.source && save({ source: e.target.value })} /></div>
-            <div><div className="label mb-1">последний контакт</div><div className="mt-1.5">{d.last_contact_at ? dayLabel(d.last_contact_at) : '—'}</div></div>
+            <div><div className="label mb-1">{t('or.cc_source')}</div>
+              <input className="input !h-8" defaultValue={d.source} placeholder={t('or.cc_source_ph')} onBlur={(e) => e.target.value !== d.source && save({ source: e.target.value })} /></div>
+            <div><div className="label mb-1">{t('or.cc_last')}</div><div className="mt-1.5">{d.last_contact_at ? dayLabel(d.last_contact_at) : '—'}</div></div>
           </div>
           {d.tags?.length > 0 && <div className="flex flex-wrap gap-1.5">{d.tags.map((t) => <span key={t} className="chip on">{t}</span>)}</div>}
           <div>
-            <div className="label mb-1">следующий шаг</div>
+            <div className="label mb-1">{t('next_step.title')}</div>
             <div className="flex flex-wrap items-center gap-2">
-              <input className="input !h-8 min-w-[180px] flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder="позвонить, прислать смету…" aria-label="Следующий шаг" />
-              <input type="date" className="input !h-8 !w-[150px]" value={stepAt} onChange={(e) => setStepAt(e.target.value)} aria-label="Дата следующего шага" />
-              <button className="btn-soft btn-sm" disabled={step === (d.next_step || '') && stepAt === (d.next_step_at ? toLocalISO(new Date(d.next_step_at)).slice(0, 10) : '')} onClick={saveStep}>сохранить</button>
+              <input className="input !h-8 min-w-[180px] flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder={t('next_step.ph')} aria-label={t('next_step.title')} />
+              <input type="date" className="input !h-8 !w-[150px]" value={stepAt} onChange={(e) => setStepAt(e.target.value)} aria-label={t('next_step.date')} />
+              <button className="btn-soft btn-sm" disabled={step === (d.next_step || '') && stepAt === (d.next_step_at ? toLocalISO(new Date(d.next_step_at)).slice(0, 10) : '')} onClick={saveStep}>{t('common.save')}</button>
             </div>
             {err && <div className="neg mt-1 text-[12px]">{err}</div>}
-            <div className="faint mt-1 text-[12px]">{d.next_step_at ? `было: к ${dayLabel(d.next_step_at)}` : 'даты можно задать здесь — она попадёт в follow-up'}</div>
+            <div className="faint mt-1 text-[12px]">{d.next_step_at ? t('or.cc_was', { when: dayLabel(d.next_step_at) }) : t('or.cc_date_hint')}</div>
           </div>
           <div>
-            <div className="label mb-1.5">история заказов</div>
+            <div className="label mb-1.5">{t('or.cc_history')}</div>
             {d.orders.map((o) => (
               <button key={o.id} type="button" className="flex w-full items-center justify-between gap-3 py-0.5 text-left" onClick={() => onOrder?.(o.id)}>
-                <span className="min-w-0 truncate">{o.title} <span className="faint">· {ORDER_STAGE_LABEL[stageOf(o)]}</span></span>
-                <span className="num shrink-0">{o.price ? money(o.price) : '—'}{o.left > 0 ? <span className="faint"> · долг {money(o.left)}</span> : ''}</span>
+                <span className="min-w-0 truncate">{o.title} <span className="faint">· {t(ORDER_STAGE_LABEL[stageOf(o)])}</span></span>
+                <span className="num shrink-0">{o.price ? money(o.price) : '—'}{o.left > 0 ? <span className="faint"> · {t('or.debt', { m: money(o.left) })}</span> : ''}</span>
               </button>
             ))}
-            {!d.orders.length && <div className="faint text-[12px]">заказов ещё нет</div>}
+            {!d.orders.length && <div className="faint text-[12px]">{t('or.cc_no_orders')}</div>}
           </div>
           {d.activity?.length > 0 && <div>
-            <div className="label mb-1.5">лента</div>
+            <div className="label mb-1.5">{t('mem.t_timeline')}</div>
             <div className="max-h-[180px] space-y-1 overflow-y-auto">{d.activity.map((a) => <div key={a.id} className="muted text-[12.5px]"><span className="faint num">{dayLabel(a.created_at).toLowerCase()}</span> {a.text}</div>)}</div>
           </div>}
         </div>
@@ -480,13 +486,14 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
 
 /* Аналитика CRM: конверсия воронки и топ клиентов (read-only) */
 function AnalyticsBlock({ a }) {
+  const { t } = useI18n()
   const max = Math.max(1, ...a.funnel.map((f) => f.count))
   return (
-    <Section title="воронка и топ клиентов" hint="конверсия по стадиям и доход по клиентам — только чтение">
+    <Section title={t('or.an_title')} hint={t('or.an_hint')}>
       <div className="space-y-2">
         {a.funnel.map((f) => (
           <div key={f.stage} className="flex items-center gap-3 text-[12.5px]">
-            <span className="w-[110px] shrink-0 muted">{f.label}</span>
+            <span className="w-[110px] shrink-0 muted">{t.sv(f.label) || f.label}</span>
             <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
               <div className="h-full rounded-full" style={{ width: `${Math.round((f.count / max) * 100)}%`, background: f.stage === 'paid' ? 'var(--pos)' : f.stage === 'lost' ? 'var(--neg)' : 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
             </div>
@@ -497,21 +504,22 @@ function AnalyticsBlock({ a }) {
       <div className="mt-4 grid gap-x-6 gap-y-1 sm:grid-cols-2">
         {a.top.map((c) => <div key={c.client_id ?? 'none'} className="flex items-center justify-between gap-3 text-[12.5px]"><span className="min-w-0 truncate">{c.client} <span className="faint">· {c.orders}</span></span><span className="num pos shrink-0">{money(c.revenue)}</span></div>)}
       </div>
-      <div className="muted mt-3 text-[12px]">конверсия {a.conversion}% · выиграно {a.won} из {a.total}{a.avg_check ? ` · средний чек ${money(a.avg_check)}` : ''}</div>
+      <div className="muted mt-3 text-[12px]">{t('or.an_foot', { conv: a.conversion, won: a.won, total: a.total }) + (a.avg_check ? t('or.an_avg', { m: money(a.avg_check) }) : '')}</div>
     </Section>
   )
 }
 
 function StatsBlock({ stats, onUnpaid }) {
+  const { t } = useI18n()
   const [more, setMore] = useState(false)
   const max = Math.max(1, ...stats.months.map((m) => m.income))
   const maxF = Math.max(1, ...stats.focus_days.map((d) => d.min))
   const lastMonth = stats.months.at(-1)?.month
   return (
-    <Section title="как идут дела" hint="доход по месяцам — только оплаты по заказам; часы — по таймеру">
+    <Section title={t('or.st_title')} hint={t('or.st_hint')}>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div className="c" style={{ borderRadius: 26 }}>
-          <div className="label mb-5">доход по месяцам</div>
+          <div className="label mb-5">{t('or.st_income')}</div>
           <div className="flex h-[132px] items-end gap-2">
             {stats.months.map((m) => {
               const cur = m.month === lastMonth
@@ -530,10 +538,10 @@ function StatsBlock({ stats, onUnpaid }) {
           </div>
         </div>
         <div className="c" style={{ borderRadius: 26 }}>
-          <div className="mb-5 flex items-baseline justify-between"><div className="label">фокус за 2 недели</div><span className="muted text-[12px]">{stats.week_load_h ? `${hours(stats.week_load_h)} за неделю` : 'таймер ещё не запускали'}</span></div>
+          <div className="mb-5 flex items-baseline justify-between"><div className="label">{t('or.st_focus')}</div><span className="muted text-[12px]">{stats.week_load_h ? t('or.st_week', { h: hours(stats.week_load_h) }) : t('or.st_no_timer')}</span></div>
           <div className="flex h-[132px] items-end gap-1">
             {stats.focus_days.map((d) => (
-              <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5" title={`${d.date.slice(8)}.${d.date.slice(5, 7)} · ${d.min} мин`}>
+              <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5" title={t('or.st_day', { date: `${d.date.slice(8)}.${d.date.slice(5, 7)}`, min: d.min })}>
                 <div className="w-full rounded-t-md" style={{
                   height: `${Math.max(3, (d.min / maxF) * 96)}px`,
                   background: d.min ? 'linear-gradient(180deg,#19b34a 0%,#10b3a3 100%)' : 'var(--fill-2)',
@@ -548,15 +556,15 @@ function StatsBlock({ stats, onUnpaid }) {
       </div>
       {stats.clients.length > 0 && (
         <div className="c mt-5" style={{ borderRadius: 26 }}>
-          <button className="flex items-center gap-2 text-left" onClick={() => setMore((v) => !v)}><span className="label">клиенты · {stats.clients.length}</span>{more ? <ChevronUp size={13} className="faint" /> : <ChevronDown size={13} className="faint" />}</button>
+          <button className="flex items-center gap-2 text-left" onClick={() => setMore((v) => !v)}><span className="label">{t('or.st_clients', { n: stats.clients.length })}</span>{more ? <ChevronUp size={13} className="faint" /> : <ChevronDown size={13} className="faint" />}</button>
           {more && (
             <div className="mt-3 animate-rise">
               {stats.clients.map((c) => (
                 <div key={c.client} className="row">
-                  <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-[12px]">{c.orders} {plural(c.orders, 'заказ', 'заказа', 'заказов')}{c.total ? ` на ${money(c.total)}` : ''}{c.open ? ` · ${c.open} в работе` : ''}{c.hours ? ` · ${hours(c.hours)}` : ''}{c.rate ? ` · ${money(c.rate)}/ч` : ''}</div></div>
+                  <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-[12px]">{t('or.cc_orders_n', { count: c.orders }) + (c.total ? ` ${t('or.on', { m: money(c.total) })}` : '') + (c.open ? ` · ${t('tk.open_n', { n: c.open })}` : '') + (c.hours ? ` · ${hours(c.hours)}` : '') + (c.rate ? ` · ${money(c.rate)}/${T('unit.hour')}` : '')}</div></div>
                   <div className="num text-right">
-                    {c.paid > 0 ? <div className="text-[14px] font-medium">{money(c.paid)} <span className="faint text-[11px] font-normal">получено</span></div> : <div className="faint text-[12.5px]">оплат не записано</div>}
-                    {c.unpaid > 0 && <button type="button" className="warn text-[11.5px]" onClick={onUnpaid}>ждём {money(c.unpaid)}</button>}
+                    {c.paid > 0 ? <div className="text-[14px] font-medium">{money(c.paid)} <span className="faint text-[11px] font-normal">{t('or.st_received')}</span></div> : <div className="faint text-[12.5px]">{t('or.st_no_pays')}</div>}
+                    {c.unpaid > 0 && <button type="button" className="warn text-[11.5px]" onClick={onUnpaid}>{t('or.st_awaiting', { m: money(c.unpaid) })}</button>}
                   </div>
                 </div>
               ))}
@@ -570,10 +578,11 @@ function StatsBlock({ stats, onUnpaid }) {
 
 /* Стадии, которые имеет смысл выбрать при создании (воронка CRM, те же подписи, что и везде).
    «оплачен» появляется только через оплату, «потерян» — с причиной, позже. */
-const NEW_STAGES = [['lead', 'лид'], ['negotiation', 'переговоры'], ['spec', 'ТЗ согласовано'], ['in_work', 'в работе'], ['revisions', 'на правках'], ['delivered', 'сдан']]
+const NEW_STAGES = [['lead', 'crm.stage_lead'], ['negotiation', 'crm.stage_negotiation'], ['spec', 'crm.stage_spec'], ['in_work', 'crm.stage_in_work'], ['revisions', 'crm.stage_revisions'], ['delivered', 'crm.stage_delivered']]
 
 const blank = { title: '', price: '', client: '', deadline: '', notes: '', estimate_h: '', stage: 'in_work', done: false, paid: '' }
 export function OrderSheet({ open, order, onClose, onDone, onErr }) {
+  const { t } = useI18n()
   const [f, setF] = useState(blank)
   const [clients, setClients] = useState([])
   const [hint, setHint] = useState(null)
@@ -611,48 +620,48 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
       const now = stageOf(saved || order || {})
       if (oid && stage !== now) { try { await api.crmSetStage(oid, stage) } catch { /* стадия не критична для сохранения */ } }
       const paid = Number(String(f.paid).replace(/\s/g, '').replace(',', '.'))
-      if (oid && f.done && paid > 0) { try { await api.payOrder(oid, paid, { note: 'оплата при создании' }) } catch { /* покажем тост */ } }
-      onDone(order ? 'Заказ обновлён' : (f.done ? 'Заказ добавлен как сданный' : 'Заказ добавлен'))
+      if (oid && f.done && paid > 0) { try { await api.payOrder(oid, paid, { note: t('or.pay_on_create') }) } catch { /* покажем тост */ } }
+      onDone(t(order ? 'or.updated' : f.done ? 'or.added_delivered' : 'or.added'))
     } catch (err) { onErr(err) }
   }
   const toggleDone = (v) => setF({ ...f, done: v, stage: v ? 'delivered' : f.stage === 'delivered' ? 'in_work' : f.stage })
   return (
-    <Sheet open={open} onClose={onClose} title={order ? 'заказ' : 'новый заказ'} sub={order ? undefined : 'или скажите ассистенту: «заказ: ролик для Пятёрочки, 25к, до пятницы»'}>
+    <Sheet open={open} onClose={onClose} title={t(order ? 'od.order' : 'or.new_order')} sub={order ? undefined : t('or.new_order_sub')}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="что делаем"><input autoFocus className="input !text-[17px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder="Монтаж ролика" /></Field>
+        <Field label={t('or.what_do')}><input autoFocus className="input !text-[17px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder={t('or.what_do_ph')} /></Field>
         {hint && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: 'var(--sf2)' }}>
-            <span className="muted">похожие: {hint.sample?.slice(0, 2).join(', ')}</span>
-            {hint.price ? <span>обычно <b>{money(hint.price)}</b></span> : null}
-            {hint.hours ? <span className="muted">≈{hint.hours} ч{hint.rate ? ` · ${money(hint.rate)}/ч` : ''}</span> : null}
-            <button type="button" className="btn-ghost btn-sm !h-6 ml-auto" onClick={() => setF((x) => ({ ...x, ...(hint.price ? { price: String(hint.price) } : {}), ...(hint.hours ? { estimate_h: String(hint.hours) } : {}) }))}>подставить</button>
+            <span className="muted">{t('or.similar', { what: hint.sample?.slice(0, 2).join(', ') })}</span>
+            {hint.price ? <span>{t('or.usually', { m: money(hint.price) })}</span> : null}
+            {hint.hours ? <span className="muted">≈{hint.hours} {t('unit.hour')}{hint.rate ? ` · ${money(hint.rate)}/${T('unit.hour')}` : ''}</span> : null}
+            <button type="button" className="btn-ghost btn-sm !h-6 ml-auto" onClick={() => setF((x) => ({ ...x, ...(hint.price ? { price: String(hint.price) } : {}), ...(hint.hours ? { estimate_h: String(hint.hours) } : {}) }))}>{t('or.apply')}</button>
           </div>
         )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="сумма"><Money value={f.price} onChange={(v) => setF({ ...f, price: v })} /></Field>
-          <Field label="клиент"><input className="input" list="clients-list" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} placeholder="Пятёрочка" /><datalist id="clients-list">{clients.map((c) => <option key={c.id} value={c.name} />)}</datalist></Field>
-          <Field label="дедлайн"><DateTimeField value={f.deadline} onChange={(v) => setF({ ...f, deadline: v })} /></Field>
-          <Field label="Сколько часов планируете" hint="план по времени"><input type="number" min="0" step="0.5" className="input num" value={f.estimate_h} onChange={(e) => setF({ ...f, estimate_h: e.target.value })} placeholder="8" /></Field>
+          <Field label={t('common.amount')}><Money value={f.price} onChange={(v) => setF({ ...f, price: v })} /></Field>
+          <Field label={t('graph.one_client')}><input className="input" list="clients-list" value={f.client} onChange={(e) => setF({ ...f, client: e.target.value })} placeholder={t('or.client_ph')} /><datalist id="clients-list">{clients.map((c) => <option key={c.id} value={c.name} />)}</datalist></Field>
+          <Field label={t('od.deadline')}><DateTimeField value={f.deadline} onChange={(v) => setF({ ...f, deadline: v })} /></Field>
+          <Field label={t('or.hours_plan')} hint={t('or.time_plan')}><input type="number" min="0" step="0.5" className="input num" value={f.estimate_h} onChange={(e) => setF({ ...f, estimate_h: e.target.value })} placeholder="8" /></Field>
         </div>
 
         {/* чекбокс вместо непонятной подсказки про «старый заказ»: ставит «сдан» и открывает поле оплаты */}
         <label className="flex cursor-pointer items-center gap-2.5 text-[13.5px]">
           <input type="checkbox" className="h-4 w-4 accent-[var(--acc)]" checked={f.done} onChange={(e) => toggleDone(e.target.checked)} />
-          <span>Заказ уже выполнен — поставлю стадию «сдан»</span>
+          <span>{t('or.already_done')}</span>
         </label>
         {f.done && (
-          <Field label="уже получено за заказ" hint="можно позже — в панели заказа">
+          <Field label={t('or.already_paid')} hint={t('or.later')}>
             <Money value={f.paid} onChange={(v) => setF({ ...f, paid: v })} placeholder="0" />
           </Field>
         )}
 
         {!f.done && (
-          <Field label="стадия заказа" hint="воронка CRM — та же, что на канбане">
-            <Pills value={f.stage} onChange={(s) => setF({ ...f, stage: s })} options={NEW_STAGES} />
+          <Field label={t('stage.aria')} hint={t('or.crm_hint')}>
+            <Pills value={f.stage} onChange={(s) => setF({ ...f, stage: s })} options={NEW_STAGES.map(([k, l]) => [k, t(l)])} />
           </Field>
         )}
-        <Field label="заметки и ТЗ"><textarea className="input min-h-[72px]" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder="ТЗ, ссылки на исходники, договорённости" /></Field>
-        <button className="btn-primary btn-lg w-full">{order ? 'сохранить' : 'добавить'}</button>
+        <Field label={t('od.notes_spec')}><textarea className="input min-h-[72px]" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder={t('or.notes_ph')} /></Field>
+        <button className="btn-primary btn-lg w-full">{t(order ? 'common.save' : 'common.add')}</button>
       </form>
     </Sheet>
   )
@@ -665,6 +674,7 @@ function newPaymentKey() {
 
 
 function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
+  const { t } = useI18n()
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [accounts, setAccounts] = useState([])
@@ -677,25 +687,25 @@ function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
   const submit = async (e) => {
     e.preventDefault()
     const n = Number(String(amount).replace(/\s/g, '').replace(',', '.'))
-    if (!n || n <= 0) return onErr(new Error('Сумма должна быть больше нуля'))
+    if (!n || n <= 0) return onErr(new Error(t('or.amount_zero')))
     const today = toLocalISO(new Date()).slice(0, 10)
     try { onDone(await api.payOrder(order.id, n, { note: note || null, account: account || null, date: date && date !== today ? `${date}T12:00:00` : null, idem_key: payKey || null })) } catch (err) { onErr(err) }
   }
   return (
-    <Sheet open={!!order} onClose={onClose} title="оплата по заказу" sub={order ? `«${order.title}»${order.left ? ` · осталось ${money(order.left)}` : ''}` : ''}>
+    <Sheet open={!!order} onClose={onClose} title={t('or.pay_title')} sub={order ? `«${order.title}»${order.left ? ` · ${t('or.left', { m: money(order.left) })}` : ''}` : ''}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="сумма"><Money value={amount} onChange={setAmount} big autoFocus /></Field>
+        <Field label={t('common.amount')}><Money value={amount} onChange={setAmount} big autoFocus /></Field>
         {order?.left > 0 && <div className="flex flex-wrap gap-1.5">
-          {[0.3, 0.5, 1].map((k) => <button type="button" key={k} className="chip" onClick={() => setAmount(String(Math.round(order.left * k)))}>{k === 1 ? 'всё' : `${k * 100}%`} · {money(Math.round(order.left * k))}</button>)}
+          {[0.3, 0.5, 1].map((k) => <button type="button" key={k} className="chip" onClick={() => setAmount(String(Math.round(order.left * k)))}>{k === 1 ? t('common.all') : `${k * 100}%`} · {money(Math.round(order.left * k))}</button>)}
         </div>}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="на счёт"><select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>{accounts.filter((a) => a.kind !== 'debt_only').map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}</select></Field>
-          <Field label="комментарий"><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder="аванс / остаток" /></Field>
-          <Field label="дата" hint="когда пришли деньги"><input type="date" className="input" value={date} max={toLocalISO(new Date()).slice(0, 10)} onChange={(e) => setDate(e.target.value)} /></Field>
+          <Field label={t('or.to_account')}><select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>{accounts.filter((a) => a.kind !== 'debt_only').map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}</select></Field>
+          <Field label={t('common.comment')}><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('or.pay_ph')} /></Field>
+          <Field label={t('common.date')} hint={t('or.pay_date_hint')}><input type="date" className="input" value={date} max={toLocalISO(new Date()).slice(0, 10)} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
-        <div className="muted text-[12.5px]">Запишется как доход «Фриланс» с привязкой к заказу в выбранный день. Полная сумма закроет заказ как оплаченный.</div>
-        <button className="btn-primary btn-lg w-full">записать</button>
-        {onJustClose && <button type="button" className="btn-ghost btn-sm w-full" onClick={() => onJustClose(order)}>деньги уже учтены — просто закрыть заказ</button>}
+        <div className="muted text-[12.5px]">{t('or.pay_note')}</div>
+        <button className="btn-primary btn-lg w-full">{t('or.record')}</button>
+        {onJustClose && <button type="button" className="btn-ghost btn-sm w-full" onClick={() => onJustClose(order)}>{t('or.pay_already')}</button>}
       </form>
     </Sheet>
   )

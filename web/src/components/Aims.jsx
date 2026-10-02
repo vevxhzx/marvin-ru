@@ -1,13 +1,15 @@
 import { useEffect, useState } from 'react'
 import { Plus, Check, ChevronDown, ChevronUp, Pause, Play, X, MessageCircle } from 'lucide-react'
-import { api, plural } from '../lib/api'
+import { api } from '../lib/api'
 import { Section, Empty, Sheet, useToast } from './ui'
+import { useI18n, localeOf, t as T } from '../lib/i18n'
 
 /* Цели: цель → вехи → задачи. Не список дел, а «ради чего список». Прогресс считается по закрытым задачам и заказам. */
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
-const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short', year: new Date(iso).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined }) : '')
+const fmtDate = (iso) => (iso ? new Date(iso).toLocaleDateString(localeOf(), { day: 'numeric', month: 'short', year: new Date(iso).getFullYear() !== new Date().getFullYear() ? 'numeric' : undefined }).replace(/\.?\s*г\.$/u, '') : '')
 
 export default function Aims({ tick, bump }) {
+  const { t } = useI18n()
   const [list, setList] = useState(null)
   const [all, setAll] = useState(false)
   const [sheet, setSheet] = useState(false)
@@ -21,38 +23,39 @@ export default function Aims({ tick, bump }) {
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <div className="muted text-[13px]">{active.length ? `${active.length} ${plural(active.length, 'активная цель', 'активные цели', 'активных целей')}` : 'Долгосрочное: то, ради чего задачи.'}</div>
+        <div className="muted text-[13px]">{t(active.length ? 'aims.active_n' : 'aims.long_term', { count: active.length })}</div>
         <div className="flex items-center gap-2">
-          <button className={`btn-ghost btn-sm ${all ? 'text-accent' : ''}`} onClick={() => setAll(!all)}>{all ? 'только активные' : 'все'}</button>
-          <button className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> цель</button>
+          <button className={`btn-ghost btn-sm ${all ? 'text-accent' : ''}`} onClick={() => setAll(!all)}>{t(all ? 'aims.only_active' : 'common.all')}</button>
+          <button className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('aims.goal')}</button>
         </div>
       </div>
-      {!list.length && <div className="rule"><Empty glyph="tasks" text="Целей пока нет" sub="Цель — это на месяцы: портфолио, доход, здоровье. Вехи и задачи подтянутся к ней." hint="цель: собрать портфолио до конца года, потому что хочу брать заказы дороже" onHint={() => ask('цель: ')} /></div>}
+      {!list.length && <div className="rule"><Empty glyph="tasks" text={t('aims.none')} sub={t('aims.none_hint')} hint={t('aims.hint_example')} onHint={() => ask(T('aims.seed_goal'))} /></div>}
       <div className="space-y-4">
         {active.map((a) => <AimCard key={a.id} a={a} onPatch={patch} onChange={() => { load(); bump?.() }} />)}
       </div>
       {all && rest.length > 0 && (
-        <Section title="закрытые и на паузе" idx={rest.length}>
+        <Section title={t('aims.closed_paused')} idx={rest.length}>
           <div className="rule">
             {rest.map((a) => (
               <div key={a.id} className="row opacity-70">
                 <span className="grid h-[22px] w-[22px] shrink-0 place-items-center text-[12px]">{a.status === 'done' ? <Check size={14} className="text-accent" /> : a.status === 'paused' ? <Pause size={12} /> : <X size={12} />}</span>
                 <div className="min-w-0 flex-1">
                   <div className={`truncate text-[15px] ${a.status === 'done' ? '' : 'line-through'}`}>{a.title}</div>
-                  <div className="muted text-[12px]">{a.status === 'done' ? `достигнута ${fmtDate(a.done_at)}` : a.status === 'paused' ? 'на паузе' : 'снята'}{a.why ? ` · ${a.why}` : ''}</div>
+                  <div className="muted text-[12px]">{t(a.status === 'done' ? 'aims.reached' : a.status === 'paused' ? 'aims.on_pause' : 'aims.dropped', { date: fmtDate(a.done_at) })}{a.why ? ` · ${a.why}` : ''}</div>
                 </div>
-                {a.status !== 'done' && <button className="btn-ghost btn-sm" onClick={() => patch(a.id, { status: 'active' }, 'Снова в работе')}><Play size={12} /> вернуть</button>}
+                {a.status !== 'done' && <button className="btn-ghost btn-sm" onClick={() => patch(a.id, { status: 'active' }, t('aims.back_to_work'))}><Play size={12} /> {t('aims.restore')}</button>}
               </div>
             ))}
           </div>
         </Section>
       )}
-      <AimSheet open={sheet} onClose={() => setSheet(false)} onDone={() => { setSheet(false); load(); bump?.(); show('Цель поставлена') }} />
+      <AimSheet open={sheet} onClose={() => setSheet(false)} onDone={() => { setSheet(false); load(); bump?.(); show(t('aims.set')) }} />
     </div>
   )
 }
 
 function AimCard({ a, onPatch, onChange }) {
+  const { t } = useI18n()
   const [v, setV] = useState(null)
   const [open, setOpen] = useState(false)
   const [msDraft, setMsDraft] = useState('')
@@ -73,30 +76,30 @@ function AimCard({ a, onPatch, onChange }) {
         <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(!open)}>
           <div className="flex items-baseline gap-2">
             <div className="truncate text-[16px] font-semibold">{a.title}</div>
-            {a.priority === 1 && <span className="label !text-accent">главная</span>}
+            {a.priority === 1 && <span className="label !text-accent">{t('aims.main')}</span>}
           </div>
           <div className="muted mt-0.5 text-[13px]">
-            {a.why ? <span>{a.why}</span> : <span className="faint">зачем — не записано</span>}
-            {a.due && <span> · к {fmtDate(a.due)}{a.days_left != null && a.days_left >= 0 ? ` (${a.days_left} дн.)` : ''}</span>}
-            {a.days_left != null && a.days_left < 0 && <span className="neg"> · срок прошёл</span>}
+            {a.why ? <span>{a.why}</span> : <span className="faint">{t('aims.no_why')}</span>}
+            {a.due && <span> · {t('aims.by', { date: fmtDate(a.due) })}{a.days_left != null && a.days_left >= 0 ? t('aims.days_left', { n: a.days_left }) : ''}</span>}
+            {a.days_left != null && a.days_left < 0 && <span className="neg"> · {t('aims.overdue')}</span>}
           </div>
         </button>
         <div className="num shrink-0 text-[15px] font-semibold tabular-nums">{pct}%</div>
-        <button className="btn-icon !h-7 !w-7" onClick={() => setOpen(!open)} aria-label={open ? 'Свернуть' : 'Раскрыть'}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
+        <button className="btn-icon !h-7 !w-7" onClick={() => setOpen(!open)} aria-label={t(open ? 'aims.collapse' : 'aims.expand')}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
       </div>
       <div className="progress mt-3"><div style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }} /></div>
-      {stale && !open && <div className="warn mt-2 text-[12px]">ничего не двигалось {a.stale_days} дн.</div>}
+      {stale && !open && <div className="warn mt-2 text-[12px]">{t('aims.stale', { n: a.stale_days })}</div>}
       {open && (
         <div className="mt-4 space-y-4" style={{ animation: 'rise .2s var(--ease-out)' }}>
           {!v ? <div className="muted text-[13px]">…</div> : (
             <>
-              {v.milestones.length === 0 && v.tasks.length === 0 && <div className="muted text-[13px]">Пока пусто. Первая веха — первый ощутимый рубеж; задачи привяжутся к ней («задача: … к вехе …»).</div>}
+              {v.milestones.length === 0 && v.tasks.length === 0 && <div className="muted text-[13px]">{t('aims.no_ms')}</div>}
               {v.milestones.map((m) => (
                 <div key={m.id}>
                   <div className="flex items-center gap-2">
-                    <button onClick={() => msStatus(m, m.status === 'done' ? 'open' : 'done')} aria-label="Веха закрыта" className={`grid h-[20px] w-[20px] shrink-0 place-items-center rounded-full border transition ${m.status === 'done' ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={{ borderColor: 'var(--line-2)' }}>{m.status === 'done' && <Check size={11} strokeWidth={3} />}</button>
+                    <button onClick={() => msStatus(m, m.status === 'done' ? 'open' : 'done')} aria-label={t('aims.ms_done')} className={`grid h-[20px] w-[20px] shrink-0 place-items-center rounded-full border transition ${m.status === 'done' ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={{ borderColor: 'var(--line-2)' }}>{m.status === 'done' && <Check size={11} strokeWidth={3} />}</button>
                     <div className={`min-w-0 flex-1 truncate text-[14px] font-medium ${m.status === 'done' ? 'muted line-through' : ''}`}>{m.title}</div>
-                    <div className="muted num text-[12px]">{Math.round(m.progress * 100)}%{m.order_title ? ` · заказ «${m.order_title}»` : ''}{m.due ? ` · к ${fmtDate(m.due)}` : ''}</div>
+                    <div className="muted num text-[12px]">{Math.round(m.progress * 100)}%{m.order_title ? ` · ${t('aims.order', { title: m.order_title })}` : ''}{m.due ? ` · ${t('aims.by', { date: fmtDate(m.due) })}` : ''}</div>
                   </div>
                   {m.tasks.length > 0 && (
                     <div className="ml-7 mt-1">
@@ -107,20 +110,20 @@ function AimCard({ a, onPatch, onChange }) {
               ))}
               {v.tasks.length > 0 && (
                 <div>
-                  <div className="label mb-1">без вехи</div>
+                  <div className="label mb-1">{t('aims.no_milestone')}</div>
                   {v.tasks.map((t) => <TaskLine key={t.id} t={t} onDone={doneTask} />)}
                 </div>
               )}
               <form onSubmit={addMs} className="flex items-center gap-2">
                 <Plus size={14} className="faint shrink-0" />
-                <input value={msDraft} onChange={(e) => setMsDraft(e.target.value)} className="h-8 w-full bg-transparent text-[14px] outline-none placeholder:text-[var(--ink-3)]" placeholder="новая веха…" />
+                <input value={msDraft} onChange={(e) => setMsDraft(e.target.value)} className="h-8 w-full bg-transparent text-[14px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('aims.new_ms')} />
               </form>
               <div className="flex flex-wrap items-center gap-1 pt-1 text-[12px]">
-                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { priority: a.priority === 1 ? 2 : 1 })}>{a.priority === 1 ? 'не главная' : 'сделать главной'}</button>
-                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { status: 'paused' }, 'На паузе')}><Pause size={12} /> пауза</button>
-                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { status: 'done' }, 'Цель закрыта')}><Check size={12} /> достигнута</button>
-                <button className="btn-ghost btn-sm !text-red" onClick={() => onPatch(a.id, { status: 'dropped' }, 'Цель снята')}><X size={12} /> снять</button>
-                <button className="btn-ghost btn-sm ml-auto" onClick={() => ask(`по цели «${a.title}»: `)}><MessageCircle size={12} /> обсудить</button>
+                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { priority: a.priority === 1 ? 2 : 1 })}>{t(a.priority === 1 ? 'aims.unmain' : 'aims.make_main')}</button>
+                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { status: 'paused' }, t('aims.paused'))}><Pause size={12} /> {t('aims.pause')}</button>
+                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { status: 'done' }, t('aims.closed'))}><Check size={12} /> {t('aims.reached_btn')}</button>
+                <button className="btn-ghost btn-sm !text-red" onClick={() => onPatch(a.id, { status: 'dropped' }, t('aims.dropped_toast'))}><X size={12} /> {t('aims.drop')}</button>
+                <button className="btn-ghost btn-sm ml-auto" onClick={() => ask(T('aims.seed_about', { title: a.title }))}><MessageCircle size={12} /> {t('aims.discuss')}</button>
               </div>
             </>
           )}
@@ -131,9 +134,10 @@ function AimCard({ a, onPatch, onChange }) {
 }
 
 function TaskLine({ t, onDone }) {
+  const { t: T2 } = useI18n()
   return (
     <div className="flex items-center gap-2 py-1">
-      <button onClick={() => !t.done && onDone(t)} aria-label="Сделано" className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border transition ${t.done ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={{ borderColor: 'var(--line-2)' }}>{t.done && <Check size={10} strokeWidth={3} />}</button>
+      <button onClick={() => !t.done && onDone(t)} aria-label={T2('focus.done')} className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border transition ${t.done ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={{ borderColor: 'var(--line-2)' }}>{t.done && <Check size={10} strokeWidth={3} />}</button>
       <div className={`min-w-0 flex-1 truncate text-[13px] ${t.done ? 'muted line-through' : ''}`}>{t.title}</div>
       {t.blocked_by && !t.done && <span className="warn truncate text-[11px]">⏸ {t.blocked_by}</span>}
       {t.due && !t.done && <span className="faint text-[11px]">{fmtDate(t.due)}</span>}
@@ -142,6 +146,7 @@ function TaskLine({ t, onDone }) {
 }
 
 function AimSheet({ open, onClose, onDone }) {
+  const { t } = useI18n()
   const [title, setTitle] = useState('')
   const [why, setWhy] = useState('')
   const [due, setDue] = useState('')
@@ -154,17 +159,17 @@ function AimSheet({ open, onClose, onDone }) {
     try { await api.post('/api/aims', { title: title.trim(), why: why.trim(), due: due ? new Date(due + 'T00:00').toISOString() : null }); onDone() } catch (err) { show.err(err) } finally { setBusy(false) }
   }
   return (
-    <Sheet open={open} onClose={onClose} title="новая цель" sub="Это на месяцы, не на день. Задачи и заказы будут двигать её сами.">
+    <Sheet open={open} onClose={onClose} title={t('aims.new_title')} sub={t('aims.new_sub')}>
       <form onSubmit={save} className="space-y-4">
-        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className="input" placeholder="Собрать портфолио по интерьерам" />
-        <input value={why} onChange={(e) => setWhy(e.target.value)} className="input" placeholder="Зачем: брать заказы дороже (через месяц это единственное, что удержит)" />
+        <input autoFocus value={title} onChange={(e) => setTitle(e.target.value)} className="input" placeholder={t('aims.ph_title')} />
+        <input value={why} onChange={(e) => setWhy(e.target.value)} className="input" placeholder={t('aims.ph_why')} />
         <label className="block">
-          <div className="label mb-1">срок (необязательно)</div>
+          <div className="label mb-1">{t('aims.due_label')}</div>
           <input type="date" value={due} onChange={(e) => setDue(e.target.value)} className="input" />
         </label>
         <div className="flex justify-end gap-2 pt-2">
-          <button type="button" className="btn-ghost" onClick={onClose}>отмена</button>
-          <button className="btn-primary" disabled={busy || title.trim().length < 2}>поставить</button>
+          <button type="button" className="btn-ghost" onClick={onClose}>{t('common.cancel')}</button>
+          <button className="btn-primary" disabled={busy || title.trim().length < 2}>{t('aims.set')}</button>
         </div>
       </form>
     </Sheet>

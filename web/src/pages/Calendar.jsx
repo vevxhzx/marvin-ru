@@ -1,19 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, plural } from '../lib/api'
+import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
 import { Sheet, Field, DateTimeField, useToast, PageAccent, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
+import { useI18n, localeOf, t as T } from '../lib/i18n'
 
-const WD = ['вс', 'пн', 'вт', 'ср', 'чт', 'пт', 'сб']
-const WD_FULL = ['воскресенье', 'понедельник', 'вторник', 'среда', 'четверг', 'пятница', 'суббота']
+/* Короткие и полные дни недели — из Intl (lib/api.js WD_SHORT_MON, dayLabel) */
 
 /* Карточки сетки календаря: порядок и ширина меняются в режиме «настроить» */
 const CAL_CARDS = ['month', 'day', 'week', 'upcoming']
 const CAL_WIDTHS = { month: 8, day: 4, week: 12, upcoming: 12 }
 
 export function EventSheet({ open, ev, day, onClose, onDone }) {
+  const { t } = useI18n()
   const isNew = ev === 'new' || !ev?.id
   // событие-проекция (задача/дедлайн заказа) в календаре правится в своей карточке — здесь только просмотр
   const synthetic = !isNew && Number(ev?.id) < 0
@@ -79,8 +80,8 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
     try {
       const r = await api.doneEvent(ev.id, !!next)
       const linked = (r?.linked || []).filter(Boolean)
-      if (next) show('Завершено', linked.join(' · '), ev.title)
-      else show('Возвращено в работу', linked.join(' · '), ev.title)
+      if (next) show(t('cal.done'), linked.join(' · '), ev.title)
+      else show(t('cal.reopened'), linked.join(' · '), ev.title)
       onDone()
     } catch (err) {
       show.err(err)
@@ -90,18 +91,18 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
   }
 
   const kindChip = ev?.kind === 'task'
-    ? { txt: 'задача из списка', cls: '!bg-[var(--acc)] !text-white' }
+    ? { txt: t('cal.task_from_list'), cls: '!bg-[var(--acc)] !text-white' }
     : ev?.kind === 'order'
-      ? { txt: 'дедлайн заказа', cls: '!bg-[var(--warn)] !text-black' }
+      ? { txt: t('cal.order_deadline'), cls: '!bg-[var(--warn)] !text-black' }
       : null
 
   if (synthetic) {
     return (
-      <Sheet open={open} onClose={onClose} title={ev?.kind === 'order' ? 'сдача заказа' : 'задача из календаря'}>
+      <Sheet open={open} onClose={onClose} title={t(ev?.kind === 'order' ? 'cal.deliver' : 'cal.task_from_cal')}>
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             {kindChip && <span className={`chip ${kindChip.cls}`}>{kindChip.txt}</span>}
-            {ev.done && <span className="chip !bg-[var(--pos)] !text-white">выполнено</span>}
+            {ev.done && <span className="chip !bg-[var(--pos)] !text-white">{t('tk.done')}</span>}
           </div>
           <div className="text-[18px] font-semibold">{ev?.title}</div>
           <div className="text-sm text-[var(--ink2)] num">
@@ -109,13 +110,13 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
           </div>
           <p className="text-sm text-[var(--ink3)]">
             {ev?.kind === 'order'
-              ? 'Это дедлайн заказа. Завершение переведёт заказ в статус «сдан» — он также изменится на странице заказов.'
-              : 'Задача из списка, показанная в календаре. Завершение закроет её и везде — и задачу, и привязанную встречу.'}
+              ? t('cal.order_help')
+              : t('cal.task_help')}
           </p>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn g" onClick={onClose}>закрыть</button>
+            <button type="button" className="btn g" onClick={onClose}>{t('common.close')}</button>
             <button type="button" className="btn" disabled={saving} onClick={toggleDone}>
-              {ev.done ? 'вернуть в работу' : ev?.kind === 'order' ? 'заказ сдан ✓' : 'выполнено ✓'}
+              {t(ev.done ? 'od.back_to_work' : ev?.kind === 'order' ? 'cal.order_done' : 'cal.task_done')}
             </button>
           </div>
         </div>
@@ -124,43 +125,43 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новое событие' : ev.done ? 'встреча завершена' : 'редактировать встречу'}>
+    <Sheet open={open} onClose={onClose} title={t(isNew ? 'cal.new_event' : ev.done ? 'cal.event_done' : 'cal.edit_event')}>
       <form onSubmit={save} className="space-y-4">
-        <Field label="название встречи">
-          <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Встреча с клиентом, созвон…" />
+        <Field label={t('cal.title')}>
+          <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('cal.title_ph')} />
         </Field>
-        <Field label="дата и время">
+        <Field label={t('cal.date_time')}>
           <DateTimeField value={start} onChange={setStart} />
         </Field>
-        <Field label="место или ссылка">
-          <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Zoom, переговорная, https://…" />
+        <Field label={t('cal.place')}>
+          <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={t('cal.place_ph')} />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="привязать к задаче" hint="срок задачи встанет на это время; ✓ закроет обоих">
+          <Field label={t('cal.link_task')} hint={t('cal.link_task_hint')}>
             <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
-              <option value="">не привязывать</option>
+              <option value="">{t('cal.not_link')}</option>
               {tasks.map((t) => <option key={t.id} value={t.id}>{t.done ? '✓ ' : ''}{t.title}</option>)}
             </select>
           </Field>
-          <Field label="привязать к заказу" hint="завершение закроет заказ">
+          <Field label={t('cal.link_order')} hint={t('cal.link_order_hint')}>
             <select className="input" value={orderId} onChange={(e) => setOrderId(e.target.value)}>
-              <option value="">не привязывать</option>
+              <option value="">{t('cal.not_link')}</option>
               {orders.map((o) => <option key={o.id} value={o.id}>{o.title}</option>)}
             </select>
           </Field>
         </div>
         <div className="flex items-center justify-between gap-2 pt-4">
           {!isNew ? (
-            <button type="button" className="btn g !text-[var(--neg)]" onClick={remove}>удалить</button>
+            <button type="button" className="btn g !text-[var(--neg)]" onClick={remove}>{t('common.delete')}</button>
           ) : <span />}
           <div className="flex gap-2">
             {!isNew && (
               <button type="button" className={`btn ${ev.done ? 'g' : ''}`} disabled={saving} onClick={toggleDone}>
-                {ev.done ? 'открыть заново' : 'завершить'}
+                {t(ev.done ? 'cal.reopen' : 'cal.finish')}
               </button>
             )}
-            <button type="button" className="btn g" onClick={onClose}>отмена</button>
-            <button type="submit" className="btn" disabled={saving || !title.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+            <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+            <button type="submit" className="btn" disabled={saving || !title.trim()}>{t(saving ? 'people.saving' : 'common.save')}</button>
           </div>
         </div>
       </form>
@@ -170,13 +171,14 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
 
 /* Кружок завершения в строке календаря: галочка ставится на месте, без открытия карточки */
 export function EvCheck({ ev, onToggle, small }) {
+  const { t } = useI18n()
   return (
     <button
       type="button"
       className={`ev-check ${small ? 'sm' : ''} ${ev.done ? 'on' : ''}`}
       onClick={(e) => { e.stopPropagation(); onToggle(ev, e) }}
-      aria-label={ev.done ? 'вернуть в работу' : 'завершить'}
-      title={ev.done ? 'вернуть в работу' : 'завершить'}
+      aria-label={t(ev.done ? 'od.back_to_work' : 'cal.finish')}
+      title={t(ev.done ? 'od.back_to_work' : 'cal.finish')}
     >
       <Check size={small ? 9 : 12} strokeWidth={3} />
     </button>
@@ -186,15 +188,15 @@ export function EvCheck({ ev, onToggle, small }) {
 /* Подпись строки: откуда она — задача, дедлайн заказа или обычная встреча */
 function evSub(e, tasks = [], orders = []) {
   const bits = []
-  if (e.kind === 'task') bits.push('задача')
-  else if (e.kind === 'order') bits.push(`заказ · ${e.location || 'сдать'}`)
+  if (e.kind === 'task') bits.push(T('graph.one_task'))
+  else if (e.kind === 'order') bits.push(`${T('graph.one_order')} · ${e.location || T('cal.deliver_short')}`)
   if (e.task_id && e.kind !== 'task') {
-    const t = tasks.find((x) => x.id === Number(e.task_id))
-    if (t) bits.push(`↳ задача «${t.title}»`)
+    const task = tasks.find((x) => x.id === Number(e.task_id))
+    if (task) bits.push(T('cal.link_task', { title: task.title }))
   }
   if (e.order_id && e.kind !== 'order') {
-    const o = orders.find((x) => x.id === Number(e.order_id))
-    if (o) bits.push(`↳ заказ «${o.title}»`)
+    const order = orders.find((x) => x.id === Number(e.order_id))
+    if (order) bits.push(T('cal.link_order', { title: order.title }))
   }
   if (e.location && e.kind !== 'order') bits.push(e.location)
   if (e.sub) bits.push(e.sub)
@@ -202,8 +204,12 @@ function evSub(e, tasks = [], orders = []) {
 }
 
 export default function Calendar() {
+  const { t } = useI18n()
   const [cursor, setCursor] = useState(() => { const d = new Date(); d.setDate(1); d.setHours(0, 0, 0, 0); return d })
   const [selected, setSelected] = useState(new Date())
+  /* Один объект «сегодня» на весь срок жизни страницы: раньше здесь стояло
+     `const today = new Date()` в deps у useMemo — сетка пересчитывалась на каждый рендер */
+  const [today] = useState(() => new Date())
   const [events, setEvents] = useState([])
   const [linkTasks, setLinkTasks] = useState([])
   const [linkOrders, setLinkOrders] = useState([])
@@ -238,9 +244,9 @@ export default function Calendar() {
       const r = await api.doneEvent(e.id, !!next)
       const linked = (r?.linked || []).filter(Boolean)
       if (next) {
-        show('Завершено', linked.join(' · '), e.title)
+        show(t('cal.done'), linked.join(' · '), e.title)
       } else {
-        show('Возвращено в работу', linked.join(' · '), e.title)
+        show(t('cal.reopened'), linked.join(' · '), e.title)
       }
       load()
       bump()
@@ -249,8 +255,6 @@ export default function Calendar() {
       load()
     }
   }
-
-  const today = new Date()
 
   // Раскладка карточек: порядок и ширина (режим «настроить» в шапке)
   const wide = useWide()
@@ -318,8 +322,8 @@ export default function Calendar() {
       const dayEvs = (events || []).filter((e) => isSameDay(new Date(e.start), cur)).sort((a, b) => new Date(a.start) - new Date(b.start))
       daysArr.push({
         date: cur,
-        name: WD[cur.getDay()],
-        fullName: WD_FULL[cur.getDay()],
+        name: WD_SHORT[cur.getDay()],
+        fullName: cur.toLocaleDateString(localeOf(), { weekday: 'long' }),
         num: cur.getDate(),
         isToday: isSameDay(cur, today),
         isSel: isSameDay(cur, selected),
@@ -331,7 +335,34 @@ export default function Calendar() {
   }, [selected, events, today])
 
   const dayEvents = (events || []).filter((e) => isSameDay(new Date(e.start), selected)).sort((a, b) => new Date(a.start) - new Date(b.start))
-  const upcoming = (events || []).filter((e) => new Date(e.start) > today).sort((a, b) => new Date(a.start) - new Date(b.start)).slice(0, 6)
+  const upcomingAll = (events || []).filter((e) => new Date(e.start) > today)
+  const upcoming = [...upcomingAll].sort((a, b) => new Date(a.start) - new Date(b.start)).slice(0, 6)
+
+  /** Ячейки, которые реально нарисованы в сетке месяца (35 или 42 дня) */
+  const gridCells = cells.slice(0, cells[35]?.isOut ? 35 : 42)
+  /* Клавиатура в сетке: день фокусируется (tabIndex), ←/→/↑/↓ и Home/End — переход
+     к дню, Enter/Пробел — открыть день (он станет выбранным в карточке «день»). */
+  const dayKeyDown = (e, idx) => {
+    const last = gridCells.length - 1
+    let to = null
+    if (e.key === 'ArrowRight') to = idx + 1
+    else if (e.key === 'ArrowLeft') to = idx - 1
+    else if (e.key === 'ArrowDown') to = idx + 7
+    else if (e.key === 'ArrowUp') to = idx - 7
+    else if (e.key === 'Home') to = idx - (idx % 7)
+    else if (e.key === 'End') to = idx - (idx % 7) + 6
+    if (to !== null) {
+      e.preventDefault()
+      const next = Math.max(0, Math.min(last, to))
+      const nodes = e.currentTarget.parentElement?.querySelectorAll('[data-day]')
+      nodes?.[next]?.focus()
+      return
+    }
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault()
+      setSelected(gridCells[idx].date)
+    }
+  }
 
   const shiftTime = (n) => {
     if (view === 'week') {
@@ -364,24 +395,24 @@ export default function Calendar() {
       <div className="top">
         <div>
           <h1 className="r" style={{ '--i': 0 }}>
-            {view === 'week' ? `неделя ${selected.getDate()} ${MONTHS_GEN[selected.getMonth()]}` : MONTHS_NOM[cursor.getMonth()].toLowerCase()}
+            {view === 'week' ? t('cal.week_of', { d: selected.getDate(), m: MONTHS_GEN[selected.getMonth()] }) : MONTHS_NOM[cursor.getMonth()].toLowerCase()}
           </h1>
           <p className="sub r" style={{ '--i': 1 }}>{cursor.getFullYear()}</p>
         </div>
         <div className="hr r" style={{ '--i': 1 }}>
           <div className="sg">
-            <span className={view === 'month' ? 'on' : ''} onClick={() => setView('month')}>месяц</span>
-            <span className={view === 'week' ? 'on' : ''} onClick={() => setView('week')}>неделя</span>
+            <button type="button" className={view === 'month' ? 'on' : ''} onClick={() => setView('month')}>{t('cal.month')}</button>
+            <button type="button" className={view === 'week' ? 'on' : ''} onClick={() => setView('week')}>{t('cal.week')}</button>
           </div>
           <div className="sg">
             <span onClick={() => shiftTime(-1)}>‹</span>
-            <span onClick={goToday}>сегодня</span>
+            <span onClick={goToday}>{t('common.today')}</span>
             <span onClick={() => shiftTime(1)}>›</span>
           </div>
-          <span className="btn" onClick={() => setSheet('new')}>+ событие</span>
+          <button type="button" className="btn" onClick={() => setSheet('new')}>+ {t('graph.one_event')}</button>
           {shown.length > 1 && (
-            <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
-              title="Переместить или поменять ширину карточек">настроить</span>
+            <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
+              title={t('tk.layout_tip')}>{t('tk.layout')}</button>
           )}
         </div>
       </div>
@@ -395,17 +426,23 @@ export default function Calendar() {
               {cardCtl('month')}
               <div className="cal2" id="cal2">
                 <div className="cal2-head">
-                  {'пн вт ср чт пт сб вс'.split(' ').map((w) => (
+                  {WD_SHORT.slice(1).concat(WD_SHORT[0]).join(' ').split(' ').map((w) => (
                     <span className="mono font-semibold" key={w}>{w}</span>
                   ))}
                 </div>
                 <div className="cal2-grid">
-                  {cells.slice(0, cells[35]?.isOut ? 35 : 42).map((c) => (
+                  {gridCells.map((c, i) => (
                     <b
                       key={c.key}
+                      data-day={i}
+                      tabIndex={0}
+                      role="button"
+                      aria-current={c.isToday ? 'date' : undefined}
+                      aria-label={`${c.num}, ${c.events.length ? c.events.map((e) => e.title).join(', ') : t('cal.no_events')}`}
                       className={`${c.isOut ? 'o' : ''} ${c.isToday ? 't' : ''} ${c.isSel && !c.isToday ? 'is-sel' : ''}`}
                       style={{ '--k': c.key }}
                       onClick={() => setSelected(c.date)}
+                      onKeyDown={(e) => dayKeyDown(e, i)}
                     >
                       <div className="flex items-center justify-between w-full">
                         <span className="day-num">{c.num}</span>
@@ -434,12 +471,12 @@ export default function Calendar() {
               <div className="mt-auto pt-3.5 border-t border-[var(--line)] flex items-center justify-between text-xs text-[var(--ink2)]">
                 <div className="flex items-center gap-2">
                   <span className="w-2.5 h-2.5 rounded-full bg-[var(--acc)] shadow-[0_0_8px_var(--acc)]"></span>
-                  <span>Выбранный день: <strong className="text-[var(--ink)] font-semibold">{dayLabel(selected)}, {selected.getDate()} {MONTHS_GEN[selected.getMonth()]}</strong></span>
+                  <span>{t('cal.selected')}: <strong className="text-[var(--ink)] font-semibold">{dayLabel(selected)}, {selected.getDate()} {MONTHS_GEN[selected.getMonth()]}</strong></span>
                 </div>
                 <div className="flex items-center gap-3">
-                  <span className="mono text-[var(--ink3)]">{dayEvents.length} {plural(dayEvents.length, 'событие', 'события', 'событий')}</span>
+                  <span className="mono text-[var(--ink3)]">{t('cal.events_n', { count: dayEvents.length })}</span>
                   <button type="button" className="btn g !h-7 !px-3 !text-xs" onClick={() => setSheet('new')}>
-                    <Plus size={12} /> добавить
+                    <Plus size={12} /> {t('common.add')}
                   </button>
                 </div>
               </div>
@@ -448,17 +485,17 @@ export default function Calendar() {
             <section className="c s4 r flex flex-col" style={{ '--i': 3, minHeight: '560px', ...cardSt('day') }}>
               {cardCtl('day')}
               <div className="hd">
-                <h2>{isSameDay(selected, today) ? 'сегодня' : dayLabel(selected)}</h2>
-                <small>{shortDate(selected)} · {dayEvents.length} {plural(dayEvents.length, 'событие', 'события', 'событий')}</small>
+                <h2>{isSameDay(selected, today) ? t('common.today') : dayLabel(selected)}</h2>
+                <small>{shortDate(selected)} · {t('cal.events_n', { count: dayEvents.length })}</small>
               </div>
               <div className="flex-1 overflow-y-auto pr-1 space-y-1">
                 {!loaded ? (
                   <ListSkeleton n={4} />
                 ) : dayEvents.length === 0 ? (
                   <div className="py-12 text-center text-sm text-[var(--ink3)] flex flex-col items-center justify-center gap-2">
-                    <span>нет событий на этот день</span>
+                    <span>{t('cal.day_empty')}</span>
                     <button type="button" className="btn g !h-8 !px-3.5 !text-xs mt-2" onClick={() => setSheet('new')}>
-                      <Plus size={13} /> записать событие
+                      <Plus size={13} /> {t('cal.add_event')}
                     </button>
                   </div>
                 ) : (
@@ -488,8 +525,8 @@ export default function Calendar() {
           <section className="c s12 r" style={{ '--i': 2, ...cardSt('week') }}>
             {cardCtl('week')}
             <div className="hd">
-              <h2>расписание на неделю</h2>
-              <small>кликните на день или событие для просмотра</small>
+              <h2>{t('cal.week_plan')}</h2>
+              <small>{t('cal.week_hint')}</small>
             </div>
             {/* на телефоне неделя листается вбок (7 колонок в ряд), на ПК — как обычно */}
             <div className="flex gap-3 mt-4 overflow-x-auto -mx-1 px-1 pb-1 md:mx-0 md:px-0 md:pb-0 md:overflow-visible md:grid md:grid-cols-7">
@@ -521,7 +558,7 @@ export default function Calendar() {
 
                     <div className="flex-1 space-y-1.5 mt-1 overflow-hidden">
                       {dayItem.events.length === 0 ? (
-                        <span className="text-[11px] text-[var(--ink3)] italic opacity-60">свободно</span>
+                        <span className="text-[11px] text-[var(--ink3)] italic opacity-60">{t('run.free')}</span>
                       ) : (
                         dayItem.events.map((ev) => (
                           <div
@@ -554,11 +591,11 @@ export default function Calendar() {
         <section className="c s12 r" style={{ '--i': 4, ...cardSt('upcoming') }}>
           {cardCtl('upcoming')}
           <div className="hd">
-            <h2>ближайшее</h2>
-            <small>на 7 дней вперёд · {upcoming.length}</small>
+            <h2>{t('nextup.title')}</h2>
+            <small>{t('cal.upcoming_note', { all: upcomingAll.length, shown: upcoming.length })}</small>
           </div>
           {upcoming.length === 0 ? (
-            <p className="py-4 text-center text-sm text-[var(--ink3)]">нет предстоящих событий</p>
+            <p className="py-4 text-center text-sm text-[var(--ink3)]">{t('cal.no_upcoming')}</p>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
               {upcoming.map((e) => {
@@ -567,12 +604,12 @@ export default function Calendar() {
                 return (
                   <div className={`rowi ${e.done ? 'is-done' : ''}`} key={e.id} onClick={() => setSheet(e)} style={{ cursor: 'pointer' }}>
                     <EvCheck ev={e} onToggle={toggleDone} />
-                    <time>{WD[d.getDay()]} {hhmm(e.start)}</time>
+                    <time>{WD_SHORT[d.getDay()]} {hhmm(e.start)}</time>
                     <span className="t">
                       {e.title}
                       <small>{sub || shortDate(e.start)}</small>
                     </span>
-                    <span className="chip">{e.kind === 'task' ? 'задача' : e.kind === 'order' ? 'заказ' : 'встреча'}</span>
+                    <span className="chip">{t(e.kind === 'task' ? 'graph.one_task' : e.kind === 'order' ? 'graph.one_order' : 'graph.one_event')}</span>
                   </div>
                 )
               })}

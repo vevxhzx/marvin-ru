@@ -58,7 +58,7 @@ aside .sb { margin-top: 0; }
   stroke-dashoffset: 63;
   animation: ringu 90s linear infinite;
 }
-.st { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; background: #1a1a20; font-size: 13px; color: #b9bcc6; }
+.st { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-radius: 999px; background: var(--sb-hover); font-size: var(--fs-md); color: var(--sb-dim); }
 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--warn); animation: breathe 2.4s ease-in-out infinite; }
 
 main.bench-main, main { min-width: 0; padding: 8px clamp(4px, 1vw, 16px) 64px; width: 100%; }
@@ -68,7 +68,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .tools { display: flex; gap: 10px; align-items: center; }
 .gt { display: flex; justify-content: flex-end; gap: 10px; align-items: center; margin-bottom: 26px; }
 .search { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 8px 0 16px; border-radius: 999px; background: var(--sf); color: var(--ink3); font-size: 14px; width: 250px; }
-.kbd { margin-left: auto; font-size: 11px; padding: 3px 8px; border-radius: 8px; background: var(--sf2); color: var(--ink2); }
+.kbd { margin-left: auto; font-size: 12px; padding: 3px 8px; border-radius: 8px; background: var(--sf2); color: var(--ink2); }
 .ib { position: relative; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--sf); color: var(--ink2); cursor: pointer; }
 .ib svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .ib u { position: absolute; top: 11px; right: 12px; width: 8px; height: 8px; border-radius: 50%; background: var(--acc); border: 2px solid var(--sf); box-sizing: content-box; }
@@ -175,7 +175,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 /* высота в процентах: без минимума «0» превращался в невидимую линию и график выглядел пустым */
 .bars i { flex: 1; min-height: 6px; border-radius: 8px; background: linear-gradient(180deg, currentColor, color-mix(in srgb, currentColor 45%, transparent)); height: max(var(--h), 6px); animation: rise 1.2s calc(1s + var(--k) * 80ms) var(--e) both; transform-origin: bottom; }
 .bars i.z { background: var(--sf2); color: var(--ink3); }
-.bl { display: flex; gap: 8px; margin-top: 6px; font-size: 11px; opacity: 0.7; }
+.bl { display: flex; gap: 8px; margin-top: 6px; font-size: 12px; opacity: 0.78; }
 .bl span { flex: 1; text-align: center; }
 
 .blk {
@@ -194,7 +194,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
 .chip:hover { background: var(--ink); color: var(--bg); }
 
 .cal { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px 2px; text-align: center; font-size: 13px; }
-.cal .w { color: var(--ink3); font-size: 11px; padding-bottom: 4px; }
+.cal .w { color: var(--ink3); font-size: 12px; padding-bottom: 4px; }
 .cal b { position: relative; font-weight: 500; padding: 6px 0 9px; animation: fade 0.5s both; animation-delay: calc(0.9s + var(--k) * 12ms); border-radius: 12px; transition: transform 0.25s var(--e), background 0.25s var(--e), color 0.2s var(--e); cursor: pointer; }
 .cal b:hover:not(.o) { background: var(--sf2); transform: translateY(-2px) scale(1.06); }
 .cal b.o { color: var(--ink3); font-weight: 400; opacity: 0.6; }
@@ -293,7 +293,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   overflow: hidden;
 }
 .cal2 .ev-pill {
-  font-size: 11px;
+  font-size: 12px;
   padding: 2px 6px;
   border-radius: 6px;
   background: color-mix(in srgb, var(--acc) 16%, transparent);
@@ -410,8 +410,8 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   transition: transform .15s var(--e), box-shadow .15s var(--e); }
 .pa-sw:hover { transform: scale(1.14); box-shadow: 0 6px 16px rgba(0, 0, 0, .25); }
 .pa-sw-on { outline: 2px solid var(--acc); outline-offset: 3px; }
-.pa-sw-reset { background: var(--sf2); color: var(--ink2); font-size: 9px; line-height: 1.15; display: grid; place-items: center; text-align: center; }
-.pa-note { margin-top: 10px; font-size: 11px; color: var(--ink3); line-height: 1.35; }
+.pa-sw-reset { background: var(--sf2); color: var(--ink2); font-size: 12px; line-height: 1.15; display: grid; place-items: center; text-align: center; }
+.pa-note { margin-top: 10px; font-size: 12px; color: var(--ink3); line-height: 1.35; }
 
 .ck input { appearance: none; -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--ink3); cursor: pointer; flex: none; transition: 0.3s; margin: 0; }
 .ck input:checked { background: var(--acc); border-color: var(--acc); }
@@ -674,7 +674,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.05em;
@@ -700,7 +700,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
   color: var(--ink3);
@@ -713,7 +713,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   color: var(--ink2);
   padding: 1px 6px;
   border-radius: 999px;
-  font-size: 10px;
+  font-size: 12px;
 }
 .report-empty-row {
   padding: 12px 4px;
@@ -775,7 +775,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --sf2: #f0f1f6;
   --ink: #101114;
   --ink2: #5d6068;
-  --ink3: #9a9da6;
+  --ink3: #666b76;
   /* алиасы с дефисом — так их зовут утилиты .muted/.label/.faint и часть разметки */
   --ink-2: var(--ink2);
   --ink-3: var(--ink3);
@@ -851,9 +851,21 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --shadow-2: 0 20px 60px -20px rgba(0, 0, 0, 0.18);
   --shadow-3: 0 34px 56px -36px color-mix(in srgb, var(--acc) 42%, transparent);
 
-  --fs-xs: 12px; --fs-sm: 12px; --fs-md: 13px; --fs-base: 15px; --fs-lg: 16px; --fs-xl: 18px;
+  --fs-xs: 12px; --fs-sm: 12.5px; --fs-md: 13.5px; --fs-base: 15px; --fs-lg: 16px; --fs-xl: 18px;
+  --fs-2xl: 22px; --fs-3xl: 30px; --fs-4xl: 44px;
+  --lh-tight: 1.06; --lh-snug: 1.3; --lh-body: 1.45;
+  /* шкала отступов: сетка 4px */
+  --s-1: 4px; --s-2: 8px; --s-3: 12px; --s-4: 16px; --s-5: 20px;
+  --s-6: 24px; --s-7: 28px; --s-8: 32px; --s-9: 36px; --s-10: 40px;
+  /* зоны нажатия (WCAG 2.5.5 / Apple HIG): на тач-экране — не меньше 44px */
+  --tap: 44px; --tap-lg: 48px; --tap-sm: 32px;
   --ui-zoom: 1;
   --sidebar-w: 232px; --sidebar-w-min: 68px; --topbar-h: 56px; --content-max: 1200px;
+  /* раскладка оболочки: отступы приложения, карточек и сетки бенто */
+  --app-pad: 16px; --card-pad: 26px; --card-pad-m: 18px;
+  --bento-gap: 16px; --bento-gap-m: 12px;
+  /* кольцо фокуса — одно на всё приложение */
+  --focus-ring: 2px; --focus-offset: 2px;
 }
 
 /* Тёмная тема «до скриптов»: системная настройка, чтобы не было вспышки светлого при старте */
@@ -864,7 +876,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
     --sf2: #1c2550;
     --ink: #f5f5f7;
     --ink2: #a4a7b0;
-    --ink3: #8b8f9a;
+    --ink3: #9aa0ab;
     --ink-2: var(--ink2);
     --ink-3: var(--ink3);
     --line: rgba(255, 255, 255, 0.10);
@@ -977,7 +989,7 @@ h1.bench-h1, .top h1 { font-size: clamp(34px, 5vw, 54px); font-weight: 600; lett
   --sf2: #f0f1f6;
   --ink: #101114;
   --ink2: #5d6068;
-  --ink3: #9a9da6;
+  --ink3: #666b76;
   --ink-2: var(--ink2);
   --ink-3: var(--ink3);
   --line: rgba(16, 17, 20, 0.07);
@@ -1263,7 +1275,7 @@ select.input { appearance: none; }
 /* телефон: шторка снизу, «ручка» сверху, нижние вкладки на это время прячутся (body.sheet-open), низ — с запасом под домашний индикатор */
 @media (max-width: 639px) {
   .sheet { border-left: 0; border-right: 0; border-bottom: 0; max-height: calc(min(94dvh, 94svh) / var(--ui-zoom)); padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 2rem); }
-  .sheet::before { content: ''; display: block; width: 36px; height: 5px; border-radius: 99px; background: var(--line-2); margin: -6px auto 14px; }
+  /* «ручка» шторки — элемент .sheet-grip (ui.jsx), на неё же вешается свайп-закрытие */
   /* вторая шторка поверх первой (подтверждение) — первая приглушается и чуть отъезжает назад, как в iOS */
   .sheet-backdrop.behind > .sheet { transform: translateY(-12px) scale(.955); opacity: .5; filter: saturate(.8); transition: transform .3s var(--ease-out), opacity .3s, filter .3s; }
   .sheet-backdrop.behind { background: transparent; }
@@ -1346,6 +1358,19 @@ a > .panel, button > .panel, .panel.hover { transition: transform var(--t-base) 
 a:hover > .panel, button:hover > .panel, .panel.hover:hover { transform: translateY(-2px); box-shadow: var(--shadow-2); }
 a:active > .panel, button:active > .panel { transform: translateY(0); transition-duration: .1s; }
 .row-hover { transition: background-color var(--t-fast) var(--ease-out), padding var(--t-base) var(--ease-out); }
+
+/* панель чата: на телефоне — такой же bottom sheet, как и все остальные окна */
+.chat-panel { padding-top: 8px; }
+@media (max-width: 639px) {
+  .chat-panel { padding-bottom: 0; }
+  .chat-panel textarea { max-height: 34dvh; }
+}
+
+/* канбан заказов на телефоне: колонки листаются по одному экрану, а не «как попалось» */
+.kanban-scroll { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; padding-bottom: 6px; }
+.kanban-scroll > * { scroll-snap-align: start; }
+.kanban-scroll::-webkit-scrollbar { height: 4px; }
+.kanban-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; }
 
 /* пилюли и сегменты: активное состояние «перетекает», а не щёлкает */
 .pill { transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-spring); }
@@ -1507,7 +1532,7 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 .swipe-bg.left  { justify-content: flex-end;   background: var(--neg); }
 .swipe-bg.show { opacity: 1; }
 /* кнопка растёт вместе со сдвигом; иконка держится у края строки, при «полном» свайпе — подпрыгивает */
-.swipe-act { display: flex; flex-direction: row; align-items: center; gap: 4px; min-width: 84px; font-size: 11px; font-weight: 600; letter-spacing: -.01em; color: #fff; background: transparent; border: 0; padding: 0; }
+.swipe-act { display: flex; flex-direction: row; align-items: center; gap: 4px; min-width: 84px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; color: #fff; background: transparent; border: 0; padding: 0; }
 .swipe-act > * { flex: none; }
 .swipe-act span { display: none; }
 .swipe-act::after { content: none; }
@@ -1647,3 +1672,249 @@ body.board-page .tabbar { display: none; }
 .nav-group-title:first-child { padding-top: 2px; }
 .nav-group-sep { height: 1px; margin: 8px 12px; background: var(--sb-line); }
 
+
+/* ---------- Language switcher RU/EN in the header ---------- */
+.lang-toggle { display: inline-flex; align-items: center; gap: 1px; padding: 2px; border-radius: 9px;
+  background: var(--fill); border: 1px solid transparent; }
+.lang-toggle button { min-width: 28px; padding: 3px 6px; border-radius: 7px; font-size: 12px; font-weight: 600;
+  letter-spacing: 0.04em; color: var(--ink-3); transition: color .15s, background .15s; cursor: pointer; }
+.lang-toggle button:hover { color: var(--ink-2); }
+.lang-toggle button.on { background: var(--sf); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+
+
+/* =====================================================================
+   ПРИЛОЖЕНИЕ ЦЕЛИКОМ · общий каркас, шапка экрана, телефон-как-приложение
+   ===================================================================== */
+
+/* ---------- 1. Раскладка оболочки: 100dvh, без резинового скролла ---------- */
+html { min-height: 100dvh; }
+body { min-height: 100dvh; }
+.app { min-height: 100vh; min-height: 100dvh; --app-pad: 16px; padding: 16px; }
+#root { min-height: 100dvh; }
+/* Sidebar/панели считают высоту от dvh — на мобильном Safari адресная строка не срезает низ */
+aside.sidebar-bench, aside { height: calc(100vh - 32px); height: calc(100dvh - 32px); }
+.sidebar { height: calc(100vh / var(--ui-zoom)); height: calc(100dvh / var(--ui-zoom)); }
+
+/* Страница — колонка; ширина не «уезжает», длинные слова ломаются, а не растягивают сетку */
+.pg { min-width: 0; max-width: 100%; }
+.pg, .bento, .c, .panel, .row, .rowi, .note, .hd, .hr { min-width: 0; }
+
+/* ---------- 2. Шапка экрана: единственная на всех страницах ---------- */
+.top {
+  display: flex; align-items: flex-end; justify-content: space-between;
+  gap: var(--s-4); flex-wrap: wrap; margin-bottom: var(--s-6);
+}
+.top h1, h1.bench-h1 { font-size: clamp(30px, 4.2vw, 48px); font-weight: 600; letter-spacing: -0.045em; line-height: var(--lh-tight); }
+.top .sub, .sub { margin-top: var(--s-2); color: var(--ink-2); font-size: var(--fs-md); line-height: var(--lh-snug); }
+.top .hr { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+/* строка действий под заголовком на телефоне: две равные колонки, ничего не прыгает */
+.head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+
+/* ---------- 3. Кнопки: одна высота, одно радиальное свечение, одна волна ---------- */
+.btn, .btn-primary, .btn-ghost, .btn-soft, .btn-dark, .btn-danger { min-height: 38px; }
+.btn-icon { width: 38px; height: 38px; }
+/* Главное действие на телефоне — на всю ширину строки действий */
+.head-primary { flex: none; }
+
+/* ---------- 4. Поля: высота 44, шрифт 16 на тач-экране (iOS не зумит) ---------- */
+.input { min-height: 44px; }
+textarea.input { min-height: 44px; }
+select.input { padding-right: 34px; background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%); background-position: right 16px center, right 11px center; background-size: 5px 5px, 5px 5px; background-repeat: no-repeat; }
+select.input option { background: var(--surface); color: var(--ink); }
+
+/* ---------- 5. Карточки: одинаковый внутренний отступ, радиус и бордер ---------- */
+.c { padding: var(--card-pad); border-radius: calc(30px * var(--r-k)); }
+.bento { gap: var(--bento-gap); }
+
+/* ---------- 6. Нижняя навигация телефона: 5 разделов, safe-area, без прыжков ---------- */
+.tabbar {
+  display: none;
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 60;
+  padding: 6px max(8px, env(safe-area-inset-right, 0px)) calc(max(env(safe-area-inset-bottom, 0px), 8px))
+           max(8px, env(safe-area-inset-left, 0px));
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  backdrop-filter: blur(18px) saturate(160%);
+  border-top: 1px solid var(--line);
+  overflow: hidden;
+}
+.tabbar > div { display: flex; align-items: stretch; gap: 2px; height: 54px; }
+.tabbar a, .tabbar > button.tab-more {
+  flex: 1 1 0; min-width: 0; min-height: var(--tap);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+  padding: 4px 2px; border: 0; background: transparent; border-radius: 16px;
+  color: var(--ink-3); font-size: 12px; font-weight: 500; line-height: 1.1;
+  text-decoration: none; text-align: center; cursor: pointer;
+  transition: color var(--t-fast) var(--ease-out), background-color var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-spring);
+}
+.tabbar a span, .tabbar > button.tab-more span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabbar a svg, .tabbar > button.tab-more svg { width: 21px; height: 21px; flex: none; }
+.tabbar a.active, .tabbar a[aria-current="page"], .tabbar > button.tab-more.on {
+  color: var(--accent); background: var(--accent-soft); font-weight: 600;
+}
+/* точка-индикатор больше не нужна: активная вкладка сама подсвечена плашкой */
+.tabbar a::before { display: none; }
+/* «только иконки» — настройка компактной навигации */
+.tabbar.compact a span, .tabbar.compact > button.tab-more span { display: none; }
+.tabbar.compact > div { height: 44px; }
+@media (max-width: 820px) { .tabbar { display: block; } }
+/* Пока открыта шторка — вкладки уезжают вниз (правило .sheet-open ниже) */
+
+/* ---------- 7. Шторка на телефоне: ручка, свайп, резина ---------- */
+.sheet-grip {
+  display: none;
+  width: 40px; height: 5px; border-radius: 99px; background: var(--line-2);
+  margin: -4px auto 14px; flex: none; cursor: grab; touch-action: none;
+}
+.sheet-grip:active { cursor: grabbing; }
+.sheet { transition: transform var(--t-base) var(--ease-out); }
+.sheet-dragging { transition: none !important; }
+@media (max-width: 639px) {
+  .sheet-grip { display: block; }
+  .sheet { padding-top: 10px; }
+}
+
+/* ---------- 8. Шапка телефона: липкая, размытая, компактная ---------- */
+@media (max-width: 820px) {
+  main { padding: 0 0 8px; }
+  /* липкая шапка: размытие + safe-area, контент не «прыгает» под ней */
+  .gt {
+    position: sticky; top: 0; z-index: 40;
+    margin: 0 -10px 12px; padding: calc(env(safe-area-inset-top, 0px) + 8px) 12px 8px;
+    background: color-mix(in srgb, var(--bg) 82%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(160%); backdrop-filter: blur(16px) saturate(160%);
+    border-bottom: 1px solid var(--line);
+    gap: 8px;
+  }
+  html.in-telegram .gt { padding-top: max(env(safe-area-inset-top, 0px), var(--tg-content-safe-area-inset-top, 0px), 8px); }
+  /* содержимое страницы снова с полями — шапка вынесена в общий слой */
+  .pg, .bento-page { padding: 0 12px; }
+  .top { margin-bottom: var(--s-5); }
+  .top h1, h1.bench-h1 { font-size: clamp(26px, 7.5vw, 32px); }
+  /* клик по строке списка — крупная зона, но текст остаётся читаемым */
+  .rowi { min-height: var(--tap); padding: 12px 8px; }
+  .note { padding: 14px 8px; }
+}
+
+/* ---------- 9. Крупные зоны нажатия на тач-экранах ---------- */
+@media (pointer: coarse) {
+  .btn, .btn-primary, .btn-ghost, .btn-soft, .btn-dark, .btn-danger { min-height: var(--tap); padding-inline: 16px; }
+  .btn-sm { min-height: var(--tap); padding-inline: 14px; }
+  .btn-lg { min-height: var(--tap-lg); }
+  .btn-icon { width: var(--tap); height: var(--tap); }
+  .pill, .chip { min-height: var(--tap-sm); padding-block: 8px; }
+  .seg > button { min-height: var(--tap-sm); padding: 8px 14px; }
+  .sg span, .sg button { min-height: var(--tap-sm); padding: 8px 14px; }
+  .ib, .av { width: var(--tap); height: var(--tap); }
+  .send { width: var(--tap); height: var(--tap); }
+  .ck input { width: 26px; height: 26px; }
+  .row-open { width: var(--tap); height: var(--tap); margin: -10px -8px; }
+  .ev-check { width: 26px; height: 26px; }
+  .sw { gap: 10px; }
+  .sw i, .sw button { width: 44px; height: 44px; }
+  .comp { height: var(--tap-lg); border-radius: calc(var(--tap-lg) / 2); }
+  .chips span, .chips button { min-height: 34px; display: inline-flex; align-items: center; }
+  .cal b { padding: 10px 0 12px; }
+  .tgl { width: 56px; height: 32px; }
+  .tgl::after { width: 26px; height: 26px; left: 3px; }
+  .tgl.off::after { left: 3px; }
+  .tgl.on::after { left: 27px; }
+  /* поля 16px — иначе iOS приближает страницу при фокусе */
+  .input, textarea.input, select.input { font-size: 16px; }
+  /* активные состояния вместо hover: короткая анимация отклика */
+  .btn:active, .chip:active, .pill:active, .seg > button:active, .sg span:active, .ib:active, .av:active { transform: scale(.96); }
+  .row-hover:active, .rowi:active, .note:active { background: var(--fill-2); }
+}
+/* На устройствах без hover не показываем эффекты наведения — они «залипают» после тапа */
+@media (hover: none) {
+  .c:hover, .btn:hover, .btn-primary:hover, .btn-icon:hover, .chip:hover, .pill:hover,
+  .seg > button:hover, .sg span:hover, .sg button:hover, .chips span:hover, .chips button:hover,
+  .row-hover:hover, .rowi:hover, .note:hover, .comp:hover, .comp:hover .send,
+  .cal b:hover:not(.o), .cal2 b:hover:not(.o), .swatch:hover, .pa-sw:hover,
+  .sw i:hover, .sw button:hover, .cfg:hover, .row-open:hover, .search:hover { transform: none; }
+  .c:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.09), inset 0 0 0 1px var(--line), 0 16px 36px -18px rgba(0, 0, 0, 0.45); }
+  .btn:hover { transform: none; }
+  .btn:hover span:last-child, .arrow:hover::after { transform: none; }
+  .btn-icon:hover svg { transform: none; }
+  .nav-item:hover svg { transform: none; }
+  .comp:hover .send { transform: none; }
+  .ev-check:hover { transform: none; }
+  .swatch:hover, .pa-sw:hover, .sw i:hover, .sw button:hover { transform: none; }
+  .tile-glow:hover { --tg: 34%; }
+}
+
+/* ---------- 10. Широкие строки на телефоне — карточки, а не горизонтальная прокрутка ---------- */
+@media (max-width: 639px) {
+  /* любая «таблица» интерфейса: строки складываются в карточки */
+  .wide-row { flex-wrap: wrap; row-gap: 6px; }
+  .wide-row > .amt, .wide-row > time { margin-left: auto; }
+  .lg { flex-wrap: wrap; gap: 8px 14px; }
+  .flow { height: 44px; }
+  .cal2 { min-height: 360px; }
+  .mas { columns: 1; }
+}
+
+/* ---------- 11. Фокус: одно кольцо на всё приложение ---------- */
+:focus-visible { outline: var(--focus-ring) solid var(--accent); outline-offset: var(--focus-offset); border-radius: inherit; }
+.input:focus-visible, textarea.input:focus-visible, .composer textarea:focus-visible { outline: none; }
+
+/* ---------- 12. Мелкие утилиты: обрезка, числа, раскладка ---------- */
+/* кнопка-подпись «настроить главную»: без лишнего прямоугольника */
+button.cfg {
+  display: block; width: 100%; margin-top: 28px; padding: 0;
+  border: 0; background: transparent; text-align: right;
+  color: var(--ink-3); font-size: var(--fs-md); cursor: pointer;
+  transition: color var(--t-fast) var(--ease-out);
+}
+button.cfg:hover { color: var(--ink); }
+button.cfg:active { transform: scale(.99); }
+/* композер главной: поле и кнопка отправки — без лишних рамок */
+.ph { min-width: 0; }
+button.ph { display: block; width: 100%; padding: 0; border: 0; background: transparent; }
+button.send { border: 0; padding: 0; }
+.chips button, .chips span { border: 0; }
+@media (pointer: coarse) { .chips button, .chips span { min-height: 36px; } }
+/* строка «Ещё»: иконка + подпись, вся строка — зона нажатия */
+.more-row {
+  display: flex; align-items: center; gap: var(--s-3); width: 100%;
+  min-height: var(--tap); padding: 10px var(--s-3);
+  border: 0; border-radius: var(--r-md); background: var(--fill);
+  color: var(--ink); font-size: var(--fs-base); font-weight: 500; text-align: left;
+  text-decoration: none; cursor: pointer;
+  transition: background-color var(--t-fast) var(--ease-out), transform var(--t-fast) var(--ease-spring);
+}
+.more-row:active { transform: scale(.985); background: var(--fill-2); }
+.more-ic {
+  display: grid; place-items: center; flex: none;
+  width: 34px; height: 34px; border-radius: 12px;
+  background: var(--surface-2); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line);
+}
+.trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.clamp-2, .clamp-3 { display: -webkit-box; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp-2 { -webkit-line-clamp: 2; line-clamp: 2; }
+.clamp-3 { -webkit-line-clamp: 3; line-clamp: 3; }
+/* разрядная выравнивание: суммы и проценты в одну колонку */
+.tnum { font-variant-numeric: tabular-nums; }
+.num-r { text-align: right; font-variant-numeric: tabular-nums; }
+.stack { display: flex; flex-direction: column; gap: var(--s-3); }
+.cluster { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+
+/* ---------- 13. Клавиатура телефона: поле не прячется, страница не «прыгает» ---------- */
+@media (max-width: 639px) {
+  /* нативная клавиатура уменьшает «окно» — нижние вкладки уходят, чтобы не перекрывать поле */
+  .sheet { max-height: min(92dvh, 92svh); }
+  .composer textarea { font-size: 16px; }
+  .empty { padding-block: 28px; }
+}
+
+/* ---------- 14. Скролл только внутри, страница не дёргается ---------- */
+@media (max-width: 820px) {
+  html, body { overscroll-behavior-y: none; }
+  .sheet, .sheet-backdrop { overscroll-behavior: contain; }
+  /* горизонтальная прокрутка внутри — с отключённым «резиновым» отступом */
+  .no-scrollbar { -webkit-overflow-scrolling: touch; }
+}
+
+/* ---------- 15. PWA: строка состояния и safe-area в оболочке ---------- */
+html[data-pwa="standalone"] .app { padding-top: max(env(safe-area-inset-top, 0px), 12px); }
+html[data-pwa="standalone"] .gt { padding-top: max(env(safe-area-inset-top, 0px), 10px); }

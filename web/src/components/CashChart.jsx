@@ -1,5 +1,6 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { money } from '../lib/api'
+import { t as T } from '../lib/i18n'
 
 /* График «касса на N дней» — общий для раздела «финансы» и виджета на главной.
  *
@@ -21,8 +22,8 @@ const txEvents = (txs) => {
     const day = String(t.date).slice(0, 10)
     ;(by[day] = by[day] || []).push({
       title: t.kind === 'transfer'
-        ? `Перевод ${money(t.amount)}: ${t.account} → ${t.to_account || '—'}`
-        : t.note || t.category || (t.kind === 'income' ? 'Доход' : 'Трата'),
+        ? T('chart.transfer', { amount: money(t.amount), from: t.account, to: t.to_account || '—' })
+        : t.note || t.category || (t.kind === 'income' ? T('chart.income') : T('chart.expense')),
       amount: t.kind === 'income' ? Math.round(t.amount) : t.kind === 'transfer' ? 0 : -Math.round(t.amount),
     })
   }
@@ -112,7 +113,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
     else el.style.maxWidth = ''
   }, [sel, cur?.date, cur?.balance, compact])
 
-  if (!geo) return <p className="py-10 text-center text-sm text-[var(--ink3)]">мало операций для прогноза — добавьте расходы за месяц</p>
+  if (!geo) return <p className="py-10 text-center text-sm text-[var(--ink3)]">{T('chart.too_few')}</p>
 
   const curX = sel != null ? xPct(sel) : 0
   const tipBelow = sel != null && yPx(cur.balance) < height * 0.3
@@ -121,7 +122,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
   return (
     <div>
       <div className="relative" style={{ height }} onPointerLeave={onLeave} onPointerCancel={onCancel}>
-        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label="график баланса и прогноза"
+        <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={T('chart.aria')}
           className="block w-full cursor-crosshair" style={{ height, touchAction: 'pan-y' }}
           onPointerDown={onDown} onPointerMove={pick}>
           <defs>
@@ -144,7 +145,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
 
         {/* слой HTML: точки событий, подпись нуля, точка выбора — их нельзя рисовать в растянутом svg */}
         <div className="pointer-events-none absolute inset-0" style={{ height }}>
-          <span className="absolute right-0 -translate-y-full pr-0.5 text-[10.5px] leading-none text-[var(--ink3)]" style={{ top: yPx(0) }}>ноль</span>
+          <span className="absolute right-0 -translate-y-full pr-0.5 text-[10.5px] leading-none text-[var(--ink3)]" style={{ top: yPx(0) }}>{T('chart.zero')}</span>
           {pts.map((p, i) => {
             const ev = events(i)
             if (!ev.length) return null
@@ -165,11 +166,11 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
               className="absolute z-20 rounded-xl px-2.5 py-1.5 text-left text-[11.5px] leading-tight shadow-lg"
               style={{ left: `${curX}%`, top: yPx(cur.balance), background: 'var(--ink)', color: 'var(--bg)', transform: `translate(${curX < 12 ? 0 : curX > 88 ? -100 : -50}%, ${tipBelow ? '10%' : '-118%'})` }}>
               <div className="mono whitespace-nowrap font-medium">
-                {cur.kind === 'future' ? 'прогноз на ' : 'баланс на '}{dm(cur.date)}: {money(cur.balance)}
+                {T(cur.kind === 'future' ? 'chart.forecast_on' : 'chart.balance_on', { date: dm(cur.date) })}: {money(cur.balance)}
               </div>
               <div className="mono mt-0.5 whitespace-nowrap opacity-80">
-                за день{cur.kind === 'future' ? ' (прогноз)' : ''}:{' '}
-                {delta(sel) === 0 ? 'без изменений' : money(delta(sel), { plus: true })}
+                {T('chart.per_day')}{cur.kind === 'future' ? T('chart.forecast_tag') : ''}:{' '}
+                {delta(sel) === 0 ? T('chart.no_change') : money(delta(sel), { plus: true })}
               </div>
               {evs.slice(0, compact ? 1 : 2).map((e, k) => (
                 <div key={k} className="mono mt-0.5 max-w-[240px] truncate whitespace-normal opacity-90">
@@ -187,16 +188,16 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
           <span key={a.i} data-testid="cash-tick" data-today={a.today ? '1' : '0'}
             className={`absolute top-0 -translate-x-1/2 whitespace-nowrap ${a.today ? 'text-[var(--ink2)]' : ''}`}
             style={{ left: `${a.x}%`, transform: a.x < 3 ? 'translateX(0)' : a.x > 97 ? 'translateX(-100%)' : 'translateX(-50%)' }}>
-            {a.today ? `сегодня ${a.text}` : a.text}
+            {a.today ? T('chart.today_at', { date: a.text }) : a.text}
           </span>
         ))}
       </div>
 
       {legend && (
         <div className="lg">
-          <span><i style={{ background: '#ff9f5c' }}></i>факт</span>
-          <span><i style={{ background: 'var(--accent)' }}></i>прогноз</span>
-          <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>ноль</span>
+          <span><i style={{ background: '#ff9f5c' }}></i>{T('chart.fact')}</span>
+          <span><i style={{ background: 'var(--accent)' }}></i>{T('chart.forecast')}</span>
+          <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>{T('chart.zero')}</span>
         </div>
       )}
     </div>

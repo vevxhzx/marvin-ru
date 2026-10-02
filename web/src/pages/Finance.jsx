@@ -1,30 +1,33 @@
 import { useEffect, useRef, useState, useMemo } from 'react'
-import { api, money, shortDate, toLocalISO, plural } from '../lib/api'
-import { Num, Sheet, Field, Empty, Money, useToast, PageAccent } from '../components/ui'
+import { api, money, shortDate, toLocalISO } from '../lib/api'
+import { Num, Sheet, Field, Empty, Money, useToast, PageAccent, Confirm } from '../components/ui'
 import CashChart from '../components/CashChart'
+import { ImportButton } from '../components/Widgets'
 import { useRefresh } from '../App'
 import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff, Play, Pause } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
+import { useI18n, localeOf, t as T } from '../lib/i18n'
 
 /* Карточки вкладки «обзор»: порядок и ширина хранятся общим модулем lib/layout */
 const FIN_CARDS = ['balance', 'chart', 'income', 'recurring', 'debts', 'free', 'flow', 'budgets', 'upcoming']
 const FIN_CARD_WIDTHS = { balance: 4, chart: 8, income: 3, recurring: 3, debts: 3, free: 3, flow: 12, budgets: 6, upcoming: 6 }
-const FIN_CARD_LABELS = { balance: 'баланс', chart: 'касса', income: 'доход', recurring: 'регулярные', debts: 'долги', free: 'свободно', flow: 'поток', budgets: 'бюджеты', upcoming: 'ближайшие списания' }
+const FIN_CARD_LABELS = { balance: 'fin.c_balance', chart: 'fin.c_chart', income: 'fin.c_income', recurring: 'fin.c_recurring', debts: 'fin.c_debts', free: 'fin.c_free', flow: 'fin.c_flow', budgets: 'fin.c_budgets', upcoming: 'fin.c_upcoming' }
 
 /* Честная оценка «когда накоплю»: при темпе 5 000 ₽ в месяц — без обещаний точности */
-const MON_SHORT = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек']
+const MON_SHORT = Array.from({ length: 12 }, (_, i) => new Date(2024, i, 1).toLocaleDateString(localeOf(), { month: 'short' }).replace(/\.$/, ''))
 function goalEta(need) {
   const months = Math.ceil(need / 5000)
   if (!Number.isFinite(months) || months <= 0) return ''
   if (months > 60) return null
   const d0 = new Date()
   d0.setMonth(d0.getMonth() + months)
-  return `к ${d0.getDate()} ${MON_SHORT[d0.getMonth()]}`
+  return T('fin.on_day', { d: d0.getDate(), m: MON_SHORT[d0.getMonth()] })
 }
 
 export default function Finance() {
+  const { t } = useI18n()
   const [tab, setTab] = useState('overview') // 'overview' | 'txs' | 'accounts' | 'debts' | 'recurring' | 'goals'
   const [days, setDays] = useState(30)
   const [sum, setSum] = useState(null)
@@ -42,6 +45,8 @@ export default function Finance() {
   const [sheet, setSheet] = useState(null) // 'tx' | 'account' | 'debt' | 'payDebt' | 'recurring' | 'goal' | 'putGoal' | 'budget'
   const [editingItem, setEditingItem] = useState(null)
   const [budgetCat, setBudgetCat] = useState(null) // категория/бюджет, для которого правим лимит
+  // подтверждение удаления вместо нативного confirm(): { title, text, run }
+  const [ask, setAsk] = useState(null)
 
   // Filters for txs
   const [txSearch, setTxSearch] = useState('')
@@ -172,7 +177,7 @@ export default function Finance() {
   const exportCSV = () => {
     if (!shownTxs.length) return
     const rows = [
-      ['Дата', 'Сумма', 'Категория', 'Название', 'Счет'],
+      [t('fin.csv.date'), t('fin.csv.amount'), t('fin.csv.category'), t('fin.csv.title'), t('fin.csv.account')],
       ...shownTxs.map(t => [
         t.date ? t.date.slice(0, 10) : '',
         t.amount,
@@ -196,27 +201,30 @@ export default function Finance() {
       {/* Шапка страницы */}
       <div className="top">
         <div>
-          <h1 className="r" style={{ '--i': 0 }}>финансы</h1>
+          <h1 className="r" style={{ '--i': 0 }}>{t('nav.finance')}</h1>
           <p className="sub r" style={{ '--i': 1 }}>
-            {tab === 'overview' && 'все счета и баланс'}
-            {tab === 'txs' && `${shownTxs.length} ${plural(shownTxs.length, 'операция', 'операции', 'операций')}`}
-            {tab === 'accounts' && `${accounts.length} ${plural(accounts.length, 'счёт', 'счёта', 'счетов')}`}
-            {tab === 'debts' && `${debts.length} ${plural(debts.length, 'долг', 'долга', 'долгов')}`}
-            {tab === 'recurring' && `${recActive.length} активных${recPaused.length ? ` · ${recPaused.length} на паузе` : ''}`}
-            {tab === 'goals' && `${goals.length} ${plural(goals.length, 'финансовая цель', 'финансовые цели', 'финансовых целей')}`}
+            {tab === 'overview' && t('fin.sub_overview')}
+            {tab === 'txs' && t('fin.n_txs', { count: shownTxs.length })}
+            {tab === 'accounts' && t('fin.n_accounts', { count: accounts.length })}
+            {tab === 'debts' && t('fin.n_debts', { count: debts.length })}
+            {tab === 'recurring' && t('fin.n_rec', { n: recActive.length, paused: recPaused.length ? t('fin.n_rec_paused', { n: recPaused.length }) : '' })}
+            {tab === 'goals' && t('fin.n_goals', { count: goals.length })}
           </p>
         </div>
         <div className="hr r" style={{ '--i': 1 }}>
-          <div className="sg" title="период: цифры и операции считаются за него">
-            <span className={days === 7 ? 'on' : ''} onClick={() => setDays(7)}>7 дн</span>
-            <span className={days === 30 ? 'on' : ''} onClick={() => setDays(30)}>30 дн</span>
-            <span className={days === 90 ? 'on' : ''} onClick={() => setDays(90)}>90 дн</span>
-            <span className={days === 0 ? 'on' : ''} onClick={() => setDays(0)}>всё</span>
+          <div className="sg" title={t('fin.period_tip')}>
+            <button type="button" className={days === 7 ? 'on' : ''} onClick={() => setDays(7)}>{t('mem.d7')}</button>
+            <button type="button" className={days === 30 ? 'on' : ''} onClick={() => setDays(30)}>{t('mem.d30')}</button>
+            <button type="button" className={days === 90 ? 'on' : ''} onClick={() => setDays(90)}>{t('fin.d90')}</button>
+            <button type="button" className={days === 0 ? 'on' : ''} onClick={() => setDays(0)}>{t('common.all')}</button>
           </div>
-          {tab === 'overview' && <span className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title="Переместить, спрятать или поменять ширину карточек">настроить</span>}
-          <span className="btn g" onClick={exportCSV} title="Скачать CSV выписку">выписка</span>
-          <span
+          {tab === 'overview' && <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title={t('tk.layout_tip')} aria-label={t('fin.configure_cards')}>{t('tk.layout')}</button>}
+          <button type="button" className="btn g" onClick={exportCSV} title={t('fin.csv_dl')} aria-label={t('fin.csv_dl')}>{t('import.button')}</button>
+          <button
+            type="button"
             className="btn"
+            title={t('fin.add_entry')}
+            aria-label={t('fin.add_entry')}
             onClick={() => {
               if (tab === 'accounts') { setEditingItem(null); setSheet('account') }
               else if (tab === 'debts') { setEditingItem(null); setSheet('debt') }
@@ -225,20 +233,20 @@ export default function Finance() {
               else { setEditingItem(null); setSheet('tx') }
             }}
           >
-            {tab === 'accounts' ? '+ счёт' : tab === 'debts' ? '+ долг' : tab === 'recurring' ? '+ платёж' : tab === 'goals' ? '+ цель' : '+ операция'}
-          </span>
+            {t(tab === 'accounts' ? 'fin.add_account' : tab === 'debts' ? 'fin.add_debt' : tab === 'recurring' ? 'fin.add_pay' : tab === 'goals' ? 'fin.add_goal' : 'fin.add_tx')}
+          </button>
         </div>
       </div>
 
       {/* Вкладки разделов финансов в едином стиле бенто */}
       <div className="sg r my-4" style={{ '--i': 2 }}>
-        <span className={tab === 'overview' ? 'on' : ''} onClick={() => setTab('overview')}>обзор</span>
-        <span className={tab === 'txs' ? 'on' : ''} onClick={() => setTab('txs')}>операции</span>
-        <span className={tab === 'accounts' ? 'on' : ''} onClick={() => setTab('accounts')}>счета</span>
-        <span className={tab === 'debts' ? 'on' : ''} onClick={() => setTab('debts')}>долги</span>
-        <span className={tab === 'recurring' ? 'on' : ''} onClick={() => setTab('recurring')}>регулярные</span>
-        <span className={tab === 'goals' ? 'on' : ''} onClick={() => setTab('goals')}>цели</span>
-        <span className={tab === 'techniques' ? 'on' : ''} onClick={() => setTab('techniques')}>техники</span>
+        <button type="button" className={tab === 'overview' ? 'on' : ''} onClick={() => setTab('overview')}>{t('fin.tab_overview')}</button>
+        <button type="button" className={tab === 'txs' ? 'on' : ''} onClick={() => setTab('txs')}>{t('fin.tab_txs')}</button>
+        <button type="button" className={tab === 'accounts' ? 'on' : ''} onClick={() => setTab('accounts')}>{t('fin.tab_accounts')}</button>
+        <button type="button" className={tab === 'debts' ? 'on' : ''} onClick={() => setTab('debts')}>{t('fin.tab_debts')}</button>
+        <button type="button" className={tab === 'recurring' ? 'on' : ''} onClick={() => setTab('recurring')}>{t('fin.tab_recurring')}</button>
+        <button type="button" className={tab === 'goals' ? 'on' : ''} onClick={() => setTab('goals')}>{t('goals.title')}</button>
+        <button type="button" className={tab === 'techniques' ? 'on' : ''} onClick={() => setTab('techniques')}>{t('tech.title')}</button>
       </div>
 
       {/* Вкладка 1: ОБЗОР (Классический Bento из эталона; порядок и ширина — кнопка «настроить») */}
@@ -254,85 +262,85 @@ export default function Finance() {
             )
             if (id === 'balance') return (
               <section key="balance" className="c hero s4 r" style={st}>{ctl}
-                <div className="hd"><h2>баланс</h2><small>все счета</small></div>
+                <div className="hd"><h2>{t('fin.c_balance')}</h2><small>{t('fin.all_accounts')}</small></div>
                 <div className="big"><Num value={balance} /> ₽</div>
-                <span className="tag">за {days} дн −{money(spent)}</span>
+                <span className="tag">{t('fin.for_days', { n: days, m: money(spent) })}</span>
                 <div className="hm">
-                  <div><small>доходы за {days} дн</small><b>+{money(earned)}</b></div>
-                  <div><small>долги</small><b>{money(debtsTotal)}</b></div>
+                  <div><small>{t('fin.income_days', { n: days })}</small><b>+{money(earned)}</b></div>
+                  <div><small>{t('fin.c_debts')}</small><b>{money(debtsTotal)}</b></div>
                 </div>
               </section>
             )
             if (id === 'chart') return (
               <section key="chart" className="c chart s8 r" style={st}>{ctl}
                 <div className="hd">
-                  <h2>касса на {days || 'все'} {plural(days, 'день', 'дня', 'дней')}</h2>
+                  <h2>{t('fin.cash_on', { n: days || t('common.all'), days: t('run.days_n', { count: days }) })}</h2>
                   <small>
-                    {forecast ? `сейчас ${money(forecast.balance)} · темп ${money(forecast.avg_day_spent)}/дн · наведите на график` : 'при текущем темпе'}
+                    {forecast ? t('fin.fc_now', { bal: money(forecast.balance), pace: money(forecast.avg_day_spent) }) : t('fc.by_pace')}
                   </small>
                 </div>
                 {!forecast ? (
-                  <p className="py-10 text-center text-sm text-[var(--ink3)]">загружаю прогноз…</p>
+                  <p className="py-10 text-center text-sm text-[var(--ink3)]">{t('common.loading')}</p>
                 ) : (
                   <CashChart f={forecast} height={200} txs={txs} legend={false} />
                 )}
                 <div className="lg">
-                  <span><i style={{ background: '#ff9f5c' }}></i>факт</span>
-                  <span><i style={{ background: 'var(--accent)' }}></i>прогноз</span>
-                  <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>ноль</span>
+                  <span><i style={{ background: '#ff9f5c' }}></i>{t('chart.fact')}</span>
+                  <span><i style={{ background: 'var(--accent)' }}></i>{t('chart.forecast')}</span>
+                  <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>{t('chart.zero')}</span>
                   {forecast?.runway_days != null && (
-                    <span className="text-[var(--neg)]">до нуля ~{forecast.runway_days} дн</span>
+                    <span className="text-[var(--neg)]">{t('td.to_zero', { n: forecast.runway_days })}</span>
                   )}
                   {forecast?.min_balance != null && forecast.min_balance >= 0 && (
-                    <span>минимум {money(forecast.min_balance)} · {forecast.min_date?.slice(8, 10)}.{forecast.min_date?.slice(5, 7)}</span>
+                    <span>{t('fc.min', { m: money(forecast.min_balance) })} · {forecast.min_date?.slice(8, 10)}.{forecast.min_date?.slice(5, 7)}</span>
                   )}
                 </div>
                 {forecast?.scenarios?.realistic && forecast?.scenarios?.pessimistic
                   && forecast.scenarios.realistic.low !== forecast.scenarios.pessimistic.low && (
                   <div className="muted mt-1 text-[12px]">
-                    сценарии: реалистично минимум <b className="num">{money(forecast.scenarios.realistic.low)}</b>
-                    {' · '}пессимистично (оплаты позже ~{forecast.scenarios.pessimistic.delay_days ?? 0} дн) <b className={`num ${forecast.scenarios.pessimistic.ok ? '' : 'neg'}`}>{money(forecast.scenarios.pessimistic.low)}</b>
+                    {t('fin.scen_min')} <b className="num">{money(forecast.scenarios.realistic.low)}</b>
+                    {' · '}{t('fin.pessimistic', { n: forecast.scenarios.pessimistic.delay_days ?? 0 })} <b className={`num ${forecast.scenarios.pessimistic.ok ? '' : 'neg'}`}>{money(forecast.scenarios.pessimistic.low)}</b>
                   </div>
                 )}
               </section>
             )
             if (id === 'income') return (
               <section key="income" className="c p2 s3 r" style={st}>{ctl}
-                <div className="hd"><h2>доход</h2><small>{cf.income_is_estimate ? 'средний' : ''}</small></div>
+                <div className="hd"><h2>{t('fin.c_income')}</h2><small>{cf.income_is_estimate ? t('fin.average') : ''}</small></div>
                 <div className="mid"><Num value={cf.income || 22844} /> ₽</div>
               </section>
             )
             if (id === 'recurring') return (
               <section key="recurring" className="c p1 s3 r" style={st}>{ctl}
-                <div className="hd"><h2>регулярные</h2><small></small></div>
+                <div className="hd"><h2>{t('fin.c_recurring')}</h2><small></small></div>
                 <div className="mid"><Num value={cf.recurring || 1528} /> ₽</div>
               </section>
             )
             if (id === 'debts') return (
               <section key="debts" className="c blk s3 r" style={st}>{ctl}
-                <div className="hd"><h2>по долгам</h2><small></small></div>
+                <div className="hd"><h2>{t('fin.by_debts')}</h2><small></small></div>
                 <div className="mid"><Num value={cf.debt_payments || 13500} /> ₽</div>
               </section>
             )
             if (id === 'free') return (
               <section key="free" className="c tint-ok s3 r" style={st}>{ctl}
-                <div className="hd"><h2>свободно</h2><small>в месяц</small></div>
+                <div className="hd"><h2>{t('fin.c_free')}</h2><small>{t('td.per_month')}</small></div>
                 <div className="mid"><Num value={cf.free || 7816} /> ₽</div>
               </section>
             )
             if (id === 'budgets') return (
               <section key="budgets" className="c p2 s6 r" style={st}>{ctl}
                 <div className="hd">
-                  <h2>бюджеты на месяц</h2>
+                  <h2>{t('fin.budgets_month')}</h2>
                   <span className="flex items-center gap-2">
-                    <small>{budgetItems.length ? `${MON_SHORT[now.getMonth()]} · ${budgetLeft >= 0 ? 'осталось' : 'перерасход'}` : ''}</small>
-                    <button type="button" className="btn-soft btn-sm !h-6" onClick={() => { setBudgetCat(null); setSheet('budget') }}>+ лимит</button>
+                    <small>{budgetItems.length ? `${MON_SHORT[now.getMonth()]} · ${t(budgetLeft >= 0 ? 'fin.left' : 'fin.over')}` : ''}</small>
+                    <button type="button" className="btn-soft btn-sm !h-6" onClick={() => { setBudgetCat(null); setSheet('budget') }}>+ {t('fin.limit')}</button>
                   </span>
                 </div>
                 {!budgetItems.length ? (
                   <div className="py-6 text-center">
-                    <p className="text-sm text-[var(--ink3)]">лимиты не заданы — задайте месячный лимит на категорию, и тут появится контроль</p>
-                    <button type="button" className="btn mt-3" onClick={() => { setBudgetCat(null); setSheet('budget') }}><Plus size={15} /> задать лимит</button>
+                    <p className="text-sm text-[var(--ink3)]">{t('fin.no_limits')}</p>
+                    <button type="button" className="btn mt-3" onClick={() => { setBudgetCat(null); setSheet('budget') }}><Plus size={15} /> {t('fin.set_limit')}</button>
                   </div>
                 ) : (
                   <>
@@ -340,11 +348,11 @@ export default function Finance() {
                       <span className="text-[26px] font-semibold" style={{ color: budgetLeft < 0 ? 'var(--neg)' : 'inherit' }}>
                         <Num value={Math.abs(budgetLeft)} /> ₽
                       </span>
-                      <span className="text-xs text-[var(--ink3)]">{budgetLeft < 0 ? 'перерасход' : 'в запасе'} из {money(totalBudget)}</span>
+                      <span className="text-xs text-[var(--ink3)]">{t(budgetLeft < 0 ? 'fin.over' : 'fin.in_reserve')} {t('fin.of', { m: money(totalBudget) })}</span>
                     </div>
                     <div className="mt-4 space-y-3">
                       {budgetItems.slice(0, 5).map((b) => (
-                        <div key={b.id || b.name} className="cursor-pointer text-[13px]" title="Изменить лимит" onClick={() => { setBudgetCat(b); setSheet('budget') }}>
+                        <div key={b.id || b.name} className="cursor-pointer text-[13px]" title={t('fin.edit_limit')} onClick={() => { setBudgetCat(b); setSheet('budget') }}>
                           <div className="flex items-center justify-between mb-1">
                             <span className="flex items-center gap-1.5">{b.icon} {b.name}</span>
                             <span className="num text-[var(--ink2)]">{money(b.spent)} / {money(b.budget)}</span>
@@ -359,8 +367,8 @@ export default function Finance() {
                       ))}
                     </div>
                     <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)] text-xs text-[var(--ink3)]">
-                      <span>перерасход: {budgetItems.filter((b) => b.status === 'over').length} · нажмите категорию, чтобы поправить лимит</span>
-                      <span className="btn-soft btn-sm" onClick={() => { setTxCategory('all'); setTab('txs') }}>смотреть операции →</span>
+                      <span>{t('fin.over_note', { n: budgetItems.filter((b) => b.status === 'over').length })}</span>
+                      <button type="button" className="btn-soft btn-sm" onClick={() => { setTxCategory('all'); setTab('txs') }}>{t('fin.see_txs')}</button>
                     </div>
                   </>
                 )}
@@ -368,51 +376,51 @@ export default function Finance() {
             )
             if (id === 'upcoming') return (
               <section key="upcoming" className="c s6 r" style={st}>{ctl}
-                <div className="hd"><h2>ближайшие списания</h2><small>регулярные платежи</small></div>
+                <div className="hd"><h2>{t('fin.c_upcoming')}</h2><small>{t('fin.recurring_pays')}</small></div>
                 {!nextPayments.length ? (
-                  <p className="py-6 text-center text-sm text-[var(--ink3)]">регулярных платежей нет</p>
+                  <p className="py-6 text-center text-sm text-[var(--ink3)]">{t('fin.no_recurring')}</p>
                 ) : nextPayments.slice(0, 5).map((r) => (
                   <div className="rowi" key={r.id}>
-                    <time>{r.on.getDate()} {['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'][r.on.getMonth()]}</time>
+                    <time>{r.on.getDate()} {MON_SHORT[r.on.getMonth()]}</time>
                     <span className="t">
                       {r.title || r.name}
-                      <small>через {daysUntil(r.on)} {plural(daysUntil(r.on), 'день', 'дня', 'дней')}{r.category ? ` · ${r.category}` : ''}</small>
+                      <small>{t('fin.in_n', { n: daysUntil(r.on) })}{r.category ? ` · ${r.category}` : ''}</small>
                     </span>
                     <span className="amt">−{money(r.amount)}</span>
                   </div>
                 ))}
                 {nextPayments.length > 0 && (
                   <div className="flex items-center justify-between mt-3 pt-3 border-t border-[var(--line)] text-xs text-[var(--ink3)]">
-                    <span>за 7 дней: {money(nextPayments.filter((r) => daysUntil(r.on) <= 7).reduce((s, r) => s + (r.amount || 0), 0))}</span>
-                    <span className="btn-soft btn-sm" onClick={() => setTab('recurring')}>управление →</span>
+                    <span>{t('fin.last7')} {money(nextPayments.filter((r) => daysUntil(r.on) <= 7).reduce((s, r) => s + (r.amount || 0), 0))}</span>
+                    <button type="button" className="btn-soft btn-sm" onClick={() => setTab('recurring')}>{t('fin.manage')}</button>
                   </div>
                 )}
               </section>
             )
             return (
               <section key="flow" className="c s12 r" style={st}>{ctl}
-                <div className="hd"><h2>поток в месяц</h2><small>доход минус обязательные платежи — то, чем реально можно распоряжаться</small></div>
+                <div className="hd"><h2>{t('fin.flow_month')}</h2><small>{t('fin.flow_month_hint')}</small></div>
                 <div className="flow">
                   <i style={{ width: `${flowRecurringPct}%`, background: 'linear-gradient(90deg, var(--ink), #4b4b55)' }}></i>
                   <i style={{ width: `${flowDebtPct}%`, background: 'linear-gradient(90deg, #b9bcc6, var(--ink3))' }}></i>
                   <i style={{ width: `${flowFreePct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }}></i>
                 </div>
                 <div className="fl">
-                  <span>регулярные · долги · свободно</span>
-                  <span>на жизнь обычно уходит {money(livingSpent)} → остаётся <b>{livingRemain < 0 ? '−' : ''}{money(Math.abs(livingRemain))}</b></span>
+                  <span>{t('fin.reg_debt_free')}</span>
+                  <span>{t('fin.living_costs')} {money(livingSpent)} → {t('fin.remains')} <b>{livingRemain < 0 ? '−' : ''}{money(Math.abs(livingRemain))}</b></span>
                 </div>
               </section>
             )
           })}
           {cardsEdit && (
             <section className="c s12 r" style={{ '--i': 11 }}>
-              <div className="hd"><h2>настройка карточек</h2><small></small></div>
-              <p className="muted text-[13px]">стрелки — порядок, кнопка с числом — ширина карточки, крестик — спрятать.</p>
+              <div className="hd"><h2>{t('fin.cards_setup')}</h2><small></small></div>
+              <p className="muted text-[13px]">{t('fin.cards_setup_hint')}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {FIN_CARDS.filter((x) => !cardOrder.includes(x)).map((x) => (
                   <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {FIN_CARD_LABELS[x]}</button>
                 ))}
-                <button className="btn-ghost btn-sm" onClick={resetCards}>вернуть всё как было</button>
+                <button className="btn-ghost btn-sm" onClick={resetCards}>{t('tk.restore_all')}</button>
               </div>
             </section>
           )}
@@ -429,7 +437,7 @@ export default function Finance() {
                 <Search size={16} />
                 <input
                   type="text"
-                  placeholder="поиск по названию или категории…"
+                  placeholder={t('fin.search_ph')}
                   value={txSearch}
                   onChange={(e) => setTxSearch(e.target.value)}
                   className="bg-transparent outline-none w-full text-sm text-[var(--ink)]"
@@ -444,7 +452,7 @@ export default function Finance() {
                     className={txCategory === 'all' ? '!bg-[var(--ink)] !text-[var(--bg)]' : ''}
                     onClick={() => setTxCategory('all')}
                   >
-                    все
+                    {t('common.all')}
                   </button>
                   {categories.map((c) => (
                     <button
@@ -457,19 +465,28 @@ export default function Finance() {
                     </button>
                   ))}
                 </span>
+                {/* импорт выписки Т-Банка: рядом с фильтрами и «выпиской» (CSV/PDF/XLSX, можно перетащить) */}
+                <ImportButton
+                  className="ml-auto"
+                  onDone={(r) => {
+                    if (r?.ok) { show(r.text || t('fin.import_added')); load(); bump() }
+                    else show(r?.text || t('fin.import_bad'), 'err')
+                  }}
+                  onErr={show.err}
+                />
               </div>
             </div>
             {/* фильтр по счёту: отдельной строкой, чтобы не спорить с категориями */}
             <div className="flex flex-wrap items-center gap-2 mt-3 pt-3 border-t border-[var(--line)]">
-              <span className="text-[11px] uppercase tracking-wider text-[var(--ink3)]">счёт</span>
+              <span className="text-[11px] uppercase tracking-wider text-[var(--ink3)]">{t('graph.one_account')}</span>
               <span className="chips !m-0 !gap-1.5">
-                <button type="button" className={txAccount === 'all' ? '!bg-[var(--ink)] !text-[var(--bg)]' : ''} onClick={() => setTxAccount('all')}>все</button>
+                <button type="button" className={txAccount === 'all' ? '!bg-[var(--ink)] !text-[var(--bg)]' : ''} onClick={() => setTxAccount('all')}>{t('common.all')}</button>
                 {accounts.map((a) => (
                   <button type="button" key={a.id || a.name} className={txAccount === a.name ? '!bg-[var(--ink)] !text-[var(--bg)]' : ''} onClick={() => setTxAccount(a.name)}>{a.name}</button>
                 ))}
               </span>
               {(txCategory !== 'all' || txAccount !== 'all' || txSearch) && (
-                <button type="button" className="btn-ghost btn-sm !h-6" onClick={() => { setTxCategory('all'); setTxAccount('all'); setTxSearch('') }}>сбросить</button>
+                <button type="button" className="btn-ghost btn-sm !h-6" onClick={() => { setTxCategory('all'); setTxAccount('all'); setTxSearch('') }}>{t('common.reset')}</button>
               )}
               <span className="ml-auto text-[13px] num text-[var(--ink2)]">
                 <b className="text-[var(--pos)]">+{money(filteredTxs.income)}</b>
@@ -482,47 +499,44 @@ export default function Finance() {
           {/* Список операций */}
           <section className="c s12 r" style={{ '--i': 4 }}>
             <div className="hd">
-              <h2>история операций</h2>
-              <small>{shownTxs.length} {plural(shownTxs.length, 'запись', 'записи', 'записей')} · {days ? `за ${days} дн` : 'вся история'}</small>
+              <h2>{t('fin.tx_history')}</h2>
+              <small>{t('mem.entries_n', { count: shownTxs.length })} · {days ? t('fin.for_days_short', { n: days }) : t('fin.all_history')}</small>
             </div>
             {shownTxs.length === 0 ? (
-              <p className="py-8 text-center text-sm text-[var(--ink3)]">нет операций за указанный период</p>
+              <p className="py-8 text-center text-sm text-[var(--ink3)]">{t('fin.no_txs_period')}</p>
             ) : (
-              shownTxs.map((t) => (
-                <div className="rowi group" key={t.id}>
-                  <time>{shortDate(t.date || t.created_at)}</time>
+              shownTxs.map((tx) => (
+                <div className="rowi group" key={tx.id}>
+                  <time>{shortDate(tx.date || tx.created_at)}</time>
                   <span className="t">
-                    {t.title || t.note || t.category || 'Операция'}
+                    {tx.title || tx.note || tx.category || t('fin.tx')}
                     <small>
-                      {[t.category, t.account, t.comment].filter(Boolean).join(' · ')}
+                      {[tx.category, tx.account, tx.comment].filter(Boolean).join(' · ')}
                     </small>
                   </span>
                   {/* знак берём из kind: amount приходит из API положительным */}
-                  <span className="amt" style={{ color: t.kind === 'income' ? 'var(--pos)' : 'inherit' }}>
-                    {t.kind === 'income' ? '+' : t.kind === 'expense' ? '−' : ''}{money(t.amount)}
+                  <span className="amt" style={{ color: tx.kind === 'income' ? 'var(--pos)' : 'inherit' }}>
+                    {tx.kind === 'income' ? '+' : tx.kind === 'expense' ? '−' : ''}{money(tx.amount)}
                   </span>
                   <div className="opacity-0 group-hover:opacity-100 flex items-center gap-1 transition">
                     <button
                       type="button"
-                      onClick={() => { setEditingItem(t); setSheet('tx') }}
+                      onClick={() => { setEditingItem(tx); setSheet('tx') }}
                       className="p-1.5 rounded-full hover:bg-[var(--sf)] text-[var(--ink2)]"
-                      title="Редактировать"
+                      title={t('common.edit')}
                     >
                       <Edit2 size={13} />
                     </button>
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (confirm('Удалить эту операцию?')) {
-                          try {
-                            await api.delTx(t.id)
-                            load()
-                            bump()
-                          } catch (e) { show.err(e) }
-                        }
-                      }}
+                      onClick={() => setAsk({
+                        title: t('fin.del_tx_q'),
+                        text: t('fin.del_tx_text'),
+                        msg: t('fin.tx_deleted'),
+                        run: () => api.delTx(tx.id),
+                      })}
                       className="p-1.5 rounded-full hover:bg-[var(--sf)] text-[var(--neg)]"
-                      title="Удалить"
+                      title={t('common.delete')}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -541,14 +555,14 @@ export default function Finance() {
             <section className="c s12 r" style={{ '--i': 3 }}>
               <div className="text-center py-10">
                 <Wallet className="mx-auto mb-3 opacity-30" size={36} />
-                <h3 className="text-lg font-medium">Счета ещё не добавлены</h3>
-                <p className="text-sm text-[var(--ink2)] mt-1">Добавьте банковские карты, наличные или кошельки для учёта баланса</p>
+                <h3 className="text-lg font-medium">{t('fin.no_accounts')}</h3>
+                <p className="text-sm text-[var(--ink2)] mt-1">{t('fin.no_accounts_hint')}</p>
                 <button
                   type="button"
                   className="btn mt-4"
                   onClick={() => { setEditingItem(null); setSheet('account') }}
                 >
-                  <Plus size={15} /> добавить счёт
+                  <Plus size={15} /> {t('fin.add_account')}
                 </button>
               </div>
             </section>
@@ -569,24 +583,26 @@ export default function Finance() {
                 </div>
                 <div className="mid font-semibold"><Num value={a.balance || 0} /> ₽</div>
                 <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)]">
-                  <span className="text-[13px] text-[var(--ink3)]">{a.comment || ({ card: 'карта', cash: 'наличные', bank: 'счёт', savings: 'вклад', crypto: 'крипта' })[atype] || 'счёт'}</span>
+                  <span className="text-[13px] text-[var(--ink3)]">{a.comment || ({ card: t('acc.card'), cash: t('acc.cash2'), bank: t('graph.one_account'), savings: t('acc.deposit'), crypto: t('acc.crypto') })[atype] || t('graph.one_account')}</span>
                   <div className="flex gap-1.5">
                     <button
                       type="button"
                       onClick={() => { setEditingItem(a); setSheet('account') }}
                       className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)]"
-                      title="Изменить"
+                      title={t('common.edit')}
                     >
                       <Edit2 size={13} />
                     </button>
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (!confirm(`Удалить счёт «${a.name}»? Операции по нему останутся в истории.`)) return
-                        try { await api.delAccount(a.id); load(); bump() } catch (e) { show.err(e) }
-                      }}
+                      onClick={() => setAsk({
+                        title: t('fin.del_acc_q_name', { name: a.name }),
+                        text: t('fin.del_acc_text'),
+                        msg: t('fin.acc_deleted'),
+                        run: () => api.delAccount(a.id),
+                      })}
                       className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
-                      title="Удалить счёт"
+                      title={t('fin.del_acc_q')}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -603,10 +619,10 @@ export default function Finance() {
       {tab === 'debts' && (
         <div className="bento">
           <section className="c hero s4 r" style={{ '--i': 3 }}>
-            <div className="hd"><h2>общий долг</h2><small>осталось</small></div>
+            <div className="hd"><h2>{t('fin.total_debt')}</h2><small>{t('fin.debt_left_hint')}</small></div>
             <div className="big"><Num value={debtsTotal} /> ₽</div>
             <span className="tag">
-              {debts.length} {plural(debts.length, 'активный долг', 'активных долга', 'активных долгов')}
+              {t('fin.n_active_debt', { count: debts.length })}
             </span>
           </section>
 
@@ -619,15 +635,15 @@ export default function Finance() {
               <section key={d.id || idx} className="c blk s4 r" style={{ '--i': 4 + idx }}>
                 <div className="hd">
                   <h2>{d.name || d.title}</h2>
-                  <small>{d.creditor || 'кредитор'}</small>
+                  <small>{d.creditor || t('fin.creditor')}</small>
                 </div>
                 <div className="mid"><Num value={left} /> ₽</div>
                 <div className="w-full bg-white/10 rounded-full h-2 mt-4 overflow-hidden">
                   <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }}></div>
                 </div>
                 <div className="flex items-center justify-between mt-3 text-xs text-[#8b8e98] num">
-                  <span>выплачено {money(paid)} ({pct}%)</span>
-                  <span>из {money(total)}</span>
+                  <span>{t('fin.paid_out')} {money(paid)} ({pct}%)</span>
+                  <span>{t('fin.of')} {money(total)}</span>
                 </div>
                 <div className="flex items-center justify-between mt-4 pt-3 border-t border-white/10">
                   <button
@@ -635,25 +651,27 @@ export default function Finance() {
                     onClick={() => { setEditingItem(d); setSheet('payDebt') }}
                     className="btn g !h-8 !px-3 text-[12px]"
                   >
-                    внести платёж
+                    {t('fin.make_payment')}
                   </button>
                   <div className="flex gap-1">
                     <button
                       type="button"
                       onClick={() => { setEditingItem(d); setSheet('debt') }}
                       className="p-1.5 text-white/50 hover:text-white"
-                      title="Изменить"
+                      title={t('common.edit')}
                     >
                       <Edit2 size={13} />
                     </button>
                     <button
                       type="button"
-                      onClick={async () => {
-                        if (!confirm(`Удалить долг «${d.name || d.title}»?`)) return
-                        try { await api.delDebt(d.id); load(); bump() } catch (e) { show.err(e) }
-                      }}
+                      onClick={() => setAsk({
+                        title: t('fin.del_debt_q_name', { name: d.name || d.title }),
+                        text: t('fin.del_debt_text'),
+                        msg: t('fin.debt_deleted'),
+                        run: () => api.delDebt(d.id),
+                      })}
                       className="p-1.5 text-[var(--neg)] hover:opacity-80"
-                      title="Удалить"
+                      title={t('common.delete')}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -669,23 +687,23 @@ export default function Finance() {
       {tab === 'recurring' && (
         <div className="bento">
           <section className="c p1 s4 r" style={{ '--i': 3 }}>
-            <div className="hd"><h2>регулярные</h2><small>списания в месяц</small></div>
+            <div className="hd"><h2>{t('fin.c_recurring')}</h2><small>{t('fin.per_month_spends')}</small></div>
             <div className="big">
               <Num value={recExpense} /> ₽
             </div>
             <span className="tag">
               {recIncome > 0 && (
-                <span style={{ color: 'var(--pos)' }}>доход +{money(recIncome)} · </span>
+                <span style={{ color: 'var(--pos)' }}>{t('fin.income_plus')}{money(recIncome)} · </span>
               )}
-              {recActive.length} {plural(recActive.length, 'активный платёж', 'активных платежа', 'активных платежей')}
-              {recPaused.length > 0 ? `, ${recPaused.length} на паузе` : ''}
+              {t('fin.n_active_pay', { count: recActive.length })}
+              {recPaused.length > 0 ? t('fin.paused_n', { count: recPaused.length }) : ''}
             </span>
           </section>
 
           <section className="c s8 r" style={{ '--i': 4 }}>
             <div className="hd">
-              <h2>список регулярных</h2>
-              <small>подписки, сервис, аренда, доходы</small>
+              <h2>{t('fin.rec_list')}</h2>
+              <small>{t('fin.rec_list_hint')}</small>
             </div>
             {recPaused.length > 0 && (
               <div className="flex justify-end -mt-2 mb-2">
@@ -693,33 +711,33 @@ export default function Finance() {
                   type="button"
                   className="btn-soft btn-sm"
                   onClick={() => setShowPaused((v) => !v)}
-                  title="На паузе не считаются в прогнозе — включите, если платёж снова активен"
+                  title={t('fin.paused_hint')}
                 >
-                  {showPaused ? 'спрятать паузы' : `показать паузы (${recPaused.length})`}
+                  {showPaused ? t('fin.hide_paused') : t('fin.show_paused_n', { n: recPaused.length })}
                 </button>
               </div>
             )}
             {recShown.length === 0 ? (
               <p className="py-6 text-center text-sm text-[var(--ink3)]">
-                {recurring.length > 0 ? 'все регулярные на паузе' : 'нет регулярных платежей'}
+                {recurring.length > 0 ? t('fin.all_paused') : t('fin.no_recurring')}
               </p>
             ) : (
               recShown.map((r) => (
                 <div className="rowi group" key={r.id}>
-                  <time>{(r.day_of_month || r.day) ? `${r.day_of_month || r.day} числа` : 'ежемес.'}</time>
+                  <time>{(r.day_of_month || r.day) ? t('fin.day_of_month', { d: r.day_of_month || r.day }) : t('fin.per_month_short')}</time>
                   <span className="t">
                     {r.name || r.title}
-                    <small>{[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? 'поступление' : 'списание')}</small>
+                    <small>{[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}</small>
                   </span>
                   <span className="amt" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit' }}>
                     {r.kind === 'income' ? '+' : '−'}{money(r.amount)}
                   </span>
-                  <span className={`chip !ml-2 ${r.active === false ? '!opacity-50' : ''}`}>{r.active === false ? 'пауза' : 'активен'}</span>
+                  <span className={`chip !ml-2 ${r.active === false ? '!opacity-50' : ''}`}>{r.active === false ? t('aims.pause') : t('status_active')}</span>
                   <button
                     type="button"
                     onClick={() => toggleActive(r)}
                     className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)] transition"
-                    title={r.active === false ? 'Включить: платёж снова пойдёт в прогноз' : 'Поставить на паузу: платёж уйдёт из прогноза'}
+                    title={r.active === false ? 'Включить: платёж снова пойдёт в прогноз' : t('fin.pause_tip')}
                   >
                     {r.active === false ? <Play size={13} /> : <Pause size={13} />}
                   </button>
@@ -727,18 +745,20 @@ export default function Finance() {
                     type="button"
                     onClick={() => { setEditingItem(r); setSheet('recurring') }}
                     className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)] opacity-0 group-hover:opacity-100 transition"
-                    title="Изменить платёж"
+                    title={t('fin.edit_pay')}
                   >
                     <Edit2 size={13} />
                   </button>
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!confirm(`Убрать регулярный платёж «${r.name || r.title}»?`)) return
-                      try { await api.delRecurring(r.id); load(); bump() } catch (e) { show.err(e) }
-                    }}
+                    onClick={() => setAsk({
+                      title: t('fin.del_rec_q_name', { name: r.name || r.title }),
+                      text: t('fin.pause_note'),
+                      msg: t('fin.paused'),
+                      run: () => api.delRecurring(r.id),
+                    })}
                     className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
-                    title="Убрать (строка не исчезнет — уйдёт на паузу, оттуда её можно вернуть)"
+                    title={t('fin.remove_pay')}
                   >
                     <Trash2 size={13} />
                   </button>
@@ -756,14 +776,14 @@ export default function Finance() {
             <section className="c s12 r" style={{ '--i': 3 }}>
               <div className="text-center py-10">
                 <Target className="mx-auto mb-3 opacity-30" size={36} />
-                <h3 className="text-lg font-medium">Нет активных финансовых целей</h3>
-                <p className="text-sm text-[var(--ink2)] mt-1">Создайте цель, чтобы откладывать на мечту, подушку безопасности или покупки</p>
+                <h3 className="text-lg font-medium">{t('fin.no_goals')}</h3>
+                <p className="text-sm text-[var(--ink2)] mt-1">{t('fin.no_goals_hint')}</p>
                 <button
                   type="button"
                   className="btn mt-4"
                   onClick={() => { setEditingItem(null); setSheet('goal') }}
                 >
-                  <Plus size={15} /> создать цель
+                  <Plus size={15} /> {t('gl.goal')}
                 </button>
               </div>
             </section>
@@ -776,18 +796,18 @@ export default function Finance() {
                 <section key={g.id || idx} className="c p2 s4 r" style={{ '--i': 3 + idx }}>
                   <div className="hd">
                     <h2>{g.title || g.name}</h2>
-                    <small>{g.deadline ? shortDate(g.deadline) : 'бессрочно'}</small>
+                    <small>{g.deadline ? shortDate(g.deadline) : t('fin.forever')}</small>
                   </div>
                   <div className="mid font-semibold"><Num value={current} /> ₽</div>
                   <div className="w-full bg-[var(--line)] rounded-full h-2 mt-4 overflow-hidden">
                     <div className="h-full rounded-full transition-all" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, #19b34a, #14b8a6)' }}></div>
                   </div>
                   <div className="flex items-center justify-between mt-2.5 text-xs text-[var(--ink2)] num">
-                    <span>{pct}% накоплено</span>
-                    <span>цель: {money(target)}</span>
+                    <span>{t('fin.saved_pct', { pct })}</span>
+                    <span>{t('fin.goal_colon')} {money(target)}</span>
                   </div>
                   {target > current && goalEta(target - current) && (
-                    <div className="mt-2 text-[12px] text-[var(--ink3)]">при 5 000 ₽/мес — {goalEta(target - current)}</div>
+                    <div className="mt-2 text-[12px] text-[var(--ink3)]">{t('gl.at_rate', { m: money(5000) })} {goalEta(target - current)}</div>
                   )}
                   <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--line)]">
                     <button
@@ -795,25 +815,27 @@ export default function Finance() {
                       onClick={() => { setEditingItem(g); setSheet('putGoal') }}
                       className="btn !h-8 !px-3 text-[12px]"
                     >
-                      пополнить
+                      {t('fin.top_up')}
                     </button>
                     <div className="flex gap-1">
                       <button
                         type="button"
                         onClick={() => { setEditingItem(g); setSheet('goal') }}
                         className="p-1 rounded-full text-[var(--ink2)] hover:text-[var(--ink)]"
-                        title="Изменить"
+                        title={t('common.edit')}
                       >
                         <Edit2 size={13} />
                       </button>
                       <button
                         type="button"
-                        onClick={async () => {
-                          if (!confirm(`Удалить цель «${g.title || g.name}»?`)) return
-                          try { await api.delGoal(g.id); load(); bump() } catch (e) { show.err(e) }
-                        }}
+                        onClick={() => setAsk({
+                          title: t('fin.del_goal_q_name', { name: g.title || g.name }),
+                          text: t('gl.del_text2'),
+                          msg: t('gl.deleted'),
+                          run: () => api.delGoal(g.id),
+                        })}
                         className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
-                        title="Удалить"
+                        title={t('common.delete')}
                       >
                         <Trash2 size={13} />
                       </button>
@@ -838,8 +860,8 @@ export default function Finance() {
             ) : (
               <Empty
                 glyph="money"
-                text="Техники пока не посчитаны"
-                sub="Нужны операции за месяц — как только появятся, покажу 50/30/20, сравнение с прошлым месяцем и запас"
+                text={t('tech.not_calc')}
+                sub={t('tech.need_txs')}
                 compact
               />
             )}
@@ -854,7 +876,7 @@ export default function Finance() {
         categories={categories}
         accounts={accounts}
         onClose={() => { setSheet(null); setEditingItem(null) }}
-        onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
+        onDone={(msg) => { setSheet(null); setEditingItem(null); load(); bump(); if (msg) show(msg) }}
       />
 
       <AccountSheet
@@ -876,7 +898,7 @@ export default function Finance() {
         debt={editingItem}
         accounts={accounts}
         onClose={() => { setSheet(null); setEditingItem(null) }}
-        onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
+        onDone={(msg) => { setSheet(null); setEditingItem(null); load(); bump(); if (msg) show(msg) }}
       />
 
       <RecurringSheet
@@ -899,7 +921,7 @@ export default function Finance() {
         goal={editingItem}
         accounts={accounts}
         onClose={() => { setSheet(null); setEditingItem(null) }}
-        onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
+        onDone={(msg) => { setSheet(null); setEditingItem(null); load(); bump(); if (msg) show(msg) }}
       />
 
       <BudgetSheet
@@ -908,6 +930,21 @@ export default function Finance() {
         categories={categories}
         onClose={() => { setSheet(null); setBudgetCat(null) }}
         onDone={() => { setSheet(null); setBudgetCat(null); load(); bump() }}
+      />
+
+      {/* Подтверждение удаления вместо нативного confirm(): одна шторка на всю страницу */}
+      <Confirm
+        open={!!ask}
+        danger
+        title={ask?.title || ''}
+        text={ask?.text || ''}
+        onClose={() => setAsk(null)}
+        onOk={async () => {
+          const a = ask
+          setAsk(null)
+          if (!a) return
+          try { await a.run(); if (a.msg) show(a.msg); load(); bump() } catch (e) { show.err(e) }
+        }}
       />
     </div>
   )
@@ -918,6 +955,7 @@ export default function Finance() {
    ========================================================================= */
 
 function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }) {
+  const { t } = useI18n()
   const isNew = !item?.id
   const [amount, setAmount] = useState('')
   const [title, setTitle] = useState('')
@@ -928,6 +966,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
   const [date, setDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [amountErr, setAmountErr] = useState('')
+  const [askDel, setAskDel] = useState(false)
   const [, show] = useToast()
 
   useEffect(() => {
@@ -959,7 +998,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
     if (isNaN(a)) return
     // нулевая сумма не «тихая»: кнопка активна, поэтому объясняем прямо в форме (D3);
     // отрицательные и нечисловые значения ведут себя как раньше (Math.abs / игнор)
-    if (a === 0) { setAmountErr('сумма должна быть больше нуля'); return }
+    if (a === 0) { setAmountErr(t('or.amount_zero')); return }
     setAmountErr('')
     setSaving(true)
     try {
@@ -986,59 +1025,59 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новая операция' : 'редактирование операции'}>
+    <Sheet open={open} onClose={onClose} title={isNew ? 'новая операция' : t('fin.edit_tx')}>
       <form onSubmit={submit} className="space-y-4">
         <div className="sg w-full">
-          <span className={kind === 'expense' ? 'on' : ''} onClick={() => setKind('expense')}>расход</span>
-          <span className={kind === 'income' ? 'on' : ''} onClick={() => setKind('income')}>доход</span>
+          <button type="button" className={kind === 'expense' ? 'on' : ''} onClick={() => setKind('expense')}>{t('fin.expense')}</button>
+          <button type="button" className={kind === 'income' ? 'on' : ''} onClick={() => setKind('income')}>{t('fin.income')}</button>
         </div>
-        <Field label="сумма (₽)" error={amountErr}>
+        <Field label={t('fin.amount_rub')} error={amountErr}>
           <input className="input" autoFocus type="number" step="any" value={amount}
             onChange={(e) => { setAmount(e.target.value); if (amountErr) setAmountErr('') }}
             placeholder="1000" />
         </Field>
-        <Field label="описание">
-          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Супермаркет, такси, зарплата…" />
+        <Field label={t('fin.description')}>
+          <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('fin.desc_ph')} />
         </Field>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="категория">
-            <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Еда, транспорт…" list="cat-list" />
+          <Field label={t('common.category')}>
+            <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder={t('fin.cat_ph')} list="cat-list" />
             <datalist id="cat-list">
               {categories.map(c => <option key={c.id || c.name || c} value={c.name || c} />)}
             </datalist>
           </Field>
-          <Field label="счёт">
+          <Field label={t('graph.one_account')}>
             <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
-              <option value="">не указан</option>
+              <option value="">{t('fin.not_set')}</option>
               {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
             </select>
           </Field>
         </div>
-        <Field label="дата">
+        <Field label={t('common.date')}>
           <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
         </Field>
-        <Field label="комментарий">
-          <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} placeholder="необязательно" />
+        <Field label={t('common.comment')}>
+          <input className="input" value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t('common.optional')} />
         </Field>
         <div className="flex justify-between gap-2 pt-4">
           {!isNew && (
-            <button type="button" className="btn g !text-[var(--neg)]"
-              onClick={async () => {
-                if (!confirm('Удалить операцию? Баланс счёта вернётся обратно.')) return
-                try { await api.delTx(item.id); onDone() } catch (err) { show.err(err) }
-              }}>удалить</button>
+            <button type="button" className="btn g !text-[var(--neg)]" onClick={() => setAskDel(true)}>{t('common.delete')}</button>
           )}
           <div className="ml-auto flex gap-2">
-            <button type="button" className="btn g" onClick={onClose}>отмена</button>
-            <button type="submit" className="btn" disabled={saving || !amount}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+            <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+            <button type="submit" className="btn" disabled={saving || !amount}>{saving ? t('people.saving') : t('common.save')}</button>
           </div>
         </div>
       </form>
+      <Confirm open={askDel} danger title={t('fin.del_tx_q')} text={t('fin.del_tx_text')}
+        onOk={async () => { setAskDel(false); try { await api.delTx(item.id); onDone(t('fin.tx_deleted')) } catch (err) { show.err(err) } }}
+        onClose={() => setAskDel(false)} />
     </Sheet>
   )
 }
 
 function AccountSheet({ open, account, onClose, onDone }) {
+  const { t } = useI18n()
   const isNew = !account?.id
   const [name, setName] = useState('')
   const [balance, setBalance] = useState('')
@@ -1078,25 +1117,25 @@ function AccountSheet({ open, account, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новый счёт' : 'редактировать счёт'}>
+    <Sheet open={open} onClose={onClose} title={isNew ? 'новый счёт' : t('fin.edit_account')}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="название счёта">
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Тинькофф, Сбербанк, Наличные…" />
+        <Field label={t('acc.name')}>
+          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('acc.name_ph')} />
         </Field>
-        <Field label="текущий баланс (₽)">
+        <Field label={t('acc.current_balance')}>
           <input className="input" type="number" step="any" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0" />
         </Field>
-        <Field label="тип счёта">
+        <Field label={t('acc.type')}>
           <select className="input" value={type} onChange={(e) => setType(e.target.value)}>
-            <option value="card">Банковская карта</option>
-            <option value="cash">Наличные</option>
-            <option value="bank">Банковский счёт / вклад</option>
-            <option value="crypto">Криптокошелёк</option>
+            <option value="card">{t('acc.bank_card')}</option>
+            <option value="cash">{t('acc.cash')}</option>
+            <option value="bank">{t('acc.deposit')}</option>
+            <option value="crypto">{t('acc.crypto_wallet')}</option>
           </select>
         </Field>
         <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? t('people.saving') : t('common.save')}</button>
         </div>
       </form>
     </Sheet>
@@ -1104,6 +1143,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
 }
 
 function DebtSheet({ open, debt, onClose, onDone }) {
+  const { t } = useI18n()
   const isNew = !debt?.id
   const [name, setName] = useState('')
   const [creditor, setCreditor] = useState('')
@@ -1142,20 +1182,20 @@ function DebtSheet({ open, debt, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новый долг' : 'редактировать долг'}>
+    <Sheet open={open} onClose={onClose} title={isNew ? 'новый долг' : t('fin.edit_debt')}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="название">
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="Кредитка, долг другу…" />
+        <Field label={t('common.title')}>
+          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('fin.debt_ph')} />
         </Field>
-        <Field label="кредитор (банк или человек)">
-          <input className="input" value={creditor} onChange={(e) => setCreditor(e.target.value)} placeholder="Сбербанк, Иван…" />
+        <Field label={t('fin.creditor2')}>
+          <input className="input" value={creditor} onChange={(e) => setCreditor(e.target.value)} placeholder={t('fin.creditor_ph')} />
         </Field>
-        <Field label="общая сумма долга (₽)">
+        <Field label={t('fin.total_amount')}>
           <input className="input" type="number" step="any" value={total} onChange={(e) => setTotal(e.target.value)} placeholder="50000" />
         </Field>
         <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? t('people.saving') : t('common.save')}</button>
         </div>
       </form>
     </Sheet>
@@ -1163,21 +1203,28 @@ function DebtSheet({ open, debt, onClose, onDone }) {
 }
 
 function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
+  const { t } = useI18n()
   const [amount, setAmount] = useState('')
-  const [account, setAccount] = useState('')
+  const [account, setAccount] = useState('none')
+  const [accErr, setAccErr] = useState('')
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
-  useEffect(() => { if (open) setAccount(accounts[0]?.name || '') }, [open])
+  // по умолчанию — «не списывать»: счёт пользователь выбирает сам, а не таём первый попавшийся
+  useEffect(() => { if (open) { setAccount('none'); setAccErr('') } }, [open])
 
   const submit = async (e) => {
     if (e) e.preventDefault()
     const a = parseFloat(amount)
     if (!a || isNaN(a) || !debt?.id) return
+    // PayIn принимает только amount/account/date: «не списывать» бэкенд не умеет,
+    // а пустой счёт превратился бы в основной (деньги всё равно ушли бы) — просим выбрать честно
+    if (account === 'none') { setAccErr(t('fin.pick_account')); return }
+    setAccErr('')
     setSaving(true)
     try {
       await api.payDebt(debt.id, a, { account })
-      onDone()
+      onDone(t('fin.pay_made'))
     } catch (err) {
       show.err(err)
     } finally {
@@ -1186,20 +1233,21 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={`внести платёж: ${debt?.name || debt?.title || ''}`}>
+    <Sheet open={open} onClose={onClose} title={t('fin.pay_debt_title', { name: debt?.name || debt?.title || '' })}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="сумма платежа (₽)">
+        <Field label={t('fin.pay_amount')}>
           <input className="input" autoFocus type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="5000" />
         </Field>
-        <Field label="списать со счёта" hint="деньги реально уйдут с баланса — иначе расчёт не сойдётся">
-          <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
-            <option value="none">не списывать</option>
+        <Field label={t('fin.charge')} error={accErr}
+          hint={account === 'none' ? 'выберите счёт — иначе остаток долга не сойдётся' : t('fin.charge_hint')}>
+          <select className="input" value={account} onChange={(e) => { setAccount(e.target.value); if (accErr) setAccErr('') }}>
+            <option value="none">{t('fin.no_charge')}</option>
             {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
           </select>
         </Field>
         <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !amount}>{saving ? 'сохраняю…' : 'внести'}</button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !amount}>{saving ? t('people.saving') : t('fin.submit')}</button>
         </div>
       </form>
     </Sheet>
@@ -1207,6 +1255,7 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
 }
 
 function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
+  const { t } = useI18n()
   const isNew = !item?.id
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
@@ -1252,26 +1301,26 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
 
   const isIncome = kind === 'income'
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новый регулярный платёж' : 'редактировать платёж'}>
+    <Sheet open={open} onClose={onClose} title={isNew ? 'новый регулярный платёж' : t('fin.edit_pay2')}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="тип" hint={isIncome ? 'поступление: уйдёт в доход и в прогноз кассы' : 'списание: уйдёт в расход и в прогноз кассы'}>
+        <Field label={t('fin.kind')} hint={isIncome ? 'поступление: уйдёт в доход и в прогноз кассы' : t('fin.outflow_hint')}>
           <div className="sg">
-            <span className={!isIncome ? 'on' : ''} onClick={() => setKind('expense')}>списание</span>
-            <span className={isIncome ? 'on' : ''} onClick={() => setKind('income')}>доход</span>
+            <button type="button" className={!isIncome ? 'on' : ''} onClick={() => setKind('expense')}>{t('fin.outflow')}</button>
+            <button type="button" className={isIncome ? 'on' : ''} onClick={() => setKind('income')}>{t('fin.income')}</button>
           </div>
         </Field>
-        <Field label="название">
-          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={isIncome ? 'Зарплата, аренда, фриланс…' : 'Яндекс Плюс, Спортзал, Подписка…'} />
+        <Field label={t('common.title')}>
+          <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={isIncome ? 'Зарплата, аренда, фриланс…' : t('fin.pay_ph2')} />
         </Field>
-        <Field label={isIncome ? 'сумма поступления в месяц (₽)' : 'сумма в месяц (₽)'}>
+        <Field label={isIncome ? 'сумма поступления в месяц (₽)' : t('fin.amount_month')}>
           <input className="input" type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="499" />
         </Field>
-        <Field label={isIncome ? 'день поступления (1–31)' : 'день списания (1–31)'}>
+        <Field label={isIncome ? 'день поступления (1–31)' : t('fin.pay_day')}>
           <input className="input" type="number" min="1" max="31" value={day} onChange={(e) => setDay(e.target.value)} />
         </Field>
         <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? t('people.saving') : t('common.save')}</button>
         </div>
       </form>
     </Sheet>
@@ -1279,6 +1328,7 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
 }
 
 function GoalSheet({ open, goal, onClose, onDone }) {
+  const { t } = useI18n()
   const isNew = !goal?.id
   const [title, setTitle] = useState('')
   const [target, setTarget] = useState('')
@@ -1317,20 +1367,20 @@ function GoalSheet({ open, goal, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? 'новая финансовая цель' : 'редактировать цель'}>
+    <Sheet open={open} onClose={onClose} title={isNew ? 'новая финансовая цель' : t('fin.edit_goal')}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="название цели">
-          <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Подушка безопасности, новый ноутбук…" />
+        <Field label={t('gl.goal_name')}>
+          <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('gl.goal_ph2')} />
         </Field>
-        <Field label="целевая сумма (₽)">
+        <Field label={t('gl.target')}>
           <input className="input" type="number" step="any" value={target} onChange={(e) => setTarget(e.target.value)} placeholder="100000" />
         </Field>
-        <Field label="уже накоплено (₽)">
+        <Field label={t('gl.saved')}>
           <input className="input" type="number" step="any" value={current} onChange={(e) => setCurrent(e.target.value)} placeholder="0" />
         </Field>
         <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !title.trim()}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !title.trim()}>{saving ? t('people.saving') : t('common.save')}</button>
         </div>
       </form>
     </Sheet>
@@ -1338,12 +1388,14 @@ function GoalSheet({ open, goal, onClose, onDone }) {
 }
 
 function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
+  const { t } = useI18n()
   const [amount, setAmount] = useState('')
-  const [account, setAccount] = useState('')
+  const [account, setAccount] = useState('none')
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
-  useEffect(() => { if (open) setAccount(accounts[0]?.name || '') }, [open])
+  // по умолчанию — «не списывать»: баланс не трогаем, пока пользователь сам не выберет счёт
+  useEffect(() => { if (open) setAccount('none') }, [open])
 
   const submit = async (e) => {
     if (e) e.preventDefault()
@@ -1351,8 +1403,10 @@ function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
     if (!a || isNaN(a) || !goal?.id) return
     setSaving(true)
     try {
-      await api.putGoal(goal.id, a, { account })
-      onDone()
+      // «не списывать» = просто отметить накопление: GoalPut.record_tx=false, транзакция не создаётся
+      if (account === 'none') await api.putGoal(goal.id, a, { record_tx: false })
+      else await api.putGoal(goal.id, a, { account })
+      onDone(t('fin.topped_up'))
     } catch (err) {
       show.err(err)
     } finally {
@@ -1361,20 +1415,21 @@ function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={`пополнить копилку: ${goal?.title || goal?.name || ''}`}>
+    <Sheet open={open} onClose={onClose} title={t('fin.top_up_title', { name: goal?.title || goal?.name || '' })}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="сумма пополнения (₽)">
+        <Field label={t('fin.top_amount')}>
           <input className="input" autoFocus type="number" step="any" value={amount} onChange={(e) => setAmount(e.target.value)} placeholder="2000" />
         </Field>
-        <Field label="списать со счёта" hint="отложенные деньги уйдут с баланса — так видна настоящая картина">
+        <Field label={t('fin.charge')}
+          hint={account === 'none' ? 'баланс не тронется — просто отмечу накопление на цели' : t('fin.top_hint')}>
           <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
-            <option value="none">не списывать</option>
+            <option value="none">{t('fin.no_charge')}</option>
             {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
           </select>
         </Field>
         <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !amount}>{saving ? 'сохраняю…' : 'пополнить'}</button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !amount}>{saving ? t('people.saving') : t('fin.top_up')}</button>
         </div>
       </form>
     </Sheet>
@@ -1384,6 +1439,7 @@ function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
 /* Месячный лимит категории: хранится в Category.budget, карточка «бюджеты» читает его
    через /api/finance/budgets. Лимит необязателен — 0 или пусто означает «без контроля». */
 function BudgetSheet({ open, item, categories = [], onClose, onDone }) {
+  const { t } = useI18n()
   const [cid, setCid] = useState('')
   const [amount, setAmount] = useState('')
   const [saving, setSaving] = useState(false)
@@ -1421,20 +1477,20 @@ function BudgetSheet({ open, item, categories = [], onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title="лимит на месяц" sub="необязательно: 0 или пусто — категория без контроля">
+    <Sheet open={open} onClose={onClose} title={t('fin.limit_month')} sub={t('fin.limit_optional')}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label="категория">
+        <Field label={t('common.category')}>
           <select className="input" value={cid} onChange={(e) => pick(e.target.value)} autoFocus>
-            {!options.length && <option value="">нет расходных категорий</option>}
+            {!options.length && <option value="">{t('fin.no_exp_cats')}</option>}
             {options.map((c) => <option key={c.id} value={c.id}>{c.icon} {c.name}{c.budget ? ` · ${money(c.budget)}` : ''}</option>)}
           </select>
         </Field>
-        <Field label="лимит на месяц (₽)" hint="0 — без лимита">
+        <Field label={t('fin.limit_month_rub')} hint={t('fin.zero_no_limit')}>
           <Money value={amount} onChange={setAmount} min={0} placeholder="0" />
         </Field>
         <div className="flex justify-end gap-2 pt-4">
-          <button type="button" className="btn g" onClick={onClose}>отмена</button>
-          <button type="submit" className="btn" disabled={saving || !cid}>{saving ? 'сохраняю…' : 'сохранить'}</button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !cid}>{saving ? t('people.saving') : t('common.save')}</button>
         </div>
       </form>
     </Sheet>

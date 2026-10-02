@@ -3,34 +3,38 @@
 // а ручное значение авто-логика не перетирает — поэтому показываем метку «вручную» и кнопку «вернуть авто».
 import { useCallback, useEffect, useState } from 'react'
 import { PencilLine, Undo2 } from 'lucide-react'
-import { CLIENT_STAGES, CLIENT_STAGE_LABEL, CLIENT_STAGE_HINT, CLIENT_STAGE_TONE, clientStageApi } from '../lib/crm'
+import { CLIENT_STAGES, CLIENT_STAGE_LABEL, CLIENT_STAGE_HINT, CLIENT_STAGE_TONE, clientStageApi, clientStageLabel, clientStageHint } from '../lib/crm'
+import { useI18n } from '../lib/i18n'
 
 /** Бейдж стадии клиента. `view` — ответ /api/crm/clients/{id}/stage. */
 export function ClientStageBadge({ view, className = '' }) {
+  const { t } = useI18n()
   if (!view?.stage) return null
   return (
     <span className={`badge ${CLIENT_STAGE_TONE[view.stage] || ''} ${className}`}>
-      {view.label || CLIENT_STAGE_LABEL[view.stage] || view.stage}
-      {view.manual && <span className="faint text-[10px]" title="выставлено руками — авто не перетирает">· вручную</span>}
+      {view.label || clientStageLabel(view.stage) || view.stage}
+      {view.manual && <span className="faint text-[10px]" title={t('cstage.manual_title')}>{t('cstage.manual')}</span>}
     </span>
   )
 }
 
 /** Одна строка-пояснение: как стадия посчитана (для подписи под списком). */
 export function ClientStageNote({ view }) {
+  const { t } = useI18n()
   if (!view) return null
   return (
     <div className="faint mt-1 text-[11.5px]">
       {view.manual
-        ? 'выставлено руками — авто-логика не перетирает'
-        : view.auto ? `авто по заказам: ${view.auto_label || CLIENT_STAGE_LABEL[view.auto]}` : 'авто-сигнала нет — значение сохранено'}
-      {view.paid_orders ? ` · оплаченных заказов: ${view.paid_orders}` : ''}
+        ? t('cstage.manual_note')
+        : view.auto ? t('cstage.auto_by_orders', { label: view.auto_label || clientStageLabel(view.auto) }) : t('cstage.no_signal')}
+      {view.paid_orders ? ` · ${t('cstage.paid_orders', { n: view.paid_orders })}` : ''}
     </div>
   )
 }
 
 /** Выпадающий список стадии клиента + «вернуть авто», если значение ручное. */
-export function ClientStageSelect({ view, onView, onErr, className = '', label = 'Стадия клиента' }) {
+export function ClientStageSelect({ view, onView, onErr, className = '', label }) {
+  const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   const cur = view?.stage || 'lead'
   const pick = async (e) => {
@@ -46,13 +50,13 @@ export function ClientStageSelect({ view, onView, onErr, className = '', label =
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
       <PencilLine size={13} className="faint shrink-0" aria-hidden />
-      <select className="input !h-8 !w-auto min-w-[150px] text-[13px]" value={cur} onChange={pick} disabled={busy} aria-label={label}
-        title={CLIENT_STAGE_HINT[cur]}>
-        {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{l} — {CLIENT_STAGE_HINT[k]}</option>)}
+      <select className="input !h-8 !w-auto min-w-[150px] text-[13px]" value={cur} onChange={pick} disabled={busy} aria-label={label || t('cstage.title')}
+        title={clientStageHint(cur)}>
+        {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{t(l)} — {clientStageHint(k)}</option>)}
       </select>
       {view?.manual && (
-        <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={toAuto} data-tip="снять ручной режим и вернуть авто-подсчёт">
-          <Undo2 size={13} /> вернуть авто
+        <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={toAuto} data-tip={t('cstage.back_to_auto_tip')}>
+          <Undo2 size={13} /> {t('cstage.back_to_auto')}
         </button>
       )}
     </div>

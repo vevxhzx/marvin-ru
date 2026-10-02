@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { StickyNote, Type, Film, Pencil, Trash2, Copy, ArrowUpRight, ChevronDown, Lock } from 'lucide-react'
 import { api } from '../lib/api'
+import { t as T } from '../lib/i18n'
 import { RATIOS, STICKY, DEFAULT_SIZE, MIN_K, MAX_K, uid, fontSize, fontFamily, frameHeight, frameWindow, captionHeight, itemBox, bbox, inBox, normRect, rectsIntersect, distSeg, anchorPoint, nearestAnchor, arrowPoints, fmtSec, themeColor, stickyInk } from '../lib/board'
 
 /* Холст доски. Canvas: сетка, кадры, картинки, стрелки, карандаш, выделение. HTML-слой поверх: текст стикеров,
@@ -258,7 +259,7 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
     const fd = new FormData(); fd.append('file', file)
     try {
       const r = await fetch(`/api/boards/${board.id}/asset`, { method: 'POST', body: fd })
-      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.detail || 'Не удалось загрузить картинку')
+      if (!r.ok) throw new Error((await r.json().catch(() => ({})))?.detail || T('board.img_failed'))
       const a = await r.json()
       snapshot()
       const fr = frameId != null ? itemsRef.current.find((i) => i.id === frameId) : null
@@ -399,7 +400,7 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
             g.font = `500 ${ts}px "Inter Tight", "Inter", sans-serif`
             g.fillStyle = dark ? 'rgba(236,236,233,.4)' : 'rgba(14,14,14,.38)'
             g.textAlign = 'center'; g.textBaseline = 'middle'
-            g.fillText('картинка не выбрана', it.x + it.w / 2, it.y + ih / 2)
+            g.fillText(T('board.img_none'), it.x + it.w / 2, it.y + ih / 2)
             g.textAlign = 'left'
           }
           g.strokeStyle = line; g.lineWidth = 1 / v.k; rr(it.x, it.y, it.w, ih, 10 * it.w / 320); g.stroke(); rr(it.x, it.y, it.w, b.h, 10 * it.w / 320); g.stroke()
@@ -710,7 +711,7 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
             const pq = arrowPoints(it, byId); if (!pq) return null
             const mx = (pq[0].x + pq[1].x) / 2, my = (pq[0].y + pq[1].y) / 2
             return <div key={it._key} className="absolute -translate-x-1/2 -translate-y-1/2 rounded-md px-2 py-0.5" style={{ left: mx, top: my, background: 'var(--surface)', outline: '1px solid var(--accent)', pointerEvents: 'auto', fontSize: fs || 13, minWidth: 60, ...common }}>
-              <EditableText it={it} field="label" editing placeholder="подпись" single onChange={(v) => { it.data = { ...it.data, label: v } }} onDone={stopEdit} />
+              <EditableText it={it} field="label" editing placeholder={T('board.caption_ph')} single onChange={(v) => { it.data = { ...it.data, label: v } }} onDone={stopEdit} />
             </div>
           }
           const b = itemBox(it), rotStyle = it.rot ? { transform: `rotate(${it.rot}deg)`, transformOrigin: 'center' } : {}
@@ -720,7 +721,7 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
               <div key={it._key} className="absolute" style={{ left: it.x, top: it.y, width: it.w, height: b.h, zIndex: it.z, pointerEvents: 'none', ...rotStyle }}>
                 <div className="absolute left-0 flex items-start gap-2" style={{ top: ih, width: it.w, height: cap, padding: `${8 * scale}px ${10 * scale}px`, pointerEvents: isEd ? 'auto' : 'none' }}>
                   <span className="mono shrink-0 font-semibold" style={{ fontSize: 13 * scale, lineHeight: 1.35, color: 'var(--ink-2)', paddingTop: 1 * scale }}>{it.data.n || '·'}</span>
-                  <EditableText it={it} field="label" editing={isEd} placeholder="что в кадре" className="min-w-0 flex-1" style={{ fontSize: fs * scale, lineHeight: 1.35, color: it.data.text_color ? themeColor(it.data.text_color, dark) : 'var(--ink)', ...common }}
+                  <EditableText it={it} field="label" editing={isEd} placeholder={T('board.shot_ph')} className="min-w-0 flex-1" style={{ fontSize: fs * scale, lineHeight: 1.35, color: it.data.text_color ? themeColor(it.data.text_color, dark) : 'var(--ink)', ...common }}
                     onChange={(v) => { it.data = { ...it.data, label: v }; it.h = frameHeight(it.w, it.data) }} onDone={stopEdit} />
                 </div>
               </div>
@@ -737,7 +738,7 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
           }
           return (
             <div key={it._key} className="absolute overflow-hidden" style={{ left: it.x, top: it.y, width: it.w, minHeight: it.h, zIndex: it.z, padding: 8, borderRadius: 8, color: themeColor(it.data.text_color || 'ink', dark), fontSize: fs, lineHeight: 1.4, pointerEvents: isEd ? 'auto' : 'none', background: isEd ? 'var(--surface)' : 'transparent', outline: isEd ? '1px solid var(--accent)' : 'none', ...common, ...rotStyle }}>
-              <EditableText it={it} field="text" editing={isEd} placeholder="Текст" className="whitespace-pre-wrap" md onChange={(v) => { it.data = { ...it.data, text: v } }} onDone={stopEdit} onGrow={(h) => { if (h + 16 > it.h) { it.h = h + 16; bump() } }} />
+              <EditableText it={it} field="text" editing={isEd} placeholder={T('board.text_ph')} className="whitespace-pre-wrap" md onChange={(v) => { it.data = { ...it.data, text: v } }} onDone={stopEdit} onGrow={(h) => { if (h + 16 > it.h) { it.h = h + 16; bump() } }} />
             </div>
           )
         })}
@@ -801,14 +802,14 @@ function ContextMenu({ m, onClose, onAct, hasSel, readOnly }) {
   const el = document.querySelector('.board-wrap'); const W = el?.clientWidth || 800, H = el?.clientHeight || 600
   return (
     <div className="elevated absolute z-[60] w-[210px] !p-1.5" style={{ left: Math.min(m.x, W - 220), top: Math.min(m.y, H - 260) }} onPointerDown={(e) => e.stopPropagation()}>
-      {!readOnly && !m.item && <><Item a="sticky" icon={StickyNote}>стикер</Item><Item a="text" icon={Type}>текст</Item><Item a="frame" icon={Film}>кадр</Item></>}
-      {m.item && ['sticky', 'text', 'frame', 'arrow'].includes(m.item.type) && !readOnly && <Item a="edit" icon={Pencil}>редактировать <span className="kbd ml-auto">↵</span></Item>}
+      {!readOnly && !m.item && <><Item a="sticky" icon={StickyNote}>{T('board.sticky')}</Item><Item a="text" icon={Type}>{T('board.text')}</Item><Item a="frame" icon={Film}>{T('board.frame')}</Item></>}
+      {m.item && ['sticky', 'text', 'frame', 'arrow'].includes(m.item.type) && !readOnly && <Item a="edit" icon={Pencil}>{T('board.edit')} <span className="kbd ml-auto">↵</span></Item>}
       {hasSel && !readOnly && <>
-        <Item a="dup" icon={Copy}>дублировать <span className="kbd ml-auto">⌘D</span></Item>
-        <Item a="front" icon={ArrowUpRight}>на передний план <span className="kbd ml-auto">PgUp</span></Item>
-        <Item a="back" icon={ChevronDown}>на задний план <span className="kbd ml-auto">PgDn</span></Item>
+        <Item a="dup" icon={Copy}>{T('board.dup')} <span className="kbd ml-auto">⌘D</span></Item>
+        <Item a="front" icon={ArrowUpRight}>{T('board.front')} <span className="kbd ml-auto">PgUp</span></Item>
+        <Item a="back" icon={ChevronDown}>{T('board.back')} <span className="kbd ml-auto">PgDn</span></Item>
         <div className="my-1 border-t hair" />
-        <Item a="del" icon={Trash2} danger>удалить <span className="kbd ml-auto">⌫</span></Item>
+        <Item a="del" icon={Trash2} danger>{T('common.delete')} <span className="kbd ml-auto">⌫</span></Item>
       </>}
     </div>
   )

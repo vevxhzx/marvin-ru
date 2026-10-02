@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react'
-import { hhmm, isAllDay, plural } from '../lib/api'
+import { hhmm, isAllDay } from '../lib/api'
+import { useI18n, t as T } from '../lib/i18n'
 
 /* Лента дня: одна тонкая линия времени, на ней точками — события/задачи/дедлайны с их временем, полосками — длительность,
    между соседними подписан промежуток («1 ч 40»), красная засечка — «сейчас». Видно, как день расставлен и сколько
    между делами, не читая список. Дела «на весь день» в ленту не ложатся — считаются отдельно слева. */
-const gapText = (m) => (m < 60 ? `${m} мин` : m % 60 ? `${Math.floor(m / 60)} ч ${m % 60}` : `${m / 60} ч`)
+// gapText живёт на уровне модуля, поэтому перевод берём из импорта (T), а не из хука
+const gapText = (m) => (m < 60 ? `${m} ${T('unit.min')}` : m % 60 ? `${Math.floor(m / 60)} ${T('unit.hour')} ${m % 60}` : `${m / 60} ${T('unit.hour')}`)
 
 export default function DayStrip({ list, isToday, onPick }) {
+  const { t } = useI18n()
   const [now, setNow] = useState(() => new Date())
   useEffect(() => { if (!isToday) return; const t = setInterval(() => setNow(new Date()), 60000); return () => clearInterval(t) }, [isToday])
   const timed = list.filter((e) => !e.all_day && !isAllDay(e.start)).sort((a, b) => new Date(a.start) - new Date(b.start))
@@ -48,7 +51,7 @@ export default function DayStrip({ list, isToday, onPick }) {
   const toneGrad = (e) => (e.kind === 'task' ? (e.priority === 1 ? 'linear-gradient(90deg, #ff3b5c, #ff8a3d)' : 'linear-gradient(90deg, #3a3a44, #6b6b78)') : e.kind === 'order' ? 'linear-gradient(90deg, #ffb020, #ff8a3d)' : 'linear-gradient(90deg, var(--accent), #8a5cff)')
 
   return (
-    <div className="animate-rise select-none pb-1 pt-0.5" aria-label="лента дня">
+    <div className="animate-rise select-none pb-1 pt-0.5" aria-label={t('daystrip.aria')}>
       <div className="relative mx-1 h-[56px]">
         {/* часы */}
         {hours.map((h) => (
@@ -83,7 +86,7 @@ export default function DayStrip({ list, isToday, onPick }) {
         {/* промежутки */}
         {gaps.map((g, i) => <span key={i} className="faint num absolute top-[40px] -translate-x-1/2 whitespace-nowrap text-[10.5px]" style={{ left: `${g.at}%` }}>{g.text}</span>)}
       </div>
-      {allDay > 0 && <div className="faint mt-0.5 text-[11px]">+ {allDay} {plural(allDay, 'дело', 'дела', 'дел')} на весь день</div>}
+      {allDay > 0 && <div className="faint mt-0.5 text-[11px]">{t('daystrip.all_day', { count: allDay })}</div>}
     </div>
   )
 }

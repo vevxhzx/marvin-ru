@@ -3,9 +3,11 @@ import { Link } from 'react-router-dom'
 import { Flame, Upload, Cake } from 'lucide-react'
 import { api, money } from '../lib/api'
 import CashChart from './CashChart'
+import { useI18n, t as T } from '../lib/i18n'
 
 /* ---------- Тепловая карта активности (как на GitHub) + стрик ---------- */
 export function Heatmap({ days = [], heatmap = [], weeks = 26 }) {
+  const { t } = useI18n()
   const map = useMemo(() => Object.fromEntries((heatmap || []).map((x) => [x.date, x.count])), [heatmap])
   const cells = useMemo(() => {
     const out = []; const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -28,13 +30,14 @@ export function Heatmap({ days = [], heatmap = [], weeks = 26 }) {
             className="rounded-[2px] transition-transform hover:scale-125" style={{ background: a ? `color-mix(in srgb, var(--accent) ${Math.round(a * 100)}%, var(--fill))` : 'var(--fill)', animation: `fade .4s ease-out ${Math.min(600, i * 2)}ms both` }} />
         })}
       </div>
-      <div className="faint mt-1.5 flex justify-between text-[10px]"><span>{cols} нед. назад</span><span>сегодня</span></div>
-      {tip && <div className="panel absolute -top-9 left-0 !px-2.5 !py-1 text-[11px] shadow-md">{tip.day}.{String(tip.m + 1).padStart(2, '0')} · {tip.n ? `${tip.n} зап.` : 'пусто'}</div>}
+      <div className="faint mt-1.5 flex justify-between text-[10px]"><span>{t('heat.weeks_back', { n: cols })}</span><span>{t('common.today')}</span></div>
+      {tip && <div className="panel absolute -top-9 left-0 !px-2.5 !py-1 text-[11px] shadow-md">{tip.day}.{String(tip.m + 1).padStart(2, '0')} · {tip.n ? t('heat.entries', { n: tip.n }) : t('heat.empty')}</div>}
     </div>
   )
 }
 
 export function Streak({ streak }) {
+  const { t } = useI18n()
   if (!streak) return null
   const hot = streak.current >= 3
   return (
@@ -43,16 +46,16 @@ export function Streak({ streak }) {
         <Flame size={20} strokeWidth={2.2} />
       </div>
       <div>
-        <div className="num text-[26px] font-medium leading-none tracking-[-0.04em]">{streak.current}<span className="muted ml-1 text-[14px] font-normal">{plural(streak.current)} подряд</span></div>
-        <div className="muted mt-1 text-[12px]">рекорд {streak.best} · {streak.today_done ? 'сегодня уже записали ✓' : 'сегодня пока пусто'}</div>
+        <div className="num text-[26px] font-medium leading-none tracking-[-0.04em]">{streak.current}<span className="muted ml-1 text-[14px] font-normal">{t('streak.in_row', { count: streak.current })}</span></div>
+        <div className="muted mt-1 text-[12px]">{t('streak.best', { n: streak.best })} · {streak.today_done ? t('streak.today_done') : t('streak.today_empty')}</div>
       </div>
     </div>
   )
 }
-const plural = (n) => { const a = n % 100, b = n % 10; return a > 10 && a < 20 ? 'дней' : b === 1 ? 'день' : b > 1 && b < 5 ? 'дня' : 'дней' }
 
 /* ---------- Прогноз кассы на 30 дней ---------- */
 export function Forecast({ f, compact = false, txs = null }) {
+  const { t } = useI18n()
   // тот же CashChart, что и в «финансах»: точка = баланс на конец дня, подсказка в две строки
   if (!f?.points?.length) return null
   const dm = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}`
@@ -65,9 +68,9 @@ export function Forecast({ f, compact = false, txs = null }) {
       <CashChart f={f} height={compact ? 120 : 170} compact={compact} txs={txs} />
       {!compact && (
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
-          {perDay != null && <span className="muted">в среднем <b className="num" style={{ color: 'var(--ink)' }}>{money(perDay)}</b>/день</span>}
-          {f.safe_per_day != null && <span className="muted">безопасно <b className="num accent">{money(f.safe_per_day)}</b>/день до дохода ({f.days_to_income} дн)</span>}
-          {low != null && <span className={ok ? 'muted' : 'neg font-medium'}>{ok ? `минимум ${money(low)}` : `минус ${money(low)} к ${dm(lowDate)}`}</span>}
+          {perDay != null && <span className="muted">{t('fc.avg')} <b className="num" style={{ color: 'var(--ink)' }}>{money(perDay)}</b>{t('fc.per_day')}</span>}
+          {f.safe_per_day != null && <span className="muted">{t('fc.safe')} <b className="num accent">{money(f.safe_per_day)}</b>{t('fc.safe_tail', { days: f.days_to_income })}</span>}
+          {low != null && <span className={ok ? 'muted' : 'neg font-medium'}>{ok ? t('fc.min', { m: money(low) }) : t('fc.minus', { m: money(low), date: dm(lowDate) })}</span>}
         </div>
       )}
     </div>
@@ -76,12 +79,14 @@ export function Forecast({ f, compact = false, txs = null }) {
 
 /* ---------- Дни рождения ---------- */
 export function Birthdays({ list }) {
+  const { t } = useI18n()
   if (!list?.length) return null
+  const when = (n) => (n === 0 ? t('bday.today') : n === 1 ? t('bday.tomorrow') : t('bday.in_days', { count: n }))
   return (
     <div className="flex flex-wrap gap-2">
       {list.map((b) => (
         <Link to="/calendar" key={b.id} className="chip !py-1.5 flex items-center gap-1.5 hover:text-accent" style={{ animation: 'rise .4s ease-out both' }}>
-          <Cake size={13} /> {b.who} · {b.in_days === 0 ? 'сегодня!' : b.in_days === 1 ? 'завтра' : `через ${b.in_days} дн`}
+          <Cake size={13} /> {b.who} · {when(b.in_days)}
         </Link>
       ))}
     </div>
@@ -90,6 +95,7 @@ export function Birthdays({ list }) {
 
 /* ---------- Импорт выписки (CSV/PDF/XLSX Т-Банка) ---------- */
 export function ImportButton({ onDone, onErr, className = '' }) {
+  const { t } = useI18n()
   const inp = useRef(null)
   const [busy, setBusy] = useState(false)
   const [drag, setDrag] = useState(false)
@@ -100,15 +106,15 @@ export function ImportButton({ onDone, onErr, className = '' }) {
       const fd = new FormData(); fd.append('file', file)
       const r = await fetch('/api/finance/import', { method: 'POST', body: fd })
       const j = await r.json()
-      if (!r.ok) throw new Error(j.detail || 'ошибка импорта')
+      if (!r.ok) throw new Error(j.detail || T('import.failed'))
       onDone?.(j)
     } catch (e) { onErr?.(e) } finally { setBusy(false); if (inp.current) inp.current.value = '' }
   }
   return (
     <span className={className} onDragOver={(e) => { e.preventDefault(); setDrag(true) }} onDragLeave={() => setDrag(false)} onDrop={(e) => { e.preventDefault(); setDrag(false); upload(e.dataTransfer.files?.[0]) }}>
       <input ref={inp} type="file" accept=".csv,.pdf,.xlsx,.xls,.txt" className="hidden" onChange={(e) => upload(e.target.files?.[0])} />
-      <button className={`btn-ghost ${drag ? '!border-accent text-accent' : ''}`} disabled={busy} onClick={() => inp.current?.click()} title="Выписка Т-Банка: CSV, PDF или Excel. Можно перетащить файл сюда. Дубликаты не задваиваются.">
-        <Upload size={14} /> {busy ? 'читаю…' : drag ? 'отпускайте' : 'выписка'}
+      <button className={`btn-ghost ${drag ? '!border-accent text-accent' : ''}`} disabled={busy} onClick={() => inp.current?.click()} title={t('import.hint')}>
+        <Upload size={14} /> {busy ? t('import.reading') : drag ? t('import.drop') : t('import.button')}
       </button>
     </span>
   )

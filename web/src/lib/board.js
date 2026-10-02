@@ -1,6 +1,7 @@
 /* Геометрия и модель доски — одна на редактор, экспорт и панели.
    Высота кадра считается так же, как на сервере (core/services/boards.py::frame_height):
    окно под соотношение + подпись, которая масштабируется вместе с кадром. */
+import { t } from './i18n'
 
 export const RATIOS = { '16:9': 16 / 9, '9:16': 9 / 16, '1:1': 1, '4:5': 4 / 5, '4:3': 4 / 3, '2.39:1': 2.39 }
 export const STICKY = {
@@ -99,7 +100,7 @@ function clipToBox(from, to, box) {
   return { x: cx + dx * t, y: cy + dy * t }
 }
 
-export function fmtSec(x) { x = +x || 0; if (x < 60) return `${+x.toFixed(1)}с`; const m = Math.floor(x / 60), s = Math.round(x % 60); return `${m}:${String(s).padStart(2, '0')}` }
+export function fmtSec(x) { x = +x || 0; if (x < 60) return `${+x.toFixed(1)} ${t('unit.sec')}`; const m = Math.floor(x / 60), s = Math.round(x % 60); return `${m}:${String(s).padStart(2, '0')}` }
 export function themeColor(name, dark) {
   const cs = getComputedStyle(document.documentElement)
   const v = (n) => cs.getPropertyValue(n).trim()

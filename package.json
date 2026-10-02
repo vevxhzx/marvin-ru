@@ -7,6 +7,7 @@
     "dev": "tsx server.ts",
     "build": "vite build",
     "test": "node --test tests/server_api.test.mjs tests/color_contrast.test.mjs",
+    "test:i18n": "node web/src/lib/i18n.test.mjs",
     "start": "NODE_ENV=production tsx server.ts",
     "desktop": "node desktop.mjs"
   },

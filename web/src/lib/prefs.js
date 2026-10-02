@@ -5,41 +5,42 @@ import { rgbOf, lumOf, mixHex, fitAccentInk } from './color'
 
 export { lumOf } // обратная совместимость: раньше lumOf жил здесь
 
-/* Акценты: пара light/dark на каждый, чтобы контраст держался в обеих темах. hue — для «фон в тон». */
+/* Акценты: пара light/dark на каждый, чтобы контраст держался в обеих темах. hue — для «фон в тон».
+   label — ключ словаря (см. lib/i18n.js), а не готовый текст: подписи переключаются вместе с языком. */
 export const ACCENTS = {
-  blue: { label: 'синий', light: '#0a2bff', dark: '#3b5bff', hue: 230 },
-  black: { label: 'графит', light: '#111111', dark: '#f2f2f0', ink: { dark: '#0e0e0d' }, hue: 0, mono: true },
-  indigo: { label: 'индиго', light: '#3730a3', dark: '#818cf8', hue: 243 },
-  violet: { label: 'фиолетовый', light: '#6d28d9', dark: '#a78bfa', hue: 262 },
-  plum: { label: 'слива', light: '#86198f', dark: '#e879f9', hue: 292 },
-  rose: { label: 'розовый', light: '#c2185b', dark: '#f472b6', hue: 336 },
-  red: { label: 'красный', light: '#b91c1c', dark: '#f87171', hue: 0 },
-  orange: { label: 'оранжевый', light: '#d9480f', dark: '#ff8a4c', hue: 20 },
-  amber: { label: 'янтарь', light: '#a16207', dark: '#fbbf24', hue: 43 },
-  olive: { label: 'олива', light: '#4d7c0f', dark: '#a3e635', hue: 85 },
-  green: { label: 'зелёный', light: '#0f8a4b', dark: '#34c77b', hue: 150 },
-  teal: { label: 'бирюза', light: '#0f766e', dark: '#2dd4bf', hue: 175 },
-  sky: { label: 'небо', light: '#0369a1', dark: '#38bdf8', hue: 200 },
+  blue: { label: 'accent.blue', light: '#0a2bff', dark: '#3b5bff', hue: 230 },
+  black: { label: 'accent.graphite', light: '#111111', dark: '#f2f2f0', ink: { dark: '#0e0e0d' }, hue: 0, mono: true },
+  indigo: { label: 'accent.indigo', light: '#3730a3', dark: '#818cf8', hue: 243 },
+  violet: { label: 'accent.violet', light: '#6d28d9', dark: '#a78bfa', hue: 262 },
+  plum: { label: 'accent.plum', light: '#86198f', dark: '#e879f9', hue: 292 },
+  rose: { label: 'accent.rose', light: '#c2185b', dark: '#f472b6', hue: 336 },
+  red: { label: 'accent.red', light: '#b91c1c', dark: '#f87171', hue: 0 },
+  orange: { label: 'accent.orange', light: '#d9480f', dark: '#ff8a4c', hue: 20 },
+  amber: { label: 'accent.amber', light: '#a16207', dark: '#fbbf24', hue: 43 },
+  olive: { label: 'accent.olive', light: '#4d7c0f', dark: '#a3e635', hue: 85 },
+  green: { label: 'accent.green', light: '#0f8a4b', dark: '#34c77b', hue: 150 },
+  teal: { label: 'accent.teal', light: '#0f766e', dark: '#2dd4bf', hue: 175 },
+  sky: { label: 'accent.sky', light: '#0369a1', dark: '#38bdf8', hue: 200 },
 }
 /* Оттенок поверхностей: лёгкая подкраска фона/карточек. tint — в тон акценту (берём его hue).
    Холодный и чернильный держим в синей зоне (200–235): hue 250 подмешивал к синему фиолетовый. */
 export const TINTS = {
-  neutral: { label: 'нейтральный', light: null, dark: null },
-  warm: { label: 'тёплый', light: [40, 12], dark: [35, 6] },     // [hue, насыщенность %]
-  cool: { label: 'холодный', light: [215, 10], dark: [215, 8] },
-  ink: { label: 'чернильный', light: [250, 6], dark: [232, 10] },
-  accent: { label: 'в тон акценту', light: 'accent', dark: 'accent' },
+  neutral: { label: 'tint.neutral', light: null, dark: null },
+  warm: { label: 'tint.warm', light: [40, 12], dark: [35, 6] },     // [hue, насыщенность %]
+  cool: { label: 'tint.cool', light: [215, 10], dark: [215, 8] },
+  ink: { label: 'tint.ink', light: [250, 6], dark: [232, 10] },
+  accent: { label: 'tint.accent', light: 'accent', dark: 'accent' },
 }
-export const FONT_SIZES = { sm: ['мельче', 0.92], md: ['обычный', 1], lg: ['крупнее', 1.1] }
+export const FONT_SIZES = { sm: ['font.sm', 0.92], md: ['font.md', 1], lg: ['font.lg', 1.1] }
 /* 'strict' — старое имя «строгих» углов из настроек, оставлено как синоним 'sharp' */
-export const RADII = { soft: ['мягкие', 1], sharp: ['строгие', 0.45], strict: ['строгие', 0.45], round: ['круглые', 1.35] }
+export const RADII = { soft: ['radius.soft', 1], sharp: ['radius.sharp', 0.45], strict: ['radius.sharp', 0.45], round: ['radius.round', 1.35] }
 
 const KEY = 'ui.prefs.v1'
 export const DEFAULTS = {
   accent: 'blue', accentHex: '#0a3cff', tint: 'neutral', font: 'md', radius: 'soft', motion: true, compactNav: false,
   address: '', // как обращаться: пусто — берём из настроек ядра («сэр»)
   hiddenNav: [], // скрытые разделы в боковой панели (кроме «сегодня» и «настройки»)
-  tabbar: ['/', '/tasks', '/calendar', '/finance', '/mind'], // нижняя панель телефона (5 макс)
+  tabbar: ['/', '/tasks', '/finance', '/mind'], // нижняя панель телефона (4 раздела + «Ещё»)
   showGreeting: true, showContext: true, showQuick: true, density: 'calm',
   hiddenBlocks: ['upcoming', 'recent'], // блоки главной, скрытые по умолчанию
   tasksSort: 'priority', // сортировка внутри групп задач: priority | due | new

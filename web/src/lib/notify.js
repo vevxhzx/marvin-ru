@@ -1,4 +1,5 @@
 import { name } from './name'
+import { t } from './i18n'
 // Браузерные уведомления: напоминания и действия из Telegram приходят через SSE (/api/events/stream).
 // Включаются на странице настроек. На iPhone работают после «Добавить на экран Домой» (PWA).
 export const notifySupported = () => typeof window !== 'undefined' && 'Notification' in window
@@ -8,7 +9,7 @@ export const notifyEnabled = () => notifyState() === 'granted' && localStorage.g
 export async function enableNotifications() {
   if (!notifySupported()) return 'unsupported'
   const p = await Notification.requestPermission()
-  if (p === 'granted') { localStorage.setItem('notify', 'on'); show('Уведомления включены', 'Буду напоминать прямо здесь, сэр.') }
+  if (p === 'granted') { localStorage.setItem('notify', 'on'); show(t('notify.enabled'), t('notify.enabled_hint')) }
   return p
 }
 export const disableNotifications = () => localStorage.setItem('notify', 'off')
@@ -29,10 +30,10 @@ export function show(title, body, tag) {
 export function notifyFromEvent(ev) {
   if (!ev || !notifyEnabled()) return
   if (document.visibilityState === 'visible' && ev.kind !== 'reminder') return
-  if (ev.kind === 'reminder') return show('Напоминание', ev.text || 'Напоминание', 'rem-' + (ev.id || Date.now()))
+  if (ev.kind === 'reminder') return show(t('notify.reminder'), ev.text || t('notify.reminder'), 'rem-' + (ev.id || Date.now()))
   if (ev.kind === 'chat' && ev.channel && ev.channel !== 'web' && ev.actions?.length) {
-    const map = { add_event: 'событие в календарь', add_task: 'задачу', add_expense: 'трату', add_income: 'доход', add_note: 'заметку', add_link: 'ссылку', add_debt: 'долг', update_event: 'изменение в календаре', undo: 'откат' }
-    const what = ev.actions.map((a) => map[a]).filter(Boolean)[0]
-    if (what) show(name(), `Добавил ${what} из Telegram`, 'chat-' + Date.now())
+    const map = { add_event: 'act_add_event', add_task: 'act_add_task', add_expense: 'act_add_expense', add_income: 'act_add_income', add_note: 'act_add_note', add_link: 'act_add_link', add_debt: 'act_add_debt', update_event: 'act_update_event', undo: 'common.undo' }
+    const what = ev.actions.map((a) => map[a] && t(map[a])).filter(Boolean)[0]
+    if (what) show(name(), t('notify.added_from_tg', { what }), 'chat-' + Date.now())
   }
 }

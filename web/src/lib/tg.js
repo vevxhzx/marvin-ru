@@ -2,6 +2,7 @@
 // Что делаем: 1) узнаём, что мы в Telegram; 2) входим на сервер подписанными данными Telegram (initData) —
 // без QR и ключей; 3) подстраиваем оболочку под webview (развернуть, тема, кнопка «назад», не закрывать свайпом).
 // В обычном браузере ничего из этого не запускается и скрипт Telegram не загружается.
+import { t } from './i18n'
 
 const KEY = 'tg_init'  // sessionStorage: initData живёт, пока открыт webview (при переходах внутри SPA hash теряется)
 
@@ -39,7 +40,7 @@ async function login(data) {
   const r = await fetch('/api/tg/login', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ init_data: data }) })
   let j = {}
   try { j = await r.json() } catch {}
-  if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : `вход не удался (${r.status})`)
+  if (!r.ok) throw new Error(typeof j.detail === 'string' ? j.detail : t('tg.login_failed', { status: r.status }))
   return j
 }
 
@@ -57,7 +58,7 @@ export async function tgBoot() {
   const data = initData()
   if (!data) {
     // открыт в Telegram, но не как приложение бота (ссылкой): initData не будет — вход невозможен, Gate объяснит
-    if (/tgWebAppPlatform|tgWebAppVersion/.test(location.hash)) console.warn('Telegram открыл сайт без initData — открывайте кнопкой бота, а не ссылкой')
+    if (/tgWebAppPlatform|tgWebAppVersion/.test(location.hash)) console.warn(t('tg.no_initdata'))
     return tg
   }
   tg.active = true
