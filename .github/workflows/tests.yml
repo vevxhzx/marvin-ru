@@ -10,6 +10,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Минимальные права: токену workflow не нужно ничего, кроме чтения репозитория.
+# Секреты (GEMINI_API_KEY и прочие) в этом workflow не используются и не выводятся —
+# тесты работают офлайн, ASSISTANT_TEST=1 (tests/conftest.py).
+permissions:
+  contents: read
+
 jobs:
   python:
     name: pytest (Python ${{ matrix.python }})

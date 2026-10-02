@@ -5,7 +5,7 @@
   * `PRAGMA busy_timeout` выставлен, «запертая» база не убивает процесс;
   * в логах (data/server.log, data/voice.log) нет ключей и токенов;
   * нет `time.sleep` в async-роутах, есть (находка) блокирующий I/O в async-роутах;
-  * на размер тела запроса нет лимита (находка).
+  * лимит размера тела запроса есть (раньше была находка «нет лимита» — закрыта, 413 из middleware).
 
 Тесты с пометкой xfail фиксируют НАЙДЕННУЮ проблему: падают до исправления,
 при исправлении дают XPASS (надо переписать тест и убрать находку из отчёта).
@@ -184,13 +184,14 @@ def test_finance_import_does_not_block_event_loop():
     assert not _inspect.iscoroutinefunction(finance.finance_import)
 
 
-@pytest.mark.xfail(reason="FINDING P2: на тело запроса нет лимита — 8 МБ JSON читаются в память целиком, "
-                          "только после этого падает валидация (422), а не 413", strict=False)
+# FINDING P2 закрыт: глобальная проверка Content-Length (core/api/app.py::BodyLimitMiddleware) —
+# слишком большое тело отклоняется сразу (413 с JSON), а не после чтения в память.
 def test_request_body_size_is_limited():
     c = _client()
     body = b'{"title":"' + b"a" * (8 * 1024 * 1024) + b'"}'
     r = c.post("/api/tasks", content=body, headers={"content-type": "application/json"}, timeout=60)
     assert r.status_code == 413
+    assert r.json()["detail"]  # понятный JSON, а не пустой/HTML-ответ
 
 
 def test_large_but_valid_request_is_handled():

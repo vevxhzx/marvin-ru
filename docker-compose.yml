@@ -8,6 +8,10 @@ services:
     build: .
     container_name: assistant
     restart: unless-stopped
+    # ⚠ Порт публикуется на 0.0.0.0 — ядро слушает всю сеть, чтобы сайт открывался с телефона.
+    # Снаружи (с чужого устройства) без ключа из ⚙ Настроек → «с телефона» ничего не отдаётся:
+    # см. core/api/auth.py (AuthMiddleware). Если порт пробрасывается наружу (роутер/VPS),
+    # дополнительно ограничьте его правилами файрвола — ключ хранится на ПК и в QR-ссылке.
     ports:
       - "8765:8765"
     volumes:
@@ -16,6 +20,9 @@ services:
     environment:
       - TZ=Europe/Moscow
       - OLLAMA_URL=http://ollama:11434
+    # Минимальные права: процесс не может повысить привилегии (никаких setuid внутри).
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - ollama
 

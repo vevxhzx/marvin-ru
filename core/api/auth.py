@@ -38,8 +38,16 @@ QUERY = "t"
 PUBLIC_PREFIXES = ("/assets/", "/icon-", "/apple-touch-icon", "/favicon")
 PUBLIC_EXACT = {"/api/health", "/manifest.json", "/api/google/callback", "/sw.js", "/robots.txt", "/api/tg/login"}
 # только с самого компьютера, даже с токеном: мастер первого запуска и его API (пишут config.yaml, перезапускают процесс),
-# ссылки/QR с мастер-ключом (/api/phone)
-LOCAL_ONLY_PREFIXES = ("/api/setup/", "/setup", "/api/phone")
+# ссылки/QR с мастер-ключом (/api/phone), бэкапы целиком (список, копии config.yaml с ключами,
+# скачивание снимка базы /api/backups/…/download — там вся база: деньги, письма, ключи) и
+# восстановление базы из бэкапа (подменяет data/jarvis.db целиком).
+# ВАЖНО: префиксы без завершающего слэша не ловят подпути — /api/backups/… и /api/backups
+# должны быть в списке ОБА (иначе список бэкапов читается с телефона по ключу).
+LOCAL_ONLY_PREFIXES = ("/api/setup/", "/setup", "/api/phone", "/api/backups")
+# подмножество локальных маршрутов, которые закрываем ЕЩЁ ДО проверки ключа: без ключа снаружи — сразу 403,
+# чтобы по ответу не было видно, что за маршрутом что-то есть. Остальные (бэкапы) сначала спрашивают ключ
+# (401, как у всех чувствительных /api), и только потом — «только с этого компьютера» (403 с ключом снаружи)
+LOCAL_ONLY_EARLY_PREFIXES = ("/api/setup/", "/setup", "/api/phone")
 # признаки обратного прокси: если они есть, реальный клиент — не loopback, даже если TCP-соединение с 127.0.0.1
 PROXY_HEADERS = ("x-forwarded-for", "x-forwarded-proto", "x-forwarded-host", "forwarded", "x-real-ip")
 # откуда браузеру можно слать запросы к API (Origin): сам сайт (тот же host) + dev-сервер Vite
@@ -191,12 +199,17 @@ class AuthMiddleware(BaseHTTPMiddleware):
             if not _origin_ok(request):
                 log.warning("Отказано %s %s: чужой Origin %r (CSRF?)", request.method, path, request.headers.get("origin"))
                 return JSONResponse({"detail": "Запрос с чужого сайта отклонён"}, status_code=403)
-        if path.startswith(LOCAL_ONLY_PREFIXES) and not is_local(request):
+        if path.startswith(LOCAL_ONLY_EARLY_PREFIXES) and not is_local(request):
+            # мастер/ссылки с ключом: 403 даже без ключа — не подтверждаем, что за маршрутом есть что-то
             return JSONResponse({"detail": "Это действие доступно только с самого компьютера"}, status_code=403)
         if not _is_public(path) and not is_authorized(request):
             src = request.headers.get("x-forwarded-for", "").split(",")[0].strip() or (request.client.host if request.client else "?")
             log.warning("Отказано %s %s с %s%s (нет ключа)", request.method, path, src, " через прокси" if behind_proxy(request) else "")
             return JSONResponse({"detail": "Нет доступа. Откройте сайт по ссылке/QR из ⚙ Настроек → «с телефона»."}, status_code=401)
+        # остальные «только с этого компьютера» маршруты (восстановление бэкапа) — после ключа:
+        # снаружи без ключа это обычный 401, а с ключом — 403: выполнять с другого устройства нельзя
+        if path.startswith(LOCAL_ONLY_PREFIXES) and not is_local(request):
+            return JSONResponse({"detail": "Это действие доступно только с самого компьютера"}, status_code=403)
         response = await call_next(request)
         # первый заход с телефона по ссылке с ?t=… → запоминаем в cookie и убираем токен из адресной строки
         q = request.query_params.get(QUERY)

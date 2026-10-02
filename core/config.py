@@ -82,6 +82,25 @@ def _load() -> _Node:
     env_gemini = os.getenv("GEMINI_API_KEY")
     if env_gemini:
         raw.setdefault("brain", {}).setdefault("gemini", {})["api_key"] = env_gemini
+    # Секреты из окружения: переменная всегда важнее config.yaml (значения не логируем и не печатаем).
+    # Подхватываются и из .env — его читает _load_env_file() до загрузки конфига; см. .env.example.
+    env_cloud = os.getenv("CLOUD_API_KEY")
+    if env_cloud:
+        raw.setdefault("brain", {}).setdefault("cloud", {})["api_key"] = env_cloud
+    env_gsecret = os.getenv("GOOGLE_CLIENT_SECRET")
+    if env_gsecret:
+        raw.setdefault("google", {})["client_secret"] = env_gsecret
+    env_gid = os.getenv("GOOGLE_CLIENT_ID")
+    if env_gid:
+        raw.setdefault("google", {})["client_id"] = env_gid
+    env_api = os.getenv("ASSISTANT_API_TOKEN") or os.getenv("JARVIS_API_TOKEN")
+    if env_api:
+        # ключ доступа к ядру с другой машины (config.yaml: voice.pc.api_token, см. voice_client.py)
+        raw.setdefault("voice", {}).setdefault("pc", {})["api_token"] = env_api
+    # Обезличивание текста перед отправкой в облако — ВКЛЮЧЕНО по умолчанию: личные данные не должны
+    # уходить открытым текстом из-за того, что ключа нет в config.yaml (setdefault не перезаписывает —
+    # явное `brain.gemini.anonymize: false` в файле остаётся в силе). Подробнее — core/brain/llm.py.
+    raw.setdefault("brain", {}).setdefault("gemini", {}).setdefault("anonymize", True)
     return _Node(raw)
 
 
@@ -197,6 +216,11 @@ def _get_path(raw: dict, path: str, default=None):
     return cur
 
 
+# Значения по умолчанию для ключей, которых может не быть в config.yaml: read_settings показывает
+# именно то, что реально действует (иначе UI показывал бы выключенным включённое по умолчанию).
+SETTINGS_DEFAULTS = {"brain.gemini.anonymize": True}
+
+
 def read_settings() -> dict:
     """Текущие значения редактируемых ключей (секреты маскируются)."""
     src = _config_src()
@@ -204,12 +228,16 @@ def read_settings() -> dict:
         raw = yaml.safe_load(f) or {}
     out = []
     for key, (typ, label, secret) in EDITABLE.items():
-        val = _get_path(raw, key, "" if typ == "str" else (0 if typ == "int" else False))
+        fallback = SETTINGS_DEFAULTS.get(key, "" if typ == "str" else (0 if typ == "int" else False))
+        val = _get_path(raw, key, fallback)
         if val is None:
             val = ""
         shown = val
-        if secret and val:
-            shown = str(val)[:4] + "…" + str(val)[-3:] if len(str(val)) > 8 else "•••"
+        if secret:
+            # Секрет (API-ключ/токен) наружу не показываем вообще — ни его кусок, ни длину: раньше
+            # здесь отдавались первые 4 и последние 3 символа, а 7 символов ключа — это уже помощь
+            # перебору. Состояние видно по полю `set`: «задан» / «не задан» (так же его показывает UI).
+            shown = "задан" if val else "не задан"
         out.append({"key": key, "type": typ, "label": label, "secret": secret, "value": shown, "set": bool(val)})
     return {"file": str(src), "exists": _config_file().exists(), "items": out}
 
@@ -237,8 +265,10 @@ def write_settings(changes: dict[str, object]) -> list[str]:
         if key not in EDITABLE:
             continue
         typ, _, secret = EDITABLE[key]
-        if secret and (val is None or (isinstance(val, str) and ("…" in val or val.strip() in ("", "•••")))):
-            continue  # маска/пусто для секрета — не трогаем
+        # маска секрета («задан»/«не задан», старые маски с «…» и «•••») или пусто — не трогаем,
+        # иначе фронт, отправляющий то, что получил, затёр бы настоящий ключ
+        if secret and (val is None or (isinstance(val, str) and ("…" in val or val.strip().lower() in ("", "•••", "задан", "не задан")))):
+            continue
         if typ == "int":
             try:
                 val = int(str(val).strip() or 0)

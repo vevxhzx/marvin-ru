@@ -23,7 +23,8 @@ Telegram открывает сайт во встроенном браузере 
 - Мастер настройки (/setup) и /api/phone (ссылки с мастер-ключом) для внешних клиентов закрыты всегда — даже
   с валидной Telegram-сессией: это операции «с самого компьютера».
 - Брутфорс: провальные попытки логина по IP ограничены (TG_LOGIN_BURST за TG_LOGIN_WINDOW секунд), каждая
-  пишется в лог без секретов.
+  пишется в лог без секретов. Ключ лимита — реальный адрес соединения; X-Forwarded-For берётся только от
+  прокси на этом же ПК, иначе подстановкой заголовка лимит обходился.
 
 Ничего из этого не требует внешних библиотек: hmac, hashlib, json, time из стандартной библиотеки.
 """
@@ -31,6 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import logging
 import secrets
@@ -160,23 +162,48 @@ def session_from(request: Request) -> bool:
 
 
 # ------------------------------------------------------------------ защита от перебора
+def _peer_is_loopback(request: Request) -> bool:
+    """Соединение открыто с самого ПК: именно там стоит обратный прокси (Funnel/uvicorn)."""
+    host = (request.client.host if request.client else "") or ""
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return host in ("localhost", "testclient")
+
+
 def _client_key(request: Request) -> str:
+    """Ключ лимита попыток — адрес клиента. X-Forwarded-For берём ТОЛЬКО когда соединение
+    открыто с этого же ПК: там и стоит обратный прокси, ему заголовок доверен. Иначе любой
+    мог бы подставить чужой XFF и получить неограниченное число новых «слотов» под перебор.
+    Грязный XFF при этом не создаёт и собственных ключей: считается реальный адрес TCP-ровесника."""
+    host = (request.client.host if request.client else "") or "?"
     xff = request.headers.get("x-forwarded-for", "")
-    if xff:
-        return xff.split(",")[0].strip()[:64]
-    return (request.client.host if request.client else "?")[:64]
+    if xff and _peer_is_loopback(request):
+        return (xff.split(",")[0].strip() or host)[:64]
+    return host[:64]
+
+
+def _prune(ts: float) -> None:
+    """Выбросить попытки старше окна и опустевшие ключи — иначе `_fails` растёт памятью
+    (пустые слоты заводились на каждый заход, даже если логин не проваливался)."""
+    for key in list(_fails):
+        q = _fails[key]
+        while q and ts - q[0] > TG_LOGIN_WINDOW:
+            q.popleft()
+        if not q:
+            _fails.pop(key, None)
 
 
 def login_allowed(request: Request, now: float | None = None) -> bool:
     ts = now if now is not None else time.time()
-    q = _fails[_client_key(request)]
-    while q and ts - q[0] > TG_LOGIN_WINDOW:
-        q.popleft()
-    return len(q) < TG_LOGIN_BURST
+    _prune(ts)
+    q = _fails.get(_client_key(request))   # .get: безуспешный заход не должен плодить пустые ключи
+    return q is None or len(q) < TG_LOGIN_BURST
 
 
 def login_failed(request: Request, reason: str, now: float | None = None) -> None:
     ts = now if now is not None else time.time()
+    _prune(ts)
     key = _client_key(request)
     _fails[key].append(ts)
     log.warning("Вход через Telegram отклонён (%s): %s", key, reason)

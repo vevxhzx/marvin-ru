@@ -16,10 +16,17 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg curl && rm -rf /var/lib/apt/lists/*
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+# ВАЖНО: .dockerignore закрывает config.yaml, .env, data/, backups/ и *.db — иначе `COPY . .`
+# положил бы в образ копии ключей и снимки базы (см. .dockerignore).
 COPY . .
 COPY --from=web /web/site ./web/site
 RUN chmod +x docker-entrypoint.sh
 VOLUME ["/app/data"]
+# Процесс идёт от root. Отказ от root потребовал бы согласовать владельца для bind-mount
+# ./data и ./config.yaml из docker-compose.yml: на Windows/Docker Desktop и на хосте с
+# rootless-Docker права не совпадут и контейнер перестанет писать базу — это ломает текущий
+# запуск, поэтому здесь не делается (см. PROGRESS.md). Закрыто тем, что наружу смотрит
+# только порт 8765, а данные за ним — только с ключом (core/api/auth.py).
 EXPOSE 8765
 HEALTHCHECK --interval=30s --timeout=5s CMD curl -fs http://127.0.0.1:8765/api/health || exit 1
 ENTRYPOINT ["./docker-entrypoint.sh"]

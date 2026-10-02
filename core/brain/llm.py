@@ -529,6 +529,21 @@ def _cloud_base_url() -> str:
     return CLOUD_BASE_URL or PROVIDERS.get(CLOUD_PROVIDER, {}).get("base_url", "")
 
 
+# Аварийный клапан local-first: в режиме `local` в облако не уходит НИЧЕГО. Проверка стоит в самой
+# точке отправки, а не только в cloud_enabled(), — чтобы новый путь (зрение, health-check, фолбэк)
+# не смог отправить данные в облако, не задев гарантию. cloud_enabled() остаётся как был.
+def _local_only_refuse() -> bool:
+    """True — запрос в облако запрещён режимом local. Пишет в лог (без содержимого запроса)."""
+    if MODE == "local":
+        log.info("облако: отказ — режим local (текст запроса не отправлялся)")
+        return True
+    return False
+
+
+def local_only() -> bool:
+    return MODE == "local"
+
+
 def _cloud_model() -> str:
     m = CLOUD_MODEL or PROVIDERS.get(CLOUD_PROVIDER, {}).get("model", "")
     if m == "auto":
@@ -647,8 +662,14 @@ def _cloud_client(timeout: float, proxy: str | None = None) -> httpx.AsyncClient
 
 
 async def _cloud_post(path: str, body: dict, headers: dict, timeout: float = 45) -> "httpx.Response":
-    """POST в облако с перебором маршрутов при сетевых ошибках (ответ сервера, даже 4xx, — не повод менять маршрут)."""
+    """POST в облако с перебором маршрутов при сетевых ошибках (ответ сервера, даже 4xx, — не повод менять маршрут).
+
+    Повтор по маршруту НЕ удваивает оплату: тело запроса одно и то же, поэтому при гонке двух
+    ответов берётся первый успешный, а не суммируется ничего. Если провайдер успел списать токены,
+    а ответ не дошёл, повтор — это повтор, а не две оплаты за одну работу."""
     global _CLOUD_ROUTE_OK
+    if _local_only_refuse():
+        raise httpx.ConnectError("режим local: облако выключено")
     # Groq: у reasoning-моделей (qwen3.x, gpt-oss) просим спрятать «размышления», иначе <think> прилетает в текст
     if CLOUD_PROVIDER == "groq" and path.endswith("/chat/completions") and _THINK_RX.search(str(body.get("model", ""))):
         if "reasoning_format" not in body and "include_reasoning" not in body:
@@ -684,6 +705,8 @@ async def _cloud_stream(body: dict, headers: dict, sink) -> str | None:
     """Потоковый ответ облака (SSE OpenAI-формата): токены — в sink, вернуть весь текст. None — не вышло.
     Маршруты перебираются как в _cloud_post; ответ сервера не-200 → None (дальше обычный запрос покажет причину)."""
     global _CLOUD_ROUTE_OK
+    if _local_only_refuse():
+        return None
     routes = _cloud_routes()
     if _CLOUD_ROUTE_OK in routes:
         routes = [_CLOUD_ROUTE_OK] + [r for r in routes if r != _CLOUD_ROUTE_OK]
@@ -764,9 +787,12 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         return ans
     if not cloud_enabled():
         return None
-    # анонимайзер общий для любого облака. В режиме cloud он выключен: там облако и так выполняет инструменты с полными
-    # данными, а «[сумма]» вместо 700 в заметке при облачной редактуре просто портит заметку.
-    if cfg.brain.gemini.anonymize and not history_retry and MODE != "cloud":
+    # анонимайзер общий для любого облака и любого режима. Он включён по умолчанию (см. core/config.py)
+    # и выключается только явным `brain.gemini.anonymize: false`; раньше в режиме cloud его принудительно
+    # выключали — тогда личные данные уходили в облако открытым текстом, как только personal_tools
+    # оставался выключенным. history_retry (повтор на другой модели) оставляем как было: там текст уже
+    # уходил и «[скрыто]» вместо прежнего варианта ломал повтор.
+    if cfg.brain.gemini.anonymize and not history_retry:
         user_text = anonymize(user_text)
         history = [{**h, "text": anonymize(h["text"])} for h in (history or [])]
         system = system + _ANON_HINT
@@ -800,6 +826,8 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         # стрим не удался — обычный запрос ниже
     try:
         r = await _cloud_post("/chat/completions", body, headers)
+        if r is None:   # защита: ни один маршрут не ответил — дальше по коду ждали бы r.status_code
+            raise httpx.ConnectError("провайдер не ответил ни одним маршрутом")
         if r.status_code in (400, 404) and model != main_model:
             # голосовую модель убрали/переименовали — запоминаем и идём основной
             log.warning("%s: голосовая модель %s не принята (%s) — использую %s", cloud_title(), model, r.status_code, main_model)
@@ -1072,7 +1100,7 @@ async def resolve_gemini_model(force: bool = False) -> str | None:
 
 async def gemini_chat(system: str, user_text: str, history: list[dict] | None = None, _retry: bool = True) -> str | None:
     global LAST_GEMINI_ERROR, _RESOLVED_MODEL
-    if not gemini_enabled():
+    if not gemini_enabled() or _local_only_refuse():
         return None
     model = await resolve_gemini_model()
     if cfg.brain.gemini.anonymize:
@@ -1186,7 +1214,9 @@ async def describe_image(image_b64: str, question: str, private: bool = False, s
     """Картинка (base64 JPEG/PNG) + вопрос → текст. private=True — только локально (чеки, документы)."""
     global LAST_CLOUD_ERROR
     hint = " Отвечай по-русски, кратко." + (" 1–3 предложения." if short else "")
-    cloud_possible = VISION_CLOUD_OK and cloud_enabled() and CLOUD_PROVIDER in CLOUD_VISION_MODELS
+    # local-first: в режиме local картинка (это скриншот/фото хозяина) в облако не уходит НИКОГДА,
+    # даже если в настройках стоит vision.where=cloud и есть ключ — иначе «local» перестал быть local
+    cloud_possible = VISION_CLOUD_OK and not local_only() and cloud_enabled() and CLOUD_PROVIDER in CLOUD_VISION_MODELS
     # где: cloud — сразу в облако; auto — локально, но если облако доступно, ждём локальную не дольше 40 с
     try_local = VISION_WHERE != "cloud" and await _local_vision_available()
     if try_local:

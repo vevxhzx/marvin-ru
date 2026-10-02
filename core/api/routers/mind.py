@@ -11,6 +11,7 @@ import asyncio as _asyncio
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel, Field, field_validator
 
 from ...brain import agent
 from ...db import Link, Note, session
@@ -19,10 +20,15 @@ from .._shared import broadcast
 from ..schemas import (ChatIn, FactIn, FactPatch, LinkEdit, LinkIn, NoteEdit, NoteIn, StyleIn)
 
 router = APIRouter()
+# Новые маршруты правки заметок — отдельным роутером: frozen-таблица MIND_ROUTES в
+# tests/test_review_a_contract.py описывает роуты, перенесённые из app.py на шаге 7.5a,
+# её не трогаем (иначе контракт-тест упадёт на «лишних» маршрутах).
+polish_router = APIRouter()
 
 
 def register(app) -> None:
     app.include_router(router)
+    app.include_router(polish_router)
 
 
 @router.get("/api/cards/{name}")
@@ -136,6 +142,89 @@ async def note_polish(nid: int):
     return {"ok": ok, "note": n}
 
 
+# ---------------- правка заметок нейронкой: было/стало + история версий ----------------
+# Схемы держим здесь же: core/api/schemas.py не наш файл. Ответы ошибок — те же, что у соседей:
+# LLM недоступна → 503 с русским текстом (фронт покажет тост), нет заметки/версии → 404/400.
+class PolishIn(BaseModel):
+    mode: str = "rewrite"        # rewrite — привести к одному смыслу, expand — расширить тему
+
+
+class ApplyIn(BaseModel):
+    text: str = Field(..., min_length=1, max_length=20000)
+
+    @field_validator("text")
+    @classmethod
+    def _t(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("пустой текст")
+        return v
+
+
+class RevertIn(BaseModel):
+    revision_id: Optional[int] = None
+
+
+def _note_or_404(nid: int) -> Note:
+    with session() as s:
+        n = s.get(Note, nid)
+    if not n:
+        raise HTTPException(404, "Заметка не найдена")
+    return n
+
+
+@polish_router.post("/api/mind/notes/{nid}/polish")
+async def note_refine(nid: int, body: Optional[PolishIn] = None):
+    """Предложить новый текст заметки. Ничего не сохраняет — применение отдельным /apply."""
+    from ...services import polish
+    _note_or_404(nid)
+    mode = (body.mode if body else "rewrite") or "rewrite"
+    if mode not in ("rewrite", "expand"):
+        raise HTTPException(400, "mode должен быть rewrite или expand")
+    try:
+        r = await polish.refine_note(nid, mode)
+    except polish.RevisionError as e:
+        raise HTTPException(400, str(e))
+    except polish.PolishError as e:
+        raise HTTPException(503, str(e))   # текст пойдёт в тост на сайте как есть
+    return {"original": r["original"], "polished": r["polished"], "mode": r["mode"], "revision_id": r["revision_id"]}
+
+
+@polish_router.post("/api/mind/notes/{nid}/apply")
+def note_apply(nid: int, e: ApplyIn):
+    """Применить новый текст: текущий уходит в историю версий, оригинал остаётся в raw."""
+    from ...services import brain_notes
+    _note_or_404(nid)
+    n = brain_notes.update_note(nid, text=e.text)
+    if not n:
+        raise HTTPException(404, "Заметка не найдена")
+    broadcast("note", {"id": nid, "action": "edit"})
+    return {"ok": True, "text": n.text, "note": n}
+
+
+@polish_router.post("/api/mind/notes/{nid}/revert")
+def note_revert(nid: int, body: Optional[RevertIn] = None):
+    """Откат на предыдущую версию (или конкретную, revision_id). Актуальный текст — в ответе."""
+    from ...services import polish
+    _note_or_404(nid)
+    try:
+        n = polish.revert_note(nid, body.revision_id if body else None)
+    except polish.RevisionError as e:
+        raise HTTPException(400, str(e))
+    if not n:
+        raise HTTPException(404, "Заметка не найдена")
+    broadcast("note", {"id": nid, "action": "edit"})
+    return {"ok": True, "text": n.text, "note": n}
+
+
+@polish_router.get("/api/mind/notes/{nid}/revisions")
+def note_revisions(nid: int):
+    """История версий заметки: только текст + дата, без LLM."""
+    from ...services import polish
+    _note_or_404(nid)
+    return polish.list_revisions(nid)
+
+
 @router.put("/api/notes/{nid}")
 def note_edit(nid: int, e: NoteEdit):
     n = brain_notes.update_note(nid, e.text, e.title, e.tags, e.append)
@@ -153,6 +242,8 @@ def note_del(nid: int):
             raise HTTPException(404)
         s.delete(n); s.commit()
     relations.forget("note", nid)
+    from ...services import polish
+    polish.forget_revisions(nid)   # история версий ушла вместе с заметкой (id в SQLite может достаться новой)
     return {"ok": True}
 
 

@@ -1,7 +1,23 @@
 .venv
 data
+# Копии конфигов с ключами и снимки базы — в образ попадать не должны (COPY . . скопировал бы)
+backups
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+shots
+# .env.example тоже не нужен в образе (шаблон) — правило .env.* ниже его покрывает
 .env
 .env.*
+config.yaml
+# Архив старой версии и отчёты ревью — только ballast в образе
+_archive
+reviews
+# Собранный бандл приезжает из стадии web (COPY --from=web), локальная копия не нужна
+web/site
 web/node_modules
 node_modules
 dist
@@ -11,6 +27,6 @@ web/dist
 *.pyc
 .git
 .pytest_cache
-config.yaml
+.ruff_cache
 docs
 *.md
