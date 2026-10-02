@@ -8,7 +8,9 @@ from __future__ import annotations
 import asyncio
 import os
 import logging
+import re
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 # запасные чистые python-пакеты (socksio для socks-прокси) — работают даже без pip
@@ -18,15 +20,70 @@ if _vendor.exists() and str(_vendor) not in sys.path:
 
 import uvicorn
 
-from core.config import cfg
+from core.config import cfg, DATA_DIR
 from core import identity
 from core.db import init_db
 from core.services import scheduler
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S")
+# ---------------- логи процесса: консоль + data/core.log с ротацией (5 МБ × 5 копий)
+_LOG_FILE = DATA_DIR / "core.log"
+_LOG_FMT = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+_SECRET_RX = re.compile(r"([?&](?:t|token|key|api_key)=)[^&\s\"']+", re.I)
+
+
+class _SecretsFilter(logging.Filter):
+    """Маскирует ключи в query (?t=…): access-лог uvicorn пишет URL целиком, а ссылка с ключом —
+    это сессия владельца. Ставится на хендлеры, поэтому фильтруется и консоль, и файл."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            if isinstance(record.msg, str):
+                record.msg = _SECRET_RX.sub(r"\1***", record.msg)
+            args = record.args
+            if isinstance(args, tuple):
+                record.args = tuple(_SECRET_RX.sub(r"\1***", a) if isinstance(a, str) else a for a in args)
+            elif isinstance(args, dict):
+                record.args = {k: (_SECRET_RX.sub(r"\1***", v) if isinstance(v, str) else v)
+                               for k, v in args.items()}
+            elif isinstance(args, str):
+                record.args = _SECRET_RX.sub(r"\1***", args)
+        except Exception:  # pragma: no cover — маскировка не должна ломать запись лога
+            # здесь pass оправдан: любая ошибка маскировки не должна помешать записи лога;
+            # сообщение отослать нельзя — писать в тот же сломанный лог
+            return True
+        return True
+
+
+def _log_handler(h: logging.Handler) -> logging.Handler:
+    h.setFormatter(logging.Formatter(_LOG_FMT, datefmt="%H:%M:%S"))
+    h.addFilter(_SecretsFilter())
+    return h
+
+
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    level=logging.INFO,
+    handlers=[
+        _log_handler(logging.StreamHandler(sys.stdout)),
+        _log_handler(RotatingFileHandler(
+            _LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8", delay=True)),
+    ],
+)
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
 log = logging.getLogger("jarvis")
+
+# access-логи uvicorn — в тот же файл: раньше log_level="warning" глушил их полностью (запросы не писались).
+# Хендлеры у uvicorn-логгеров свои не ставим — только propagate в корень, где ротация и фильтр от секретов.
+_UVICORN_LOG_CONFIG = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "loggers": {
+        "uvicorn": {"level": "INFO", "handlers": [], "propagate": True},
+        "uvicorn.error": {"level": "INFO", "handlers": [], "propagate": True},
+        "uvicorn.access": {"level": "INFO", "handlers": [], "propagate": True},
+    },
+}
 
 def _instance_label() -> str:
     """Чем эта копия отличается от «главной»: имя папки + порт. Вторая копия («jarvis-mama», 8766) — видно в заголовке окна,
@@ -47,8 +104,9 @@ def _set_console_title(label: str) -> None:
             ctypes.windll.kernel32.SetConsoleTitleW(title)
         else:
             sys.stdout.write(f"\033]0;{title}\007"); sys.stdout.flush()
-    except Exception:
-        pass
+    except Exception as e:
+        # украшение окна, а не функция ядра: падать из-за него нельзя — пишем в лог
+        log.debug("заголовок окна не установлен: %s", e)
 
 
 def _banner() -> str:
@@ -165,7 +223,8 @@ async def main(with_tg: bool) -> None:
         probe.close()
 
     from core.api.app import app
-    config = uvicorn.Config(app, host=cfg.server.host, port=int(cfg.server.port), log_level="warning")
+    config = uvicorn.Config(app, host=cfg.server.host, port=int(cfg.server.port),
+                            log_level="info", log_config=_UVICORN_LOG_CONFIG)
     server = uvicorn.Server(config)
     from core.config import ROOT
     if (ROOT / "web" / "site" / "index.html").exists() or (ROOT / "web" / "dist" / "index.html").exists():
@@ -194,13 +253,35 @@ async def main(with_tg: bool) -> None:
     try:
         await asyncio.gather(*tasks)
     finally:
+        # Аккуратная остановка (Ctrl+C, сигнал завершения, падение сервера):
+        # 1) гасим планировщик — новые задачи больше не запускаются;
+        # 2) отменяем текущие и ждём их (asyncio.to_thread не отменяется — поток доработает сам,
+        #    поэтому ждём недолго, чтобы окно закрывалось сразу, а не «висит до конца бэкапа»);
+        # 3) гасим состояние присутствия и сессию Telegram.
+        # Раньше здесь был sch.shutdown(wait=False) без отмены задач: они могли ещё работать,
+        # когда процесс уже закрывал базу, и держали файл data/jarvis.db.
+        _shutdown_timeout = float(os.getenv("JARVIS_SHUTDOWN_TIMEOUT", "8"))
+        try:
+            sch.shutdown(wait=False)
+        except Exception as e:  # pragma: no cover
+            log.debug("scheduler shutdown: %s", e)
+        for t in tasks:
+            if not t.done():
+                t.cancel()
+        if tasks:
+            _done, pending = await asyncio.wait(tasks, timeout=_shutdown_timeout)
+            for _t in pending:
+                log.warning("задача не завершилась за %.0f с — закрываемся без неё", _shutdown_timeout)
         try:
             _state.shutdown()
         except Exception as e:  # pragma: no cover
             log.debug("state shutdown: %s", e)
-        sch.shutdown(wait=False)
         if bot:
-            await bot.session.close()
+            try:
+                await asyncio.wait_for(bot.session.close(), timeout=3)
+            except Exception as e:  # pragma: no cover
+                log.debug("telegram session close: %s", e)
+        log.info("Останавливаюсь. До связи.")
 
 
 if __name__ == "__main__":
@@ -210,8 +291,8 @@ if __name__ == "__main__":
         os.system("chcp 65001 >nul")
         try:
             sys.stdout.reconfigure(encoding="utf-8")
-        except Exception:
-            pass
+        except Exception as e:  # перекодировка нужна для русских строк в консоли, но не критична
+            logging.getLogger("jarvis").debug("stdout не перекодирован в utf-8: %s", e)
         loop_factory = asyncio.SelectorEventLoop  # стабильнее для сетевых библиотек на Windows
     try:
         with asyncio.Runner(loop_factory=loop_factory) as runner:

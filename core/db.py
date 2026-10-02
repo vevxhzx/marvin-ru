@@ -1,15 +1,20 @@
 """Одна база данных (SQLite) для всего: календарь, задачи, финансы, заметки, память."""
 from __future__ import annotations
 
+import copy
+import logging
 import os
+import time
 from contextlib import contextmanager
 from datetime import datetime
-from typing import Iterator, Optional
+from typing import Any, Callable, Iterator, Optional
 
 from sqlalchemy import event
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
-from .config import DB_PATH
+from .config import DB_PATH, cfg
+
+log = logging.getLogger("jarvis.db")
 
 
 def now() -> datetime:
@@ -50,7 +55,7 @@ class Task(SQLModel, table=True):
     title: str
     done: bool = Field(default=False, index=True)
     priority: int = 2                  # 1 высокий, 2 обычный, 3 низкий
-    due: Optional[datetime] = None
+    due: Optional[datetime] = Field(default=None, index=True)   # «что на сегодня / просрочено» (составной индекс done+due — v4)
     project: Optional[str] = None
     source: str = "tg"
     remind_stage: int = 0              # 0 — не напоминали, 1 — утром в день дедлайна, 2 — за час
@@ -119,7 +124,7 @@ class Transaction(SQLModel, table=True):
     amount: float                      # всегда положительное
     kind: str = Field(index=True)      # expense / income / transfer
     category: Optional[str] = Field(default=None, index=True)
-    account: Optional[str] = None
+    account: Optional[str] = Field(default=None, index=True)   # фильтр «по счёту» (вместе с датой — составной индекс v4)
     to_account: Optional[str] = None   # для переводов
     note: Optional[str] = None
     date: datetime = Field(default_factory=now, index=True)
@@ -330,7 +335,7 @@ class SchemaVersion(SQLModel, table=True):
 class ActionLog(SQLModel, table=True):
     """Что Джарвис сделал по команде — чтобы «отмени» работало для чего угодно и переживало перезапуск."""
     id: Optional[int] = Field(default=None, primary_key=True)
-    kind: str                          # add_event / add_task / add_expense / add_income / add_debt / add_note / add_link / add_recurring / pay_debt
+    kind: str = Field(index=True)      # add_event / add_task / add_expense / add_income / add_debt / add_note / add_link / add_recurring / pay_debt
     ref_table: str
     ref_id: int
     title: str = ""
@@ -485,17 +490,103 @@ class ChatMessage(SQLModel, table=True):
 # ---------- Движок ----------
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 
+# Счётчик записей в базу. Любой INSERT/UPDATE/DELETE/REPLACE (в т.ч. из соседнего потока и из
+# чужого движка SQLAlchemy) увеличивает его — на этом стоит инвалидация кэшей (см. cached()).
+_write_stamp = 0
+_WRITE_HEADS = ("INSERT", "UPDATE", "DELETE", "REPLAC")
+
+
+def write_stamp() -> int:
+    """Сколько раз в базу что-то записывали с начала процесса (0 — ещё ни разу)."""
+    return _write_stamp
+
+
+def _trace_write(stmt: str) -> None:
+    global _write_stamp
+    s = (stmt or "").lstrip()
+    if s[:7].upper().startswith(_WRITE_HEADS):
+        _write_stamp += 1
+
 
 @event.listens_for(engine, "connect")
 def _pragmas(dbapi_conn, _):
     cur = dbapi_conn.cursor()
     cur.execute("PRAGMA journal_mode=WAL")
+    # NORMAL — рекомендуемый режим для WAL: журнал сбрасывается раз в секунду (не на каждую запись),
+    # поэтому записи в разы дешевле; на питание это влияет только при внезапном отключении ПК
+    cur.execute("PRAGMA synchronous=NORMAL")
     # busy_timeout: если файл БД займёт другой процесс (пульс ПК, бэкап), ждём до 5 с, а не падаем «database is locked»
     cur.execute("PRAGMA busy_timeout=5000")
     cur.execute("PRAGMA foreign_keys=ON")
+    # Сортировки и группировки (ORDER BY по 4 колонкам в списке задач, отчёты по месяцам) SQLite
+    # складывает во временный файл на диске; в памяти это заметно быстрее, а объём ограничен запросом.
+    cur.execute("PRAGMA temp_store=MEMORY")
+    # Страничный кэш 8 МБ вместо дефолтных 2 МБ: база маленькая и целиком помещается,
+    # повторные прогоны аналитики (дашборд, прогноз) перестают ходить в файл.
+    cur.execute("PRAGMA cache_size=-8000")
     cur.close()
     # SQLite не умеет lower() для кириллицы — добавляем свою функцию
     dbapi_conn.create_function("ulower", 1, lambda v: v.lower() if isinstance(v, str) else v)
+    # Видим каждую выполненную инструкцию → считаем записи (нужно кэшам, см. cached()).
+    # Ставится здесь, а не через event на движке, чтобы работало и на движках из фикстур тестов
+    # (везде подключают именно db._pragmas).
+    try:
+        dbapi_conn.set_trace_callback(_trace_write)
+    except Exception:  # pragma: no cover — старый sqlite3 без трассировки: кэши просто не гасятся по записи
+        log.debug("set_trace_callback недоступен — кэши будут жить до TTL")
+
+
+# ---------- короткоживущий кэш тяжёлой аналитики ----------
+# Идея: прогноз кассы/сводка/ряд считаются по всей базе (десятки запросов), а страница
+# просит их по several раз подряд (дашборд + прогноз + текст). Кэш живёт секунды и НЕ может
+# устареть по содержимому: любая запись в базу поднимает _write_stamp и обнуляет все записи,
+# поэтому «добавил трату → прогноз сразу новый». TTL — страховка на случай правки из другого
+# процесса. Время жизни настраивается: performance.cache_ttl_sec в config.yaml (0 — выключить).
+CACHE_TTL_DEFAULT = 5.0
+CACHE_MAX_ENTRIES = 96
+_caches: dict[tuple[str, str], tuple[int, float, Any]] = {}
+
+
+def cache_ttl() -> float:
+    """TTL кэша в секундах: performance.cache_ttl_sec (по умолчанию 5, 0 — кэш выключен)."""
+    node = cfg.get("performance")
+    raw = node.get("cache_ttl_sec", CACHE_TTL_DEFAULT) if node is not None else CACHE_TTL_DEFAULT
+    try:
+        return max(0.0, min(60.0, float(raw)))
+    except (TypeError, ValueError):
+        return CACHE_TTL_DEFAULT
+
+
+def _db_key() -> str:
+    return str(getattr(engine, "url", ""))
+
+
+def cached(key: str, build: Callable[[], Any], ttl: float | None = None) -> Any:
+    """`build()` — но не чаще, чем раз в TTL секунд и только пока база не менялась.
+
+    Наружу отдаётся глубокая копия: кэш общий, а вызывающий вправе править полученный словарь
+    (так делает, например, /api/finance/forecast). Копия прогноза — доли миллисекунды против
+    двадцати с лишними запросами.
+    """
+    life = cache_ttl() if ttl is None else ttl
+    if life <= 0:
+        return build()
+    k = (key, _db_key())
+    now = time.monotonic()
+    hit = _caches.get(k)
+    if hit is not None and hit[0] == _write_stamp and hit[1] > now:
+        return copy.deepcopy(hit[2])
+    val = build()
+    if len(_caches) >= CACHE_MAX_ENTRIES:
+        for k2 in [kk for kk, vv in _caches.items() if vv[1] <= now or vv[0] != _write_stamp]:
+            _caches.pop(k2, None)
+    _caches[k] = (_write_stamp, now + life, val)
+    return copy.deepcopy(val)
+
+
+def clear_caches() -> None:
+    """Сбросить все кэши (например, после восстановления БД из бэкапа)."""
+    _caches.clear()
 
 
 def icontains(column, query: str):
@@ -525,26 +616,149 @@ DEFAULT_BUCKETS = {"Еда": "need", "Транспорт": "need", "Жильё":
                    "Подписки": "want", "Развлечения": "want", "Одежда": "want", "Техника": "want", "Другое": "want"}
 
 
+# Legacy-колонки, которые дорабатывает _migrate() в старых базах. Вынесено наверх, чтобы
+# init_db мог ДО первой правки спросить «есть ли что менять» — и только тогда снимать бэкап.
+_LEGACY_COLUMNS: dict[str, dict[str, str]] = {
+    "board": {"revision": "INTEGER DEFAULT 0", "last_sync": "VARCHAR DEFAULT '{}'"},
+    "note": {"title": "VARCHAR", "raw": "VARCHAR", "polished": "BOOLEAN DEFAULT 0", "image": "VARCHAR"},
+    "link": {"polished": "BOOLEAN DEFAULT 0", "summary": "VARCHAR", "excerpt": "VARCHAR"},
+    "transaction": {"debt_id": "INTEGER", "order_id": "INTEGER", "goal_id": "INTEGER"},
+    "category": {"budget": "FLOAT DEFAULT 0", "custom": "BOOLEAN DEFAULT 0", "bucket": "VARCHAR DEFAULT ''"},
+    "event": {"repeat": "VARCHAR DEFAULT ''", "repeat_days": "VARCHAR DEFAULT ''", "repeat_until": "DATETIME",
+              "skip_dates": "VARCHAR DEFAULT ''", "reminded_for": "VARCHAR DEFAULT ''",
+              "done": "BOOLEAN DEFAULT 0", "done_at": "DATETIME", "done_dates": "VARCHAR DEFAULT ''",
+              "task_id": "INTEGER", "order_id": "INTEGER"},
+    "task": {"remind_stage": "INTEGER DEFAULT 0", "aim_id": "INTEGER", "milestone_id": "INTEGER", "blocked_by": "VARCHAR DEFAULT ''"},
+    "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''",
+               "pay_mode": "VARCHAR DEFAULT 'each'", "pay_every": "INTEGER DEFAULT 14", "pay_days": "VARCHAR DEFAULT ''"},
+}
+
+
+def _legacy_pending() -> bool:
+    """Есть ли в старой базе таблица, которой не хватает legacy-колонок (см. _LEGACY_COLUMNS)."""
+    from sqlalchemy import inspect
+    insp = inspect(engine)
+    tables = set(insp.get_table_names())
+    for table, cols in _LEGACY_COLUMNS.items():
+        if table not in tables:
+            continue
+        have = {c["name"] for c in insp.get_columns(table)}
+        if set(cols) - have:
+            return True
+    return False
+
+
+def _schema_change_pending() -> bool:
+    """Схему действительно предстоит менять (недостающие миграции ИЛИ legacy-колонки)?
+
+    Нужно для порядка в init_db: бэкап снимается ДО первого изменения схемы и только когда
+    есть что менять — иначе каждый перезапуск плодил бы копии в backups/."""
+    from . import migrations
+    register_perf_indexes()
+    try:
+        if migrations.current_version(engine) < max(v for v, _, _ in migrations.MIGRATIONS):
+            return True
+    except Exception as e:
+        log.warning("версию схемы прочитать не удалось (%s) — считаем, что изменения есть", e)
+        return True
+    return _legacy_pending()
+
+
+# ---------- миграция v7: индексы под реальные запросы ----------
+# Почему отдельная миграция, а не Field(index=True) в моделях: индекс из Field(index=True)
+# создаётся только при CREATE TABLE. Колонки, добавленные в уже существующую базу
+# (_migrate и миграции v2/v3), остались без индексов — например у transaction.order_id,
+# из-за чего «оплаты по заказу» сканировали всю таблицу, а у task.aim_id — все задачи.
+# Ниже — только CREATE INDEX IF NOT EXISTS (аддитивно, идемпотентно, данные не трогаем).
+PERF_INDEXES: tuple[tuple[str, str, str], ...] = (
+    # фриланс: оплаты по заказу (N+1 в списке заказов и в прогнозе кассы), платежи по долгу, конверты
+    ("ix_transaction_order_kind", "transaction", '"order_id", "kind"'),
+    ("ix_transaction_debt_id", "transaction", '"debt_id"'),
+    ("ix_transaction_goal_id", "transaction", '"goal_id"'),
+    # отчёт «по счёту»: фильтр по счёту + сортировка по дате одним индексом (был только account)
+    ("ix_transaction_account_date", "transaction", '"account", "date"'),
+    # список задач на сайте: done → priority → due (был только index по done + сортировка во временном дереве)
+    ("ix_task_done_priority_due", "task", '"done", "priority", "due"'),
+    # цели (0.10): задачи и вехи по цели
+    ("ix_task_aim_id", "task", '"aim_id"'),
+    ("ix_task_milestone_id", "task", '"milestone_id"'),
+    ("ix_milestone_aim_status", "milestone", '"aim_id", "status"'),
+    # CRM: канбан по стадии + список по дате создания
+    ("ix_order_stage", "order", '"stage"'),
+    ("ix_order_created_at", "order", '"created_at"'),
+    # помодоро: тик каждые 20 секунд ищет незакрытую сессию, отчёт — фокус за период
+    ("ix_worksession_ended_at", "worksession", '"ended_at"'),
+    ("ix_worksession_kind_started_at", "worksession", '"kind", "started_at"'),
+    # смысловой поиск: векторы по записи (ref_table+ref_id), а не по одной колонке
+    ("ix_embedding_ref_table_ref_id", "embedding", '"ref_table", "ref_id"'),
+    # лента журнала: выборка по виду записи за период
+    ("ix_memory_kind_created_at", "memory", '"kind", "created_at"'),
+)
+
+_PERF_MIGRATION_VERSION: int | None = None
+
+
+def _v7_perf_indexes(conn) -> None:
+    """Индексы под частые выборки. Только CREATE INDEX IF NOT EXISTS, без изменения данных;
+    на старой базе колонки/таблицы проверяются, отсутствующее пропускается с предупреждением."""
+    _create_perf_indexes(conn)
+
+
+def _create_perf_indexes(conn) -> int:
+    from .migrations import create_index
+    n = 0
+    for name, table, cols in PERF_INDEXES:
+        create_index(conn, name, table, cols)
+        n += 1
+    return n
+
+
+def register_perf_indexes() -> None:
+    """Дописать миграцию с индексами в общий список (core/migrations.py — файл не наш, не трогаем).
+
+    Версия 7 — следующая за текущей (в core/migrations.py последняя 6). Если её к этому
+    моменту занял кто-то ещё, берём следующую свободную и пишем об этом в лог, чтобы две
+    миграции не оказались с одним номером. Повторный вызов ничего не делает.
+    """
+    global _PERF_MIGRATION_VERSION
+    if _PERF_MIGRATION_VERSION is not None:
+        return
+    try:
+        from . import migrations
+        taken = {v for v, _, _ in migrations.MIGRATIONS}
+        ver = 7 if 7 not in taken else max(taken) + 1
+        if ver != 7:
+            log.info("версия миграции индексов занята другим агентом — беру %d", ver)
+        migrations.MIGRATIONS.append((ver, "индексы: transaction/task/order/worksession/memory/embedding", _v7_perf_indexes))
+        migrations.MIGRATIONS.sort(key=lambda m: m[0])
+        _PERF_MIGRATION_VERSION = ver
+    except Exception as e:  # pragma: no cover — без миграции индексов не будет, но старт не упадёт
+        log.warning("миграция индексов не зарегистрирована: %s", e)
+
+
+def ensure_perf_indexes() -> None:
+    """Страховка: создать недостающие индексы даже если версионированная миграция не прошла
+    (например, её номер заняли). CREATE INDEX IF NOT EXISTS — идемпотентно и безопасно:
+    индекс не меняет данные, поэтому бэкап ради него не нужен."""
+    from sqlalchemy import text
+    try:
+        with engine.begin() as conn:
+            have = {r[0] for r in conn.execute(text("SELECT name FROM sqlite_master WHERE type='index'")).all()}
+            missing = [x for x in PERF_INDEXES if x[0] not in have]
+            if not missing:
+                return
+            n = _create_perf_indexes(conn)
+            log.info("индексы созданы: %d из %d (миграция)", len(missing), n)
+    except Exception as e:  # pragma: no cover
+        log.warning("индексы создать не удалось (работаем без них): %s", e)
+
+
 def _migrate() -> None:
     """Добавляем новые колонки в старую базу, не теряя данные."""
     from sqlalchemy import inspect, text
     insp = inspect(engine)
-    wanted = {
-        "board": {"revision": "INTEGER DEFAULT 0", "last_sync": "VARCHAR DEFAULT '{}'"},
-        "note": {"title": "VARCHAR", "raw": "VARCHAR", "polished": "BOOLEAN DEFAULT 0", "image": "VARCHAR"},
-        "link": {"polished": "BOOLEAN DEFAULT 0", "summary": "VARCHAR", "excerpt": "VARCHAR"},
-        "transaction": {"debt_id": "INTEGER", "order_id": "INTEGER", "goal_id": "INTEGER"},
-        "category": {"budget": "FLOAT DEFAULT 0", "custom": "BOOLEAN DEFAULT 0", "bucket": "VARCHAR DEFAULT ''"},
-        "event": {"repeat": "VARCHAR DEFAULT ''", "repeat_days": "VARCHAR DEFAULT ''", "repeat_until": "DATETIME",
-                  "skip_dates": "VARCHAR DEFAULT ''", "reminded_for": "VARCHAR DEFAULT ''",
-                  "done": "BOOLEAN DEFAULT 0", "done_at": "DATETIME", "done_dates": "VARCHAR DEFAULT ''",
-                  "task_id": "INTEGER", "order_id": "INTEGER"},
-        "task": {"remind_stage": "INTEGER DEFAULT 0", "aim_id": "INTEGER", "milestone_id": "INTEGER", "blocked_by": "VARCHAR DEFAULT ''"},
-        "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''",
-                   "pay_mode": "VARCHAR DEFAULT 'each'", "pay_every": "INTEGER DEFAULT 14", "pay_days": "VARCHAR DEFAULT ''"},
-    }
     with engine.begin() as conn:
-        for table, cols in wanted.items():
+        for table, cols in _LEGACY_COLUMNS.items():
             if table not in insp.get_table_names():
                 continue
             have = {c["name"] for c in insp.get_columns(table)}
@@ -554,18 +768,41 @@ def _migrate() -> None:
 
 
 def init_db() -> None:
-    # файл БД до create_all: только для существующей (непустой) базы нужен бэкап перед миграцией
+    # 1) бэкап снимается ДО первого изменения схемы: раньше копия делалась в migrations.apply,
+    #    то есть уже после ALTER из _migrate() — теперь оба вида правок идут после снимка.
+    register_perf_indexes()
     _db_file = getattr(engine.url, "database", None)
     had_db = bool(_db_file) and os.path.exists(_db_file) and os.path.getsize(_db_file) > 0
+    # Тесты подменяют db.engine на временный файл в tmp_path. Если при этом каталог бэкапов
+    # остаётся настоящим (data/backups), прогоны тестов оставляют там мусорные — иногда нулевые —
+    # pre-migration-*.db: копия временной базы пользователю не нужна, терять нечего.
+    # Если каталог подменён тестом (tmp_path) — снимок делаем как обычно, он и проверяется.
+    from .config import ROOT
+    from . import migrations as _mig
+    _raw = (getattr(getattr(cfg, "backup", None), "dir", "") or "backups")
+    _real_bdir = _raw if os.path.isabs(_raw) else ROOT / _raw
+    _tmp_db = bool(_db_file) and os.path.normcase(str(_db_file)) != os.path.normcase(str(DB_PATH))
+    _shared_bdir = os.path.normcase(str(_mig._backup_dir())) == os.path.normcase(str(_real_bdir))
+    backed_up = False
+    if had_db and _schema_change_pending() and not (_tmp_db and _shared_bdir):
+        try:
+            backed_up = _mig.backup_before_migration(engine) is not None
+        except Exception as e:  # бэкап не должен ронять старт, но прятать сбой нельзя
+            log.error("резервная копия перед изменению схемы НЕ снята: %s", e)
     SQLModel.metadata.create_all(engine)
     _migrate()
     try:
-        from . import migrations
-        migrations.apply(engine, had_db=had_db)
-    except Exception as e:  # pragma: no cover — миграция не должна ронять старт
-        import logging
-        logging.getLogger("jarvis.db").warning("миграции не применены: %s", e)
-    from .config import cfg
+        _mig.apply(engine, had_db=had_db, backup_taken=backed_up)
+        set_setting("migration:error", None)   # перезапуск прошёл без ошибок — снимаем флаг
+    except Exception as e:  # миграция не должна ронять старт, но и молчать не должна
+        msg = f"миграции не применены: {type(e).__name__}: {e}"
+        log.error(msg, exc_info=True)
+        try:
+            from .services import events
+            events.emit("health_bad", key="migration", dedup_sec=6 * 3600, text=msg, quiet=False)
+            set_setting("migration:error", f"{datetime.now():%Y-%m-%d %H:%M:%S} — {type(e).__name__}: {e}")
+        except Exception as e2:  # pragma: no cover — даже хранилище может быть недоступно
+            log.error("не удалось сохранить флаг ошибки миграции: %s", e2)
     with Session(engine, expire_on_commit=False) as s:
         if s.exec(select(Category)).first() is None:
             for name, kind, icon, kw in DEFAULT_CATEGORIES:
@@ -590,6 +827,9 @@ def init_db() -> None:
                     if c.kind == "client" or g != "person":   # «человека» повышаем только до семьи/друга/компании, не трогаем зря
                         c.kind = g; s.add(c)
             s.add(Setting(key="migr.people_kinds", value="1")); s.commit()
+    # 2) индексы под частые выборки — после миграций (страховка, если версия занята)
+    ensure_perf_indexes()
+    clear_caches()   # схема/данные могли поменяться — старые ответы кэша больше не годятся
 
 
 @contextmanager
@@ -644,10 +884,18 @@ def diff_text(before: dict, after: dict, labels: dict[str, str] | None = None, w
     return "; ".join(parts)
 
 
-def get_setting(key: str, default: str | None = None) -> str | None:
+def _read_setting(key: str) -> str | None:
     with Session(engine, expire_on_commit=False) as s:
         row = s.get(Setting, key)
-        return row.value if row else default
+        return row.value if row else None
+
+
+def get_setting(key: str, default: str | None = None) -> str | None:
+    """Значение настройки. Читается через кэш: настроек читают много (тихие часы, режим фриланса,
+    лимиты), а писать их — редко; любая запись в базу (в т.ч. эта настройка через set_setting)
+    сразу сбрасывает кэш, поэтому «поставил галочку → вижу» работает как раньше."""
+    val = cached("setting:" + key, lambda: _read_setting(key))
+    return val if val is not None else default
 
 
 def set_setting(key: str, value: str | None) -> None:
@@ -667,3 +915,8 @@ def set_setting(key: str, value: str | None) -> None:
 
 def log_action(s: Session, kind: str, ref_table: str, ref_id: int, title: str = "", channel: str = "tg") -> None:
     s.add(ActionLog(kind=kind, ref_table=ref_table, ref_id=ref_id, title=title, channel=channel))
+
+
+# Регистрируем миграцию индексов сразу при импорте: иначе скрипт, импортирующий только
+# core.migrations, увидел бы версии 1–6 и не применил бы новую.
+register_perf_indexes()

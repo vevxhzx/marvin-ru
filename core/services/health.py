@@ -6,13 +6,16 @@
 """
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timedelta
 
 from sqlmodel import select
 
-from ..db import Run, Setting, session, get_setting
+from ..db import Run, get_setting, session
 from . import pc, state
+
+log = logging.getLogger("jarvis.health")
 
 
 async def diagnose() -> dict:
@@ -60,16 +63,16 @@ async def diagnose() -> dict:
     if not tg:
         add("warn", "Telegram не настроен", "telegram.token и telegram.owner_id в config.yaml")
 
-    # ходы агента за сутки
+    # ходы агента за сутки — одним флагом на строку, а не все колонки (текст хода тут не нужен)
     since = datetime.now() - timedelta(hours=24)
     with session() as s:
-        runs = s.exec(select(Run).where(Run.created_at >= since)).all()
-    bad = [r for r in runs if not r.ok]
-    if runs and len(bad) / len(runs) > 0.3 and len(bad) >= 3:
-        add("warn", f"за сутки провалено {len(bad)} из {len(runs)} ходов",
+        oks = s.exec(select(Run.ok).where(Run.created_at >= since)).all()
+    total, bad_n = len(oks), sum(1 for ok in oks if not ok)
+    if total and bad_n / total > 0.3 and bad_n >= 3:
+        add("warn", f"за сутки провалено {bad_n} из {total} ходов",
             "посмотри «журнал» — если это одно и то же, скажи мне формулировку, добавлю правило")
-    elif runs:
-        add("ok", f"за сутки {len(runs)} ходов, провалов {len(bad)}")
+    elif total:
+        add("ok", f"за сутки {total} ходов, провалов {bad_n}")
 
     # календарь-очередь
     try:
@@ -78,22 +81,45 @@ async def diagnose() -> dict:
         n = len([x for x in q.split("\n") if x.strip()]) if q else 0
         if n:
             add("warn", f"в очереди к Google Calendar {n} событий — не ушли", "проверь интернет/токен Google; уйдут сами при следующем тике")
-    except Exception:
-        pass
+    except Exception as e:
+        # раньше здесь был `except Exception: pass` — очередь Google молча не проверялась
+        log.warning("очередь Google Calendar не проверена: %s", e)
+        add("warn", f"не удалось проверить очередь Google Calendar: {type(e).__name__}: {e}",
+            "обычно битая настройка gcal.queue в базе — проверь модуль календаря")
 
-    # бэкап
+    # бэкап: возраст, размер и результат последней проверки целостности
+    lb = None
     try:
         from .scheduler import last_backup
         lb = last_backup()
-        at = lb.get("at") if isinstance(lb, dict) else None
+    except Exception as e:
+        log.warning("не удалось получить состояние бэкапов: %s", e)
+        add("warn", f"не удалось проверить бэкапы: {type(e).__name__}: {e}",
+            "обычно недоступна папка бэкапов — проверь backup.dir в настройках")
+    if isinstance(lb, dict):
+        at = lb.get("last")   # last_backup() отдаёт «last», не «at»
+        age_h = None
         if at:
-            age = (datetime.now() - datetime.fromisoformat(at)).total_seconds() / 3600
-            if age > 48:
-                add("warn", f"последний бэкап базы {int(age)} ч назад", "ночной бэкап не сработал — проверь, что Джарвис работал ночью")
+            try:
+                age_h = (datetime.now() - datetime.fromisoformat(str(at))).total_seconds() / 3600
+            except ValueError as e:
+                log.warning("нечитаемая дата последнего бэкапа %r: %s", at, e)
+        if age_h is not None:
+            size = f" · {_mb(lb.get('size'))}" if lb.get("size") else ""
+            if age_h > 48:
+                add("warn", f"последний бэкап базы {int(age_h)} ч назад{size}",
+                    "ночной бэкап не сработал — проверь, что Джарвис работал ночью")
             else:
-                add("ok", "бэкап свежий")
-    except Exception:
-        pass
+                add("ok", f"бэкап свежий ({int(age_h)} ч назад{size})")
+        elif lb.get("enabled"):
+            add("warn", "бэкапов ещё нет", "нажми «бэкап сейчас» в настройках и проверь, что ночной бэкап включён")
+        chk = lb.get("check")
+        if isinstance(chk, dict) and chk.get("result"):
+            if chk.get("ok"):
+                add("ok", f"проверка бэкапа {chk.get('file', '')}: integrity_check — ok")
+            else:
+                add("bad", f"бэкап {chk.get('file', '')} не прошёл integrity_check: {chk.get('result')}",
+                    "снимок повреждён — сделай «бэкап сейчас» заново и проверь диск")
 
     # застрявшие тяжёлые задачи
     for j in state.jobs():
@@ -107,11 +133,22 @@ async def diagnose() -> dict:
         free_gb = shutil.disk_usage(DB_PATH.parent).free / 1e9
         if free_gb < 3:
             add("bad", f"на диске с базой осталось {free_gb:.1f} ГБ", "почисти место — при 0 база перестанет писаться")
-    except Exception:
-        pass
+    except Exception as e:
+        # раньше здесь было `except Exception: pass` — неполадка с диском молчала
+        log.warning("не удалось проверить диск: %s", e)
+        add("warn", f"не удалось проверить свободное место на диске: {type(e).__name__}: {e}",
+            "проверь, что папка data/ доступна на чтение")
 
     ok = not any(i["level"] == "bad" for i in items)
     return {"ok": ok, "items": items, "text": _text(items, ok), "at": datetime.now().isoformat()}
+
+
+def _mb(size) -> str:
+    """Байты → «12,3 МБ» для человеческих строк."""
+    try:
+        return f"{int(size) / 1e6:.1f} МБ"
+    except (TypeError, ValueError):
+        return ""
 
 
 def _text(items: list[dict], ok: bool) -> str:

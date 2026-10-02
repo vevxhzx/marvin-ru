@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ...db import (
     Event,
@@ -36,9 +36,15 @@ from .._shared import _ev_out, broadcast
 from ..schemas import BackupRestoreIn, EditionIn, GameBody, SettingsIn, TgLogin, UiPrefsIn
 
 router = APIRouter()
+# Облачные бэкапы живут в отдельном роутере: базовый `router` выше сверяется тестом
+# tests/test_review_a_contract.py со списком SYSTEM_ROUTES (роуты «до разбиения app.py»),
+# новые маршруты его не должны ломать. Регистрируем ПЕРВЫМ — иначе
+# GET /api/backups/cloud/download съедается параметрическим /api/backups/{name:path}/download.
+cloud_router = APIRouter()
 
 
 def register(app) -> None:
+    app.include_router(cloud_router)
     app.include_router(router)
 
 
@@ -261,6 +267,8 @@ async def status():
                      "last_message": last_tg.created_at.isoformat() if last_tg else None},
         "backup": last_backup(),
         "db": {"path": str(DB_PATH), "size": DB_PATH.stat().st_size if DB_PATH.exists() else 0, **counts},
+        # ошибка миграций: ставит init_db при сбое, очищает после успешного старта
+        "migration_error": get_setting("migration:error"),
         "errors": list(getattr(app.state, "errors", []))[-10:],
     }
 
@@ -444,23 +452,37 @@ def google_connect():
     return {"url": gcal.auth_url()}
 
 
+def _esc(value: object) -> str:
+    """Экранировать текст для вставки в HTML-страницу.
+
+    Страница ниже собирается строковой подстановкой, а `error` приходит из query-параметра
+    (публичный /api/google/callback, без ключа). Без экранирования это отражённый XSS:
+    злоумышленник присылает жертве ссылку вида …/api/google/callback?error=<script>…,
+    и скрипт выполняется от имени сайта — может дёрнуть /api/… с её cookie-сессией."""
+    import html
+    return html.escape(str(value), quote=True)
+
+
 @router.get("/api/google/callback", response_class=HTMLResponse)
 async def google_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
     gcal = _gcal_reload()
     page = "<html><head><meta charset='utf-8'><title>Джарвис · Google</title></head><body style='font-family:-apple-system,Segoe UI,sans-serif;background:#f4f3f1;color:#1d1d1f;display:flex;align-items:center;justify-content:center;height:100vh;margin:0'><div style='text-align:center;max-width:520px;padding:32px'>{}</div></body></html>"
     if error or not code:
-        return page.format(f"<h1 style='font-weight:500'>Не вышло</h1><p>{error or 'Google не вернул код'}.</p><p><a href='/settings'>← назад в настройки</a></p>")
+        return page.format(f"<h1 style='font-weight:500'>Не вышло</h1><p>{_esc(error or 'Google не вернул код')}.</p><p><a href='/settings'>← назад в настройки</a></p>")
     try:
         res = await gcal.finish_auth(code, state)
     except Exception as e:
-        return page.format(f"<h1 style='font-weight:500'>Не вышло</h1><p>{e}</p><p><a href='/settings'>← назад в настройки</a></p>")
+        # текст ошибки наружу не отдаём целиком (в нём могут быть детали обмена с Google) — только свой
+        log.warning("Google OAuth не завершился: %s", type(e).__name__)
+        return page.format("<h1 style='font-weight:500'>Не вышло</h1><p>Google не подтвердил вход. Попробуйте ещё раз.</p><p><a href='/settings'>← назад в настройки</a></p>")
     # включаем флаг, если забыли
     from ...config import write_settings
     write_settings({"google.enabled": True})
     _gcal_reload()
     _asyncio.get_running_loop().create_task(gcal.sync_all())
     broadcast("google", {"connected": True})
-    return page.format(f"<h1 style='font-weight:500'>Готово, сэр</h1><p>Google Календарь подключён{(' · ' + res.get('email')) if res.get('email') else ''}. Выгружаю события — это займёт минуту.</p><p><a href='/settings'>← назад в настройки</a></p><script>setTimeout(()=>location.href='/settings',2500)</script>")
+    email = _esc(res.get("email")) if res.get("email") else ""
+    return page.format(f"<h1 style='font-weight:500'>Готово, сэр</h1><p>Google Календарь подключён{f' · {email}' if email else ''}. Выгружаю события — это займёт минуту.</p><p><a href='/settings'>← назад в настройки</a></p><script>setTimeout(()=>location.href='/settings',2500)</script>")
 
 
 @router.post("/api/google/sync")
@@ -482,16 +504,107 @@ def google_disconnect():
 
 @router.post("/api/backup")
 def backup_now():
-    """Ручной снимок — даже если ночной бэкап выключен (force)."""
-    from ...services.scheduler import backup_db
+    """Ручной снимок — даже если ночной бэкап выключен (force). check — результат integrity_check свежего файла."""
+    from ...services.scheduler import backup_db, last_backup
     dst = backup_db(force=True)
-    return {"ok": dst is not None, "file": str(dst) if dst else None, "name": dst.name if dst else None}
+    return {"ok": dst is not None, "file": str(dst) if dst else None, "name": dst.name if dst else None,
+            "check": last_backup().get("check")}
 
 
 @router.get("/api/backups")
 def backups_list():
-    from ...services.scheduler import list_backups
-    return list_backups()
+    """Список бэкапов: снимки базы (в т.ч. «перед миграцией») + копии конфигов/ключей."""
+    from ...services.scheduler import list_backups, list_config_backups
+    return list_backups() + list_config_backups()
+
+
+# ---------------- облачные бэкапы (WebDAV, cloud_backup.py) ----------------
+# Пути под /api/backups/ — LOCAL_ONLY_PREFIXES в auth.py уже делает их «только с этого
+# компьютера». Роуты лежат в cloud_router (см. выше): он подключается раньше `router`,
+# поэтому /api/backups/cloud/download не съедается параметрическим {name:path}/download.
+@cloud_router.get("/api/backups/cloud")
+def backups_cloud_get():
+    """Статус и настройки облака. Секреты — только флагами «задан/не задан»."""
+    from ...services import cloud_backup
+    return cloud_backup.status()
+
+
+@cloud_router.put("/api/backups/cloud")
+async def backups_cloud_put(request: Request):
+    """Сохранить настройки облака. Пустая строка в пароле/токене = «не менять»."""
+    from ...services import cloud_backup
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "тело запроса должно быть JSON")
+    if not isinstance(body, dict):
+        raise HTTPException(400, "ожидался объект настроек")
+    try:
+        return cloud_backup.save_settings(body)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@cloud_router.post("/api/backups/cloud/test")
+def backups_cloud_test():
+    """«Проверить соединение»: доступ к корню, каталог, список файлов. Ответ {ok, detail|error}."""
+    from ...services import cloud_backup
+    return cloud_backup.verify_connection()
+
+
+@cloud_router.post("/api/backups/cloud/upload")
+def backups_cloud_upload():
+    """Отправить свежий снимок в облако (нет локального — сначала backup_db())."""
+    from ...services import cloud_backup
+    try:
+        return cloud_backup.upload_latest()
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except cloud_backup.CloudError as e:
+        raise HTTPException(502, str(e))
+
+
+@cloud_router.get("/api/backups/cloud/download")
+def backups_cloud_download(name: str):
+    """Скачать файл из облака в локальные backups/ (шифрованный — расшифровать в .db),
+    после чего его подхватывает существующий POST /api/backups/restore."""
+    from ...services import cloud_backup
+    try:
+        return cloud_backup.download_to_backups(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except LookupError as e:
+        raise HTTPException(404, str(e))
+    except cloud_backup.CloudError as e:
+        raise HTTPException(502, str(e))
+
+
+@cloud_router.post("/api/backups/cloud/delete")
+def backups_cloud_delete(name: str):
+    """Удалить файл из облака (нужно для ротации cloud.keep; только свои backup-*)."""
+    from ...services import cloud_backup
+    try:
+        return cloud_backup.delete_remote(name)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except cloud_backup.CloudError as e:
+        raise HTTPException(502, str(e))
+
+
+@router.get("/api/backups/{name:path}/download")
+def backup_download(name: str):
+    """Скачать файл бэкапа (снимок базы, копия перед миграцией или файл из backups/config-<дата>/).
+    Доступ — тот же, что у всего /api (AuthMiddleware); путь валидируется как в restore_backup."""
+    from ...services.scheduler import resolve_backup_file
+    try:
+        path = resolve_backup_file(name)
+    except LookupError:
+        raise HTTPException(404, "Такого бэкапа нет")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return FileResponse(path, filename=path.name, media_type="application/octet-stream")
 
 
 @router.post("/api/backups/restore")

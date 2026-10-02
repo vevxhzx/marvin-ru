@@ -17,6 +17,7 @@ import re
 import sys
 import threading
 import time
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -32,8 +33,10 @@ if os.name == "nt":
 
 _LOG_FILE = ROOT / "data" / "voice.log"
 _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+# ротация: 5 МБ × 5 копий — лог голосового клиента больше не растёт вечно
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", datefmt="%H:%M:%S",
-                    handlers=[logging.StreamHandler(sys.stdout), logging.FileHandler(_LOG_FILE, encoding="utf-8")])
+                    handlers=[logging.StreamHandler(sys.stdout),
+                              RotatingFileHandler(_LOG_FILE, maxBytes=5 * 1024 * 1024, backupCount=5, encoding="utf-8")])
 logging.getLogger("httpx").setLevel(logging.WARNING)
 log = logging.getLogger("assistant.pc")
 

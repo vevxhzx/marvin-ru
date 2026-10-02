@@ -3,8 +3,10 @@ from __future__ import annotations
 
 import asyncio
 
+import json as _json
 import logging
 import shutil
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -86,8 +88,10 @@ def morning_digest_text(head: str | None = None, card: bool = True, extra: str |
     today = [t for t in ts if t.due and t.due.date() <= d.date()]
     day = [t for t in today if is_all_day(t.due)]
     pays = finance.upcoming_payments(3)
-    s = finance.summary(1)
-    safe = s.get("safe") or {}
+    # баланс и «можно тратить» — те же числа, что сводка, но без неё самой: summary() считает
+    # ещё месячный поток, лимиты и 90 дней операций, а здесь нужны только два значения
+    total = finance.total_balance()
+    safe = finance.safe_to_spend()
 
     # ---------------- секции (общие для обоих вариантов)
     ev_rows = [f"— **{e.start:%H:%M}** {e.title}" + (f" · {e.location}" if e.location else "") for e in evs[:6]]
@@ -132,7 +136,7 @@ def morning_digest_text(head: str | None = None, card: bool = True, extra: str |
             out.append(head)
         # плитки баланса — зелёные карточки сверху
         out.append("")
-        out.append(f"**баланс** {money(s['total_balance'])} · свободно")
+        out.append(f"**баланс** {money(total)} · свободно")
         if safe.get("per_day") is not None:
             out.append(f"**можно тратить** {money(safe['per_day'])} · в день")
         # СЕГОДНЯ
@@ -188,7 +192,7 @@ def morning_digest_text(head: str | None = None, card: bool = True, extra: str |
     lines += notes
     if extra:
         lines.append(extra)
-    tail = f"💰 Баланс {money(s['total_balance'])}"
+    tail = f"💰 Баланс {money(total)}"
     if safe.get("per_day") is not None:
         tail += f" · можно тратить {money(safe['per_day'])} в день"
     lines.append(tail + ".")
@@ -200,7 +204,11 @@ def _backup_dir() -> Path:
 
 
 def backup_db(force: bool = False) -> Path | None:
-    """Снимок базы. force=True — кнопка «бэкап сейчас» даже если ночной выключен."""
+    """Снимок базы. force=True — кнопка «бэкап сейчас» даже если ночной выключен.
+
+    После снимка файл обязательно открывается и проверяется (`PRAGMA integrity_check`):
+    бэкап, который не восстанавливается, хуже его отсутствия. Результат проверки пишется
+    в settings (`backup.integrity`) — его отдают /api/status и health.diagnose()."""
     if (not force and not cfg.backup.enabled) or not DB_PATH.exists():
         return None
     bdir = _backup_dir()
@@ -213,11 +221,24 @@ def backup_db(force: bool = False) -> Path | None:
     with out:
         src.backup(out)
     out.close(); src.close()
-    # чистим старые
-    cutoff = datetime.now() - timedelta(days=int(cfg.backup.keep_days))
-    for f in bdir.glob("backup-*.db"):
-        if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
-            f.unlink(missing_ok=True)
+    # проверка свежего снимка
+    ok, result = _verify_backup(dst)
+    _remember_backup_check(dst, ok, result)
+    if not ok:
+        # старые (проверенные) бэкапы НЕ удаляем — иначе единственный рабочий снимок пропадёт
+        log.error("бэкап %s не прошёл проверку (%s) — старые копии не трогаю", dst.name, result)
+        try:
+            from . import events
+            events.emit("health_bad", key="backup_integrity", dedup_sec=6 * 3600,
+                        text=f"бэкап {dst.name} повреждён: {result}", quiet=False)
+        except Exception as e:  # pragma: no cover
+            log.warning("событие health_bad не отправлено: %s", e)
+    else:
+        # чистим старые (в т.ч. копии «перед миграцией», которые раньше росли вечно)
+        cutoff = datetime.now() - timedelta(days=int(cfg.backup.keep_days))
+        for f in list(bdir.glob("backup-*.db")) + list(bdir.glob("pre-migration-*.db")):
+            if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
+                f.unlink(missing_ok=True)
     # вторая копия — на другой диск / в папку облака (Яндекс.Диск, Google Drive), если указана
     extra = getattr(cfg.backup, "extra_dir", None)
     if extra:
@@ -225,9 +246,11 @@ def backup_db(force: bool = False) -> Path | None:
             edir = Path(extra)
             edir.mkdir(parents=True, exist_ok=True)
             shutil.copy2(dst, edir / dst.name)
-            for f in edir.glob("backup-*.db"):
-                if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
-                    f.unlink(missing_ok=True)
+            if ok:
+                cutoff = datetime.now() - timedelta(days=int(cfg.backup.keep_days))
+                for f in edir.glob("backup-*.db"):
+                    if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
+                        f.unlink(missing_ok=True)
         except Exception as e:  # pragma: no cover
             log.warning("extra backup failed: %s", e)
     # картинки заметок/чеков (data/media): без них восстановленная база ссылается в пустоту.
@@ -240,8 +263,73 @@ def backup_db(force: bool = False) -> Path | None:
             log.info("backup media: +%d файлов", n)
     except Exception as e:  # pragma: no cover
         log.warning("media backup failed: %s", e)
+    # копии конфигов и ключей (config.yaml, google_token, api_token, session_secret) — ретеншн тот же
+    try:
+        _backup_configs(bdir)
+    except Exception as e:  # pragma: no cover — копия конфигов не должна ломать снимок базы
+        log.warning("config backup failed: %s", e)
     log.info("backup -> %s", dst)
     return dst
+
+
+def _verify_backup(path: Path) -> tuple[bool, str]:
+    """Открыть снимок и прогнать `PRAGMA integrity_check`. (ok, текст): «ok» ли всё, и если нет — почему."""
+    import sqlite3
+    try:
+        con = sqlite3.connect(str(path))
+        try:
+            rows = [str(r[0]) for r in con.execute("PRAGMA integrity_check").fetchall()]
+        finally:
+            con.close()
+        result = "; ".join(rows) or "нет результата"
+        return (len(rows) == 1 and rows[0].lower() == "ok", result)
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
+def _remember_backup_check(path: Path, ok: bool, result: str) -> None:
+    """Результат последней проверки — в settings, чтобы /api/status и самопроверка видели его после перезапуска."""
+    from ..db import set_setting
+    payload = {"at": datetime.now().isoformat(timespec="seconds"), "ok": bool(ok),
+               "result": str(result)[:300], "file": path.name,
+               "size": path.stat().st_size if path.exists() else 0}
+    try:
+        set_setting("backup.integrity", _json.dumps(payload, ensure_ascii=False))
+    except Exception as e:  # pragma: no cover — база может быть занята; снимок уже сделан
+        log.warning("не удалось сохранить результат проверки бэкапа: %s", e)
+
+
+def _last_check() -> dict | None:
+    """Последняя проверка бэкапа из settings (None — ещё не проверяли)."""
+    from ..db import get_setting
+    try:
+        raw = get_setting("backup.integrity")
+        return _json.loads(raw) if raw else None
+    except Exception as e:  # pragma: no cover
+        log.debug("read backup.integrity: %s", e)
+        return None
+
+
+def _backup_configs(bdir: Path) -> int:
+    """Копии настроек и ключей доступа рядом с бэкапами (иначе базу восстановить, а ключи — нет).
+    Ретеншн — тот же backup.keep_days. Содержимое файлов не пишем ни в лог, ни в ответы."""
+    from ..config import ROOT, DATA_DIR
+    files = [ROOT / "config.yaml", DATA_DIR / "google_token.json", DATA_DIR / "api_token", DATA_DIR / "session_secret"]
+    files = [f for f in files if f.exists()]
+    if not files:
+        return 0
+    dst = bdir / f"config-{datetime.now():%Y%m%d-%H%M}"
+    dst.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for f in files:
+        shutil.copy2(f, dst / f.name)
+        n += 1
+    cutoff = datetime.now() - timedelta(days=int(cfg.backup.keep_days))
+    for d in bdir.glob("config-*"):
+        if d.is_dir() and datetime.fromtimestamp(d.stat().st_mtime) < cutoff:
+            shutil.rmtree(d, ignore_errors=True)
+    log.info("config backup: %d файлов -> %s", n, dst.name)
+    return n
 
 
 def _sync_media(dst_dir: Path) -> int:
@@ -284,40 +372,91 @@ def _quiet_now() -> bool:
 
 
 def last_backup() -> dict:
-    """Когда был последний бэкап и где лежит (для статуса в настройках)."""
+    """Когда был последний бэкап, где лежит и как прошла его последняя проверка (для статуса в настройках)."""
+    check = _last_check()
     bdir = _backup_dir()
     files = sorted(bdir.glob("backup-*.db"), key=lambda f: f.stat().st_mtime) if bdir.exists() else []
     # pre-restore — служебные, в «последний» не считаем
     files = [f for f in files if not f.name.startswith("backup-pre-restore-")]
     if not files:
-        return {"enabled": bool(cfg.backup.enabled), "last": None, "dir": str(bdir), "count": 0, "extra_dir": getattr(cfg.backup, "extra_dir", None) or None}
+        return {"enabled": bool(cfg.backup.enabled), "last": None, "dir": str(bdir), "count": 0,
+                "extra_dir": getattr(cfg.backup, "extra_dir", None) or None, "check": check}
     f = files[-1]
     return {"enabled": bool(cfg.backup.enabled), "last": datetime.fromtimestamp(f.stat().st_mtime).isoformat(), "dir": str(bdir),
-            "count": len(files), "size": f.stat().st_size, "extra_dir": getattr(cfg.backup, "extra_dir", None) or None}
+            "count": len(files), "size": f.stat().st_size, "extra_dir": getattr(cfg.backup, "extra_dir", None) or None,
+            "check": check}
 
 
+# обычный снимок / страховка перед restore, копия «перед миграцией», копии конфигов
 _BACKUP_NAME_RX = __import__("re").compile(r"^backup-(?:pre-restore-)?\d{8}-\d{4}\.db$")
+_PRE_MIGRATION_RX = __import__("re").compile(r"^pre-migration-\d{8}-\d{6}\.db$")
+_ANY_BACKUP_RX = __import__("re").compile(
+    r"^(?:backup-(?:pre-restore-)?\d{8}-\d{4}|pre-migration-\d{8}-\d{6})\.db$")
+_CONFIG_RX = __import__("re").compile(r"^config-\d{8}-\d{4}/[A-Za-z0-9._-]+$")
 
 
 def list_backups(limit: int = 40) -> list[dict]:
-    """Список файлов backup-*.db (новые сверху) — для «восстановить» в настройках."""
+    """Список снимков базы (новые сверху) — для «восстановить» в настройках.
+    Включает и `pre-migration-*.db` (помечены pre_migration=True), чтобы они не копились вечно незаметными."""
     bdir = _backup_dir()
     if not bdir.exists():
         return []
     out = []
-    for f in sorted(bdir.glob("backup-*.db"), key=lambda p: p.stat().st_mtime, reverse=True):
-        if not _BACKUP_NAME_RX.match(f.name):
+    names = list(bdir.glob("backup-*.db")) + list(bdir.glob("pre-migration-*.db"))
+    for f in sorted(names, key=lambda p: p.stat().st_mtime, reverse=True):
+        if not _ANY_BACKUP_RX.match(f.name):
             continue
         st = f.stat()
         out.append({
             "name": f.name,
+            "kind": "db",
             "at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
             "size": st.st_size,
             "pre_restore": f.name.startswith("backup-pre-restore-"),
+            "pre_migration": bool(_PRE_MIGRATION_RX.match(f.name)),
         })
         if len(out) >= limit:
             break
     return out
+
+
+def list_config_backups(limit: int = 40) -> list[dict]:
+    """Копии конфигов/ключей (backups/config-<дата>/*) — их же отдаёт GET /api/backups."""
+    bdir = _backup_dir()
+    if not bdir.exists():
+        return []
+    out: list[dict] = []
+    for d in sorted(bdir.glob("config-*"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if not d.is_dir():
+            continue
+        for f in sorted(d.iterdir()):
+            if not f.is_file() or not _CONFIG_RX.match(f"{d.name}/{f.name}"):
+                continue
+            st = f.stat()
+            out.append({
+                "name": f"{d.name}/{f.name}",
+                "kind": "config",
+                "at": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                "size": st.st_size,
+                "pre_restore": False,
+                "pre_migration": False,
+            })
+            if len(out) >= limit:
+                return out
+    return out
+
+
+def resolve_backup_file(name: str) -> Path:
+    """Путь к файлу бэкапа (скачивание). Та же защита, что в restore_backup: regex по имени
+    + resolve и проверка, что путь остался внутри backups/ — path traversal невозможен."""
+    name = (name or "").strip()
+    if ".." in name or "\\" in name or not (_ANY_BACKUP_RX.match(name) or _CONFIG_RX.match(name)):
+        raise ValueError("Неверное имя бэкапа")
+    bdir = _backup_dir().resolve()
+    src = (bdir / name).resolve()
+    if not str(src).startswith(str(bdir)) or not src.is_file():
+        raise LookupError("Такого бэкапа нет")
+    return src
 
 
 def _release_db_handles() -> None:
@@ -374,6 +513,163 @@ def restore_backup(name: str) -> dict:
     }
 
 
+# ------------------------------------------------------------------ ретеншн, кэши, компактификация
+# Таймауты фоновых задач (секунды). Ночные задачи идут в потоке и сами с try/except — им нужно
+# заметно больше; остальным хватает общего performance.job_timeout_sec.
+JOB_TIMEOUT_DEFAULT = 600.0
+_JOB_TIMEOUTS = {"backup": 1800.0, "retention": 1800.0, "db_compact": 1800.0,
+                 "memory_nightly": 1800.0, "cloud_backup": 900.0}
+
+
+def _retention_days(key: str) -> int:
+    """retention.<key> из config.yaml (0 / не задано — выключено). Значения по умолчанию в config.py не трогаем:
+    включение — только явной строкой в config.example.yaml → config.yaml."""
+    node = cfg.get("retention")
+    if node is None:
+        return 0
+    try:
+        return max(int(node.get(key, 0) or 0), 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def retention_cleanup() -> dict:
+    """Ретеншн растущих таблиц СТРОГО по retention.* настройкам. Чистятся только ChatMessage / ActionLog / Lesson;
+    Memory (журнал) и Fact (знания о хозяине) не трогаются никогда. Выключено (0 дней) — ничего не делаем."""
+    from sqlalchemy import delete
+    from ..db import ActionLog, ChatMessage, Lesson, session
+    res: dict[str, int] = {}
+    for label, key, model in (("chat_days", "chat_days", ChatMessage),
+                              ("action_days", "action_days", ActionLog),
+                              ("lesson_days", "lesson_days", Lesson)):
+        days = _retention_days(key)
+        if days <= 0:
+            continue
+        cutoff = datetime.now() - timedelta(days=days)
+        with session() as s:
+            cur = s.execute(delete(model).where(model.created_at < cutoff))
+            s.commit()
+            if cur.rowcount:
+                res[label] = int(cur.rowcount)
+    return res
+
+
+# (папка в data/, дней не старше, лимит в МБ — старое удаляем до лимита)
+_CACHE_RULES = (("card_cache", 30, 500), ("tmp", 7, 200))
+
+
+def clean_caches() -> dict:
+    """Чистка кэшей data/card_cache (картинки-карточки) и data/tmp (временные файлы):
+    сначала всё старше лимита по возрасту, потом лишнее по размеру (старые файлы первыми)."""
+    from ..config import DATA_DIR
+    res: dict[str, int] = {}
+    for name, days, mb in _CACHE_RULES:
+        d = DATA_DIR / name
+        if not d.is_dir():
+            continue
+        cutoff = time.time() - days * 86400
+        removed = 0
+        files: list[tuple[float, int, Path]] = []
+        for f in d.rglob("*"):
+            if not f.is_file():
+                continue
+            try:
+                st = f.stat()
+            except OSError:  # pragma: no cover — файл пропал между списком и stat
+                continue
+            if st.st_mtime < cutoff:
+                try:
+                    f.unlink()
+                    removed += 1
+                except OSError as e:  # файл занят (открыт в браузере/редакторе) — чистим в следующий раз
+                    log.debug("кэш-файл не удалён: %s (%s)", f.name, e)
+            else:
+                files.append((st.st_mtime, st.st_size, f))
+        total = sum(size for _, size, _ in files)
+        limit = mb * 1024 * 1024
+        if total > limit:
+            for _, size, f in sorted(files):   # старые первыми
+                if total <= limit:
+                    break
+                try:
+                    f.unlink()
+                    removed += 1
+                    total -= size
+                except OSError as e:  # файл занят — лимит по размеру не выбьем в этот проход
+                    log.debug("кэш-файл не удалён по лимиту: %s (%s)", f.name, e)
+        if removed:
+            res[name] = removed
+    return res
+
+
+def db_compact() -> dict:
+    """WAL → основный файл (`PRAGMA wal_checkpoint(TRUNCATE)`) + `PRAGMA integrity_check`.
+    По расписанию — раз в неделю ночью (см. build()); можно вызвать вручную из консоли."""
+    from ..db import engine
+    out: dict = {"ok": True, "result": "ok", "checkpoint": None}
+    raw = engine.raw_connection()
+    try:
+        cur = raw.cursor()
+        cur.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        row = cur.fetchone()
+        out["checkpoint"] = list(row) if row else None
+        rows = [str(r[0]) for r in cur.execute("PRAGMA integrity_check").fetchall()]
+    finally:
+        raw.close()
+    out["result"] = "; ".join(rows) or "нет результата"
+    out["ok"] = len(rows) == 1 and rows[0].lower() == "ok"
+    if out["ok"]:
+        log.info("db compact: WAL сброшен, integrity_check ok")
+    else:
+        log.error("db compact: integrity_check провален (%s)", out["result"])
+        try:
+            from . import events
+            events.emit("health_bad", key="db_integrity", dedup_sec=6 * 3600,
+                        text=f"база прошла проверку с ошибками: {out['result']}", quiet=False)
+        except Exception as e:  # pragma: no cover
+            log.warning("событие health_bad не отправлено: %s", e)
+    return out
+
+
+def job_timeout(name: str) -> float:
+    """Таймаут одной фоновой задачи, секунды.
+
+    Зачем: сеть или модель могут зависнуть навсегда (сокет без таймаута, Ollama не отвечает),
+    а `max_instances=1` не даст задаче запуститься снова — она молча перестанет работать до
+    перезапуска ядра. `wait_for` (см. guard_job) обрывает её и пишет в лог; соседние задачи
+    при этом не страдают — APScheduler и так изолирует ошибки по задачам.
+    Настраивается: performance.job_timeout_sec в config.yaml.
+    """
+    override = _JOB_TIMEOUTS.get(name)
+    if override is not None:
+        return override
+    node = getattr(cfg, "performance", None)
+    raw = getattr(node, "job_timeout_sec", JOB_TIMEOUT_DEFAULT) if node is not None else JOB_TIMEOUT_DEFAULT
+    try:
+        return max(30.0, min(3600.0, float(raw)))
+    except (TypeError, ValueError):
+        return JOB_TIMEOUT_DEFAULT
+
+
+def guard_job(fn, name: str):
+    """Обёртка задачи планировщика: ловит таймаут и любую ошибку в лог.
+
+    Ошибка одной задачи не должна подниматься наружу (иначе APScheduler её переживёт, но в
+    лог уйдёт трейсбек без имени задачи) — здесь пишем понятную строку с именем.
+    """
+    async def _inner(*a, **kw):
+        try:
+            return await asyncio.wait_for(fn(*a, **kw), timeout=job_timeout(name))
+        except asyncio.TimeoutError:
+            log.error("задача «%s» не уложилась в %.0f с — прервана, ждём следующего запуска", name, job_timeout(name))
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # pragma: no cover — детали всё равно дописывает APScheduler
+            log.error("задача «%s» упала: %s: %s", name, type(e).__name__, e)
+    _inner.__name__ = f"job_{name}"
+    return _inner
+
+
 def build(notify: Notifier) -> AsyncIOScheduler:
     # misfire_grace_time: ПК спал/ноут был закрыт — задача, пропущенная меньше чем на час, всё равно выполнится один раз
     # (coalesce), а не молча пропадёт (по умолчанию у APScheduler 1 секунда) и не выстрелит пачкой.
@@ -383,6 +679,11 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     from datetime import datetime as _dtm
     _tz = sch.timezone
     _soon = lambda sec: _dtm.now(_tz) + timedelta(seconds=sec)  # noqa: E731
+
+    def add(fn, trigger, job_id: str, **kw):
+        """sch.add_job с таймаутом и логом. replace_existing — повторный build() не плодит дубли задач."""
+        kw.setdefault("replace_existing", True)
+        return sch.add_job(guard_job(fn, job_id), trigger, id=job_id, **kw)
 
     async def _send(text: str, buttons=None, channel: str = "text"):
         from ..brain import persona
@@ -551,6 +852,26 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     async def backup():
         backup_db()
 
+    async def cloud_backup_job():
+        """Облачный бэкап (WebDAV, cloud_backup.py): если cloud.enabled и прошло
+        cloud.every_hours с последней попытки — отправить свежий снимок зашифрованным.
+        Сбой не должен ронять планировщик и соседние задачи: лог + last_error в settings
+        + событие health_bad (раз в 6 часов), дальше ждём следующего hourly-прогона."""
+        from . import cloud_backup
+        try:
+            if not cloud_backup.enabled() or not cloud_backup.due():
+                return
+            res = await asyncio.to_thread(cloud_backup.upload_latest)
+            log.info("облачный бэкап: %s (%s Б)", res.get("name"), res.get("size"))
+        except Exception as e:  # pragma: no cover — сеть/облако могут упасть в любую ночь
+            log.error("облачный бэкап не ушёл: %s", e)
+            try:
+                from . import events
+                events.emit("health_bad", key="cloud_backup", dedup_sec=6 * 3600,
+                            text=f"бэкап в облако не ушёл: {e}", quiet=False)
+            except Exception as e2:  # pragma: no cover — и событие не должно ломать задачу
+                log.warning("событие health_bad не отправлено: %s", e2)
+
     async def polish_job():
         # Явный импорт не зависит от состояния package core.services во время запуска APScheduler.
         import importlib
@@ -715,22 +1036,22 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         ping("reminder", text=text, id=f"crm-{datetime.now():%Y%m%d}")
         await _notify(text)
 
-    sch.add_job(timer_tick, "interval", seconds=20, id="timer_tick", next_run_time=_soon(20))
-    sch.add_job(payment_check, CronTrigger(hour=10, minute=30), id="payment_check")
-    sch.add_job(crm_followups_job, CronTrigger(hour=9, minute=40), id="crm_followups")
-    sch.add_job(evening_review, CronTrigger(hour=21, minute=0), id="evening_review")
-    sch.add_job(evening_budget, CronTrigger(hour=21, minute=2), id="evening_budget")
-    sch.add_job(weekly, CronTrigger(day_of_week="sun", hour=19, minute=0), id="weekly_digest")
-    sch.add_job(weekly_card, CronTrigger(day_of_week="sun", hour=19, minute=2), id="weekly_card")
-    sch.add_job(monthly_card, CronTrigger(day=1, hour=11, minute=0), id="monthly_card")
-    sch.add_job(monthly_subs, CronTrigger(day=1, hour=12, minute=0), id="monthly_subs")
-    sch.add_job(birthdays, CronTrigger(hour=10, minute=0), id="birthdays")
-    sch.add_job(self_check, CronTrigger(hour=9, minute=5), id="self_check")
-    sch.add_job(reminders, "interval", minutes=1, id="reminders")
-    sch.add_job(task_reminders, "interval", minutes=5, id="task_reminders", next_run_time=_soon(30))
-    sch.add_job(semantic_job, "interval", minutes=10, id="semantic", next_run_time=_soon(90))
-    sch.add_job(polish_job, "interval", minutes=5, id="polish", next_run_time=_soon(40))
-    sch.add_job(recurring, "interval", hours=1, id="recurring", next_run_time=_soon(20))
+    add(timer_tick, "interval", "timer_tick", seconds=20, next_run_time=_soon(20))
+    add(payment_check, CronTrigger(hour=10, minute=30), "payment_check")
+    add(crm_followups_job, CronTrigger(hour=9, minute=40), "crm_followups")
+    add(evening_review, CronTrigger(hour=21, minute=0), "evening_review")
+    add(evening_budget, CronTrigger(hour=21, minute=2), "evening_budget")
+    add(weekly, CronTrigger(day_of_week="sun", hour=19, minute=0), "weekly_digest")
+    add(weekly_card, CronTrigger(day_of_week="sun", hour=19, minute=2), "weekly_card")
+    add(monthly_card, CronTrigger(day=1, hour=11, minute=0), "monthly_card")
+    add(monthly_subs, CronTrigger(day=1, hour=12, minute=0), "monthly_subs")
+    add(birthdays, CronTrigger(hour=10, minute=0), "birthdays")
+    add(self_check, CronTrigger(hour=9, minute=5), "self_check")
+    add(reminders, "interval", "reminders", minutes=1)
+    add(task_reminders, "interval", "task_reminders", minutes=5, next_run_time=_soon(30))
+    add(semantic_job, "interval", "semantic", minutes=10, next_run_time=_soon(90))
+    add(polish_job, "interval", "polish", minutes=5, next_run_time=_soon(40))
+    add(recurring, "interval", "recurring", hours=1, next_run_time=_soon(20))
     @_state.tracked("ночная уборка памяти")
     async def memory_nightly():
         from . import memory, trace
@@ -819,7 +1140,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
 
     from . import events as _events
     _events.on("*", _on_event)
-    sch.add_job(presence_tick, "interval", minutes=1, id="presence_tick", next_run_time=_soon(45))
+    add(presence_tick, "interval", "presence_tick", minutes=1, next_run_time=_soon(45))
 
     async def screen_cleanup():
         from . import screen
@@ -829,13 +1150,36 @@ def build(notify: Notifier) -> AsyncIOScheduler:
                 log.info("Экранное время: удалено %d старых отрезков", n)
         except Exception as e:  # pragma: no cover
             log.warning("screen cleanup: %s", e)
-    sch.add_job(screen_cleanup, CronTrigger(hour=3, minute=20), id="screen_cleanup")
-    sch.add_job(backup, CronTrigger(hour=3, minute=0), id="backup")
-    sch.add_job(memory_nightly, CronTrigger(hour=4, minute=0), id="memory_nightly")
-    sch.add_job(proactive_tick, "interval", hours=1, id="proactive", next_run_time=_soon(300))
-    sch.add_job(gcal_flush, "interval", minutes=3, id="gcal_flush", next_run_time=_soon(60))
+    add(screen_cleanup, CronTrigger(hour=3, minute=20), "screen_cleanup")
+    add(backup, CronTrigger(hour=3, minute=0), "backup")
+    # облако: раз в час проверяем «включено и прошло cloud.every_hours» — отправка свежего снимка
+    add(cloud_backup_job, "interval", "cloud_backup", hours=1, next_run_time=_soon(300))
+    add(memory_nightly, CronTrigger(hour=4, minute=0), "memory_nightly")
+
+    async def nightly_maintenance():
+        """Ночью: ретеншн по retention.* (выключено — мгновенный выход) и чистка кэшей data/card_cache, data/tmp."""
+        for fn, what in ((retention_cleanup, "ретеншн"), (clean_caches, "кэши")):
+            try:
+                res = await asyncio.to_thread(fn)
+                if res:
+                    log.info("%s: удалено %s", what, res)
+            except Exception as e:  # pragma: no cover — уборка не должна ронять планировщик
+                log.error("%s: не удалось почистить: %s", what, e)
+
+    async def compact_job():
+        """Раз в неделю (вс 04:30): WAL → основный файл + integrity_check базы."""
+        try:
+            await asyncio.to_thread(db_compact)
+        except Exception as e:  # pragma: no cover
+            log.error("компактификация БД не удалась: %s", e)
+
+    # ночная надёжность: уборка каждый день, компактификация — раз в неделю
+    add(nightly_maintenance, CronTrigger(hour=4, minute=20), "retention")
+    add(compact_job, CronTrigger(day_of_week="sun", hour=4, minute=30), "db_compact")
+    add(proactive_tick, "interval", "proactive", hours=1, next_run_time=_soon(300))
+    add(gcal_flush, "interval", "gcal_flush", minutes=3, next_run_time=_soon(60))
     md = cfg.telegram.morning_digest
     if md:
         h, m = md.split(":")
-        sch.add_job(digest, CronTrigger(hour=int(h), minute=int(m)), id="digest")
+        add(digest, CronTrigger(hour=int(h), minute=int(m)), "digest")
     return sch

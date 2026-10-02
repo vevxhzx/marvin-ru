@@ -111,11 +111,53 @@ def _v3_client_stage(conn) -> None:
     create_index(conn, "ix_client_stage", "client", '"stage"')
 
 
+def _v4_indexes(conn) -> None:
+    """Составные индексы под частые запросы (фаза «надёжность»): финансы по счёту/дате, задачи по срокам,
+    журналы по ссылке, история чата и факты по слою. Только CREATE INDEX IF NOT EXISTS — никаких изменений
+    данных; на старых базах колонки/таблицы проверяются, отсутствующее пропускается с предупреждением."""
+    for name, table, cols in (
+        ("ix_transaction_account", "transaction", '"account"'),
+        ("ix_transaction_kind_date", "transaction", '"kind", "date"'),
+        ("ix_task_due", "task", '"due"'),
+        ("ix_task_done_due", "task", '"done", "due"'),
+        ("ix_recurring_active_next_date", "recurring", '"active", "next_date"'),
+        ("ix_memory_ref_table_ref_id", "memory", '"ref_table", "ref_id"'),
+        ("ix_actionlog_ref_table_ref_id", "actionlog", '"ref_table", "ref_id"'),
+        ("ix_actionlog_kind", "actionlog", '"kind"'),
+        ("ix_embedding_model_ref_table_ref_id", "embedding", '"model", "ref_table", "ref_id"'),
+        ("ix_chatmessage_role_created_at", "chatmessage", '"role", "created_at"'),
+        ("ix_fact_layer_created_at", "fact", '"layer", "created_at"'),
+    ):
+        create_index(conn, name, table, cols)
+
+
+def _v5_fact_decay(conn) -> None:
+    """Память: колонки затухания фактов. Только ADD COLUMN, значения NULL = «ещё не было».
+
+    fact.last_seen_at — когда факт последний раз встречался в реплике хозяина (не в промпте!);
+    fact.confirmed_at — когда хозяин подтвердил предложение («да» в тосте) — такой факт не гаснет;
+    fact.archived_at  — когда ушёл в архив (случай «затухло» отличается от ручного «забудь»)."""
+    add_column(conn, "fact", "last_seen_at", "DATETIME")
+    add_column(conn, "fact", "confirmed_at", "DATETIME")
+    add_column(conn, "fact", "archived_at", "DATETIME")
+    create_index(conn, "ix_fact_confirmed_at", "fact", '"confirmed_at"')
+
+
+def _v6_lesson_applied(conn) -> None:
+    """Уроки: когда урок реально подмешивался в промпт чата — чтобы выбирать свежие/уже применявшиеся
+    и не показывать один и тот же урок подряд."""
+    add_column(conn, "lesson", "applied", "BOOLEAN DEFAULT 0")
+    add_column(conn, "lesson", "last_applied_at", "DATETIME")
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
     (2, "crm: order.stage/revisions/next_step, client.source, transaction.idem_key, crm-таблицы", _v2_crm),
     (3, "crm: client.stage/stage_manual/stage_auto/stage_updated_at", _v3_client_stage),
+    (4, "индексы: transaction/task/recurring/memory/action_log/embedding/chat_message/fact", _v4_indexes),
+    (5, "память: fact.last_seen_at/confirmed_at/archived_at", _v5_fact_decay),
+    (6, "уроки: lesson.applied/last_applied_at", _v6_lesson_applied),
 ]
 
 
@@ -141,8 +183,14 @@ def add_column(conn, table: str, column: str, ddl: str) -> bool:
 
 
 def create_index(conn, name: str, table: str, columns: str) -> None:
-    """Идемпотентно создать индекс (аддитивно, без удаления). Пропускает отсутствующую таблицу."""
+    """Идемпотентно создать индекс (аддитивно, без удаления). Пропускает таблицу без нужных колонок:
+    на старой базе колонка могла не появиться — индекс создавать не на чем, лучше предупредить, чем упасть."""
     if not table_exists(conn, table):
+        return
+    have = column_names(conn, table)
+    wanted = {c.strip().strip('"`[]') for c in columns.split(",")}
+    if not wanted <= have:
+        log.warning("индекс %s пропущен: в таблице %s нет колонок %s", name, table, sorted(wanted - have))
         return
     conn.execute(text(f'CREATE INDEX IF NOT EXISTS "{name}" ON "{table}" ({columns})'))
 
@@ -159,12 +207,23 @@ def _ensure_table(engine: Engine) -> None:
 
 
 def current_version(engine: Engine) -> int:
-    """Максимальная применённая версия; 0 — ещё ничего не применялось."""
+    """Максимальная применённая версия; 0 — таблицы `schema_version` ещё нет (миграции не применялись).
+
+    Ошибка чтения (битая база, чужая схема) НЕ маскируется под «0»: раньше `except: return 0`
+    превращал сбой в «миграций нет» и apply() молча повторно лез в схему. Теперь поднимаем
+    исключение — init_db его залогирует (log.error), выставит флаг `migration:error` в settings
+    и отдаст его в /api/status."""
     with engine.connect() as conn:
+        exists = conn.execute(text(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='schema_version'"
+        )).first()
+        if not exists:
+            return 0   # таблицы нет — честно «ничего не применялось», это не ошибка
         try:
             row = conn.execute(text("SELECT MAX(version) FROM schema_version")).first()
-        except Exception:
-            return 0
+        except Exception as e:
+            log.error("не удалось прочитать версию схемы: %s", e)
+            raise
     return int(row[0]) if row and row[0] is not None else 0
 
 
@@ -208,10 +267,13 @@ def backup_before_migration(engine: Engine, backup_dir: str | Path | None = None
     return str(dst)
 
 
-def apply(engine: Engine, had_db: bool = True, backup_dir: str | Path | None = None) -> dict:
+def apply(engine: Engine, had_db: bool = True, backup_dir: str | Path | None = None,
+          backup_taken: bool = False) -> dict:
     """Применить недостающие миграции по порядку.
 
     `had_db=False` — база только что создана с нуля (бэкапить нечего).
+    `backup_taken=True` — копия уже снята ДО первых изменений схемы (init_db берёт её заранее,
+    чтобы ни один ALTER не ушёл в файл раньше бэкапа) — второй раз не копируем.
     Возвращает {"from", "to", "applied": [версии], "backup": путь|None}.
     """
     _ensure_table(engine)
@@ -219,7 +281,7 @@ def apply(engine: Engine, had_db: bool = True, backup_dir: str | Path | None = N
     todo = [m for m in MIGRATIONS if m[0] > cur]
     if not todo:
         return {"from": cur, "to": cur, "applied": [], "backup": None}
-    backup = backup_before_migration(engine, backup_dir) if had_db else None
+    backup = None if backup_taken else (backup_before_migration(engine, backup_dir) if had_db else None)
     applied: list[int] = []
     for version, name, fn in todo:
         with engine.begin() as conn:
