@@ -218,9 +218,10 @@ def _resolve(spec, t0: datetime):
         h, m = _hm(parts[1])
         no_time = parts[1].rstrip("~").endswith("~") or parts[1].endswith("~")
         delta = (wd - t0.weekday()) % 7
+        # «~» — в фразе не было времени: вечером (после 20:00) такой день относят к следующей неделе
         d = t0 + timedelta(days=delta)
-        if delta == 0 and not no_time and (h, m) <= (t0.hour, t0.minute):
-            d += timedelta(days=7)  # время уже прошло — берём следующую неделю
+        if delta == 0 and ((h, m) <= (t0.hour, t0.minute) or (no_time and t0.hour >= 20)):
+            d += timedelta(days=7)
         return d.replace(hour=h, minute=m, second=0, microsecond=0)
     if parts[0] == "dl":                                         # dl_wd4 — дедлайн «до пятницы» (строго следующей)
         wd = int(parts[1][2:])
