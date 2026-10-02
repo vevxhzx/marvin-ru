@@ -71,13 +71,19 @@ def _route_future(p: dict) -> list[dict]:
 
 
 # ------------------------------------------------------------------ ряд cash_series (эталон)
+def _today():
+    """Сегодня в часовом поясе владельца — так же, как считает сам продукт."""
+    from core.services import insights as _ins
+    return _ins.now_tz().date()
+
+
 def test_cash_series_today_point_is_total_balance():
     f = _fin()
     f.set_balance(_main(), 10_000)
     f.add_transaction(500, "expense", "Еда", "обед", _main(), date=_ago(1))
     s = _ins().cash_series(30)
     past = _past(s)
-    assert past[-1]["date"] == s["today"] == date.today().isoformat()
+    assert past[-1]["date"] == s["today"] == _today().isoformat()
     assert past[-1]["balance"] == round(f.total_balance()) == 9_500
 
 
@@ -89,10 +95,10 @@ def test_cash_series_dates_are_consecutive_and_unique():
     d0 = date.fromisoformat(dates[0])
     for i, ds in enumerate(dates):
         assert date.fromisoformat(ds) == d0 + timedelta(days=i), "дыра или сдвиг в датах"
-    assert dates[-1] == s["today"] == date.today().isoformat()
+    assert dates[-1] == s["today"] == _today().isoformat()
     # будущее начинается со следующего дня, без пропуска и без повтора «сегодня»
     fut = [x for x in s["points"] if x["kind"] == "future"]
-    assert date.fromisoformat(fut[0]["date"]) == date.today() + timedelta(days=1)
+    assert date.fromisoformat(fut[0]["date"]) == _today() + timedelta(days=1)
 
 
 def test_cash_series_ignores_transfers_and_debt_only_accounts():
@@ -118,7 +124,7 @@ def test_cash_series_recomputes_after_delete():
     s2 = _ins().cash_series(30)
     assert _past(s2)[-1]["balance"] == 10_000
     # вчерашний день стал плоским: удалили единственную операцию окна
-    y = (date.today() - timedelta(days=1)).isoformat()
+    y = (_today() - timedelta(days=1)).isoformat()
     y_pt = next(p for p in _past(s2) if p["date"] == y)
     assert y_pt["delta"] == 0
 
@@ -144,7 +150,7 @@ def test_route_today_point_equals_total_balance():
     r = _route(30)
     assert r["balance"] == 9_500                       # поле balance — правильное
     today_pt = _past(r)[-1]
-    assert today_pt["date"] == date.today().isoformat()
+    assert today_pt["date"] == _today().isoformat()
     # а точка «сегодня» врёт на те же 500 ₽ (завышает баланс)
     assert today_pt["balance"] == round(f.total_balance()) == 9_500
 

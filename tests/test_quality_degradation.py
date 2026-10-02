@@ -46,7 +46,9 @@ def test_cash_series_on_empty_db_is_flat_and_tied_to_balance():
     f = _fin()
     f.set_balance(f.main_account_name(), 7_700)
     s = _ins().cash_series(30)
-    assert s["today"] == date.today().isoformat()
+    # «сегодня» в проекте считается в часовом поясе владельца (Europe/Moscow), а не в поясе
+    # машины, где идёт прогон: на CI в UTC после полуночи эти даты расходились на день
+    assert s["today"] == _ins().now_tz().date().isoformat()
     past = [p for p in s["points"] if p["kind"] == "past"]
     assert past[-1]["date"] == s["today"]
     assert past[-1]["balance"] == round(f.total_balance()) == 7_700

@@ -59,6 +59,12 @@ def _invariants(s: dict) -> None:
 
 # ------------------------------------------------------------------ что рисуется
 
+def _today():
+    """Сегодня в часовом поясе владельца — так же, как считает сам продукт (insights.now_tz)."""
+    from core.services import insights as _ins
+    return _ins.now_tz().date()
+
+
 def test_series_is_balance_at_end_of_day():
     from core.services import finance, insights
     finance.set_balance(ACC, 10_000)
@@ -68,7 +74,7 @@ def test_series_is_balance_at_end_of_day():
     s = insights.cash_series(30)
     past = _past(s)
     # последняя точка прошлого = сегодня и совпадает с единым источником баланса
-    assert past[-1]["date"] == s["today"] == date.today().isoformat()
+    assert past[-1]["date"] == s["today"] == _today().isoformat()
     assert past[-1]["balance"] == round(finance.total_balance()) == 17_500
     # баланс на конец дня: зарплата, пришедшая вчера, уже внутри баланса за вчера,
     # а в балансе за 2 дня назад её ещё нет — и ровно на этом дне delta = +9 000
@@ -86,7 +92,7 @@ def test_first_point_also_has_delta():
 
     s = insights.cash_series(30)
     first = s["points"][0]
-    assert first["date"] == (date.today() - timedelta(days=s["history_days"])).isoformat()
+    assert first["date"] == (_today() - timedelta(days=s["history_days"])).isoformat()
     assert first["delta"] == -300               # операция ровно на первой точке видна в её delta
     # операция ДО окна уже учтена в балансе первой точки (она случилась раньше конца этого дня)
     assert first["balance"] == round(finance.total_balance()) == 9_000
