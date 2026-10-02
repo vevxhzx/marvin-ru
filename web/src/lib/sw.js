@@ -5,13 +5,20 @@
    исходники по сокращённым путям, и service worker их закэшировал бы — HMR сломался бы.
 
    Модуль сам себя регистрирует при импорте — main.jsx добавлена одна строка:
-   import './lib/sw' */
+   import './lib/sw'
+
+   ВАЖНО, из-за чего здесь комментарий: applyUpdate() НЕ перезагружает страницу сам.
+   Решение о перезагрузке принимает обработчик controllerchange ниже — только когда
+   контроллер сменился на новый (то есть обновление мы сами запросили кнопкой). Первое
+   clients.claim() при activate перезагрузку НЕ вызывает: иначе каждый новый посетитель
+   через секунду после открытия видел перезагрузку, а на медленной сети — белый экран. */
 import { toast } from '../components/ui'
 import { t } from './i18n'
 
 let waitingSW = null     // новый SW, ждущий активации (есть обновление)
 let installEvent = null  // сохранённое событие beforeinstallprompt
 let started = false
+let askedUpdate = false  // обновление запросил пользователь (кнопка/тап), а не пришло само
 
 /* Кнопка «установить»: промпт живёт только до первого вызова/страницы. */
 export const canInstall = () => !!installEvent
@@ -27,9 +34,11 @@ export async function installPwa() {
   } catch { return false }
 }
 
-/* Применить обновление: new SW → skipWaiting → controllerchange → перезагрузка. */
+/* Применить обновление: new SW → skipWaiting → controllerchange → перезагрузка (см. registerSW). */
 export function applyUpdate() {
-  try { waitingSW?.postMessage({ type: 'SKIP_WAITING' }) } catch {}
+  if (!waitingSW) return
+  askedUpdate = true
+  try { waitingSW.postMessage({ type: 'SKIP_WAITING' }) } catch {}
   waitingSW = null
 }
 
@@ -54,7 +63,8 @@ export function registerSW() {
   if (!('serviceWorker' in navigator)) return
 
   const start = () => {
-    navigator.serviceWorker.register('/sw.js').then((reg) => {
+    // updateViaCache: 'none' — иначе HTTP-кэш отдаёт старый sw.js и обновление не приходит вовсе
+    navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' }).then((reg) => {
       if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting)
       reg.addEventListener('updatefound', () => {
         const sw = reg.installing
@@ -70,14 +80,14 @@ export function registerSW() {
   else window.addEventListener('load', start, { once: true })
 
   let reloading = false
-  // Страница была под контролем SW ещё до регистрации? Если нет — сейчас будет ПЕРВОЕ
-  // завоевание контроля (clients.claim на activate), и это не обновление: перезагрузка
-  // тут означала бы, что каждому новому посетителю страница перезагружается через
-  // секунду после открытия. Перезагружаемся только когда контролер сменился на новый.
+  // Перезагружаемся только в одном случае: обновление запросил пользователь (applyUpdate → SKIP_WAITING),
+  // и новый SW встал контроллером. Первое clients.claim() при activate сюда не попадает: страница
+  // открылась вообще без SW-контроллера (первый визит), hadController === false — это не обновление,
+  // а обычное завоевание контроля. Иначе каждый новый посетитель видел бы перезагрузку через
+  // секунду после открытия, а на медленной сети — белый экран вместо приложения.
   const hadController = !!navigator.serviceWorker.controller
   navigator.serviceWorker.addEventListener('controllerchange', () => {
-    if (!hadController) return
-    if (reloading) return
+    if (!hadController || !askedUpdate || reloading) return
     reloading = true
     window.location.reload()
   })
