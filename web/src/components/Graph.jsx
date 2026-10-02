@@ -24,6 +24,8 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
   const [hover, setHover] = useState(null)
   const hoverRef = useRef(null)          // наведение читаем из ref, а не из зависимостей эффекта — иначе физика стартовала бы с нуля на каждое движение мыши
   hoverRef.current = hover
+  const touchRef = useRef(false)         // на телефоне наведения нет: карточку узла открывает тап,
+  // но после отпускания пальца браузер шлёт pointerleave — такой уход игнорируем, иначе карточка гаснет сразу
   const alphaRef = useRef(1)             // «температура» раскладки: 1 — разлетается и ищет место, ~0 — стоит. Взаимодействие подогревает мягко
   const warm = (t) => { alphaRef.current = Math.max(alphaRef.current, t) }
   const [hidden, setHidden] = useState(() => new Set())
@@ -154,7 +156,14 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
     return { x: (e.clientX - r.left - r.width / 2 - v.x) / v.k, y: (e.clientY - r.top - r.height / 2 - v.y) / v.k }
   }
   const pick = (p) => nodesRef.current.find((n) => (n.x - p.x) ** 2 + (n.y - p.y) ** 2 <= (n.r + 4) ** 2)
-  const onDown = (e) => { const p = toWorld(e); const n = pick(p); dragRef.current = n ? { node: n, moved: false } : { pan: true, sx: e.clientX, sy: e.clientY, ox: viewRef.current.x, oy: viewRef.current.y, moved: false }; e.currentTarget.setPointerCapture(e.pointerId) }
+  const onDown = (e) => {
+    const p = toWorld(e); const n = pick(p)
+    touchRef.current = e.pointerType !== 'mouse'
+    // тап по пустому месту — убрать карточку узла (на телефоне нет наведения)
+    if (!n) setHover(null)
+    dragRef.current = n ? { node: n, moved: false } : { pan: true, sx: e.clientX, sy: e.clientY, ox: viewRef.current.x, oy: viewRef.current.y, moved: false }
+    e.currentTarget.setPointerCapture(e.pointerId)
+  }
   const onMove = (e) => {
     const d = dragRef.current
     if (d?.node) { const p = toWorld(e); d.node.x = p.x; d.node.y = p.y; d.moved = true; warm(0.35); return }
@@ -164,7 +173,7 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
   const onUp = (e) => {
     const d = dragRef.current; dragRef.current = null
     if (d?.node && d.moved) warm(0.5)   // отпустили — соседи доезжают на новое место
-    if (d?.node && !d.moved) setFocus((f) => (f === d.node.id ? null : d.node.id))
+    if (d?.node && !d.moved) { setHover(d.node); setFocus((f) => (f === d.node.id ? null : d.node.id)) }
   }
   const onDbl = (e) => {
     const n = pick(toWorld(e)); if (!n) { viewRef.current.user = false; return }
@@ -190,7 +199,8 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
   return (
     <div className="relative">
       <canvas ref={canvasRef} className="w-full rounded-3xl" style={{ height, background: 'var(--fill)', cursor: hover ? 'pointer' : 'grab', touchAction: 'none' }}
-        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => setHover(null)} onDoubleClick={onDbl} />
+        role="img" aria-label={`${t('graph.stats', { people: st.people || 0, notes: st.notes || 0, links: st.links || 0, edges: st.edges || 0 })}. ${t('graph.nav_hint')}`}
+        onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { if (!touchRef.current) setHover(null) }} onDoubleClick={onDbl} />
       {!compact && (
         <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
           {LEGEND.map((k) => (

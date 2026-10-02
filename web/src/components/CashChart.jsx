@@ -1,6 +1,7 @@
-import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useId, useMemo, useRef, useState } from 'react'
 import { money } from '../lib/api'
 import { t as T } from '../lib/i18n'
+import { useTip } from './ChartTip'
 
 /* График «касса на N дней» — общий для раздела «финансы» и виджета на главной.
  *
@@ -11,6 +12,11 @@ import { t as T } from '../lib/i18n'
  *
  * «Сегодня» = последняя точка прошлого (kind !== 'future'), тот же источник, что и у сервера,
  * поэтому метка не может разъехаться с маркером на 1 день.
+ *
+ * Саму плашку рисует ChartTip — та же, что у столбиков на главной: тёмная, с safe-area,
+ * не вылезает за края и не прыгает. Здесь она целиком в portal, поэтому карточка с
+ * overflow:hidden её не срезает. Набор подписей (data-date/data-bal/data-kind) прежний —
+ * на них завязан e2e-тест tests/e2e/specs/cash_chart.spec.js.
  */
 const W = 600, H = 200                       // система координат viewBox
 const dm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`   // без new Date(iso) — иначе минус день у клиента в UTC−
@@ -32,8 +38,9 @@ const txEvents = (txs) => {
 
 export default function CashChart({ f, height = 200, compact = false, txs = null, legend = true }) {
   const [sel, setSel] = useState(null)          // индекс точки под курсором/пальцем
-  const [pin, setPin] = useState(false)        // тап на телефоне «залипает» до повторного тапа
-  const tipRef = useRef(null)
+  const tip = useTip()                          // общая подсказка (ChartTip.jsx)
+  const dotRef = useRef(null)                   // маркер выбранной точки — к нему привязана плашка
+  const hintId = useId()                        // подпись для скринридера про стрелки
   const pts = f?.points || []
   const n = pts.length
 
@@ -88,43 +95,51 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
     return out
   }, [geo, n, todayIdx, pts])
 
+  const idxAt = (e, box) => {
+    if (!box.width) return 0
+    return Math.max(0, Math.min(n - 1, Math.round(((e.clientX - box.left) / box.width) * (n - 1))))
+  }
   const pick = (e) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    if (!r.width) return
-    setSel(Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1)))))
+    const i = idxAt(e, e.currentTarget.getBoundingClientRect())
+    if (i === sel) return
+    setSel(i)
+    tip.open(i, () => dotRef.current)      // плашка целится в маркер, он появится с ней же
   }
   const onDown = (e) => {
-    const r = e.currentTarget.getBoundingClientRect()
-    const i = r.width ? Math.max(0, Math.min(n - 1, Math.round(((e.clientX - r.left) / r.width) * (n - 1)))) : 0
-    if (pin && i === sel) { setPin(false); setSel(null); return }   // повторный тап — убрать подсказку
-    setSel(i); setPin(true)
+    const i = idxAt(e, e.currentTarget.getBoundingClientRect())
+    if (tip.pinned && i === sel) { setSel(null); tip.close(); return }   // повторный тап — убрать подсказку
+    setSel(i); tip.pin(i, () => dotRef.current)
   }
-  const onLeave = () => { if (!pin) setSel(null) }
+  const onLeave = () => { if (!tip.pinned) { setSel(null); tip.close() } }
   // палец увел в сторону — браузер отдаёт жест себе (вертикальная прокрутка), подсказку убираем
-  const onCancel = () => { setSel(null); setPin(false) }
-
-  // подсказку не обрезаем краями: у краёв она «прилипает» к границе, а не уезжает за холст
-  useLayoutEffect(() => {
-    const el = tipRef.current
-    if (!el) return
-    const w = el.offsetWidth
-    const host = el.parentElement?.clientWidth || 0
-    if (w && (!host || w + 12 > host)) el.style.maxWidth = `${Math.max(120, host - 12)}px`
-    else el.style.maxWidth = ''
-  }, [sel, cur?.date, cur?.balance, compact])
+  const onCancel = () => { setSel(null); tip.close() }
+  // клавиатура: стрелки — по дням, Esc — убрать подсказку
+  const onKey = (e) => {
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : e.key === 'Home' ? -1e9 : e.key === 'End' ? 1e9 : 0
+    if (e.key === 'Escape') { setSel(null); tip.close(); return }
+    if (!step) return
+    e.preventDefault()
+    const i = Math.max(0, Math.min(n - 1, (sel == null ? 0 : sel + step)))
+    setSel(i); tip.open(i, () => dotRef.current)
+  }
 
   if (!geo) return <p className="py-10 text-center text-sm text-[var(--ink3)]">{T('chart.too_few')}</p>
 
   const curX = sel != null ? xPct(sel) : 0
-  const tipBelow = sel != null && yPx(cur.balance) < height * 0.3
   const evs = cur ? events(sel) : []
+  // подпись точки для скринридера и для подсказки — одна и та же строка
+  const pointLabel = (p) => `${T(p.kind === 'future' ? 'chart.forecast_on' : 'chart.balance_on', { date: dm(p.date) })}: ${money(p.balance)}`
+  const dayLine = (p, i) => `${T('chart.per_day')}${p.kind === 'future' ? T('chart.forecast_tag') : ''}: `
+    + (delta(i) === 0 ? T('chart.no_change') : money(delta(i), { plus: true }))
+  const tipId = `${hintId}-tip`
 
   return (
     <div>
-      <div className="relative" style={{ height }} onPointerLeave={onLeave} onPointerCancel={onCancel}>
+      <div ref={tip.hostRef} className="relative" style={{ height }} onPointerLeave={onLeave} onPointerCancel={onCancel}>
         <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" role="img" aria-label={T('chart.aria')}
-          className="block w-full cursor-crosshair" style={{ height, touchAction: 'pan-y' }}
-          onPointerDown={onDown} onPointerMove={pick}>
+          aria-describedby={sel != null ? tipId : hintId} tabIndex={0}
+          className="chart-pt block w-full cursor-crosshair" style={{ height, touchAction: 'pan-y' }}
+          onPointerDown={onDown} onPointerMove={pick} onKeyDown={onKey}>
           <defs>
             <linearGradient id="cc-fill" x1="0" y1="0" x2="0" y2="1">
               <stop offset="0" stopColor="var(--accent)" stopOpacity="0.22" />
@@ -156,31 +171,28 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
           <span className="absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]"
             style={{ left: `${xPct(todayIdx)}%`, top: yPx(pts[todayIdx].balance), background: '#ff9f5c' }} />
           {sel != null && (
-            <span className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]"
+            <span ref={dotRef} className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]"
               data-testid="cash-dot"
               style={{ left: `${curX}%`, top: yPx(cur.balance), background: cur.balance < 0 ? 'var(--neg)' : 'var(--accent)' }} />
           )}
-          {cur && (
-            <div ref={tipRef} data-testid="cash-tip"
-              data-date={cur.date} data-kind={cur.kind} data-bal={cur.balance} data-delta={delta(sel)}
-              className="absolute z-20 rounded-xl px-2.5 py-1.5 text-left text-[11.5px] leading-tight shadow-lg"
-              style={{ left: `${curX}%`, top: yPx(cur.balance), background: 'var(--ink)', color: 'var(--bg)', transform: `translate(${curX < 12 ? 0 : curX > 88 ? -100 : -50}%, ${tipBelow ? '10%' : '-118%'})` }}>
-              <div className="mono whitespace-nowrap font-medium">
-                {T(cur.kind === 'future' ? 'chart.forecast_on' : 'chart.balance_on', { date: dm(cur.date) })}: {money(cur.balance)}
-              </div>
-              <div className="mono mt-0.5 whitespace-nowrap opacity-80">
-                {T('chart.per_day')}{cur.kind === 'future' ? T('chart.forecast_tag') : ''}:{' '}
-                {delta(sel) === 0 ? T('chart.no_change') : money(delta(sel), { plus: true })}
-              </div>
-              {evs.slice(0, compact ? 1 : 2).map((e, k) => (
-                <div key={k} className="mono mt-0.5 max-w-[240px] truncate whitespace-normal opacity-90">
-                  {e.amount ? `${e.amount > 0 ? '+' : '−'}${money(Math.abs(e.amount)).replace(' ₽', '')} ₽ ` : '· '}{e.title}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </div>
+
+      {/* подсказка — общая (ChartTip): в портале, поэтому карточка её не срезает */}
+      <span id={hintId} className="sr-only">{T('chart.nav')}</span>
+      {tip.panel({
+        id: tipId,
+        'data-testid': 'cash-tip',
+        'data-date': cur?.date,
+        'data-kind': cur?.kind,
+        'data-bal': cur?.balance,
+        'data-delta': sel != null ? delta(sel) : undefined,
+        title: cur ? pointLabel(cur) : null,
+        rows: cur ? [
+          dayLine(cur, sel),
+          ...evs.slice(0, compact ? 1 : 2).map((e) => (e.amount ? `${e.amount > 0 ? '+' : '−'}${money(Math.abs(e.amount)).replace(' ₽', '')} ₽ ` : '· ') + e.title),
+        ] : [],
+      })}
 
       {/* ось X: реальные даты точек, метка «сегодня» стоит ровно у маркера */}
       <div className="mono relative mt-1.5 h-4 text-[11.5px] text-[var(--ink3)]" data-testid="cash-axis">

@@ -14,6 +14,7 @@ import { TodaySummaryWidget, ScreenTimeBentoWidget } from '../components/ReportC
 // новые карточки главной: быстрое дело, лимит трат, цели, привычки, ближайшее дело
 import { QuickAddWidget, SpendTodayWidget, GoalsWidget, HabitsWidget, NextUpWidget } from '../components/TodayCards'
 import CashChart from '../components/CashChart'
+import { TipBars } from '../components/ChartTip'
 import { useNavigate } from 'react-router-dom'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 
@@ -184,15 +185,13 @@ export default function Today({ openChat, address = '' }) {
 
   // Траты 30 дней и столбики по дням недели — сервер считает из реальных операций
   const expenses30 = fin?.spent || d?.finance?.expense_month || 0
-  const toBars = (sums) => {
-    const max = Math.max(1, ...(sums || []))
-    return (sums || []).map((h) => Math.round((h / max) * 100))
-  }
-  const weekdayHeights = toBars(d?.finance?.weekday)
-  const monthDayHeights = toBars(d?.finance?.month_days)
+  // высоты столбиков считает сам TipBars (components/ChartTip.jsx) — вместе с подсказкой
 
   // Свободно в месяц
-  const freeMonth = d?.finance?.cashflow ? Math.max(0, d.finance.cashflow) : 0
+  // cashflow приходит объектом { income, recurring, debt_payments, free } — берём свободные,
+  // а не сам объект (иначе показывалось 0 ₽)
+  const cf = d?.finance?.cashflow
+  const freeMonth = Math.max(0, typeof cf === 'number' ? cf : cf?.free || 0)
 
   // Долги
   const debtTotal = (d?.debts || []).reduce((acc, x) => acc + (x.total - (x.paid || 0)), 0)
@@ -408,12 +407,9 @@ export default function Today({ openChat, address = '' }) {
             {renderCardControls('expenses', idx)}
             <div className="hd"><h2>{t('td.w_expenses')}</h2><small>{t('td.d30')}</small></div>
             <div className="mid"><Num value={expenses30} /> ₽</div>
-            <div className="bars">
-              {weekdayHeights.map((h, bidx) => (
-                <i key={bidx} className={h ? '' : 'z'} style={{ '--h': `${h}%`, '--k': bidx }} />
-              ))}
-            </div>
-            <div className="bl mono">{WD_SHORT.map((w, i) => <span key={i}>{w}</span>)}</div>
+            {/* столбики по дням недели: подсказка — сколько потрачено в этот день недели */}
+            {/* сервер отдаёт weekday[0] = понедельник, а WD_SHORT_MON начинается с воскресенья, поэтому подписи сдвигаем на день */}
+            <TipBars kind="weekday" values={d?.finance?.weekday} labels={WD_SHORT.slice(1).concat(WD_SHORT[0])} />
           </section>
         )
 
@@ -423,12 +419,8 @@ export default function Today({ openChat, address = '' }) {
             {renderCardControls('free', idx)}
             <div className="hd"><h2>{t('td.w_free')}</h2><small>{t('td.per_month')}</small></div>
             <div className="mid"><Num value={freeMonth} /> ₽</div>
-            <div className="bars">
-              {monthDayHeights.map((h, bidx) => (
-                <i key={bidx} className={h ? '' : 'z'} style={{ '--h': `${h}%`, '--k': bidx }} />
-              ))}
-            </div>
-            <div className="bl mono"><span>1</span><span>5</span><span>10</span><span>15</span><span>20</span><span>25</span><span>30</span></div>
+            {/* столбики по пятидневкам месяца: подсказка — сумма и доля трат месяца */}
+            <TipBars kind="month" values={d?.finance?.month_days} labels={['1', '5', '10', '15', '20', '25', '30']} />
           </section>
         )
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, money, shortDate, hhmm } from '../lib/api'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 import { Num } from './ui'
+import { useTip } from './ChartTip'
 import { Check, Sparkles, AlertCircle, Calendar, ArrowUpRight, ArrowDownRight, Wallet, Target, Clock } from 'lucide-react'
 
 /**
@@ -132,6 +133,8 @@ export function MorningDigestCard({ data, ownerName }) {
 
 export function WeekSummaryCard({ data, ownerName }) {
   const { t } = useI18n()
+  const catTip = useTip()        // «куда ушло»: категория, сумма и доля — по наведению на строку
+  const limTip = useTip()        // «лимиты»: сколько съедено от лимита
   // Реальные цифры недели: раньше карточка рисовала выдуманные 6 589 ₽ / 205 700 ₽ и категории «алкоголь 605 ₽».
   const [live, setLive] = useState(null)
   useEffect(() => {
@@ -161,7 +164,7 @@ export function WeekSummaryCard({ data, ownerName }) {
         deltaSpent: prev > 0 ? Math.round(((spent - prev) / prev) * 100) : 0,
         categories: cats,
         limits: budgets.filter((b) => (b.pct || 0) >= 80)
-          .map((b) => ({ name: b.name, pct: Math.min(100, Math.round(b.pct)), status: b.pct >= 100 ? 'over' : 'warn' })),
+          .map((b) => ({ name: b.name, pct: Math.min(100, Math.round(b.pct)), status: b.pct >= 100 ? 'over' : 'warn', budget: b.budget, spent: b.spent, left: b.left })),
         habits: {
           tasksDone: (tasks || []).filter((t) => t.done && t.done_at && new Date(t.done_at) >= weekAgo).length,
           notesSaved: (notes || []).filter((n) => n.created_at && new Date(n.created_at) >= weekAgo).length,
@@ -183,6 +186,9 @@ export function WeekSummaryCard({ data, ownerName }) {
   const habits = d.habits || { tasksDone: 0, notesSaved: 0, streakDays: null }
   const limits = d.limits || []
   const from = new Date(Date.now() - 6 * 864e5)
+  // строки, на которые сейчас наведён курсор — для подсказок
+  const catLive = catTip.active?.i != null ? categories[catTip.active.i] : null
+  const limLive = limTip.active?.i != null ? limits[limTip.active.i] : null
 
   return (
     <div className="report-card week-summary r">
@@ -227,25 +233,33 @@ export function WeekSummaryCard({ data, ownerName }) {
           <span>{t('rc.where_it_went')}</span>
           <span className="count">{categories.length}</span>
         </div>
-        <div className="space-y-3 mt-3">
-          {categories.map((cat, idx) => (
-            <div key={idx} className="category-progress-item">
-              <div className="flex justify-between items-baseline text-[13.5px]">
-                <span className="font-medium text-[var(--ink)]">{t.sv(cat.name) || cat.name}</span>
-                <span className="mono font-semibold text-[13.5px]">{money(cat.amount)}</span>
+        <div className="relative space-y-3 mt-3" ref={catTip.hostRef}>
+          {categories.map((cat, idx) => {
+            const name = t.sv(cat.name) || cat.name
+            const aria = `${name}: ${money(cat.amount)}, ${t('tip.share', { p: cat.pct })}`
+            return (
+              <div key={idx} className="category-progress-item chart-pt rounded-lg" {...catTip.bind(idx, aria, 'group')}>
+                <div className="flex justify-between items-baseline text-[13.5px]">
+                  <span className="font-medium text-[var(--ink)]">{name}</span>
+                  <span className="mono font-semibold text-[13.5px]">{money(cat.amount)}</span>
+                </div>
+                <div className="progress-bar-track mt-1.5">
+                  <div
+                    className="progress-bar-fill"
+                    style={{
+                      width: `${cat.pct}%`,
+                      background: 'linear-gradient(90deg, #2f57ff, #8a5cff)',
+                    }}
+                  />
+                </div>
               </div>
-              <div className="progress-bar-track mt-1.5">
-                <div
-                  className="progress-bar-fill"
-                  style={{
-                    width: `${cat.pct}%`,
-                    background: 'linear-gradient(90deg, #2f57ff, #8a5cff)',
-                  }}
-                />
-              </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
+        {catTip.panel({
+          title: catLive ? (t.sv(catLive.name) || catLive.name) : null,
+          rows: catLive ? [money(catLive.amount), t('tip.share', { p: catLive.pct })] : [],
+        })}
       </div>
 
       {/* Дела (пилюли статистики активности) */}
@@ -275,9 +289,10 @@ export function WeekSummaryCard({ data, ownerName }) {
             <span>{t('rc.limits')}</span>
             <span className="count">{limits.length}</span>
           </div>
-          <div className="space-y-2 mt-2.5">
+          <div className="relative space-y-2 mt-2.5" ref={limTip.hostRef}>
             {limits.map((lim, idx) => (
-              <div key={idx} className="limit-item">
+              <div key={idx} className="limit-item chart-pt rounded-lg"
+                {...limTip.bind(idx, `${lim.name}: ${t('tip.of_limit', { p: lim.pct })}`, 'group')}>
                 <div className="flex justify-between items-center text-[13.5px]">
                   <span className="font-medium">{lim.name}</span>
                   <span className="mono font-semibold text-[var(--warn)]">{lim.pct}%</span>
@@ -294,6 +309,16 @@ export function WeekSummaryCard({ data, ownerName }) {
               </div>
             ))}
           </div>
+          {limTip.panel({
+            title: limLive?.name || null,
+            rows: limLive ? [
+              t('tip.of_limit', { p: limLive.pct }),
+              // суммы приходят с тем же ответом сводки — без новых запросов
+              ...(limLive.budget != null
+                ? [t('tip.spent_left', { m: money(limLive.spent), limit: money(limLive.budget), left: money(limLive.left) })]
+                : []),
+            ] : [],
+          })}
         </div>
       )}
 
@@ -421,6 +446,7 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
  */
 export function ScreenTimeBentoWidget({ data }) {
   const { t } = useI18n()
+  const tip = useTip()
   const d = data
   // Пустой виджет: раньше здесь были захардкоженные демо-данные. Теперь честно и компактно.
   if (!d || !(d.active_min > 0) || !(d.hours || []).some((v) => v > 0)) {
@@ -441,7 +467,11 @@ export function ScreenTimeBentoWidget({ data }) {
 
   const hours = Math.floor(d.active_min / 60)
   const mins = d.active_min % 60
+  const slice = (d.hours || []).slice(8, 20)
   const maxH = Math.max(1, ...(d.hours || [1]))
+  const sumH = Math.max(1, slice.reduce((s, v) => s + (v || 0), 0))
+  const hourLabel = (h, v) => t('rc.hour_min', { h, m: v })
+  const curH = tip.active?.i != null ? slice[tip.active.i] : null
 
   const CAT_COLORS = {
     работа: '#2f57ff',
@@ -465,10 +495,10 @@ export function ScreenTimeBentoWidget({ data }) {
         </small>
       </div>
 
-      {/* Почасовой график активности */}
+      {/* Почасовой график активности: подсказка по наведению и по тапу (раньше был только title) */}
       <div className="my-2">
-        <div className="flex items-end h-10 gap-1 px-1">
-          {(d.hours || []).slice(8, 20).map((val, idx) => {
+        <div className="relative flex items-end h-10 gap-1 px-1" ref={tip.hostRef}>
+          {slice.map((val, idx) => {
             const h = idx + 8
             // контейнеру нужна явная высота: иначе height в процентах считается от
             // элемента с auto-высотой и все столбцы схлопывались в 0
@@ -476,14 +506,14 @@ export function ScreenTimeBentoWidget({ data }) {
             return (
               <div key={h} className="h-full flex-1 flex flex-col items-center justify-end gap-1 group relative">
                 <div
-                  className="w-full rounded-md transition-all"
+                  className="chart-pt w-full rounded-md transition-all"
                   style={{
                     height: `${pct}%`,
                     background: val > 20 ? 'linear-gradient(180deg, #8a5cff, #2f57ff)'
                       : val > 0 ? 'color-mix(in srgb, #8a5cff 55%, transparent)'
                       : 'var(--line)',
                   }}
-                  title={t('rc.hour_min', { h, m: val })}
+                  {...tip.bind(idx, `${hourLabel(h, val)}, ${t('tip.share_active', { p: Math.round((val / sumH) * 100) })}`)}
                 />
               </div>
             )
@@ -495,6 +525,10 @@ export function ScreenTimeBentoWidget({ data }) {
           <span>20:00</span>
         </div>
       </div>
+      {tip.panel({
+        title: curH != null ? hourLabel(tip.active.i + 8, curH) : null,
+        rows: curH != null ? [t('tip.share_active', { p: Math.round((curH / sumH) * 100) })] : [],
+      })}
 
       {/* Топ приложений */}
       <div className="space-y-1.5 mt-2">

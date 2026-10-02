@@ -7,6 +7,7 @@ import { ArrowUpRight, Flame, Plus, Target, Timer, Zap } from 'lucide-react'
 import { api, hhmm, isAllDay, money } from '../lib/api'
 import { useI18n, t as T } from '../lib/i18n'
 import { Streak, Heatmap } from './Widgets'
+import { useTip } from './ChartTip'
 
 const dm = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}`
 
@@ -139,12 +140,17 @@ export function SpendTodayWidget({ runway, payments }) {
 /* ---------- «цели»: прогресс + фокус дня ---------- */
 export function GoalsWidget({ goals, tasks, onOpen }) {
   const { t } = useI18n()
+  const tip = useTip()               // подсказка на полоске прогресса: сколько накоплено и когда ждать
   const list = (goals || []).slice().sort((a, b) => {
     const ax = a.days_left == null ? 9e9 : a.days_left
     const bx = b.days_left == null ? 9e9 : b.days_left
     return ax - bx
   }).slice(0, 3)
   const focus = (tasks || []).filter((t) => !t.done).sort((a, b) => (a.priority || 9) - (b.priority || 9))[0]
+  const pctOf = (g) => Math.round((g.pct || 0) * 100)
+  const tail = (g) => (g.days_left != null ? (g.days_left < 0 ? t('goals.overdue') : t('goals.in_days', { count: g.days_left })) : (g.per_month ? t('goals.per_month', { m: money(g.per_month) }) : ''))
+  const savedLine = (g) => t('tip.saved_of', { m: money(g.saved), target: money(g.target) })
+  const cur = tip.active?.i != null ? list[tip.active.i] : null
 
   return (
     <div className="flex h-full flex-col">
@@ -166,11 +172,13 @@ export function GoalsWidget({ goals, tasks, onOpen }) {
         </div>
       )}
 
-      <div className="space-y-3">
-        {list.map((g) => {
-          const pct = Math.round((g.pct || 0) * 100)
+      <div className="relative space-y-3" ref={tip.hostRef}>
+        {list.map((g, gi) => {
+          const pct = pctOf(g)
+          // подсказка и подпись для скринридера — одна и та же строка
+          const aria = `${g.title}: ${savedLine(g)}, ${t('tip.pct', { p: pct })}${tail(g) ? `, ${tail(g)}` : ''}`
           return (
-            <div key={g.id}>
+            <div key={g.id} className="chart-pt rounded-xl" {...tip.bind(gi, aria, 'group')}>
               <div className="flex items-baseline gap-2 text-[13.5px]">
                 <span>{g.icon || '🎯'}</span>
                 <span className="min-w-0 flex-1 truncate font-medium">{g.title}</span>
@@ -181,13 +189,19 @@ export function GoalsWidget({ goals, tasks, onOpen }) {
               </div>
               <div className="faint mt-1 flex justify-between text-[11.5px]">
                 <span>{money(g.saved)} из {money(g.target)}</span>
-                <span>{g.days_left != null ? (g.days_left < 0 ? t('goals.overdue') : t('goals.in_days', { count: g.days_left })) : (g.per_month ? t('goals.per_month', { m: money(g.per_month) }) : '')}</span>
+                <span>{tail(g)}</span>
               </div>
             </div>
           )
         })}
         {!list.length && <div className="muted text-[13px]">{t('goals.none')}</div>}
       </div>
+
+      {/* наведение, тап или стрелки на строке цели — сколько накоплено и когда ждать */}
+      {tip.panel({
+        title: cur ? `${cur.icon || '🎯'} ${cur.title}` : null,
+        rows: cur ? [savedLine(cur), t('tip.pct', { p: pctOf(cur) }), tail(cur)].filter(Boolean) : [],
+      })}
 
       {onOpen && (
         <button type="button" className="chip !mt-3 self-start !py-1.5 !text-[12.5px]" onClick={onOpen}>

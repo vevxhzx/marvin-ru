@@ -3,11 +3,14 @@ import { Link } from 'react-router-dom'
 import { Flame, Upload, Cake } from 'lucide-react'
 import { api, money } from '../lib/api'
 import CashChart from './CashChart'
+import { useTip } from './ChartTip'
 import { useI18n, t as T } from '../lib/i18n'
 
 /* ---------- Тепловая карта активности (как на GitHub) + стрик ---------- */
 export function Heatmap({ days = [], heatmap = [], weeks = 26 }) {
   const { t } = useI18n()
+  const tip = useTip()
+  const [cur, setCur] = useState(null)      // клетка под курсором/фокусом — для обводки и озвучки
   const map = useMemo(() => Object.fromEntries((heatmap || []).map((x) => [x.date, x.count])), [heatmap])
   const cells = useMemo(() => {
     const out = []; const today = new Date(); today.setHours(0, 0, 0, 0)
@@ -20,18 +23,50 @@ export function Heatmap({ days = [], heatmap = [], weeks = 26 }) {
   }, [map, weeks])
   const max = Math.max(1, ...cells.map((c) => c.n))
   const cols = Math.ceil(cells.length / 7)
-  const [tip, setTip] = useState(null)
+  const label = (c) => `${c.day}.${String(c.m + 1).padStart(2, '0')} · ${c.n ? t('heat.entries', { n: c.n }) : t('heat.empty')}`
+  const cell = (i) => cells[i]
+  // сетка идёт колонками по 7 дней: стрелки вправо/влево — неделя, вниз/вверх — день
+  const onMove = (e) => {
+    if (e.pointerType && e.pointerType !== 'mouse') return
+    const el = e.target?.closest?.('[data-i]')
+    if (!el) return
+    const i = Number(el.getAttribute('data-i'))
+    if (tip.active?.i === i) return
+    setCur(i); tip.open(i, el)
+  }
+  const onDown = (e) => {
+    if (e.pointerType === 'mouse') return
+    const el = e.target?.closest?.('[data-i]')
+    if (!el) return
+    const i = Number(el.getAttribute('data-i'))
+    if (tip.pinned && tip.active?.i === i) { setCur(null); tip.close(); return }
+    setCur(i); tip.pin(i, el)
+  }
+  const onKey = (e) => {
+    if (e.key === 'Escape') { setCur(null); tip.close(); return }
+    const step = e.key === 'ArrowRight' ? 7 : e.key === 'ArrowLeft' ? -7 : e.key === 'ArrowDown' ? 1 : e.key === 'ArrowUp' ? -1 : 0
+    if (!step) return
+    e.preventDefault()
+    const i = Math.max(0, Math.min(cells.length - 1, (cur ?? cells.length - 1) + step))
+    const el = e.currentTarget.querySelector(`[data-i="${i}"]`)
+    setCur(i); tip.open(i, el)
+  }
   return (
     <div className="relative">
-      <div className="grid gap-[3px]" style={{ gridTemplateRows: 'repeat(7, 10px)', gridAutoFlow: 'column', gridAutoColumns: '10px' }}>
+      {/* одна остановка Tab на всю карту: 91 клетка — это слишком много, поэтому шагаем стрелками */}
+      <div className="chart-pt grid gap-[3px] outline-none" style={{ gridTemplateRows: 'repeat(7, 10px)', gridAutoFlow: 'column', gridAutoColumns: '10px' }}
+        ref={tip.hostRef} tabIndex={0} role="group" aria-label={t('heat.aria')}
+        onPointerMove={onMove} onPointerDown={onDown} onKeyDown={onKey} onBlur={() => { setCur(null); tip.close() }} onPointerCancel={() => { setCur(null); tip.close() }}>
         {cells.map((c, i) => {
           const a = c.n ? 0.25 + 0.75 * Math.min(1, Math.log1p(c.n) / Math.log1p(max)) : 0
-          return <span key={c.k} onMouseEnter={() => setTip(c)} onMouseLeave={() => setTip(null)}
-            className="rounded-[2px] transition-transform hover:scale-125" style={{ background: a ? `color-mix(in srgb, var(--accent) ${Math.round(a * 100)}%, var(--fill))` : 'var(--fill)', animation: `fade .4s ease-out ${Math.min(600, i * 2)}ms both` }} />
+          return <span key={c.k} data-i={i} data-cur={cur === i ? '1' : undefined} aria-hidden="true"
+            className="heat-cell rounded-[2px] transition-transform hover:scale-125" style={{ background: a ? `color-mix(in srgb, var(--accent) ${Math.round(a * 100)}%, var(--fill))` : 'var(--fill)', animation: `fade .4s ease-out ${Math.min(600, i * 2)}ms both` }} />
         })}
       </div>
       <div className="faint mt-1.5 flex justify-between text-[10px]"><span>{t('heat.weeks_back', { n: cols })}</span><span>{t('common.today')}</span></div>
-      {tip && <div className="panel absolute -top-9 left-0 !px-2.5 !py-1 text-[11px] shadow-md">{tip.day}.{String(tip.m + 1).padStart(2, '0')} · {tip.n ? t('heat.entries', { n: tip.n }) : t('heat.empty')}</div>}
+      {/* озвучка для клавиатуры и скринридера: подсказку слышно, а не только видно */}
+      <span id={tip.id} className="sr-only" aria-live="polite">{cur != null ? label(cell(cur)) : ''}</span>
+      {tip.panel({ 'aria-hidden': 'true', title: cur != null ? label(cell(cur)) : null })}
     </div>
   )
 }

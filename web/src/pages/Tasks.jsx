@@ -286,7 +286,7 @@ export default function Tasks() {
                   <section key="empty" className="c p2 s6 r" style={st}>{ctl}
                     <div className="hd"><h2>{t('tk.list_empty')}</h2><small></small></div>
                     <p className="emp">{t('tk.rest_hint')}</p>
-                    <button type="button" className="chip" onClick={() => addQuickDirect(t('tk.buy_milk'))}>{t('tk.buy_milk_hint')}> ↗</button>
+                    <button type="button" className="chip" onClick={() => addQuickDirect(t('tk.buy_milk'))}>{t('tk.buy_milk_hint')} ↗</button>
                   </section>
                 )
               }
