@@ -51,3 +51,14 @@ shots/
 tests/e2e/screens/
 tests/e2e/report/
 tests/e2e/test-results/
+
+# --- рабочие заметки по внутренним проверкам (остаются на диске, но не в репозитории) ---
+reviews/
+REPORT.md
+POLISH_PLAN.md
+IMPROVEMENTS.md
+docs/AUDIT-*.md
+docs/audit.md
+docs/redesign-*.md
+docs/second-*.md
+docs/PROGRESS-merge.md
