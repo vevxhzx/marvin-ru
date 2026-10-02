@@ -118,6 +118,10 @@ def update_note(nid: int, text: str | None = None, title: str | None = None, tag
                             {"text": "текст", "title": "заголовок", "tags": "теги"})
         remember(s, "note", f"Правка мысли «{(n.title or n.text)[:40]}»" + (f": {changes}" if changes else " (без изменений)"), "note", n.id)
         s.commit()
+    # история версий (отдельная запись, уже вне открытой сессии): до правки и после
+    from . import polish
+    polish.track_version(nid, before["text"], before["title"], before["tags"], "правка")
+    polish.track_version(nid, n.text, n.title, n.tags, "правка")
     return n   # семантический индекс пересчитается сам: index_pending сравнивает хэш текста
 
 
@@ -135,6 +139,8 @@ def delete_note(nid: int) -> bool:
         s.delete(n); s.commit()
     from . import relations
     relations.forget("note", nid)
+    from . import polish
+    polish.forget_revisions(nid)   # история версий ушла вместе с заметкой (id в SQLite может достаться новой)
     if img:
         try:
             (MEDIA_DIR / img).unlink(missing_ok=True)
