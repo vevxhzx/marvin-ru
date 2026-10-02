@@ -260,16 +260,38 @@ def fix_night_hour(dt: datetime | None, text: str) -> datetime | None:
     return dt + timedelta(hours=12)
 
 
+# сразу за числом «-го» / «-е» / « числа» — это ДЕНЬ, а не сумма: «с 5-го плачу 3000 за интернет»
+# раньше читался как 5 ₽ (регулярный платёж на 5 вместо 3000). Такие кандидаты пропускаем.
+_ORDINAL_TAIL = re.compile(r"\s*[-–]?\s*(?:го|е|му|числа|число|числу)\b", re.I)
+_AMOUNT_RX = r"(\d[\d\s]*(?:[.,]\d+)?)\s*(?:(к|k|тыс\w*|т\.?р\.?|млн)(?![а-яёa-z]))?\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])"
+
+
+def _amount_match(t: str, pattern: str = _AMOUNT_RX) -> "re.Match | None":
+    """Первое совпадение суммы, пропуская числа, которые на самом деле порядковый номер дня («…5-го…»).
+
+    «1200 5-го» / «399 25-го» жадный разбор отдаёт одним куском «1200 5» — там отброшенный кандидат
+    ещё может оказаться суммой с разрядами, поэтому пробуем взять только первые."""
+    for m in re.finditer(pattern, t):
+        if not _ORDINAL_TAIL.match(t[m.end():]):
+            return m
+        if re.search(r"\d\s+\d", m.group(1)):
+            first = re.match(r"\d+(?:[.,]\d+)?", m.group(1)).group(0)
+            m2 = re.search(r"(" + re.escape(first) + r")(?!\d)\s*(?:(к|k|тыс\w*|т\.?р\.?|млн)(?![а-яёa-z]))?\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])", t)
+            if m2 and not _ORDINAL_TAIL.match(t[m2.end():]):
+                return m2
+    return None
+
+
 def parse_amount(text: str) -> tuple[float | None, str]:
     """«700», «1.5к», «120 тыс», «2 500 руб», слитно «128рублей» / «700р» → сумма и текст без неё."""
     t = text.lower().replace("₽", " руб ")
-    m = re.search(r"(\d[\d\s]*(?:[.,]\d+)?)\s*(?:(к|k|тыс\w*|т\.?р\.?|млн)(?![а-яёa-z]))?\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])", t)
+    m = _amount_match(t)
     if m and re.search(r"\d\s+\d", m.group(1)):
         # «1200 5-го» / «5000 25 сентября» — это два разных числа, а не «1 200»: разряды — строго по 3 цифры
         parts = m.group(1).split()
         if not all(len(x) == 3 and x.isdigit() for x in parts[1:]):
             first = re.match(r"\d+(?:[.,]\d+)?", m.group(1)).group(0)
-            m = re.search(r"(" + re.escape(first) + r")(?!\d)\s*(?:(к|k|тыс\w*|т\.?р\.?|млн)(?![а-яёa-z]))?\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])", t)
+            m = _amount_match(t, "(" + re.escape(first) + r")(?!\d)\s*(?:(к|k|тыс\w*|т\.?р\.?|млн)(?![а-яёa-z]))?\s*(руб\w*|р\.?|рублей)?(?![а-яёa-z\d])")
     if not m:
         return None, text
     raw = m.group(1).replace(" ", "").replace(",", ".")

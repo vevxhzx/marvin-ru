@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import json
 import re
@@ -23,7 +24,7 @@ from ..services.calendar import fmt_dt, fmt_due, fmt_repeat
 from ..services.finance import money
 from ..tools import registry
 from ..services import bulk, insights, pc
-from . import llm, quick, sorter
+from . import budget, llm, quick, sorter
 from .dates import ambiguous_night_hour, first_occurrence, parse_amount, parse_datetime, parse_datetime_ex, parse_repeat, task_due
 from . import persona
 from .persona import localize, now_line, say, system_prompt
@@ -36,6 +37,7 @@ class Reply:
     text: str
     actions: list[str] = field(default_factory=list)   # что было сделано (для UI/лога)
     via: str = "rules"                                  # rules / ollama / gemini(=облако) / none
+    suggest_fact: dict | None = None                    # предложенный факт {text, category, fact_id} | null — тост «Запомнить?»
 
 
 # --------------------------------------------------------------------------- правила
@@ -214,6 +216,8 @@ def _too_long_for_rules(text: str) -> bool:
 
 
 MEM_REMEMBER_RX = re.compile(r"^\s*запомни\s*[,:—-]?\s*(?:что\s+)?(.+)$", re.I | re.S)
+# «восстанови кота» / «верни то, что забыл» — вернуть факт из архива (find_fact с include_archived=True)
+MEM_RESTORE_RX = re.compile(r"^\s*(?:восстанови\w*|верн[ии]те?)\s*[,:]?\s*(?:мой\s+|свой\s+|снова\s+)?(.+)$", re.I | re.S)
 MEM_FORGET_RX = re.compile(r"^\s*забудь\s*[,:—-]?\s*(?:что\s+|про\s+|о\s+том,?\s+что\s+)?(.+)$", re.I | re.S)
 MEM_ABOUT_RX = re.compile(r"^\s*(что\s+ты\s+(?:обо?\s+мне\s+)?(?:знаешь|помнишь)(?:\s+обо?\s+мне)?|что\s+ты\s+помнишь|расскажи,?\s+что\s+(?:ты\s+)?знаешь\s+обо?\s+мне|покажи\s+память|моя\s+память|портрет)\W*$", re.I)
 # «запомни: у меня кот Барсик» — факт о человеке (в память); «запомни: идея для ролика…» — мысль (в Мозг, как раньше)
@@ -231,8 +235,18 @@ def _memory_rules(t: str, channel: str) -> Reply | None:
         f = memory.find_fact(what)
         if f:
             memory.forget(f.id)
-            return Reply(f"Забыл: «{f.text}». Лежит в архиве памяти — если что, верну.", ["forget_fact"])
+            return Reply(f"Забыл: «{f.text}». Лежит в архиве памяти — если что, верну («восстанови …»).", ["forget_fact"])
+        arch = memory.find_fact(what, include_archived=True)
+        if arch is not None:
+            return Reply(f"«{arch.text}» — так я уже и не помню: оно в архиве памяти. Скажите «восстанови …», если нужно вернуть.", [])
         return Reply(f"Такого я и не помнил, сэр: «{what}». Проверьте страницу «память».", [])
+    m = MEM_RESTORE_RX.match(t)
+    if m and len(t.split()) <= 20:
+        # восстановление затухшего/забытого факта: ищем и в архиве (recall/find_fact с include_archived=True)
+        f = memory.find_fact(m.group(1).strip(" .!"), include_archived=True)
+        if f is not None and f.layer == "archive":
+            memory.restore(f.id)
+            return Reply(f"Вернул: «{f.text}» — снова в памяти, и больше он не затухнет.", ["restore_fact"])
     m = MEM_REMEMBER_RX.match(t)
     if m and _ME_RX.search(m.group(1)) and len(t.split()) <= 40 and not _looks_like_question(t):
         body = m.group(1).strip(" .!")
@@ -1330,11 +1344,14 @@ def _truth_gate(answer: str, results: list["registry.ToolResult"]) -> str:
     return f"Не записал, сэр: {why}. {hint}"
 
 
-def _history(channel: str, limit: int = 6, max_chars: int = 600, current: str | None = None) -> list[dict]:
+def _history(channel: str, limit: int | None = None, max_chars: int | None = None, current: str | None = None) -> list[dict]:
     """Последние реплики для контекста (все каналы: чат сайта и Telegram — один разговор).
     Длинные сообщения режем, старше HISTORY_MAX_AGE_H часов — не берём: история не должна съедать окно модели
     и тянуть в ответ тему трёхдневной давности. current — текущая реплика: она уже записана в чат (_log_chat в начале
-    _handle) и отдельно идёт последним сообщением, поэтому из истории её убираем — иначе модель видит её дважды."""
+    _handle) и отдельно идёт последним сообщением, поэтому из истории её убираем — иначе модель видит её дважды.
+    limit/max_chars — None значит «взять из brain.prompt.*» (см. brain/budget.py): по умолчанию те же 6 и 600."""
+    limit = budget.history_turns() if limit is None else limit
+    max_chars = budget.history_max_chars() if max_chars is None else max_chars
     since = datetime.now() - timedelta(hours=HISTORY_MAX_AGE_H)
     with session() as s:
         rows = s.exec(select(ChatMessage).where(ChatMessage.created_at >= since,
@@ -1410,29 +1427,229 @@ def _no_repeat_block() -> str:
     return ("\nНЕДАВНО УПОМЯНУТЫЕ ОБРАЗЫ (не повторяй их в этом ответе): " + ", ".join(used[:20]) + "\n") if used else ""
 
 
+def _system(compact: bool = False) -> str:
+    """Системный промпт + ОДНА строка профиля стиля хозяина. Строка постоянна (не зависит от реплики),
+    поэтому кэш системного промпта под Ollama не сбивается, а тон задан с первого блока.
+    Потолок размера — brain.prompt.system_max_chars (по умолчанию выключен); важные блоки
+    (характер, безопасность, отказы) при ужатии не трогаются — см. brain/budget.py."""
+    line = memory.style_line()
+    base = system_prompt(compact=compact) + (
+        "\nСТИЛЬ ХОЗЯИНА (подстраивай длину, тон и слова под него): " + line + "\n" if line else "")
+    return budget.trim_static(base, budget.system_max_chars())
+
+
+LESSON_MAX = 8            # максимум уроков в блоке (по требованию — 6–8)
+LESSON_MIN_SCORE = 0.4    # порог релевантности урока к текущей реплике
+LESSON_SHOWN_KEY = "lessons.shown_id"   # какой урок показали в прошлый раз — не повторять подряд
+
+
+def _lesson_words(t: str) -> set[str]:
+    return {w[:-1] if len(w) > 4 else w for w in re.findall(r"[а-яёa-z0-9]{3,}", (t or "").lower())}
+
+
+def _lesson_meta() -> dict[int, dict]:
+    """lesson.applied / lesson.last_applied_at (миграция v6): у модели Lesson этих колонок нет — читаем SQL'ём."""
+    from sqlalchemy import text as _text
+    with session() as s:
+        rows = s.exec(_text("SELECT id, applied, last_applied_at FROM lesson")).all()
+    out: dict[int, dict] = {}
+    for r in rows:
+        at = memory._dt(r[2])
+        out[int(r[0])] = {"applied": bool(r[1]), "last_applied": at}
+    return out
+
+
+def _mark_lessons_applied(ids: list[int], when: datetime) -> None:
+    """Пометить показанные уроки применёнными (applied + last_applied_at) — это «подтверждённый» сигнал для отбора."""
+    if not ids:
+        return
+    from sqlalchemy import text as _text
+    with session() as s:
+        for lid in ids:
+            s.exec(_text("UPDATE lesson SET applied = 1, last_applied_at = :t WHERE id = :i"),
+                   params={"t": when, "i": int(lid)})
+        s.commit()
+
+
+async def _lessons_block(text_: str, vectors: list[list[float]] | None = None) -> str:
+    """Релевантные уроки хозяина («сайт 15000» → заказ, а не трата) — короткий блок ПЕРЕД репликой пользователя.
+
+    Отбор: релевантность (эмбеддинги, если есть; иначе пересечение слов), плюс за свежесть и уже
+    применявшиеся уроки; максимум LESSON_MAX; урок, показанный в прошлый ход, подряд не повторяется.
+    Пустая строка — уроков нет или ничего не подошло (лимиты и приоритеты живут здесь, не в судье).
+    vectors — уже посчитанный эмбеддинг реплики: память и уроки считают его для одной и той же фразы,
+    поэтому он считается один раз за ход и передаётся сюда (см. _turn_context)."""
+    if not text_.strip():
+        return ""
+    lessons = judge.list_lessons()
+    if not lessons:
+        return ""
+    words = _lesson_words(text_)
+    vecs = [vectors] if vectors else None
+    if vecs is None and any(l.vector for l in lessons):
+        try:
+            vecs = await llm.embed([text_]) if await llm.embed_available() else None
+        except Exception as e:  # pragma: no cover — эмбеддинги опциональны, без них отбор по словам
+            log.debug("lessons embed: %s", e)
+            vecs = None
+    now = datetime.now()
+    meta = _lesson_meta()
+    ranked: list[tuple[float, object]] = []
+    for l in lessons:
+        lw = _lesson_words(l.text)
+        sc = 0.0
+        if words and lw:
+            # пересечение через min(): короткая фраза-урок должна целиком найтись в длинной реплике
+            sc = len(words & lw) / max(1, min(len(words), len(lw)))
+        if vecs and l.vector:
+            sc = max(sc, memory._cos(vecs[0], memory._vec(l.vector)))
+        if sc < LESSON_MIN_SCORE:
+            continue
+        if (now - l.created_at).days <= 30:
+            sc += 0.06                       # свежие в приоритете
+        m = meta.get(l.id) or {}
+        if m.get("applied"):
+            sc += 0.04                       # уже применялся — проверенный
+        if m.get("last_applied") and (now - m["last_applied"]).days <= 30:
+            sc += 0.02
+        if l.kind == "mute":
+            sc -= 0.05                       # «не напоминать» — полезно, но реже остальных
+        ranked.append((sc, l))
+    ranked.sort(key=lambda x: (-x[0], -x[1].id))
+    shown = [l for _, l in ranked[:LESSON_MAX]]
+    prev = get_setting(LESSON_SHOWN_KEY, "")
+    if prev and shown:
+        others = [l for l in shown if str(l.id) != prev]
+        if others:
+            shown = others                   # не повторять один и тот же урок подряд
+        elif len(ranked) == 1:
+            shown = []                       # он единственный — пропускаем ход, в следующий раз снова можно
+            set_setting(LESSON_SHOWN_KEY, "")
+    if not shown:
+        return ""
+    _mark_lessons_applied([l.id for l in shown], now)
+    set_setting(LESSON_SHOWN_KEY, str(shown[0].id))
+    lines = []
+    for l in shown:
+        t = (l.text or "").strip()[:100]
+        if l.kind == "mute":
+            lines.append(f"— «{t}»: хозяин просил НЕ предлагать и не напоминать про это")
+        else:
+            wrong = f" (раньше понял как «{l.wrong}»)" if l.wrong else ""
+            lines.append(f"— «{t}» → это {judge.KIND_RU.get(l.kind, l.kind)}{wrong}")
+    return "\nУРОКИ ХОЗЯИНА (он исправлял раньше — делай по ним):\n" + "\n".join(lines) + "\n"
+
+
+# сколько хвоста истории нельзя резать ни при каком сбое: последняя реплика хозяина и его ответ
+HISTORY_TAIL_MIN = 2
+
+
+def _split_memory(body: str) -> tuple[str, str]:
+    """Разделить блок памяти на (обязательное, необязательное).
+
+    Обязательное — заголовок, портрет, факты core/state и профиль стиля: без них модель
+    теряет личность хозяина и тон (такое уже случалось — старый код резал блок по последней строке
+    и вместе с фактами выбрасывал стиль). Необязательное — «подтянутые по смыслу» факты."""
+    head, sep, tail = body.partition("ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ")
+    if not sep:
+        return "", body
+    rest = tail.lstrip(" :")
+    keep, drop = [], []
+    for line in rest.splitlines():
+        s = line.strip()
+        # «— факт (сейчас)» — релевантный, режется первым; остальное (портрет, стиль, core) — нет
+        (drop if s.startswith("— ") and s.endswith("(сейчас)") else keep).append(line)
+    return "\n".join(x for x in ("ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ", *keep) if x), "\n".join(drop)
+
+
+def _summary_msg(dropped: list[dict]) -> dict | None:
+    """Одна реплика-сводка о выброшенной истории. Раньше её просто выбрасывали, и модель
+    теряла нить разговора: «а что мы там обсуждали» начиналось с нуля."""
+    if not budget.summary_enabled():
+        return None
+    line = budget.summarize(dropped)
+    return {"role": "user", "content": line} if line else None
+
+
 def _fit_budget(messages: list[dict], tools: list[dict], channel: str) -> list[dict]:
-    """Уложить запрос в окно локальной модели БЕЗ смены num_ctx: сначала выкидываем историю (старые реплики), потом блок памяти.
-    Оценка как в llm.ollama_chat (символы/3). Смена окна — это перезагрузка модели (+12 с), а 16384 на 6 ГБ вытесняет
-    часть весов в оперативку, и чтение промпта замедляется в 3–4 раза (7.5k токенов за 35 с в логе пользователя)."""
-    budget = llm.OLLAMA_NUM_CTX - (160 if llm.short_mode.get() else 512) - 250
-    tools_len = len(json.dumps(tools, ensure_ascii=False)) if tools else 0
+    """Уложить запрос в окно локальной модели БЕЗ смены num_ctx (смена окна = перезагрузка модели,
+    +12 с, и на 6 ГБ видеокарты часть весов уезжает в оперативку — промпт читается в 3–4 раза дольше).
+
+    Порядок ужатия (важное не режется, порядок блоков — в brain.budget):
+      1. дальняя история — целыми парами реплик, хвост из последних HISTORY_TAIL_MIN остаётся;
+      2. выброшенное сворачивается в одну сводку, а не исчезает;
+      3. блок памяти — только релевантные факты; факты core/state, портрет и стиль не трогаем;
+      4. если всё ещё не влезает — трогать нечего, логируем и отдаём как есть (не режем по символам)."""
+    budget_tokens = llm.OLLAMA_NUM_CTX - (160 if llm.short_mode.get() else 512) - 250
 
     def est(msgs: list[dict]) -> int:
-        return (sum(len(str(m.get("content") or "")) for m in msgs) + tools_len) // 3 + 200
+        return budget.est_request(msgs, tools)
 
     before = est(messages)
-    dropped = 0
-    while est(messages) > budget and len(messages) > 2:
-        messages.pop(1)   # самая старая реплика истории (0 — system, -1 — текущая)
-        dropped += 1
-    if est(messages) > budget and "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ" in (messages[-1].get("content") or ""):
-        body = messages[-1]["content"]
-        messages[-1]["content"] = body[body.rindex("\n", 0, body.rfind("(сейчас ")) + 1:] if "(сейчас " in body else body.splitlines()[-1]
-        dropped += 100
+    if before <= budget_tokens:
+        return messages
+    # 1. история — это всё между системным сообщением и текущей репликой. Режем её парами
+    #    «хозяин → я», чтобы хвост не начинался с чужой реплики (модель и провайдеры это не любят).
+    head, hist, current = messages[0], messages[1:-1], messages[-1]
+    # сводка появится на месте выброшенного — резервируем под неё место сразу, иначе итог вылезет за окно
+    summary_reserve = budget.estimate_tokens(budget.summarize(hist[:2])) if budget.summary_enabled() else 0
+    keep_from = 0
+    while est([head, *hist[keep_from:], current]) + summary_reserve > budget_tokens and len(hist) - keep_from > HISTORY_TAIL_MIN:
+        keep_from += 2
+    dropped, kept = hist[:keep_from], hist[keep_from:]
+    msgs = [head, *kept, current]
+    # 2. сводка о выброшенном — на место выброшенного, чтобы порядок блоков не путался
     if dropped:
-        log.info("[%s] промпт ≈%d ток. > окно %d: убрал %s → ≈%d ток.", channel, before, llm.OLLAMA_NUM_CTX,
-                 (f"{dropped % 100} реплик истории" if dropped % 100 else "") + (" и блок памяти" if dropped >= 100 else ""), est(messages))
-    return messages
+        s = _summary_msg(dropped)
+        if s:
+            msgs.insert(1, s)
+    # 3. блок памяти: режем только релевантные факты
+    cut_mem = False
+    if est(msgs) > budget_tokens:
+        order = sorted(range(1, len(msgs)), key=lambda i: len(str(msgs[i].get("content") or "")), reverse=True)
+        for i in order:
+            body = str(msgs[i].get("content") or "")
+            if "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ" not in body:
+                continue
+            keep, drop = _split_memory(body)
+            if not drop:
+                continue
+            msgs[i] = {**msgs[i], "content": keep + ("\n" if keep else "")}
+            cut_mem = True
+            break
+    after = est(msgs)
+    log.info("[%s] промпт ≈%d ток. > окно %d: убрал %s%s → ≈%d ток.", channel, before, llm.OLLAMA_NUM_CTX,
+             f"{len(dropped)} реплик истории" if dropped else "", " и часть блока памяти" if cut_mem else "", after)
+    return msgs
+
+
+async def _turn_context(text: str, with_lessons: bool = True) -> tuple[str, str]:
+    """Блоки «уроки хозяина» и «что ты знаешь о хозяине» для реплики, готовятся ПАРАЛЛЕЛЬНО.
+
+    Раньше это были два последовательных вызова, и каждый внутри ещё дёргал Ollama за эмбеддингом
+    той же фразы (плюс проверку, что модель эмбеддингов загружена) — до первого токена уходило
+    3–4 лишних обращения к локальному серверу, по 100–800 мс каждое. Теперь оба блока ждут
+    одновременно (gather), а не по очереди — на одинаковой работе это в 2 раза меньше задержки.
+
+    Эмбеддинг реплики внутри памяти считается СВОИМ (core/services/memory.py — файл чужого агента,
+    менять его нельзя). Поэтому общий вектор передаётся только блоку уроков, который тоже нужен
+    для отбора: считаем его один раз за ход вместо двух."""
+    if not text.strip():
+        return "", ""
+    vec = None
+    try:
+        if await llm.embed_available():
+            vec = (await llm.embed([text]) or [None])[0] or None
+    except Exception as e:  # pragma: no cover — эмбеддинги опциональны, без них отбор по словам
+        log.debug("turn embed: %s", e)
+        vec = None
+    ctx_fut = asyncio.ensure_future(memory.context(text))
+    try:
+        les = await _lessons_block(text, vectors=vec) if with_lessons else ""
+    except Exception as e:  # pragma: no cover — блок уроков не должен ронять ход
+        log.warning("уроки не собрались: %s", e)
+        les = ""
+    return les, await ctx_fut
 
 
 async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply | None:
@@ -1446,7 +1663,8 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
         mem = await memory.context(text)
         if cloud_tools and not llm.cloud_personal_tools():
             mem = ""   # ФАЗА 6: блок «что ты знаешь о хозяине» в облако без явного brain.cloud.personal_tools не идёт
-        messages = [{"role": "system", "content": system_prompt(compact=not cloud_tools) + voice_hint + mem + _no_repeat_block()}]
+        messages = [{"role": "system", "content": _system(compact=not cloud_tools) + voice_hint + mem + _no_repeat_block()}]
+        messages = _fit_budget(messages, None, channel) if llm.short_mode.get() else messages
         for h in _history(channel, 4, current=text):
             messages.append({"role": h["role"], "content": h["text"]})
         messages.append({"role": "user", "content": text + "\n" + now_line()})
@@ -1471,13 +1689,18 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
             return None
     voice_hint = "\nОТВЕТ ГОЛОСОМ: максимум 1–2 коротких предложения, без списков, без markdown и без эмодзи.\n" if channel.endswith("voice") else ""
     allow_cloud_pre = llm.cloud_enabled() and llm.GEMINI_AUTO
+    # при недоверенном источнике (пересланное сообщение, фото, содержимое ссылки) инструменты записи
+    # и удаления модели недоступны: содержимое данных не должно уметь удалять (ФАЗА 6)
+    tool_trusted = pc.from_trusted_channel(channel)
     # Блок памяти («что ты знаешь о хозяине») меняется от фразы к фразе, поэтому он идёт НЕ в системное сообщение,
-    # а перед репликой пользователя: системный промпт + схемы 40 инструментов тогда неизменны от запроса к запросу,
+    # а перед репликой пользователя: системный промпт + схемы инструментов тогда неизменны от запроса к запросу,
     # и Ollama берёт их из кэша вместо того, чтобы каждый раз заново читать ~6k токенов (на 1660 Super это 15–25 с).
-    mem_ctx = await memory.context(text)
+    # уроки хозяина («это заказ, а не трата») идут ПЕРЕД памятью, чтобы при нехватке окна (_fit_budget)
+    # срезались первыми, а портрет и стиль остались. Оба блока считаются вместе, эмбеддинг реплики — один.
+    les_ctx, mem_ctx = await _turn_context(text)
     if cloud_tools and not llm.cloud_personal_tools():
-        mem_ctx = ""   # ФАЗА 6: личные факты в облако без явного brain.cloud.personal_tools не отдаём
-    messages = [{"role": "system", "content": system_prompt() + voice_hint +
+        mem_ctx, les_ctx = "", ""   # ФАЗА 6: личные факты и уроки в облако без явного brain.cloud.personal_tools не отдаём
+    messages = [{"role": "system", "content": _system() + voice_hint +
                  "\nУ тебя есть инструменты — это ЕДИНСТВЕННЫЙ способ что-то сохранить. Правила:\n"
                  "• Просят записать/добавить/запомнить/сохранить/напомнить/показать — ВЫЗОВИ инструмент. "
                  "Отвечать «записал» без вызова инструмента ЗАПРЕЩЕНО — это ложь.\n"
@@ -1508,7 +1731,9 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                  "Даты передавай в ISO 8601. После результата инструмента — короткий ответ в характере."}]
     for h in _history(channel, current=text):
         messages.append({"role": h["role"], "content": h["text"]})
-    messages.append({"role": "user", "content": (mem_ctx + "\n" if mem_ctx else "") + (_no_repeat_block() if mem_ctx else "") + text + "\n" + now_line()})
+    ctx_head = budget.assemble({"lessons": les_ctx or "", "memory_core": mem_ctx or "",
+                                "no_repeat": _no_repeat_block() if (les_ctx or mem_ctx) else ""})
+    messages.append({"role": "user", "content": (ctx_head + "\n" if ctx_head else "") + text + "\n" + now_line()})
     tools_now = registry.tools_schema(with_cloud=allow_cloud_pre and not cloud_tools, text=None if cloud_tools else text)
     if not cloud_tools:
         messages = _fit_budget(messages, tools_now, channel)
@@ -1636,7 +1861,7 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                     log.info("[%s] %s — необратимое действие, жду подтверждения", channel, c["name"])
                     return Reply("\n".join(done_results + [_destructive_question(c["name"], args_ok)]), actions + ["clarify"], via)
                 else:
-                    tr = registry.call(c["name"], c["arguments"], channel)
+                    tr = registry.call(c["name"], c["arguments"], channel, trusted=tool_trusted)
                     results.append(tr)
                     seen_calls[sig] = tr.ok
                     res = tr.for_model()
@@ -1670,7 +1895,7 @@ async def via_gemini(text: str, channel: str, explicit: bool = True) -> Reply | 
         return Reply(hit[1], [], "gemini")
     # историю передаём только при явном обращении (и она тоже проходит анонимайзер)
     voice_hint = " ОТВЕТ ГОЛОСОМ: максимум 1–2 коротких предложения, без списков, markdown и эмодзи." if channel.endswith("voice") else ""
-    ans = await llm.cloud_chat(system_prompt() + voice_hint + await memory.context(text) + _no_repeat_block() + "\nТы ведёшь разговор и отвечаешь на общие вопросы. Личных данных пользователя (деньги, календарь, задачи, заметки, файлы) "
+    ans = await llm.cloud_chat(_system() + voice_hint + await memory.context(text) + _no_repeat_block() + "\nТы ведёшь разговор и отвечаешь на общие вопросы. Личных данных пользователя (деньги, календарь, задачи, заметки, файлы) "
                                "у тебя нет — не проси их и не выдумывай (то, что выше в блоке «что ты знаешь о хозяине», — знаешь). Если для ответа НУЖНЫ его личные данные или надо что-то записать/изменить/показать из них — "
                                "ответь ровно одним словом: LOCAL (без пояснений). Во всех остальных случаях отвечай кратко, по-русски, в характере. "
                                "История переписки в этом запросе нужна только для тона и продолжения разговора: она могла устареть (задачи, события и записи менялись). "
@@ -1945,6 +2170,7 @@ async def handle(text: str, channel: str = "tg") -> Reply:
     if len(text) > 8000:
         text = text[:8000]
     trace.start(text, channel)   # журнал работы: строка в базе на каждый ход (services/trace.py)
+    memory.clear_suggest()       # предложение «запомнить?» живёт один ход чата — не тащим в следующий ответ
     try:
         r = await _handle(text, channel)
         trace.finish(r.via, r.actions, ok=r.via != "none")
@@ -2138,7 +2364,7 @@ async def _handle(text: str, channel: str) -> Reply:
             r.text = r.text.rstrip() + "\n\n" + hint
     _log_chat("assistant", r.text, channel)
     _changed(channel, r.actions)
-    _extract_memory_bg(text, r.actions, channel)
+    await _memory_after_reply(text, r, channel)   # фоном, а на сайте — с suggest_fact для тоста в ответе
     if r.via in ("gemini", "ollama"):
         persona.remember_images(r.text)   # чтобы кот из памяти не всплывал в каждом ответе — общий список с проактивными
     return _mark(r)
@@ -2169,6 +2395,18 @@ async def _judge_disputed(text: str, channel: str) -> Reply | None:
     return r
 
 
+async def _remind_notify(rm: dict, channel: str) -> None:
+    """Напоминание, которое ассистент предложил сам: отдельным сообщением, откат одним словом (общая часть
+    фонового и синхронного извлечения памяти)."""
+    msg = f"Кстати, поставил напомнить: «{rm['title']}»" + (f" — {fmt_dt(rm['due'])}" if rm.get("due") else ", срок не понял — скажете") + ". Лишнее — «отмени»."
+    _log_chat("assistant", msg, channel)
+    _changed(channel, ["add_task"])
+    if notify and channel.startswith("tg"):
+        await notify(msg)
+    elif on_change:
+        on_change("reminder", {"text": msg, "id": f"suggest-{rm['id']}"})
+
+
 def _extract_memory_bg(text: str, actions: list[str], channel: str = "tg") -> None:
     """Память учится из реплики в фоне — ответ пользователю не ждёт нейронку."""
     if not memory.enabled() or not memory.worth_extracting(text, actions):
@@ -2183,16 +2421,35 @@ def _extract_memory_bg(text: str, actions: list[str], channel: str = "tg") -> No
             res = await memory.extract(text)
             if res.get("added") or res.get("updated"):
                 _changed("memory", ["memory"])
-            rm = res.get("remind")
-            if rm:
-                # предложил сам — говорим об этом отдельным сообщением, откат одним словом
-                msg = f"Кстати, поставил напомнить: «{rm['title']}»" + (f" — {fmt_dt(rm['due'])}" if rm.get("due") else ", срок не понял — скажете") + ". Лишнее — «отмени»."
-                _log_chat("assistant", msg, channel)
-                _changed(channel, ["add_task"])
-                if notify and channel.startswith("tg"):
-                    await notify(msg)
-                elif on_change:
-                    on_change("reminder", {"text": msg, "id": f"suggest-{rm['id']}"})
+            if res.get("remind"):
+                await _remind_notify(res["remind"], channel)
         except Exception as e:  # pragma: no cover
             log.warning("memory extract: %s", e)
     loop.create_task(run())
+
+
+async def _memory_after_reply(text: str, r: Reply, channel: str) -> None:
+    """Память учится из реплики ПОСЛЕ ответа. На сайте (web) с включёнными предложениями — синхронно:
+    первый новый факт сохраняется как раньше и дублируется в ответ как suggest_fact (тост «Запомнить?»
+    с кнопками да/нет). Таймаут, выключенная опция или не web → всё идёт фоном, как до этой фичи."""
+    if not memory.enabled() or not memory.worth_extracting(text, r.actions):
+        return
+    if channel != "web" or not memory.suggest_enabled():
+        _extract_memory_bg(text, r.actions, channel)
+        return
+    import asyncio
+    try:
+        res = await asyncio.wait_for(memory.extract(text), timeout=memory.suggest_timeout())
+    except (Exception, asyncio.CancelledError) as e:   # noqa: BLE001 — таймаут/сбой не должен ронять ответ
+        log.warning("память (синхронно под тост) не успела: %s → в фон", e)
+        _extract_memory_bg(text, r.actions, channel)
+        return
+    added = res.get("added") or []
+    if added:
+        f = added[0]
+        r.suggest_fact = {"text": f.text, "category": f.category, "fact_id": f.id}
+        memory.set_suggest(r.suggest_fact, channel)
+    if res.get("added") or res.get("updated"):
+        _changed("memory", ["memory"])
+    if res.get("remind"):
+        await _remind_notify(res["remind"], channel)

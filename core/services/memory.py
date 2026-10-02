@@ -16,9 +16,11 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 from datetime import datetime, timedelta
 
+from sqlalchemy import text
 from sqlmodel import select
 
 from ..brain import llm
@@ -32,8 +34,12 @@ CTX_MIN_SCORE = 0.45
 CORE_MAX = 6             # ядерных — всегда
 DEDUP_SCORE = 0.9
 UNUSED_DAYS = 60         # long-факт, ни разу не пригодившийся за 60 дней (и не ядро) → архив
+FADE_SUMMARY = 0.25      # затухание ниже этого → факт не идёт в сводки («что ты обо мне знаешь»), только в ответ на прямой вопрос
+DECAY_PENALTY = 0.35     # насколько полное затухание режет релевантность в recall(): score -= (1-decay)*штраф
+DISMISSED_KEY = "memory.dismissed"   # JSON-список фраз, которые хозяин отклонил («нет» в тосте) — не предлагаем и не сохраняем
 PORTRAIT_KEY = "user.portrait"
 PORTRAIT_AT_KEY = "user.portrait_at"
+STYLE_LINE_MAX = 400     # профиль стиля — одна строка в system prompt, не длиннее
 
 SECRET_RX = re.compile(r"парол|password|пин\b|pin\b|cvv|cvc|код\s+(?:из\s+)?смс|токен|api[- ]?key|\[скрыто\]|\[ключ\]|\[карта\]", re.I)
 # что точно не факт о человеке: команды ассистенту, вопросы, короткие реплики
@@ -89,6 +95,52 @@ def short_days() -> int:
         return max(1, int(getattr(node, "short_days", 7) or 7))
     except (TypeError, ValueError):
         return 7
+
+
+def _num(node, name: str, default: float, lo: float, hi: float) -> float:
+    """Числовая настройка brain.memory.* с границами — кривой yaml не должен ронять память."""
+    try:
+        v = float(getattr(node, name, default))
+    except (TypeError, ValueError):
+        return default
+    return min(hi, max(lo, v))
+
+
+# ---------------------------------------------------------------- затухание (decay)
+def decay_half_life() -> float:
+    """Полу-период затухания неподтверждённых фактов, дней: exp(-Δt / half_life)."""
+    from .. import config as _c
+    node = getattr(getattr(_c.cfg, "brain", None), "memory", None)
+    return _num(node, "decay_half_life_days", 90.0, 1.0, 3650.0)
+
+
+def decay_days() -> int:
+    """Через столько дней неподтверждённый и почти не упоминавшийся факт уходит в архив (ночью)."""
+    from .. import config as _c
+    node = getattr(getattr(_c.cfg, "brain", None), "memory", None)
+    return int(_num(node, "decay_days", 365.0, 1.0, 36500.0))
+
+
+def decay_max_mentions() -> int:
+    """Сколько упоминаний нужно факту, чтобы он НЕ счищался по decay_days («пельмени» сказали дважды — значит, живой)."""
+    from .. import config as _c
+    node = getattr(getattr(_c.cfg, "brain", None), "memory", None)
+    return int(_num(node, "decay_max_mentions", 2.0, 0.0, 100.0))
+
+
+# ---------------------------------------------------------------- предложения фактов (тост «Запомнить?»)
+def suggest_enabled() -> bool:
+    """Предлагать новые факты из разговора в ответе чата (кнопки «да/нет» на сайте)."""
+    from .. import config as _c
+    node = getattr(getattr(_c.cfg, "brain", None), "memory", None)
+    return bool(getattr(node, "suggest", True))
+
+
+def suggest_timeout() -> float:
+    """Сколько секунд ждать извлечение фактов ради тоста; дольше — уходим в фон, как раньше."""
+    from .. import config as _c
+    node = getattr(getattr(_c.cfg, "brain", None), "memory", None)
+    return _num(node, "suggest_timeout", 20.0, 1.0, 120.0)
 
 
 # ---------------------------------------------------------------- модель
@@ -204,6 +256,7 @@ async def add_fact(text: str, layer: str = "long", category: str = "быт", cor
                     f.layer = "long"          # сказали ещё раз → устойчивое
                 f.core = f.core or core
                 s.add(f); s.commit(); s.refresh(f)
+                set_fact_meta(f.id, last_seen=datetime.now())   # хозяин повторил факт в реплике — затухание заново
                 return f
         f = Fact(text=text, layer=layer, category=category, core=core, source_msg=source_msg, confidence=confidence,
                  vector=json.dumps([round(x, 6) for x in vec]) if vec else "")
@@ -227,6 +280,7 @@ def add_fact_sync(text: str, layer: str = "long", category: str = "быт", core
                 if layer == "long":
                     f.layer = "long"
                 s.add(f); s.commit(); s.refresh(f)
+                set_fact_meta(f.id, last_seen=datetime.now())
                 return f
         f = Fact(text=text, layer=layer, category=category, core=core, confidence=confidence)
         s.add(f); s.commit(); s.refresh(f)
@@ -252,6 +306,7 @@ async def update_fact(fid: int, text: str | None = None, layer: str | None = Non
             s.add(nf); s.commit(); s.refresh(nf)
             f.layer, f.replaced_by, f.archive_reason, f.updated_at = "archive", nf.id, reason, datetime.now()
             s.add(f); s.commit()
+            set_fact_meta(f.id, archived=datetime.now())
             return nf
         if layer in ("short", "long", "archive"):
             f.layer = layer
@@ -263,6 +318,8 @@ async def update_fact(fid: int, text: str | None = None, layer: str | None = Non
             f.core = core
         f.updated_at = datetime.now()
         s.add(f); s.commit(); s.refresh(f)
+        if layer == "archive":
+            set_fact_meta(f.id, archived=datetime.now())
         return f
 
 
@@ -273,17 +330,20 @@ def forget(fid: int, reason: str = "забыл по просьбе") -> Fact | N
             return None
         f.layer, f.archive_reason, f.updated_at = "archive", reason, datetime.now()
         s.add(f); s.commit(); s.refresh(f)
-        return f
+    set_fact_meta(fid, archived=datetime.now())
+    return f
 
 
 def restore(fid: int) -> Fact | None:
+    """Вернуть факт из архива. Восстановление — явное решение хозяина, значит фактически подтверждение."""
     with session() as s:
         f = s.get(Fact, fid)
         if not f:
             return None
         f.layer, f.archive_reason, f.replaced_by, f.updated_at = "long", "", None, datetime.now()
         s.add(f); s.commit(); s.refresh(f)
-        return f
+    set_fact_meta(fid, clear_archived=True, confirmed=datetime.now(), last_seen=datetime.now())
+    return f
 
 
 def list_facts(layer: str | None = None, limit: int = 500) -> list[Fact]:
@@ -294,14 +354,16 @@ def list_facts(layer: str | None = None, limit: int = 500) -> list[Fact]:
         return list(s.exec(q.order_by(Fact.core.desc(), Fact.updated_at.desc()).limit(limit)))
 
 
-def find_fact(query: str) -> Fact | None:
-    """По подстроке среди живых фактов («забудь, что у меня кот» → факт про кота)."""
+def find_fact(query: str, include_archived: bool = False) -> Fact | None:
+    """По подстроке среди живых фактов («забудь, что у меня кот» → факт про кота).
+    include_archived=True — ищем и в архиве (восстановление затухшего/забытого факта)."""
     q = _norm(query).lower()
     words = [w for w in re.findall(r"[а-яёa-z0-9]+", q) if len(w) >= 3]
     if not words:
         return None
     with session() as s:
-        live = list(s.exec(select(Fact).where(Fact.layer != "archive")))
+        qq = select(Fact) if include_archived else select(Fact).where(Fact.layer != "archive")
+        live = list(s.exec(qq))
     best, best_n = None, 0
     for f in live:
         t = f.text.lower()
@@ -311,30 +373,223 @@ def find_fact(query: str) -> Fact | None:
     return best if best_n >= max(1, len(words) // 2) else None
 
 
-# ---------------------------------------------------------------- контекст для модели
-async def recall(text: str, limit: int = CTX_MAX) -> list[Fact]:
-    """Факты, близкие по смыслу к реплике (эмбеддинги, локально). Без эмбеддингов — по словам."""
+# ---------------------------------------------------------------- колонки затухания (миграция v5)
+# Их нет в модели Fact (core/db.py не редактируем), поэтому читаем и пишем их отдельным SQL.
+def _dt(v) -> datetime | None:
+    """Значение DATETIME из SQLite (обычно строка) → datetime; пусто или кривое → None."""
+    if v is None or v == "":
+        return None
+    if isinstance(v, datetime):
+        return v
+    s = str(v).replace("T", " ").split("+")[0].strip()
+    for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def fact_meta(fact_ids: set[int] | None = None) -> dict[int, dict]:
+    """{fact_id: {"last_seen", "confirmed", "archived"}} по колонкам v5. Без аргумента — по всем фактам."""
     with session() as s:
-        live = list(s.exec(select(Fact).where(Fact.layer != "archive")))
+        rows = s.exec(text("SELECT id, last_seen_at, confirmed_at, archived_at FROM fact")).all()
+    out = {int(r[0]): {"last_seen": _dt(r[1]), "confirmed": _dt(r[2]), "archived": _dt(r[3])} for r in rows}
+    if fact_ids is None:
+        return out
+    empty = {"last_seen": None, "confirmed": None, "archived": None}
+    return {i: out.get(i, empty) for i in fact_ids}
+
+
+def set_fact_meta(fid: int, last_seen: datetime | None = None, confirmed: datetime | None = None,
+                  archived: datetime | None = None, clear_archived: bool = False) -> None:
+    """Одна UPDATE по колонкам v5. None в аргументе = не трогать; clear_archived — снять archived_at (восстановление)."""
+    sets, params = [], {"fid": int(fid)}
+    if last_seen is not None:
+        sets.append("last_seen_at = :ls"); params["ls"] = last_seen
+    if confirmed is not None:
+        sets.append("confirmed_at = :cf"); params["cf"] = confirmed
+    if archived is not None:
+        sets.append("archived_at = :ar"); params["ar"] = archived
+    if clear_archived:
+        sets.append("archived_at = NULL")
+    if not sets:
+        return
+    with session() as s:
+        s.exec(text(f"UPDATE fact SET {', '.join(sets)} WHERE id = :fid"), params=params)
+        s.commit()
+
+
+def decay(core: bool, confirmed: datetime | None, ref: datetime | None, now: datetime | None = None) -> float:
+    """exp(-Δt/half_life) — 1.0 для ядра и подтверждённых фактов (они не гаснут). ref — last_seen_at или created_at."""
+    if core or confirmed is not None or ref is None:
+        return 1.0
+    days = max(0.0, ((now or datetime.now()) - ref).total_seconds() / 86400.0)
+    return math.exp(-days / decay_half_life())
+
+
+def _faded(core: bool, confirmed: datetime | None, ref: datetime | None) -> bool:
+    """Сильно затухший (ниже FADE_SUMMARY) — в сводки не идёт, всплывает только на прямой релевантный вопрос."""
+    return decay(core, confirmed, ref) < FADE_SUMMARY
+
+
+def _dedupe(facts: list[Fact]) -> list[Fact]:
+    """Схлопнуть дубли: одинаковый текст и «короткий внутри длинного» («пельмени» ⊂ «любит пельмени с мясом»)."""
+    out: list[Fact] = []
+    seen: set[str] = set()
+    for f in facts:
+        key = _norm(f.text).lower()
+        if not key or key in seen:
+            continue
+        if any(key in k or k in key for k in seen if k):
+            continue
+        seen.add(key)
+        out.append(f)
+    return out
+
+
+# ---------------------------------------------------------------- предложения фактов (тост «Запомнить?»)
+# Последнее предложение для текущего хода чата: Reply.suggest_fact дублирует его, а роутер-инжектор
+# вшивает в JSON /api/chat и в SSE-событие done (эти два роута живут в чужих файлах — правим их ответы здесь).
+_SUGGEST: dict = {}
+
+
+def set_suggest(payload: dict | None, channel: str = "") -> None:
+    _SUGGEST.clear()
+    if payload:
+        _SUGGEST.update({"fact": payload, "channel": channel, "at": datetime.now()})
+
+
+def pop_suggest(max_age: float = 60.0) -> dict | None:
+    """Забрать предложение для вшивания в ответ (не старше max_age секунд)."""
+    item = dict(_SUGGEST) if _SUGGEST else None
+    _SUGGEST.clear()
+    if not item:
+        return None
+    at = item.get("at")
+    if not isinstance(at, datetime) or (datetime.now() - at).total_seconds() > max_age:
+        return None
+    return item.get("fact")
+
+
+def clear_suggest() -> None:
+    _SUGGEST.clear()
+
+
+def _dismissed() -> set[str]:
+    try:
+        raw = json.loads(get_setting(DISMISSED_KEY, "[]") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return set()
+    return {str(x).lower() for x in raw if isinstance(x, (str, int))}
+
+
+def _remember_dismiss(text_: str) -> None:
+    """Запомнить отказ («нет» в тосте): такую фразу больше не предлагаем и не сохраняем."""
+    key = _norm(text_).lower()
+    if not key:
+        return
+    items = [x for x in _dismissed() if x]
+    if key in items:
+        return
+    items.append(key)
+    set_setting(DISMISSED_KEY, json.dumps(items[-200:], ensure_ascii=False))
+
+
+def confirm(fact_id: int | None = None, fact_text: str | None = None, category: str | None = None) -> Fact | None:
+    """«Да, запомни»: факт подтверждён (confirmed_at) — он больше не затухает и не архивируется по decay_days.
+    Если факта ещё нет (предложение пришло без записи) — сохраняем как long-факт сразу подтверждённым."""
+    now = datetime.now()
+    f = None
+    if fact_id:
+        with session() as s:
+            f = s.get(Fact, fact_id)
+    if f is None and _norm(fact_text or ""):
+        f = add_fact_sync(_norm(fact_text), layer="long", category=category or "быт", confidence=1.0)
+    if f is None:
+        return None
+    set_fact_meta(f.id, confirmed=now, last_seen=now, clear_archived=True)
+    with session() as s:
+        row = s.get(Fact, f.id)
+        if row and row.layer == "archive":
+            row.layer, row.archive_reason, row.updated_at = "long", "", now
+            s.add(row); s.commit()
+    return f
+
+
+def dismiss(fact_id: int | None = None, fact_text: str | None = None) -> bool:
+    """«Нет»: убрать предложенный факт (в архив) и запомнить отказ, чтобы не предлагать снова."""
+    t = _norm(fact_text or "")
+    if t:
+        _remember_dismiss(t)
+    f = None
+    if fact_id:
+        with session() as s:
+            f = s.get(Fact, fact_id)
+    if f is None and t:
+        f = find_fact(t, include_archived=True)
+    if f is None:
+        return bool(t)
+    if f.layer != "archive":
+        forget(f.id, reason="не подтвердил (тост)")
+        set_fact_meta(f.id, archived=datetime.now())
+    return True
+
+
+# ---------------------------------------------------------------- контекст для модели
+async def recall(text: str, limit: int = CTX_MAX, include_archived: bool = False) -> list[Fact]:
+    """Факты, близкие по смыслу к реплике (эмбеддинги, локально). Без эмбеддингов — по словам.
+
+    Затухание: у неподтверждённых фактов счёт режется на (1-decay)*DECAY_PENALTY, где
+    decay = exp(-Δt/half_life). Старый неподтверждённый «пельмени» всплывает только на прямой
+    вопрос (почти точное совпадение), а в фоне больше не тащится в каждый ответ.
+    include_archived=True — ищем и среди архивных (восстановление забытого по прямому запросу)."""
+    with session() as s:
+        q = select(Fact) if include_archived else select(Fact).where(Fact.layer != "archive")
+        live = list(s.exec(q))
     if not live:
         return []
+    now = datetime.now()
+    meta = fact_meta()
+    # счёт затухания: ядро и подтверждённые не гаснут, у остальных референс — последнее упоминание в реплике
+    def _decayed(f: Fact, sc: float) -> float:
+        m = meta.get(f.id) or {}
+        d = decay(bool(f.core), m.get("confirmed"), m.get("last_seen") or f.created_at, now)
+        return sc - (1.0 - d) * DECAY_PENALTY
     vecs = await _embed([text])
     if vecs:
-        scored = sorted(((_cos(vecs[0], _vec(f.vector)), f) for f in live if f.vector), key=lambda x: -x[0])
+        scored = sorted(((_decayed(f, _cos(vecs[0], _vec(f.vector))), f) for f in live if f.vector), key=lambda x: -x[0])
         return [f for sc, f in scored if sc >= CTX_MIN_SCORE][:limit]
     words = {w[:-1] if len(w) > 4 else w for w in re.findall(r"[а-яёa-z]{3,}", text.lower())}
-    scored = sorted(((sum(1 for w in words if w in f.text.lower()), f) for f in live), key=lambda x: -x[0])
-    return [f for n, f in scored if n >= 1][:limit]
+    # без эмбеддингов score = число совпавших слов; штраф затухания влияет только на порядок,
+    # а порог — «хотя бы одно слово»: вычитать дробный штраф из 1 и сравнивать с 1 нельзя
+    # (1 − ε < 1 — и одиночные совпадения пропадали бы, exp никогда не даёт ровно 1.0)
+    scored: list[tuple[float, Fact]] = []
+    for f in live:
+        base = float(sum(1 for w in words if w in f.text.lower()))
+        if base < 1:
+            continue
+        m = meta.get(f.id) or {}
+        d = decay(bool(f.core), m.get("confirmed"), m.get("last_seen") or f.created_at, now)
+        scored.append((base - (1.0 - d) * DECAY_PENALTY, f))
+    scored.sort(key=lambda x: -x[0])
+    return [f for _sc, f in scored[:limit]]
 
 
 async def context(text: str) -> str:
-    """Блок для системного промпта: портрет + ядро + релевантное. Пусто — если памяти нет или выключена."""
+    """Блок для промпта: портрет + ядро + релевантное + стиль. Пусто — если памяти нет или выключена.
+    Профиль стиля продублирован одной строкой и в system prompt (см. agent._system) — там он постоянен
+    и не зависит от реплики, а блок «КАК ОН ПИШЕТ» ниже остаётся прежним контрактом (tests/test_judge)."""
     if not enabled():
         return ""
     core = [f for f in list_facts() if f.core and f.layer != "archive"][:CORE_MAX]
     rel = await recall(text)
     seen = {f.id for f in core}
     rel = [f for f in rel if f.id not in seen]
+    # дубли схлопываем и в ядре, и в релевантном — «пельмени» дважды в промпте не нужны
+    picked = _dedupe(core + rel)
+    core = [f for f in picked if f.core]
+    rel = [f for f in picked if not f.core]
     portrait = get_setting(PORTRAIT_KEY, "") or ""
     style = get_setting(STYLE_KEY, "") or ""
     if not core and not rel and not portrait and not style:
@@ -390,6 +645,7 @@ async def extract(text: str, msg_id: int | None = None) -> dict:
     if d is None:
         return {"added": [], "updated": [], "via": via}
     added, updated = [], []
+    dismissed = _dismissed()   # «нет» в тосте: такую фразу хозяин просил не запоминать — молча не сохраняем
     ids_ok = {f.id for f in ctx}
     for u in (d.get("update") or [])[:5]:
         if not isinstance(u, dict):
@@ -404,6 +660,8 @@ async def extract(text: str, msg_id: int | None = None) -> dict:
                 updated.append(f)
     for a in (d.get("add") or [])[:5]:
         if not isinstance(a, dict) or not _norm(str(a.get("text") or "")):
+            continue
+        if _norm(str(a["text"])).lower() in dismissed:
             continue
         f = await add_fact(str(a["text"]), layer=str(a.get("layer") or "short"), category=str(a.get("category") or "быт"),
                            source_msg=msg_id, confidence=0.6)
@@ -530,9 +788,28 @@ async def rebuild_style(force: bool = False) -> str | None:
     return text
 
 
+def style_line() -> str:
+    """Профиль стиля хозяина ОДНОЙ строкой — идёт в system prompt (см. agent._system).
+    Одна строка, не зависящая от реплики: не портит кэш промпта и не дублирует многострочный блок в каждом сообщении."""
+    raw = get_setting(STYLE_KEY, "") or ""
+    if not raw.strip():
+        return ""
+    out, used = [], 0
+    for l in raw.splitlines():
+        line = re.sub(r"^[\s—•\-–]+", "", l).strip()
+        if not line:
+            continue
+        if used + len(line) > STYLE_LINE_MAX:
+            break
+        out.append(line)
+        used += len(line) + 3
+    return " · ".join(out)
+
+
 async def nightly() -> dict:
     """Уборка: short старше N дней → long/archive (нейронка; без неё — long, если факт всплывал повторно, иначе archive);
-    long без единого использования за 60 дней и не ядро → archive; портрет раз в неделю."""
+    long без единого использования за 60 дней и не ядро → archive; портрет раз в неделю.
+    Плюс затухание: неподтверждённые, старше decay_days и почти не упоминавшиеся → archive («затухло»)."""
     if not enabled():
         return {}
     await index_pending()
@@ -540,6 +817,7 @@ async def nightly() -> dict:
     with session() as s:
         old_short = list(s.exec(select(Fact).where(Fact.layer == "short", Fact.created_at < cutoff)))
     promoted = archived = 0
+    stamp_archived: list[int] = []   # id, которым проставим archived_at ПОСЛЕ коммита (вложенная сессия — это deadlock)
     if old_short:
         d, via = await _ask(PROMOTE_PROMPT, "\n".join(f"[{f.id}] {f.text}" for f in old_short))
         keep: set[int] = set()
@@ -559,15 +837,38 @@ async def nightly() -> dict:
                 if row.id in keep:
                     row.layer = "long"; promoted += 1
                 else:
-                    row.layer, row.archive_reason = "archive", "устарело"; archived += 1
+                    row.layer, row.archive_reason = "archive", "устарело"; archived += 1; stamp_archived.append(row.id)
                 row.updated_at = datetime.now(); s.add(row)
             s.commit()
     stale = datetime.now() - timedelta(days=UNUSED_DAYS)
     with session() as s:
         for f in s.exec(select(Fact).where(Fact.layer == "long", Fact.core == False, Fact.created_at < stale)):  # noqa: E712
             if not f.last_used and f.uses == 0:
-                f.layer, f.archive_reason, f.updated_at = "archive", "не пригодился", datetime.now(); s.add(f); archived += 1
+                f.layer, f.archive_reason, f.updated_at = "archive", "не пригодился", datetime.now()
+                s.add(f); archived += 1; stamp_archived.append(f.id)
         s.commit()
+    # --- затухание: неподтверждённый факт, который за год почти не вспоминали, уходит в архив
+    now = datetime.now()
+    fade_cut = now - timedelta(days=decay_days())
+    max_mentions = decay_max_mentions()
+    with session() as s:
+        live = list(s.exec(select(Fact).where(Fact.layer != "archive", Fact.core == False)))
+    meta = fact_meta()
+    faded = 0
+    for f in live:
+        m = meta.get(f.id) or {}
+        if m.get("confirmed") is not None:
+            continue                       # подтверждён («да» в тосте / восстановление) — не гаснет
+        ref = m.get("last_seen") or f.created_at
+        if ref <= fade_cut and f.uses < max_mentions:
+            with session() as s:
+                row = s.get(Fact, f.id)
+                if row and row.layer != "archive":
+                    row.layer, row.archive_reason, row.updated_at = "archive", "затухло", now
+                    s.add(row); s.commit()
+                    archived += 1; faded += 1; stamp_archived.append(f.id)
+    for fid in dict.fromkeys(stamp_archived):   # без дублей: факт мог попасть в два прохода
+        set_fact_meta(fid, archived=now)
     await rebuild_portrait()
     await rebuild_style()
     return {"promoted": promoted, "archived": archived}
@@ -583,9 +884,16 @@ def stats() -> dict:
 
 
 def about_me_text() -> str:
-    """«Что ты обо мне знаешь?» — портрет + ядро + немного long."""
+    """«Что ты обо мне знаешь?» — портрет + ядро + немного long.
+    Архивные сюда не идут, затухшие (decay < FADE_SUMMARY) и дубли тоже — сводка должна быть живой, а не хроникой."""
     st = stats()
-    facts = [f for f in list_facts() if f.layer != "archive"]
+    meta = fact_meta()
+
+    def keep(f: Fact) -> bool:
+        m = meta.get(f.id) or {}
+        return not _faded(bool(f.core), m.get("confirmed"), m.get("last_seen") or f.created_at)
+
+    facts = _dedupe([f for f in list_facts() if f.layer != "archive" and keep(f)])
     if not facts and not st["portrait"]:
         return "Пока почти ничего, сэр: вы мне о себе не рассказывали. Скажите «запомни, что …» — или просто общайтесь, я запоминаю сам."
     lines = ["🧠 **Что я о вас знаю**"]
