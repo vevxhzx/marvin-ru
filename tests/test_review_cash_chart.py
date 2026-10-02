@@ -30,8 +30,13 @@ def fresh_db(tmp_path, monkeypatch):
 
 
 def _ago(days: int, hour: int = 12) -> datetime:
-    """Дата «N дней назад» в 12:00 — чтобы не соскальзывало через полночь."""
-    base = datetime.now().replace(hour=hour, minute=0, second=0, microsecond=0)
+    """Дата «N дней назад» в 12:00 по часовому поясу владельца.
+
+    Именно по нему продукт режет дни (insights.now_tz), поэтому и тест обязан считать
+    в нём же: на машине в другом поясе дата уезжала на день и суммы в тесте расходились.
+    """
+    from core.services import insights as _ins
+    base = _ins.now_tz().replace(hour=hour, minute=0, second=0, microsecond=0)
     return base - timedelta(days=days)
 
 
