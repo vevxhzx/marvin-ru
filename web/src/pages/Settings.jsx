@@ -220,7 +220,7 @@ export default function Settings({ health }) {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <a className="btn-ghost" href="/manifest.json" target="_blank" rel="noreferrer" data-tip={t('st.pwa')}><Smartphone size={15} /> {t('st.to_phone')}</a>
+            <a className="btn-ghost" href="/manifest.webmanifest" target="_blank" rel="noreferrer" data-tip={t('st.pwa')}><Smartphone size={15} /> {t('st.to_phone')}</a>
             <Switch on={notifyEnabled()} onChange={toggleNotif} label={notifyEnabled() ? t('st.on') : t('st.enable')} />
           </div>
         </Card>
@@ -1130,7 +1130,7 @@ function DesktopClientSection() {
         </div>
       </div>
 
-      {/* Переключатель профиля: Джарвис (личный) vs Марвин (публичный) */}
+      {/* Переключатель профиля: Марвин (личный) vs Марвин для GitHub (публичный) */}
       <div className="rounded-xl border hair p-4 space-y-3" style={{ background: 'var(--surface-2)' }}>
         <div className="flex items-center justify-between">
           <div>

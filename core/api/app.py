@@ -316,19 +316,11 @@ def media(path: str):
 
 @app.get("/manifest.json", include_in_schema=False)
 def manifest():
-    return {
-        "name": persona.display_name(), "short_name": persona.display_name(), "start_url": "/", "display": "standalone",
-        "background_color": "#f4f3f0", "theme_color": "#f4f3f0", "lang": "ru",
-        "icons": [{"src": "/icon-192.png", "sizes": "192x192", "type": "image/png"},
-                  {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png"}],
-        # Ярлыки PWA (долгое нажатие на иконку на телефоне): быстрая запись без блужданий по меню
-        "shortcuts": [
-            {"name": "Трата", "short_name": "Трата", "url": "/?quick=exp", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
-            {"name": "Доход", "short_name": "Доход", "url": "/?quick=inc", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
-            {"name": "Задача", "short_name": "Задача", "url": "/?quick=task", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
-            {"name": "Мысль", "short_name": "Мысль", "url": "/?quick=note", "icons": [{"src": "/icon-192.png", "sizes": "192x192"}]},
-        ],
-    }
+    # Источник правды — статический web/public/manifest.webmanifest (его копирует сборка
+    # в web/site). Этот эндпоинт остаётся редиректом, чтобы старые закладки, ссылка
+    # в настройках и уже установленные PWA не получали устаревший JSON.
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/manifest.webmanifest", status_code=307)
 
 
 # ---------------- роутеры по доменам (ФАЗА 7) ----------------
