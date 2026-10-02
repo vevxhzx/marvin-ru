@@ -306,26 +306,101 @@ function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, time
   )
 }
 
+/* ------------------------------------------------------- канбан и закрытые стадии
+   Закрытые стадии («сдан», «оплачен», «потерян») растут без ограничений: год работы — это
+   сотни карточек, и доска от этого только тяжелеет. Поэтому в них по умолчанию видны
+   BOARD_LIMIT самых свежих заказов, дальше — кнопка «показать ещё» по BOARD_PAGE за нажатие
+   (порциями, а не всё сразу: 200+ карточек за одно нажатие подвешивают страницу).
+   Активные стадии показываются целиком — их всегда мало, и они должны быть видны. */
+const BOARD_CLOSED = ['delivered', 'paid', 'lost']
+const BOARD_LIMIT = 10   // карточек в свёрнутой закрытой колонке
+const BOARD_PAGE = 30    // сколько добавляет «показать ещё»
+const BOARD_MORE_KEY = 'orders.board.more.v1'
+
+/* Порядок закрытых карточек — по свежести закрытия заказа, а не по дате создания:
+   у «оплачен» это дата оплаты, у «сдан» — дата сдачи, у «потерян» — последний контакт
+   (если контакта не было — дата создания). Свежие сверху: недавно закрытое и нужно вспомнить первым. */
+const closedAt = (o) => {
+  let max = 0
+  for (const k of ['paid_at', 'done_at', 'last_contact_at', 'created_at']) {
+    const ms = o?.[k] ? new Date(o[k]).getTime() : 0
+    if (ms > max) max = ms
+  }
+  return max
+}
+
+/* Раскрытость закрытых колонок живёт в localStorage (по стадии): перерисовка доски,
+   смена вкладки и перезагрузка страницы не должны сбрасывать то, что уже открыли.
+   По умолчанию свёрнуто. Ключи читаем только из своего списка стадий. */
+function readBoardMore() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(BOARD_MORE_KEY) || '{}')
+    if (!raw || typeof raw !== 'object') return {}
+    const out = {}
+    for (const k of BOARD_CLOSED) {
+      const n = Math.round(Number(raw[k]))
+      if (Number.isFinite(n) && n > BOARD_LIMIT) out[k] = n
+    }
+    return out
+  } catch { return {} }
+}
+
 /* Канбан CRM: нативный HTML5 drag&drop (десктоп) + список «стадия» на каждой карточке
    (альтернатива без перетаскивания — на телефоне жест не нужен).
-   Колонка показывает стадию, количество и сумму заказов; цвет — по смыслу из DESIGN.md. */
+   Колонка показывает стадию, количество и сумму заказов; цвет — по смыслу из DESIGN.md.
+   Счётчик и сумма в шапке считаются по ВСЕМ заказам стадии, а не по видимым карточкам,
+   иначе цифры в колонке врали бы относительно сводки и аналитики. */
 function Board({ orders, onOpen, onStage }) {
   const { t } = useI18n()
   const [drag, setDrag] = useState(null)
   const [over, setOver] = useState(null)
+  const [more, setMore] = useState(readBoardMore)
+  useEffect(() => { try { localStorage.setItem(BOARD_MORE_KEY, JSON.stringify(more)) } catch { /* приватный режим — не запоминаем */ } }, [more])
+  // сколько карточек показывать в стадии: активные — все, закрытые — до раскрытой порции
+  const shownOf = (k, total) => (BOARD_CLOSED.includes(k) ? Math.min(Math.max(more[k] || BOARD_LIMIT, BOARD_LIMIT), total) : total)
+  const setShown = (k, n) => setMore((m) => ({ ...m, [k]: n }))
   const cols = useMemo(() => {
     const m = {}
     ORDER_STAGES.forEach(([k]) => { m[k] = [] })
     orders.forEach((o) => { (m[stageOf(o)] || (m[stageOf(o)] = [])).push(o) })
+    for (const k of BOARD_CLOSED) if (m[k]) m[k].sort((a, b) => closedAt(b) - closedAt(a) || b.id - a.id)
     return m
   }, [orders])
+  // сводка над доской: сколько закрытых заказов прямо сейчас не видно
+  const hidden = useMemo(
+    () => BOARD_CLOSED.reduce((s, k) => s + Math.max(0, (cols[k]?.length || 0) - shownOf(k, cols[k]?.length || 0)), 0),
+    [cols, more],   // eslint-disable-line react-hooks/exhaustive-deps
+  )
+  // «показать» из сводки: ещё одна порция в каждой закрытой колонке, а не всё сразу
+  const showNextPage = () => setMore((m) => {
+    const next = { ...m }
+    for (const k of BOARD_CLOSED) {
+      const total = cols[k]?.length || 0
+      if (total > shownOf(k, total)) next[k] = Math.min(shownOf(k, total) + BOARD_PAGE, total)
+    }
+    return next
+  })
   return (
     <div className="kanban-scroll pb-3">
+      {/* сводка над колонками: сколько закрытых заказов спрятано прямо сейчас. Клик открывает
+          ещё одну порцию в каждой закрытой стадии, дальше — кнопки в самих колонках. */}
+      {hidden > 0 && (
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px]">
+          <button type="button" className="btn-soft" onClick={showNextPage}
+            aria-label={t('or.board_hidden_aria', { count: hidden })} data-tip={t('or.board_hint_limited')}>
+            <ChevronDown size={13} /> {t('or.board_hidden', { count: hidden })}
+          </button>
+          <span className="faint text-[12px]">{t('or.board_hint_limited')}</span>
+        </div>
+      )}
       <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
         {ORDER_STAGES.map(([k, label]) => {
           const tone = ORDER_STAGE_TONE[k]
           const col = cols[k] || []
           const sum = col.reduce((s, o) => s + (o.price || 0), 0)
+          // в закрытой стадии видно не всё: 10 по умолчанию, дальше порциями по 30
+          const shown = shownOf(k, col.length)
+          const rest = col.length - shown
           return (
             <div key={k} className="w-[258px] shrink-0"
               onDragOver={(e) => { e.preventDefault(); setOver(k) }}
@@ -345,7 +420,7 @@ function Board({ orders, onOpen, onStage }) {
                 </div>
               </div>
               <div className="space-y-2" style={{ minHeight: 56 }}>
-                {col.map((o) => (
+                {col.slice(0, shown).map((o) => (
                   <div key={o.id} draggable
                     onDragStart={(e) => { try { e.dataTransfer.setData('text/plain', String(o.id)) } catch { /* ignore */ } e.dataTransfer.effectAllowed = 'move'; setDrag(o) }}
                     onDragEnd={() => { setDrag(null); setOver(null) }}
@@ -381,6 +456,20 @@ function Board({ orders, onOpen, onStage }) {
                   <div className="rounded-xl px-3 py-4 text-center text-[11.5px] faint" style={{ border: '1px dashed var(--line)' }}>
                     {t('or.drop_here')}
                   </div>
+                )}
+                {/* крупная кнопка во всю ширину колонки: на телефоне зона нажатия ≥44px (см. index.css, .btn) */}
+                {rest > 0 && (
+                  <button type="button" className="btn-soft w-full !h-9 text-[12.5px]" data-tip={t('or.board_more_tip')}
+                    aria-label={t('or.board_more_aria', { count: rest, label: t(label) })}
+                    onClick={() => setShown(k, Math.min(shown + BOARD_PAGE, col.length))}>
+                    <ChevronDown size={13} /> {t('or.board_more', { n: rest })}
+                  </button>
+                )}
+                {rest === 0 && shown > BOARD_LIMIT && (
+                  <button type="button" className="btn-ghost w-full !h-9 text-[12.5px]"
+                    aria-label={t('or.board_collapse_aria', { label: t(label) })} onClick={() => setShown(k, BOARD_LIMIT)}>
+                    <ChevronUp size={13} /> {t('or.board_collapse')}
+                  </button>
                 )}
               </div>
             </div>
