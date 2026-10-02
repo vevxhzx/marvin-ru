@@ -64,9 +64,15 @@ def main():
         subprocess.check_call([base, "-m", "venv", str(VENV)])
     print("        ок")
 
+    # На macOS базовый requirements тянет torch (нужен только для офлайн-озвучки), а у torch
+    # на mac нет колёс для Intel и для macOS 13 — установка уходила в сборку из исходников.
+    # Поэтому на маке ставим облегчённый набор, а сам torch — отдельным аддоном (install_voice).
+    req_name = "requirements-mac.txt" if sys.platform == "darwin" else "requirements.txt"
+    if os.getenv("JARVIS_REQUIREMENTS"):
+        req_name = os.getenv("JARVIS_REQUIREMENTS")
     step(2, "Устанавливаю библиотеки (2–5 минут, ~300 МБ)...")
     subprocess.call([str(PY), "-m", "pip", "install", "--upgrade", "pip", "-q", "--disable-pip-version-check"])
-    r = subprocess.call([str(PY), "-m", "pip", "install", "-r", str(ROOT / "requirements.txt"), "-q", "--disable-pip-version-check"])
+    r = subprocess.call([str(PY), "-m", "pip", "install", "-r", str(ROOT / req_name), "-q", "--disable-pip-version-check"])
     if r != 0:
         print("  [!] Ошибка установки библиотек.")
         if sys.version_info >= (3, 14) and base == sys.executable:

@@ -73,7 +73,7 @@
 
 Характер (⚙ Настройки → характер): `persona.style: swag` + `persona.humor_level` 3–10 — сухая ирония и подколы «как у Джарвиса»; `neutral` — спокойно и по делу (для «второго ассистента» близким).
 
-Пошагово, со всеми вариантами — [docs/install.md](docs/install.md).
+Пошагово, со всеми вариантами — [docs/install.md](docs/install.md). На **macOS** — [docs/macos.md](docs/macos.md) (установка через `Install-Mac.command`, значок в строке меню, типичные ошибки).
 
 ---
 

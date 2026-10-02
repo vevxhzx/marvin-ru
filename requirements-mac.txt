@@ -1,0 +1,61 @@
+# Ядро для macOS (Apple Silicon и Intel). Отдельный файл не для красоты:
+# в requirements.txt лежит `torch>=2.2`, а у torch на macOS НЕТ колёс для Intel
+# (`macosx_*_x86_64` не публикуются вообще) и нет колёс для macOS ниже 14.0.
+# То есть на Intel Mac и на macOS 13 базовая установка падала бы на сборке
+# из исходников — а torch нужен только Silero (офлайн-озвучка), то есть
+# отдельному голосовому аддону (requirements-silero.txt).
+#
+# Что здесь НЕ ставится по умолчанию:
+#   · torch                → requirements-silero.txt (озвучка Silero, ~2 ГБ), не обязателен;
+#                            без него работает edge-tts (озвучка Microsoft, нужен интернет);
+#   · nvidia-cublas/cuDNN  → requirements-gpu.txt, только для NVIDIA (на Mac нет смысла);
+#   · vosk/sounddevice/keyboard/pystray → requirements-voice.txt (микрофон и wake word);
+#   · pywebview            → requirements-windows.txt (настольное окно; на mac своё — mac/host.py).
+#
+# Остальное — ровно то, что нужно ядру (FastAPI, БД, Telegram, LLM-клиент,
+# документы, распознавание голосовых в Telegram). Версии — нижние границы,
+# как в requirements.txt: не сужаем, чтобы не ломать обновление у пользователя.
+# Проверено: у всех пакетов ниже есть macOS-колёса (arm64 + x86_64).
+
+# --- HTTP и сервер ---
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9          # формы на сайте (загрузка файлов)
+
+# --- БД ---
+sqlmodel>=0.0.22,<0.0.23        # тянет sqlalchemy 2.x и pydantic 2.x
+
+# --- Telegram и расписание ---
+aiogram>=3.13
+apscheduler>=3.10,<4            # 4.x — Major с другим API планировщика
+
+# --- сеть/крипто ---
+pyyaml>=6                        # config.yaml
+httpx[socks]>=0.27               # LLM (Ollama/облако), socks-прокси из .env
+aiohttp-socks>=0.9               # SOCKS-прокси для Google Calendar (gcal.py) и Telegram
+cryptography>=42                 # AES-256-GCM для облачного бэкапа (services/cloud_backup.py)
+python-dateutil>=2.9
+
+# --- разное ---
+segno>=1.6                       # QR для входа
+num2words>=0.5
+psutil>=5.9                      # ПК-агент и мастер настройки
+Pillow>=10                       # картинки-карточки (services/cards.py) + иконка в строке меню
+pystray>=0.19                    # иконка «J.A.R.V.I.S.» в строке меню (mac/host.py)
+
+# --- документы (импорт банковских выписок) ---
+pdfplumber>=0.11                 # PDF-выписки
+openpyxl>=3.1                    # Excel/CSV-выписки
+
+# --- голос в Telegram (лёгкая часть) ---
+edge-tts>=6.1                    # онлайн-озвучка, чистый Python
+faster-whisper>=1.1              # распознавание; ctranslate2 публикует macOS-колёса arm64 и x86_64
+av>=12                           # декодирование OGG/Opus из Telegram (PyAV, без ffmpeg)
+numpy>=1.26
+
+# --- всё, что не ставится на mac ---
+# torch>=2.2        # ТОЛЬКО Silero: requirements-silero.txt (--index-url .../whl/cpu)
+# sounddevice       # микрофон, требует brew install portaudio: requirements-voice.txt
+# vosk              # слово-активация: requirements-voice.txt
+# keyboard          # горячие клавиши: requirements-voice.txt
+# pywebview         # настольное окно: на mac используется mac/host.py (pystray)

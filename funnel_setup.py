@@ -1,8 +1,10 @@
 """Включает Tailscale Funnel для сайта ассистента и записывает публичный адрес в config.yaml (telegram.webapp_url).
 
-Запускается из funnel.bat. Ничего не ставит и не требует прав администратора.
+Запускается из funnel.bat (Windows) или вручную на macOS/Linux. Ничего не ставит
+и не требует прав администратора.
   python funnel_setup.py          — включить/проверить и записать адрес
   python funnel_setup.py off      — выключить Funnel (сайт снова доступен только внутри Tailscale)
+  python funnel_setup.py --check  — только проверка (ничего не меняется; годится для CI)
 """
 import os
 import re
@@ -24,7 +26,30 @@ try:
 except Exception:
     pass
 
-EXES = ("tailscale", r"C:\Program Files\Tailscale\tailscale.exe")
+# --- где лежит tailscale CLI -------------------------------------------------
+# На macOS `tailscale` лежит внутри .app (/Applications/Tailscale.app/Contents/MacOS/Tailscale)
+# и его НЕТ в PATH, пока не установлен Homebrew-пакет или не прописан руками —
+# раньше скрипт искал только Windows-путь и на Mac отвечал «Tailscale не найден».
+IS_MAC = sys.platform == "darwin"
+IS_WIN = os.name == "nt"
+
+if IS_MAC:
+    EXES = (
+        "tailscale",
+        "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+        "/opt/homebrew/bin/tailscale",
+        "/usr/local/bin/tailscale",
+    )
+    SCRIPT_HINT = "funnel.command  (или в Терминале: .venv/bin/python funnel_setup.py)"
+    START_HINT = "start.command"
+    DOWNLOAD = "https://tailscale.com/download/mac"
+    GUI = "Tailscale в строке меню"
+else:
+    EXES = ("tailscale", r"C:\Program Files\Tailscale\tailscale.exe")
+    SCRIPT_HINT = "funnel.bat"
+    START_HINT = "start.bat"
+    DOWNLOAD = "https://tailscale.com/download/windows"
+    GUI = "Tailscale в трее"
 
 
 def ts(*args, timeout=30):
@@ -44,8 +69,43 @@ def public_url(status_text: str) -> str | None:
     return m.group(1) if m else None
 
 
+def check() -> int:
+    """Проверка без изменений: есть ли tailscale, подключён ли, включён ли Funnel.
+
+    Нужен, чтобы проверить macOS-окружение в CI и не гадать: раньше единственный
+    способ понять, работает ли Funnel на Mac, — включить его по-настоящему.
+    """
+    print()
+    print(f"  Платформа:  {'macOS' if IS_MAC else 'Windows' if IS_WIN else 'Linux'}")
+    print(f"  Порт:       {PORT}")
+    code, out = ts("version", timeout=10)
+    if code is None:
+        print(f"  [!] Tailscale не найден ни по одному из путей: {', '.join(EXES)}")
+        print(f"      Поставить: {DOWNLOAD}  →  войти  →  запустить снова")
+        return 1
+    print(f"  [ок] Tailscale: {out.strip().splitlines()[0] if out.strip() else 'версия неизвестна'}")
+    code, out = ts("status", timeout=15)
+    if code != 0 or "Logged out" in out or "stopped" in out.lower():
+        print(f"  [!] Tailscale не подключён — откройте {GUI} → Log in / Connect")
+        print("      Войти нужно один раз с тем же аккаунтом (Google/Apple), что и на телефоне.")
+        return 1
+    print("  [ок] Tailscale подключён")
+    _, st = ts("funnel", "status", timeout=15)
+    url = public_url(st)
+    if "funnel on" in st.lower() and str(PORT) in st:
+        print(f"  [ок] Funnel уже включён: {url or '(адрес не разобрал)'}")
+    else:
+        print("  Funnel выключен (сайт виден только внутри вашей сети Tailscale).")
+        print(f"      Включить: {SCRIPT_HINT}")
+    print()
+    print("  Ничего не менялось — это была только проверка.")
+    return 0
+
+
 def main() -> int:
     print()
+    if len(sys.argv) > 1 and sys.argv[1] in ("--check", "-c"):
+        return check()
     if len(sys.argv) > 1 and sys.argv[1] == "off":
         code, out = ts("funnel", "reset")
         if code is None:
@@ -58,11 +118,13 @@ def main() -> int:
 
     code, out = ts("version")
     if code is None:
-        print("  Tailscale не установлен. Поставьте с https://tailscale.com/download/windows, войдите — и запустите снова.")
+        print(f"  Tailscale не установлен. Поставьте с {DOWNLOAD}, войдите — и запустите снова.")
+        print(f"  На macOS бинарник лежит в /Applications/Tailscale.app/Contents/MacOS/Tailscale —")
+        print("  скрипт ищет его сам, в PATH добавлять ничего не нужно.")
         return 1
     code, out = ts("status", timeout=15)
     if code != 0 or "Logged out" in out or "stopped" in out.lower():
-        print("  Tailscale установлен, но не подключён. Откройте Tailscale в трее → Log in / Connect, затем снова funnel.bat.")
+        print(f"  Tailscale установлен, но не подключён. Откройте {GUI} → Log in / Connect, затем снова {SCRIPT_HINT}.")
         print("  " + out.strip().splitlines()[0] if out.strip() else "")
         return 1
 
@@ -88,7 +150,7 @@ def main() -> int:
             print("    1) https://login.tailscale.com/admin/dns → Enable HTTPS")
             print("    2) https://login.tailscale.com/admin/acls → в policy должен быть nodeAttrs с \"funnel\"")
             print("       (Tailscale сам предложит ссылку с готовым правкой — просто примите её)")
-            print("  Затем запустите funnel.bat ещё раз.")
+            print(f"  Затем запустите {SCRIPT_HINT} ещё раз.")
             return 1
         _, st = ts("funnel", "status")
         url = public_url(st) or public_url(out)
@@ -105,7 +167,7 @@ def main() -> int:
         if cur != url:
             write_settings({"telegram.webapp_url": url})
             print(f"  Записал в config.yaml: telegram.webapp_url = {url}")
-            print("  ! Перезапустите ассистента (start.bat), чтобы в боте появилась кнопка приложения.")
+            print(f"  ! Перезапустите ассистента ({START_HINT}), чтобы в боте появилась кнопка приложения.")
         else:
             print("  В config.yaml адрес уже такой же.")
     except Exception as e:
@@ -120,7 +182,7 @@ def main() -> int:
     print()
     print("  Кто может открыть этот адрес: любой, кто его знает — но увидит только пустой экран входа.")
     print("  Данные отдаются только после подтверждения Telegram, что это вы (ваш ID из config.yaml).")
-    print("  Выключить публичный доступ: funnel.bat off")
+    print(f"  Выключить публичный доступ: {'funnel.bat off' if IS_WIN else '.venv/bin/python funnel_setup.py off'}")
     return 0
 
 

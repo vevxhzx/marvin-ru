@@ -35,6 +35,84 @@ jobs:
       - run: python -m compileall -q core run.py voice_client.py setup.py
       - run: python -m pytest tests -q
 
+  macos:
+    # Установка «с нуля» на macOS. Владелец Mac не имеет, поэтому единственная
+    # возможность ловить поломки .command/Install-Mac — гонять их на раннере.
+    #
+    # Что здесь НЕ делаем:
+    #   · requirements.txt целиком (там torch — на Intel Mac он не ставится);
+    #     вместо него requirements-mac.txt — ровно то, что ставит Install-Mac.command;
+    #   · тесты голоса/GPU/оконных пакетов (mic/silero/pywebview не в этом наборе);
+    #   · реальный запуск ядра и Telegram (нужен токен — секретов в CI нет).
+    # Задание не «зелёное всегда»: любой шаг падает при ошибке, continue-on-error нет.
+    name: macOS install (scripts, venv, pytest subset)
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: shell syntax (.command и mac/*.sh)
+        run: |
+          set -euo pipefail
+          for f in ./*.command mac/*.sh; do
+            echo "--- bash -n $f"
+            # -n не исполняет скрипт, только проверяет синтаксис
+            bash -n "$f"
+            # macOS по умолчанию — zsh; .command запускает bash, но zsh -n ловит
+            # случайную несовместимость синтаксиса с системной оболочкой.
+            zsh -n "$f" || echo "::warning file=$f::zsh -n не прошёл (скрипт всё равно идёт через /bin/bash)"
+          done
+        shell: bash
+
+      - name: установка по-настоящему (mac/install.sh)
+        run: |
+          set -euo pipefail
+          chmod +x ./*.command mac/*.sh
+          ./mac/install.sh
+        shell: bash
+
+      - name: проверка окружения (--check ничего не меняет)
+        run: |
+          set -euo pipefail
+          ./Install-Mac.command --check
+          ./start.command --check
+          ./update.command --check
+          ./phone.command --check
+          ./autostart.command --check --no-pause
+        shell: bash
+
+      - name: funnel_setup.py --check (ничего не меняет)
+        run: .venv/bin/python funnel_setup.py --check || true
+        shell: bash
+
+      - name: pytest (подмножество, безопасное для mac)
+        run: |
+          set -euo pipefail
+          .venv/bin/python -m pip install -q pytest
+          export ASSISTANT_TEST=1
+          # -k отсекает тесты голоса/микрофона: sounddevice/vosk/keyboard на mac
+          # не ставятся и не нужны ядру. Список файлов вместо «всех» — чтобы
+          # случайно тяжёлый набор не попал сюда по ошибке.
+          .venv/bin/python -m pytest tests -q -p no:cacheprovider \
+            -k "not voice and not silero" \
+            --ignore=tests/test_voice.py \
+            --ignore=tests/e2e
+        shell: bash
+
+      - name: итог (что делать, если упало)
+        if: failure()
+        run: |
+          echo "::error title=macOS install failed::Проверьте шаг выше. Частые причины:"
+          echo "  1) python3 на раннере — какой версии (python3 -V)? Нужна 3.10+."
+          echo "  2) .venv/bin/python нет после mac/install.sh — смотрите его вывод."
+          echo "  3) requirements-mac.txt перестал ставиться: у пакета нет macOS-колёс."
+          echo "  Логи: data/host.log, data/core.log локально на Mac."
+        shell: bash
+
   web:
     # web/site лежит в репозитории, чтобы пользователю не ставить Node. Здесь проверяем, что его не забыли
     # пересобрать после правок web/src (build_web.bat): сборка должна совпасть с закоммиченной.

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Точка входа J.A.R.V.I.S..app → mac/host.py (без окна Терминала).
-set -e
+set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 RES="$HERE/../Resources"
 
@@ -24,13 +24,17 @@ mkdir -p data
 
 PY="$ROOT/.venv/bin/python"
 if [ ! -x "$PY" ]; then
-  if command -v python3 >/dev/null 2>&1; then
+  # Ставим через mac/install.sh (на mac нужен requirements-mac.txt), а не
+  # через setup.py: тот тянет общий requirements.txt и на Intel Mac падает на torch.
+  if [ -f "$ROOT/mac/install.sh" ]; then
+    /bin/bash "$ROOT/mac/install.sh" >>"$ROOT/data/host.log" 2>&1 || true
+  elif command -v python3 >/dev/null 2>&1; then
     python3 "$ROOT/setup.py" >>"$ROOT/data/host.log" 2>&1 || true
   fi
 fi
 PY="$ROOT/.venv/bin/python"
 if [ ! -x "$PY" ]; then
-  osascript -e 'display alert "J.A.R.V.I.S." message "Нужен Python 3.12. Поставьте с python.org или: brew install python@3.12 — и снова Install-Mac.command."' 2>/dev/null || true
+  osascript -e 'display alert "J.A.R.V.I.S." message "Нужен Python 3.10 или новее. Поставьте с python.org или: brew install python@3.12 — и снова Install-Mac.command. Подробности: data/host.log"' 2>/dev/null || true
   exit 1
 fi
 

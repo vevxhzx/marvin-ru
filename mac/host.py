@@ -50,9 +50,14 @@ def _ensure_venv() -> Path:
     if py.exists():
         return py
     _log("нет .venv — ставлю (первый запуск, 2–5 мин)…")
-    # системный python3
-    base = sys.executable
-    r = subprocess.call([base, str(ROOT / "setup.py")])
+    # mac/install.sh, а не setup.py: на mac нужен requirements-mac.txt
+    # (в requirements.txt есть torch, у которого нет колёс под Intel Mac),
+    # и скрипт сам объясняет, что делать, если Python не тот.
+    script = ROOT / "mac" / "install.sh"
+    if script.exists():
+        r = subprocess.call(["/bin/bash", str(script)])
+    else:
+        r = subprocess.call([sys.executable, str(ROOT / "setup.py")])
     if r != 0 or not py.exists():
         _notify("Ассистент", "Установка не вышла. Смотри data/host.log")
         sys.exit(1)
