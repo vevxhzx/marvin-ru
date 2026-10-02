@@ -1,0 +1,44 @@
+# Нормализация переводов строк: скрипты для macOS обязаны быть с LF, иначе на Mac они не запустятся
+* text=auto
+
+*.command text eol=lf
+*.sh text eol=lf
+*.py text eol=lf
+*.js text eol=lf
+*.jsx text eol=lf
+*.mjs text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.css text eol=lf
+*.html text eol=lf
+*.json text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.cfg text eol=lf
+*.toml text eol=lf
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+
+# бинарные - не трогать
+*.db binary
+*.db-wal binary
+*.db-shm binary
+*.sqlite binary
+*.sqlite3 binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.mp3 binary
+*.wav binary
+*.mp4 binary
+*.zip binary
+*.exe binary
