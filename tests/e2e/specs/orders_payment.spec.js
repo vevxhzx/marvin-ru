@@ -3,7 +3,7 @@
 //      (идемпотентный ключ формы), заказ становится «оплачен», долг = 0;
 //   2) удаление дохода в финансах возвращает заказ: статус «сдан», остаток снова > 0,
 //      кнопка «записать оплату» в панели заказа появляется снова.
-import { test, expect, watch, shot, openTab, expectText, expectSheet, closeSheet } from '../helpers/index.js'
+import { test, expect, watch, shot, openTab, expectText, expectSheet, closeSheet, confirmSheet } from '../helpers/index.js'
 
 const IGNORE = [/\/api\/events\/stream/, /favicon/i]
 const uniq = (p) => `${p}-${Date.now().toString(36)}${Math.floor(Math.random() * 1e4)}`
@@ -89,7 +89,6 @@ test.describe('заказы: оплата', () => {
     const diag = watch(page, { ignore: IGNORE })
     page.__e2eProject = testInfo.project
     const TITLE = `Возврат D ${uniq(testInfo.project.name)}`
-    page.on('dialog', (d) => d.accept())   // «Удалить эту операцию?»
     await page.addInitScript(() => { try { localStorage.setItem('orders.howto.v1', 'seen') } catch { /* ignore */ } })
 
     await openTab(page, 'orders', { testInfo })
@@ -115,6 +114,7 @@ test.describe('заказы: оплата', () => {
     const rows = history.locator('.rowi')
     await expect(rows.filter({ hasText: TITLE }), 'доход по заказу в истории').toHaveCount(1, { timeout: 15_000 })
     await rows.filter({ hasText: TITLE }).locator('button[title="Удалить"]').click()
+    await confirmSheet(page)   // подтверждение удаления — шторка приложения (ui.jsx Confirm)
     await expect(rows.filter({ hasText: TITLE })).toHaveCount(0, { timeout: 15_000 })
 
     // заказ снова «сдан» и ждёт оплаты

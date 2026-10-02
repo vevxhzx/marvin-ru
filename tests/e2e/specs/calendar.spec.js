@@ -1,6 +1,6 @@
 // Review D: календарь — создание события через «+ событие» (datetime-local, ровно один раз
 // в дне после reload) и навигация «‹ / сегодня / ›» + переключатель неделя ↔ месяц.
-import { test, expect, watch, shot, openTab, expectText, expectSheet } from '../helpers/index.js'
+import { test, expect, watch, shot, openTab, expectSheet } from '../helpers/index.js'
 
 const IGNORE = [/\/api\/events\/stream/, /favicon/i]
 const uniq = (p) => `${p}-${Date.now().toString(36)}`
@@ -53,7 +53,10 @@ test.describe('календарь', () => {
     page.__e2eProject = testInfo.project
 
     await openTab(page, '/calendar', { testInfo })
-    await expectText(page, 'календарь')
+    // Страница календаря на телефоне: подписи разделов в сайдбаре скрыты, а нижняя панель
+    // из четырёх разделов («сегодня/задачи/финансы/мозг») календаря не содержит. Поэтому
+    // ориентируемся на собственную разметку страницы, а не на название раздела в меню.
+    await expect(page.locator('#p-cal')).toBeVisible()
 
     const title = page.locator('#p-cal .top h1').first()
     const nav = page.locator('#p-cal .top .sg').filter({ hasText: '‹' })

@@ -212,6 +212,20 @@ export async function closeSheet(page) {
   await sheet.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {})
 }
 
+/**
+ * Подтвердить удаление во встроенной шторке (ui.jsx Confirm).
+ *
+ * Раньше удаление спрашивало нативным window.confirm, и тесты ловили его через
+ * page.on('dialog'). Сейчас подтверждение — обычная шторка приложения (единый стиль
+ * на десктопе и телефоне, фокус-ловушка вместо системного диалога), поэтому и
+ * подтверждаем её так же, как любую другую шторку: кнопкой «Да».
+ */
+export async function confirmSheet(page) {
+  const sheet = await expectSheet(page)
+  await sheet.getByRole('button', { name: 'Да', exact: true }).click()
+  await sheet.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {})
+}
+
 // ---------------------------------------------------------------- текст и счётчики
 /** Видимый текст страницы. */
 export async function pageText(page) {

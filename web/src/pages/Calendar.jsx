@@ -409,7 +409,7 @@ export default function Calendar() {
             <span onClick={goToday}>{t('common.today')}</span>
             <span onClick={() => shiftTime(1)}>›</span>
           </div>
-          <button type="button" className="btn" onClick={() => setSheet('new')}>+ {t('graph.one_event')}</button>
+          <button type="button" className="btn" onClick={() => setSheet('new')}>+ {t('cal.event')}</button>
           {shown.length > 1 && (
             <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
               title={t('tk.layout_tip')}>{t('tk.layout')}</button>

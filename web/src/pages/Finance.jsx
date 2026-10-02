@@ -216,10 +216,10 @@ export default function Finance() {
             <button type="button" className={days === 7 ? 'on' : ''} onClick={() => setDays(7)}>{t('mem.d7')}</button>
             <button type="button" className={days === 30 ? 'on' : ''} onClick={() => setDays(30)}>{t('mem.d30')}</button>
             <button type="button" className={days === 90 ? 'on' : ''} onClick={() => setDays(90)}>{t('fin.d90')}</button>
-            <button type="button" className={days === 0 ? 'on' : ''} onClick={() => setDays(0)}>{t('common.all')}</button>
+            <button type="button" className={days === 0 ? 'on' : ''} onClick={() => setDays(0)}>{t('fin.d_all')}</button>
           </div>
           {tab === 'overview' && <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title={t('tk.layout_tip')} aria-label={t('fin.configure_cards')}>{t('tk.layout')}</button>}
-          <button type="button" className="btn g" onClick={exportCSV} title={t('fin.csv_dl')} aria-label={t('fin.csv_dl')}>{t('import.button')}</button>
+          <button type="button" className="btn g" onClick={exportCSV} title={t('fin.csv_dl')} aria-label={t('fin.csv_dl')}>{t('fin.statement')}</button>
           <button
             type="button"
             className="btn"
@@ -348,7 +348,7 @@ export default function Finance() {
                       <span className="text-[26px] font-semibold" style={{ color: budgetLeft < 0 ? 'var(--neg)' : 'inherit' }}>
                         <Num value={Math.abs(budgetLeft)} /> ₽
                       </span>
-                      <span className="text-xs text-[var(--ink3)]">{t(budgetLeft < 0 ? 'fin.over' : 'fin.in_reserve')} {t('fin.of', { m: money(totalBudget) })}</span>
+                      <span className="text-xs text-[var(--ink3)]">{t(budgetLeft < 0 ? 'fin.over' : 'fin.left')} {t('fin.of', { m: money(totalBudget) })}</span>
                     </div>
                     <div className="mt-4 space-y-3">
                       {budgetItems.slice(0, 5).map((b) => (
@@ -418,7 +418,7 @@ export default function Finance() {
               <p className="muted text-[13px]">{t('fin.cards_setup_hint')}</p>
               <div className="mt-3 flex flex-wrap gap-2">
                 {FIN_CARDS.filter((x) => !cardOrder.includes(x)).map((x) => (
-                  <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {FIN_CARD_LABELS[x]}</button>
+                  <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {t(FIN_CARD_LABELS[x])}</button>
                 ))}
                 <button className="btn-ghost btn-sm" onClick={resetCards}>{t('tk.restore_all')}</button>
               </div>
@@ -536,7 +536,7 @@ export default function Finance() {
                         run: () => api.delTx(tx.id),
                       })}
                       className="p-1.5 rounded-full hover:bg-[var(--sf)] text-[var(--neg)]"
-                      title={t('common.delete')}
+                      title={t('common.delete_title')}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -671,7 +671,7 @@ export default function Finance() {
                         run: () => api.delDebt(d.id),
                       })}
                       className="p-1.5 text-[var(--neg)] hover:opacity-80"
-                      title={t('common.delete')}
+                      title={t('common.delete_title')}
                     >
                       <Trash2 size={13} />
                     </button>
@@ -835,7 +835,7 @@ export default function Finance() {
                           run: () => api.delGoal(g.id),
                         })}
                         className="p-1 rounded-full text-[var(--neg)] hover:bg-[var(--sf2)]"
-                        title={t('common.delete')}
+                        title={t('common.delete_title')}
                       >
                         <Trash2 size={13} />
                       </button>

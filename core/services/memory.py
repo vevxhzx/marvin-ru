@@ -27,6 +27,7 @@ from ..brain import llm
 from ..db import Fact, get_setting, log_action, session, set_setting
 
 log = logging.getLogger("jarvis.memory")
+_META_COLS: bool | None = None   # кэш проверки колонок v5
 
 CATEGORIES = ("о человеке", "предпочтение", "здоровье", "работа", "быт", "отношения", "привычка")
 CTX_MAX = 6              # сколько релевантных фактов подтягиваем
@@ -390,20 +391,44 @@ def _dt(v) -> datetime | None:
     return None
 
 
+def _meta_columns() -> bool:
+    """Есть ли в БД колонки v5 (last_seen_at/confirmed_at/archived_at).
+
+    На боевой базе они всегда есть (миграция v5), но демо/тестовые базы и копии,
+    снятые до миграции, могут быть без них. Тогда затухание молча выключается,
+    а не роняет ночную задачу.
+    """
+    global _META_COLS
+    if _META_COLS is None:
+        try:
+            with session() as s:
+                cols = {r[1] for r in s.exec(text("PRAGMA table_info(fact)")).all()}
+            _META_COLS = {"last_seen_at", "confirmed_at", "archived_at"} <= cols
+        except Exception as e:  # pragma: no cover - БД недоступна
+            log.warning("память: не удалось проверить колонки затухания — %s", e)
+            _META_COLS = False
+    return _META_COLS
+
+
 def fact_meta(fact_ids: set[int] | None = None) -> dict[int, dict]:
     """{fact_id: {"last_seen", "confirmed", "archived"}} по колонкам v5. Без аргумента — по всем фактам."""
+    empty = {"last_seen": None, "confirmed": None, "archived": None}
+    if not _meta_columns():
+        return {i: dict(empty) for i in fact_ids} if fact_ids is not None else {}
     with session() as s:
         rows = s.exec(text("SELECT id, last_seen_at, confirmed_at, archived_at FROM fact")).all()
     out = {int(r[0]): {"last_seen": _dt(r[1]), "confirmed": _dt(r[2]), "archived": _dt(r[3])} for r in rows}
     if fact_ids is None:
         return out
-    empty = {"last_seen": None, "confirmed": None, "archived": None}
-    return {i: out.get(i, empty) for i in fact_ids}
+    return {i: out.get(i, dict(empty)) for i in fact_ids}
 
 
 def set_fact_meta(fid: int, last_seen: datetime | None = None, confirmed: datetime | None = None,
                   archived: datetime | None = None, clear_archived: bool = False) -> None:
     """Одна UPDATE по колонкам v5. None в аргументе = не трогать; clear_archived — снять archived_at (восстановление)."""
+    if not _meta_columns():
+        log.warning("память: колонки затухания отсутствуют (миграция v5 не применена) — пропускаю")
+        return
     sets, params = [], {"fid": int(fid)}
     if last_seen is not None:
         sets.append("last_seen_at = :ls"); params["ls"] = last_seen

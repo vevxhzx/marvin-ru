@@ -70,7 +70,13 @@ export function registerSW() {
   else window.addEventListener('load', start, { once: true })
 
   let reloading = false
+  // Страница была под контролем SW ещё до регистрации? Если нет — сейчас будет ПЕРВОЕ
+  // завоевание контроля (clients.claim на activate), и это не обновление: перезагрузка
+  // тут означала бы, что каждому новому посетителю страница перезагружается через
+  // секунду после открытия. Перезагружаемся только когда контролер сменился на новый.
+  const hadController = !!navigator.serviceWorker.controller
   navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (!hadController) return
     if (reloading) return
     reloading = true
     window.location.reload()

@@ -111,7 +111,7 @@ export default function Orders() {
         right={<>
           <Seg value={layout} onChange={setLayout} options={[['list', t('or.layout_list')], ['board', t('or.layout_board')]]} />
           <Seg value={view} onChange={setView} options={VIEWS.map(([v, k]) => [v, t(k)])} />
-          <button type="button" className="btn-icon outlined" aria-label={t('howto.show')} data-tip={t('howto.title')}
+          <button type="button" className="btn-icon outlined" aria-label={t('howto.toggle_aria')} data-tip={t('howto.title')}
             onClick={() => window.dispatchEvent(new CustomEvent('orders:howto', { detail: 'toggle' }))}><HelpCircle size={16} /></button>
           <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
         </>} />
@@ -331,7 +331,9 @@ function Board({ orders, onOpen, onStage }) {
               onDragOver={(e) => { e.preventDefault(); setOver(k) }}
               onDragLeave={() => setOver((x) => (x === k ? null : x))}
               onDrop={(e) => { e.preventDefault(); const d = drag; setOver(null); setDrag(null); if (d) onStage(d, k) }}>
-              <div className="mb-2 overflow-hidden rounded-xl" aria-label={t('or.column_aria', { label: t(label), n: col.length }) + (sum > 0 ? `, ${money(sum)}` : '')}
+              <div className="mb-2 overflow-hidden rounded-xl" aria-label={t('or.column_aria', {
+                label: t(label), n: col.length, sum: sum > 0 ? t('or.column_sum', { m: money(sum) }) : '',
+              })}
                 style={{ background: 'var(--sf2)', boxShadow: 'inset 0 0 0 1px var(--line)', outline: over === k ? '2px solid var(--acc)' : 'none' }}>
                 <div className="h-[3px]" style={{ background: tone === 'pos' ? 'var(--pos)' : tone === 'warn' ? 'var(--warn)' : tone === 'neg' ? 'var(--neg)' : 'var(--acc)' }} aria-hidden />
                 <div className="flex items-center justify-between gap-2 px-3 py-2">
@@ -457,7 +459,7 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
           <div>
             <div className="label mb-1">{t('next_step.title')}</div>
             <div className="flex flex-wrap items-center gap-2">
-              <input className="input !h-8 min-w-[180px] flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder={t('next_step.ph')} aria-label={t('next_step.title')} />
+              <input className="input !h-8 min-w-[180px] flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder={t('next_step.ph')} aria-label={t('next_step.aria')} />
               <input type="date" className="input !h-8 !w-[150px]" value={stepAt} onChange={(e) => setStepAt(e.target.value)} aria-label={t('next_step.date')} />
               <button className="btn-soft btn-sm" disabled={step === (d.next_step || '') && stepAt === (d.next_step_at ? toLocalISO(new Date(d.next_step_at)).slice(0, 10) : '')} onClick={saveStep}>{t('common.save')}</button>
             </div>
@@ -656,7 +658,7 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
         )}
 
         {!f.done && (
-          <Field label={t('stage.aria')} hint={t('or.crm_hint')}>
+          <Field label={t('stage.block')} hint={t('or.crm_hint')}>
             <Pills value={f.stage} onChange={(s) => setF({ ...f, stage: s })} options={NEW_STAGES.map(([k, l]) => [k, t(l)])} />
           </Field>
         )}

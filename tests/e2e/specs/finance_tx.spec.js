@@ -5,7 +5,7 @@
 //   3) exportCSV собирает CSV из ВСЕХ txs, а не из отфильтрованного shownTxs.
 // Скриншоты: tests/e2e/screens/<проект>-finance-*.png
 import fs from 'node:fs'
-import { test, expect, watch, shot, openTab, expectSheet } from '../helpers/index.js'
+import { test, expect, watch, shot, openTab, expectSheet, confirmSheet } from '../helpers/index.js'
 
 const IGNORE = [/\/api\/events\/stream/, /favicon/i]
 const uniq = (p) => `${p}-${Date.now().toString(36)}`
@@ -31,7 +31,6 @@ test.describe('финансы: операции, фильтры, периоды,
     const diag = watch(page, { ignore: IGNORE })
     page.__e2eProject = testInfo.project
     const TITLE = `Трата D ${uniq(testInfo.project.name)}`
-    page.on('dialog', (d) => d.accept())   // «Удалить эту операцию?»
 
     await openTab(page, 'finance', { testInfo })
     await tabsOf(page).getByText('операции', { exact: true }).click()
@@ -54,6 +53,7 @@ test.describe('финансы: операции, фильтры, периоды,
     // удаление — с подтверждением; список возвращается к исходному размеру
     const row = rowsOf(page).filter({ hasText: TITLE })
     await row.locator('button[title="Удалить"]').click()
+    await confirmSheet(page)   // подтверждение удаления — шторка приложения (ui.jsx Confirm)
     await expect(rowsOf(page).filter({ hasText: TITLE })).toHaveCount(0, { timeout: 15_000 })
     await expect(rowsOf(page)).toHaveCount(before)
 
@@ -123,7 +123,6 @@ test.describe('финансы: операции, фильтры, периоды,
     const diag = watch(page, { ignore: IGNORE })
     page.__e2eProject = testInfo.project
     const TITLE = `Выписка D ${uniq(testInfo.project.name)}`
-    page.on('dialog', (d) => d.accept())
 
     await openTab(page, 'finance', { testInfo })
     await tabsOf(page).getByText('операции', { exact: true }).click()

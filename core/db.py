@@ -450,6 +450,9 @@ class Fact(SQLModel, table=True):
     vector: str = ""                                    # эмбеддинг (JSON), для подтягивания по смыслу
     uses: int = 0                                       # сколько раз попадал в контекст
     last_used: Optional[datetime] = None
+    last_seen_at: Optional[datetime] = None      # когда последний раз реально всплывал (затухание веса)
+    confirmed_at: Optional[datetime] = None      # подтверждён хозяином — не гаснет никогда
+    archived_at: Optional[datetime] = None       # устарел и ушёл в архив: из контекста ушёл, но не удалён
     created_at: datetime = Field(default_factory=now, index=True)
     updated_at: datetime = Field(default_factory=now)
 

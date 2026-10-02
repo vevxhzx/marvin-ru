@@ -62,7 +62,19 @@ export default function Settings({ health }) {
   const [small, setSmall] = useState(null)   // результат проверки малой модели
   const [llm, setLlm] = useState(null)       // внешняя модель из .env (если сервер её умеет)
   const [pcBusy, setPcBusy] = useState(false) // идёт запуск/перезапуск voice.bat
+  // Ссылка вида /settings#<секция> открывает нужную секцию — и при прямом заходе, и при
+  // переходе по якорю уже открытой страницы (hashchange). Без последнего повторный
+  // переход на тот же адрес оставлял старую вкладку.
   const [cat, setCat] = useState(() => (location.hash.replace('#', '') || localStorage.getItem('settings.cat') || 'general'))
+  useEffect(() => {
+    const onHash = () => {
+      const id = location.hash.replace('#', '')
+      if (id && CATS.some((c) => c.id === id)) setCat(id)
+    }
+    window.addEventListener('hashchange', onHash)
+    onHash()
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
   const pick = (id) => { setCat(id); localStorage.setItem('settings.cat', id); history.replaceState(null, '', '#' + id); window.scrollTo({ top: 0, behavior: 'smooth' }) }
 
   const load = () => Promise.all([api.settings().then(setData), api.status().then(setStatus),
@@ -219,11 +231,11 @@ export default function Settings({ health }) {
       <Section key="data" title={t('st.data')} hint={t('st.d_data')}>
         <Card className="flex flex-wrap items-center gap-2">
           <button className="btn-ghost" onClick={() => api.backupNow().then((r) => show(r.ok ? `${t('st.copy_colon')} ${r.name || t('common.done')}` : t('st.no_db'))).catch(show.err)}><HardDriveDownload size={15} /> {t('st.backup_now')}</button>
-          <a className="btn-ghost" href="/api/export/transactions.csv"><Download size={15} /> {t('st.f_txs')}</a>
-          <a className="btn-ghost" href="/api/export/events.csv"><Download size={15} /> {t('st.f_cal')}</a>
-          <a className="btn-ghost" href="/api/export/tasks.csv"><Download size={15} /> {t('st.f_tasks')}</a>
-          <a className="btn-ghost" href="/api/export/notes.csv"><Download size={15} /> {t('st.f_notes')}</a>
-          <a className="btn-soft" href="/api/export/all.json"><Download size={15} /> {t('st.f_json')}</a>
+          <a className="btn-ghost" href="/api/export/transactions.csv" download><Download size={15} /> {t('st.f_txs')}</a>
+          <a className="btn-ghost" href="/api/export/events.csv" download><Download size={15} /> {t('st.f_cal')}</a>
+          <a className="btn-ghost" href="/api/export/tasks.csv" download><Download size={15} /> {t('st.f_tasks')}</a>
+          <a className="btn-ghost" href="/api/export/notes.csv" download><Download size={15} /> {t('st.f_notes')}</a>
+          <a className="btn-soft" href="/api/export/all.json" download><Download size={15} /> {t('st.f_json')}</a>
           <button className="btn-soft" onClick={() => api.reindex().then((r) => show(`${t('st.indexed_colon')} ${r.indexed}`)).catch(show.err)}><RefreshCw size={15} /> {t('st.reindex2')}</button>
         </Card>
         <BackupRestore show={show} />

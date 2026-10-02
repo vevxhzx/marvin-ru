@@ -185,7 +185,7 @@ export default function Chat({ open, onClose, seed }) {
             </div>
           </div>
           <div className="flex items-center gap-0.5">
-            {canUndo && <button className="btn-ghost btn-sm" onClick={undo} data-tip={t('chat.undo_tip')}><Undo2 size={13} /> {t('common.undo')}</button>}
+            {canUndo && <button className="btn-ghost btn-sm" onClick={undo} data-tip={t('chat.undo_tip')}><Undo2 size={13} /> {t('chat.undo')}</button>}
             <button className="btn-icon !h-8 !w-8" onClick={onClose} aria-label={t('common.close')}><X size={16} /></button>
           </div>
         </div>

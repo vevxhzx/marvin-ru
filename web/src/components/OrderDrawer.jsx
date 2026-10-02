@@ -95,7 +95,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
       {!d ? <div className="muted text-[13px]">{t('common.loading')}</div> : (
         <div className="space-y-3 text-[13px]">
           {/* 1. стадия заказа — клик меняет, «потерян» спрашивает причину */}
-          <Block title={t('stage.aria')} right={<span className="faint text-[11.5px]">{t('od.stage_hint')}</span>}>
+          <Block title={t('stage.block')} right={<span className="faint text-[11.5px]">{t('od.stage_hint')}</span>}>
             <StageStepper stage={stage} onStage={setStage} revisions={d.revisions} disabled={busy} />
             {lost !== null && (
               <div className="mt-2 flex flex-wrap items-center gap-2">

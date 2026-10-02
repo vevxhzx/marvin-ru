@@ -133,7 +133,8 @@ test.describe('заказы: понятный интерфейс', () => {
     await expectText(page, 'Перетащите карточку сюда', { note: 'пустая колонка' })
     // в шапке колонки — количество и сумма заказов
     await expect(page.getByLabel(/Колонка «в работе»/)).toBeVisible()
-    await expect(page.getByLabel(/Колонка «в работе»: заказов \d+, на [\d\s]+ ₽/)).toHaveCount(1)
+    // пробел перед «₽» неразрывный (lib/i18n.js fmtMoney) — ловим классом, а не литералом
+    await expect(page.getByLabel(/Колонка «в работе»: заказов \d+, на [\d\s]+₽/)).toHaveCount(1)
     await shot(page, 'orders-kanban', { testInfo })
 
     await diag.expectClean('канбан')

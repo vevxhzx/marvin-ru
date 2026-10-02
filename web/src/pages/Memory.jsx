@@ -219,7 +219,7 @@ function FactRow({ f, busy, run, cats }) {
                 <button className="hover:underline" style={{ color: 'var(--neg)' }} disabled={busy} onClick={() => run(() => api.forgetFact(f.id), t('mem.forgotten'))}>{t('mem.forget')}</button>
               </>
             ) : (
-              <button className="text-accent flex items-center gap-1 hover:underline" disabled={busy} onClick={() => run(() => api.restoreFact(f.id), t('mem.restored'))}><RotateCcw size={12} /> {t('common.back')}</button>
+              <button className="text-accent flex items-center gap-1 hover:underline" disabled={busy} onClick={() => run(() => api.restoreFact(f.id), t('mem.restored'))}><RotateCcw size={12} /> {t('mem.restore')}</button>
             )}
             {f.layer !== 'archive' && <Pills className="w-full" value={f.category} onChange={(c) => c !== f.category && run(() => api.updateFact(f.id, { category: c }))} options={(cats || []).map((c) => [c, c])} />}
           </div>

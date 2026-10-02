@@ -46,7 +46,7 @@ export default function ClientNextStep({ cid, onErr, className = '' }) {
       <div className="label mb-1">{t('next_step.title')}</div>
       <div className="flex flex-wrap items-center gap-2">
         <input className="input !h-8 min-w-[160px] flex-1" value={step} onChange={(e) => setStep(e.target.value)}
-          placeholder={t('next_step.ph')} aria-label={t('next_step.title')} />
+          placeholder={t('next_step.ph')} aria-label={t('next_step.aria')} />
         <input type="date" className="input !h-8 !w-[150px]" value={at} onChange={(e) => setAt(e.target.value)} aria-label={t('next_step.date')} />
         <button type="button" className="btn-soft btn-sm" onClick={save} disabled={!dirty || busy} aria-label={t('next_step.save')}>{busy ? t('common.loading') : t('common.save')}</button>
       </div>
