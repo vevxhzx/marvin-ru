@@ -1,6 +1,5 @@
 import { Component, useEffect, useState, createContext, useContext, useCallback, useRef } from 'react'
-import { BrowserRouter, NavLink, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import { Sun, Moon, Monitor, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings as SettingsIcon, Search, PanelLeftClose, PanelLeftOpen, Bell, History, MessageCircle, Briefcase, Square, Play, Users, Clapperboard, Languages, Grid3x3, HelpCircle } from 'lucide-react'
+import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import Settings from './pages/Settings'
 import { notifyFromEvent } from './lib/notify'
 import { chimeFromEvent } from './lib/sound'
@@ -12,40 +11,23 @@ import Mind from './pages/Mind'
 import Memory from './pages/Memory'
 import People from './pages/People'
 import BoardPage from './pages/Board'
-import Orders, { useTimer, mmss } from './pages/Orders'
-import Chat from './components/Chat'
-import Palette from './components/Palette'
-import { useLive, LiveDot, LivePopover, MicButton } from './components/Live'
-import { setName, lower } from './lib/name'
-import { usePrefs, prefs as PREFS, pullRemote, CLIENT_ID, apply } from './lib/prefs'
-import { api, relTime, kb, kbAlt } from './lib/api'
-import { tg, tgBackButton } from './lib/tg'
-import { Toaster, toast, Sheet } from './components/ui'
+import Orders from './pages/Orders'
 import { useI18n, t as T } from './lib/i18n'
+import { api, kb, kbAlt } from './lib/api'
+import { tg, tgBackButton } from './lib/tg'
+import { setName } from './lib/name'
+import { usePrefs, prefs as PREFS, pullRemote, CLIENT_ID, apply } from './lib/prefs'
+import { useLive } from './components/Live'
+import { NAV, NAV_GROUPS, pickTabs, pickMore } from './lib/nav'
+import { toast } from './components/ui'
+import AppShell from './components/AppShell'
 
-/* Навигация по смыслу: рабочее пространство и система.
-   label/title — ключи словаря (lib/i18n.js), подписи живут в t(). */
-export const NAV_GROUPS = [
-  { title: 'nav.g_work', items: [
-    { to: '/', label: 'nav.today', icon: Sparkles, key: '1' },
-    { to: '/tasks', label: 'nav.tasks', icon: CheckSquare, key: '2' },
-    { to: '/calendar', label: 'nav.calendar', icon: CalendarDays, key: '3' },
-    { to: '/finance', label: 'nav.finance', icon: Wallet, key: '4' },
-    { to: '/orders', label: 'nav.orders', icon: Briefcase, key: '5' },
-    { to: '/mind', label: 'nav.mind', icon: Brain, key: '6' },
-    { to: '/board', label: 'nav.board', icon: Clapperboard, key: '0' },
-    { to: '/people', label: 'nav.people', icon: Users, key: '9' },
-  ] },
-  { title: 'nav.g_sys', items: [
-    { to: '/memory', label: 'nav.memory', icon: History, key: '7' },
-    { to: '/settings', label: 'nav.settings', icon: SettingsIcon, key: '8' },
-  ] },
-]
-const NAV = NAV_GROUPS.flatMap((g) => g.items)
-/* Нижняя панель телефона: до 4 разделов из настроек + «Ещё» (все остальные разделы и действия).
-   Ровно пять вкладок — как в обычном приложении, а не «сколько поместилось». */
-const MOBILE_NAV = [NAV[0], NAV[1], NAV[3], NAV[5]]
-const MOBILE_TABS_MAX = 5   // 4 раздела + «Ещё»
+/* Навигация и её оболочка живут в lib/nav.js (один список на сайдбар, палитру и док).
+   Здесь переэкспортируем, потому что настройки и другие страницы берут NAV_GROUPS отсюда.
+   Оболочка (components/AppShell) монтирует ровно один док (components/Dock.jsx) и окна
+   через один хост — components/SheetHost.jsx, тонкую обёртку над шторкой ui.jsx#Sheet. */
+export { NAV_GROUPS }
+export { Logo, LangToggle, assistantState, PageTransition } from './components/AppShell'
 
 /* Реестр горячих клавиш — одна точка правды: сюда смотрит обработчик в Shell и
    справка по клавише «?». Новая комбинация = новая строка в этом массиве:
@@ -64,7 +46,6 @@ export const hotkeyId = (e) => {
   const mod = e.metaKey || e.ctrlKey
   return HOTKEYS.find((h) => h.test(e, mod))?.id || null
 }
-
 
 // тема
 const ThemeCtx = createContext(null)
@@ -153,7 +134,7 @@ const ACT_WORDS = {
 }
 function useInbox() {
   const [items, setItems] = useState(() => { try { return JSON.parse(localStorage.getItem(INBOX_KEY) || '[]') } catch { return [] } })
-  const save = (next) => { setItems(next); localStorage.setItem(INBOX_KEY, JSON.stringify(next.slice(0, 40))) }
+  const save = useCallback((next) => { setItems(next); localStorage.setItem(INBOX_KEY, JSON.stringify(next.slice(0, 40))) }, [])
   const push = useCallback((it) => setItems((cur) => { const next = [{ id: Date.now() + Math.random(), at: new Date().toISOString(), read: false, ...it }, ...cur].slice(0, 40); localStorage.setItem(INBOX_KEY, JSON.stringify(next)); return next }), [])
   const markAll = () => save(items.map((x) => ({ ...x, read: true })))
   const clear = () => save([])
@@ -171,21 +152,6 @@ export function inboxFromEvent(d) {
   return null
 }
 
-/* Переход между страницами: короткий, без блюра */
-function PageTransition({ children, pathKey }) {
-  const [shown, setShown] = useState({ key: pathKey, node: children })
-  const [phase, setPhase] = useState('enter')
-  const first = useRef(true)
-  useEffect(() => {
-    if (first.current) { first.current = false; return }
-    if (pathKey === shown.key) { setShown({ key: pathKey, node: children }); return }
-    setPhase('exit')
-    const t = setTimeout(() => { setShown({ key: pathKey, node: children }); setPhase('enter') }, 130)
-    return () => clearTimeout(t)
-  }, [pathKey, children]) // eslint-disable-line
-  return <div key={shown.key} className={phase === 'exit' ? 'page-exit' : 'page-enter'}>{shown.node}</div>
-}
-
 // координаты клика → CSS-переменные для «волны» на кнопках
 if (typeof window !== 'undefined') {
   window.addEventListener('pointerdown', (e) => {
@@ -197,239 +163,8 @@ if (typeof window !== 'undefined') {
   }, { passive: true })
 }
 
-/* Идущее помодоро — в шапке на всех страницах: осталось, по какому заказу, стоп одной кнопкой */
-function TopTimer() {
-  const { t } = useI18n()
-  const { t: tmr, left, reload } = useTimer()
-  const nav = useNavigate()
-  if (!tmr?.active) return null
-  const brk = tmr.kind === 'break'
-  const label = tmr.order || (brk ? t('unit.break') : t('unit.focus'))
-  return (
-    <div className={`flex items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1 text-[12.5px] md:hidden ${brk ? 'soft-pos' : 'soft-accent'} ${left === 0 ? 'animate-pulse' : ''}`}>
-      <button className="flex items-center gap-1.5" onClick={() => nav('/orders')} data-tip={label}>
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'currentColor' }} />
-        <span className="num font-medium tabular-nums">{mmss(left)}</span>
-        {tmr.order && <span className="hidden max-w-[140px] truncate lg:inline">{tmr.order}</span>}
-      </button>
-      <button className="grid h-6 w-6 place-items-center rounded-full transition hover:bg-[var(--fill)]" aria-label={t('pomo.stop')} data-tip={t('pomo.stop_short')} onClick={() => api.stopTimer().then(reload).catch(() => {})}><Square size={10} /></button>
-    </div>
-  )
-}
-
-/* Мини-помодоро в сайдбаре: кольцо + время + заказ. Нет таймера — кнопка «▶ 25:00» (длина из настроек).
-   Клик по времени — на страницу заказов, стоп — квадрат. В свёрнутой панели — только кольцо. */
-function SideTimer({ min }) {
-  const { t } = useI18n()
-  const { t: tmr, left, reload } = useTimer()
-  const nav = useNavigate()
-  const [busy, setBusy] = useState(false)
-  const active = !!tmr?.active
-  const brk = tmr?.kind === 'break'
-  const total = active ? tmr.planned_min * 60 : 1
-  const pct = active ? Math.min(1, left / total) : 0
-  const R = min ? 11 : 13, C = 2 * Math.PI * R, S = R * 2 + 6
-  const color = brk ? 'var(--pos)' : 'var(--accent)'
-  const label = active ? (tmr.order || (brk ? t('unit.break') : t('unit.focus'))) : t('unit.pomodoro')
-  const run = (fn) => { if (busy) return; setBusy(true); fn().then(reload).catch(() => {}).finally(() => setBusy(false)) }
-  const ring = (
-    <span className="relative grid shrink-0 place-items-center" style={{ width: S, height: S }}>
-      <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} className="-rotate-90">
-        <circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke="var(--line-2)" strokeWidth="2" />
-        {active && <circle cx={S / 2} cy={S / 2} r={R} fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeDasharray={C} strokeDashoffset={C * (1 - pct)} style={{ transition: 'stroke-dashoffset 1s linear' }} />}
-      </svg>
-      {active ? <span className={`absolute h-1.5 w-1.5 rounded-full ${left === 0 ? 'dot-live' : ''}`} style={{ background: color, color }} /> : <Play size={9} className="absolute muted" />}
-    </span>
-  )
-  if (min) {
-    return (
-      <button className="grid h-9 w-9 place-items-center rounded-xl transition hover:bg-[var(--fill)]"
-        data-tip={active ? `${mmss(left)} · ${label} · ${t('pomo.tap_to_stop')}` : t('pomo.planned', { n: tmr?.focus_min || 25 })}
-        data-tip-side="right"
-        onClick={() => run(() => (active ? api.stopTimer() : api.startTimer(null, null)))}>{ring}</button>
-    )
-  }
-  if (!active) {
-    return (
-      <button className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[12.5px] transition hover:bg-[var(--fill)]" onClick={() => run(() => api.startTimer(null, null))} data-tip={t('pomo.start')}>
-        {ring}
-        <span className="num font-medium tabular-nums">{String(tmr?.focus_min || 25).padStart(2, '0')}:00</span>
-        <span className="muted truncate">{tmr?.today_sessions ? t('pomo.today_n', { count: tmr.today_sessions }) : t('unit.pomodoro')}</span>
-      </button>
-    )
-  }
-  return (
-    <div className={`flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-1.5 text-[12.5px] ${brk ? 'soft-pos' : 'soft-accent'}`} style={{ animation: 'rise .25s var(--ease-out)' }}>
-      <button className="flex min-w-0 flex-1 items-center gap-2.5" onClick={() => nav('/orders')} data-tip={label}>
-        {ring}
-        <span className="min-w-0 text-left leading-tight">
-          <span className={`num block font-medium tabular-nums ${left === 0 ? 'animate-pulse' : ''}`}>{mmss(left)}</span>
-          <span className="block truncate text-[11px] opacity-70">{label}</span>
-        </span>
-      </button>
-      <button className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-[var(--fill)]" aria-label={t('pomo.stop')} data-tip={t('pomo.stop_short')} onClick={() => run(() => api.stopTimer())}><Square size={10} /></button>
-    </div>
-  )
-}
-
-/* Состояние ассистента для шапки/сайдбара: готов · думает · офлайн · только правила */
-export function assistantState(live, busy) {
-  if (busy) return { dot: 'var(--accent)', text: T('state.thinking'), pulse: true }
-  if (live.core === 'wait') return { dot: 'var(--ink-3)', text: T('state.connecting') }
-  if (live.core === 'down') return { dot: 'var(--neg)', text: T('state.core_offline') }
-  const pc = live.pc
-  if (pc?.alive && ['listening', 'thinking', 'speaking'].includes(pc.mode)) return { dot: 'var(--pos)', text: { listening: T('state.listening'), thinking: T('state.thinking'), speaking: T('state.speaking') }[pc.mode], pulse: true }
-  if (live.brain) return { dot: 'var(--accent)', text: T('state.ready') }
-  return { dot: 'var(--warn)', text: T('state.ready_no_model') }
-}
-
-function Sidebar({ live, busy, hiddenNav = [] }) {
-  const { t } = useI18n()
-  const st = assistantState(live, busy)
-  const { t: tmr, left } = useTimer()
-  const nav = useNavigate()
-  const [pop, setPop] = useState(false)
-  const pomoTime = tmr?.active ? mmss(left) : '90:00'
-  const pomoLabel = tmr?.active ? (tmr.order || (tmr.kind === 'break' ? t('unit.break') : t('unit.focus'))) : t('unit.pomodoro')
-
-  return (
-    <aside>
-      <div className="logo"><i></i>{lower()}</div>
-      <nav>
-        <div className="nav-group-title">{t('nav.g_plan')}</div>
-        <NavLink to="/" end className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><circle cx="10" cy="10" r="2"/></svg>{t('nav.today')}
-        </NavLink>
-        <NavLink to="/tasks" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="4"/><path d="m7 10 2 2 4-4"/></svg>{t('nav.tasks')}
-        </NavLink>
-        <NavLink to="/calendar" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="13" rx="3"/><path d="M3 8h14M7 2v3M13 2v3"/></svg>{t('nav.calendar')}
-        </NavLink>
-        <NavLink to="/board" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><rect x="3" y="4" width="14" height="12" rx="3"/><path d="M7 4v12M13 4v12"/></svg>{t('nav.board')}
-        </NavLink>
-
-        <div className="nav-group-title">{t('nav.g_money')}</div>
-        <NavLink to="/finance" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><rect x="3" y="5" width="14" height="11" rx="3"/><path d="M13 10.5h1"/></svg>{t('nav.finance')}
-        </NavLink>
-        {!hiddenNav.includes('/orders') && (
-          <NavLink to="/orders" className={({ isActive }) => isActive ? 'on' : ''}>
-            <svg viewBox="0 0 20 20"><rect x="3" y="6" width="14" height="10" rx="3"/><path d="M7.5 6V4.5h5V6"/></svg>{t('nav.orders')}
-          </NavLink>
-        )}
-
-        <div className="nav-group-title">{t('nav.g_people')}</div>
-        <NavLink to="/people" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><circle cx="7.5" cy="7" r="2.5"/><circle cx="14" cy="8" r="2"/><path d="M3 16c0-3 2-4.5 4.5-4.5S12 13 12 16M13 12c2 0 4 1 4 4"/></svg>{t('nav.people')}
-        </NavLink>
-
-        <div className="nav-group-title">{t('nav.g_jarvis')}</div>
-        <NavLink to="/mind" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><path d="M10 3.5a4 4 0 0 0-4 4 3 3 0 0 0-1 5 3.5 3.5 0 0 0 5 3.5zm0 0a4 4 0 0 1 4 4 3 3 0 0 1 1 5 3.5 3.5 0 0 1-5 3.5z"/></svg>{t('nav.mind')}
-        </NavLink>
-        <NavLink to="/memory" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l2.5 2.5"/></svg>{t('nav.memory')}
-        </NavLink>
-        <NavLink to="/settings" className={({ isActive }) => isActive ? 'on' : ''}>
-          <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="3"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M4.7 15.3l1.4-1.4M13.9 6.1l1.4-1.4"/></svg>{t('nav.settings')}
-        </NavLink>
-      </nav>
-      <div className="sb">
-        <div className="pomo select-none" onClick={() => nav('/orders')} style={{ cursor: 'pointer', outline: 'none' }}>
-          <svg className="pomo-gauge" viewBox="0 0 24 24" style={{ outline: 'none', border: 'none', boxShadow: 'none' }}>
-            <defs>
-              <linearGradient id="pomoSideGrad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="var(--acc)" />
-                <stop offset="100%" stopColor="#c04cff" />
-              </linearGradient>
-            </defs>
-            <circle className="bg" cx="12" cy="12" r="10" />
-            <circle className="fg" cx="12" cy="12" r="10" stroke="url(#pomoSideGrad)" />
-          </svg>
-          <span><b className="mono">{pomoTime}</b> {pomoLabel}</span>
-        </div>
-        <div className="relative">
-          <div className="st" onClick={() => setPop((v) => !v)} style={{ cursor: 'pointer' }} title={st.text}>
-            <i className="dot" style={{ background: st.dot }}></i>
-            {st.text}
-          </div>
-          {pop && <LivePopover live={live} onClose={() => setPop(false)} place="absolute bottom-[calc(100%+8px)] left-0" />}
-        </div>
-      </div>
-    </aside>
-  )
-}
-
-export function Logo({ size = 22 }) {
-  return (
-    <span className="grid shrink-0 place-items-center rounded-lg" style={{ width: size + 6, height: size + 6, background: 'var(--ink)', color: 'var(--bg)' }}>
-      <svg width={size - 6} height={size - 6} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="butt"><path d="M12 3v18M3 12h18M6 6l12 12M18 6L6 18" /></svg>
-    </span>
-  )
-}
-
-function InboxPanel({ inbox, onClose }) {
-  const { t } = useI18n()
-  const ref = useRef(null)
-  useEffect(() => {
-    const h = (e) => { if (!ref.current?.contains(e.target)) onClose() }
-    const k = (e) => e.key === 'Escape' && onClose()
-    setTimeout(() => { document.addEventListener('mousedown', h); document.addEventListener('keydown', k) }, 0)
-    return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
-  }, [onClose])
-  useEffect(() => { const t = setTimeout(inbox.markAll, 1200); return () => clearTimeout(t) }, []) // eslint-disable-line
-  return (
-    <div ref={ref} className="elevated absolute right-0 top-[44px] z-[75] w-[340px] max-w-[calc(100vw-24px)] overflow-hidden !p-0" style={{ animation: 'rise .22s var(--ease-out)' }}>
-      <div className="flex items-center justify-between border-b hair px-4 py-2.5">
-        <div className="text-[13px] font-medium">{t('inbox.title')}</div>
-        {inbox.items.length > 0 && <button className="faint text-[12px] hover:text-accent" onClick={inbox.clear}>{t('inbox.clear')}</button>}
-      </div>
-      <div className="scroll-thin max-h-[calc(60vh/var(--ui-zoom))] overflow-y-auto">
-        {inbox.items.length === 0 ? (
-          <div className="px-4 py-8 text-center">
-            <div className="text-[14px] font-medium">{t('inbox.quiet')}</div>
-            <div className="muted mt-1 text-[12.5px]">{t('inbox.quiet_hint', { name: lower() })}</div>
-          </div>
-        ) : inbox.items.map((it) => (
-          <div key={it.id} className="flex items-start gap-3 border-b hair px-4 py-3 last:border-0">
-            <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${it.read ? '' : 'dot-live'}`} style={{ background: it.read ? 'var(--line-2)' : 'var(--accent)', color: 'var(--accent)' }} />
-            <div className="min-w-0 flex-1">
-              <div className="text-[13.5px] leading-snug">{it.title}</div>
-              <div className="faint mt-0.5 text-[11.5px]">{[it.sub, relTime(it.at)].filter(Boolean).join(' · ')}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
-  )
-}
-
-/* Переключатель языка RU/EN в шапке — компактный, как кнопка «цвет».
-   Состояние общее с настройками (см. Settings.jsx): оба берут setLang() из lib/i18n. */
-export function LangToggle({ className = '' }) {
-  const { lang, setLang } = useI18n()
-  const pick = (l) => { if (l !== lang) setLang(l) }
-  return (
-    <div className={`lang-toggle ${className}`} role="group" aria-label={T('lang.aria')}>
-      {['ru', 'en'].map((l) => (
-        <button
-          key={l}
-          type="button"
-          className={l === lang ? 'on' : ''}
-          aria-pressed={l === lang}
-          lang={l}
-          title={T(`lang.${l}_title`)}
-          onClick={() => pick(l)}
-        >
-          {l.toUpperCase()}
-        </button>
-      ))}
-    </div>
-  )
-}
-
+/* Оболочка: логика приложения (роуты, SSE, горячие клавиши, тема, чат).
+   Раскладка и движение — в components/AppShell. */
 function Shell({ inbox }) {
   const { t } = useI18n()
   const [mode, setMode] = useTheme()
@@ -438,8 +173,7 @@ function Shell({ inbox }) {
   const [busy, setBusy] = useState(false)
   const loc = useLocation()
   const nav = useNavigate()
-  const [min, setMinState] = useState(() => localStorage.getItem('sidebar') === 'min')
-  const setMin = (v) => { setMinState(v); localStorage.setItem('sidebar', v ? 'min' : 'full') }
+  const { bump } = useRefresh()
 
   useEffect(() => {
     const load = () => api.health().then((h) => { setHealth(h); if (h?.name) setName(h.name) }).catch(() => setHealth({ ok: false }))
@@ -452,7 +186,6 @@ function Shell({ inbox }) {
     return tgBackButton(loc.pathname !== '/', () => nav('/'))
   }, [loc.pathname, nav])
   const [palOpen, setPalOpen] = useState(false)
-  const [livePop, setLivePop] = useState(false)
   const [inboxOpen, setInboxOpen] = useState(false)
   const live = useLive(health)
   // Горячие клавиши идут через реестр HOTKEYS (выше): обработчик только решает, что делать
@@ -507,8 +240,6 @@ function Shell({ inbox }) {
     setTimeout(() => document.documentElement.classList.remove('theme-anim'), 600)
     setMode(mode === 'auto' ? 'light' : mode === 'light' ? 'dark' : 'auto')
   }
-  const ThemeIcon = mode === 'light' ? Sun : mode === 'dark' ? Moon : Monitor
-  const st = assistantState(live, busy)
   const [prefs] = usePrefs()
   const [address, setAddress] = useState('')
   useEffect(() => {
@@ -518,7 +249,7 @@ function Shell({ inbox }) {
     window.addEventListener('assistant:event', h)
     return () => window.removeEventListener('assistant:event', h)
   }, [])
-  // режим фрилансера: выключен — «заказы» уходят из меню/палитры/нижней панели (страница остаётся доступна по адресу)
+  // режим фрилансера: выключен — «заказы» уходят из меню/палитры/дока (страница остаётся доступна по адресу)
   const [freelance, setFreelance] = useState(() => localStorage.getItem('freelance.on') !== '0')
   useEffect(() => {
     const apply = (r) => { setFreelance(!!r.enabled); localStorage.setItem('freelance.on', r.enabled ? '1' : '0') }
@@ -527,137 +258,70 @@ function Shell({ inbox }) {
     window.addEventListener('freelance:changed', h); return () => window.removeEventListener('freelance:changed', h)
   }, [])
   const hiddenNav = freelance ? prefs.hiddenNav : [...prefs.hiddenNav, '/orders']
-  const [moreOpen, setMoreOpen] = useState(false)
   // нижние вкладки: до 4 разделов из настроек + «Ещё» с остальными
-  const mobileNav = (prefs.tabbar || []).filter((to) => freelance || to !== '/orders')
-    .map((to) => NAV.find((n) => n.to === to)).filter(Boolean)
-    .slice(0, MOBILE_TABS_MAX - 1)
-  const tabs = mobileNav.length ? mobileNav : MOBILE_NAV.filter((n) => freelance || n.to !== '/orders')
-  // «Ещё»: всё, чего нет в нижних вкладках, плюс действия, которые на телефоне спрятаны в меню
-  const moreNav = NAV.filter((n) => !tabs.some((t) => t.to === n.to) && (freelance || n.to !== '/orders'))
+  const tabs = pickTabs(prefs.tabbar, freelance)
+  const more = pickMore(tabs, freelance)
+
+  /* Потянуть-обновить: перечитываем состояние ядра и будим страницы */
+  const onRefresh = useCallback(async () => {
+    bump()
+    try { const h = await api.health(); setHealth(h); if (h?.name) setName(h.name) } catch { /* офлайн — тихо */ }
+  }, [bump])
 
   if (denied) return <Gate denied={denied} />
 
   return (
-    <>
-      <div className="aur"><i></i><i></i><i></i></div>
-      <div className="app">
-        <Sidebar live={live} busy={busy} hiddenNav={hiddenNav} />
-
-        <main>
-          <div className="gt r">
-            <TopTimer />
-            <div className="search" onClick={() => setPalOpen(true)} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
-              aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setPalOpen(true) } }}>
-              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m14 14 3.5 3.5"/></svg>
-              {t('common.search')}<span className="kbd mono">{kb('K')}</span>
-            </div>
-            <LangToggle />
-            <div className="ib" onClick={() => setInboxOpen((v) => !v)} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
-              aria-label={t('inbox.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setInboxOpen((v) => !v) } }}>
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 1.5h-13zM8.5 18h3"/></svg>
-              {inbox.unread > 0 && <u></u>}
-            </div>
-            <div className="av" onClick={() => setChatOpen(true)} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
-              aria-label={t('chat.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setChatOpen(true) } }}>
-              {address ? address.slice(0, 1).toLowerCase() : t('common.you_initial')}
-            </div>
-          </div>
-
-          <div className="relative">
-            {inboxOpen && <InboxPanel inbox={inbox} onClose={() => setInboxOpen(false)} />}
-          </div>
-
-          {health && !health.ok && (
-            <div className="mb-6 animate-rise">
-              <div className="soft-neg flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-2.5 text-[13px]">
-                <span>{t('shell.core_down')}</span>
-                <button className="btn-ghost btn-sm" onClick={() => api.health().then(setHealth).catch(() => {})}>{t('common.retry')}</button>
-              </div>
-            </div>
-          )}
-
-          <PageGuard pathKey={loc.pathname}>
-            <Routes location={loc}>
-              <Route path="/" element={<Today openChat={() => setChatOpen(true)} address={address} />} />
-              <Route path="/finance" element={<Finance />} />
-              <Route path="/calendar" element={<Calendar />} />
-              <Route path="/tasks" element={<Tasks />} />
-              <Route path="/orders" element={<Orders />} />
-              <Route path="/mind" element={<Mind />} />
-              <Route path="/board" element={<BoardPage />} />
-              <Route path="/board/:id" element={<BoardPage />} />
-              <Route path="/people" element={<People />} />
-              <Route path="/memory" element={<Memory />} />
-              <Route path="/settings" element={<Settings health={health} />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </PageGuard>
-        </main>
-
-        {/* Нижняя навигация телефона: 4 раздела + «Ещё». На десктопе её нет — там боковая панель. */}
-        <nav className={`tabbar ${prefs.compactNav ? 'compact' : ''}`} aria-label={t('nav.mobile_menu')}>
-          <div>
-            {tabs.map(({ to, label, icon: I }) => (
-              <NavLink key={to} to={to} end={to === '/'}>
-                <I size={21} strokeWidth={2} aria-hidden="true" />
-                <span>{t(label)}</span>
-              </NavLink>
-            ))}
-            <button type="button" className={`tab-more ${moreOpen ? 'on' : ''}`} onClick={() => setMoreOpen(true)}
-              aria-label={t('nav.more')} aria-haspopup="dialog" aria-expanded={moreOpen}>
-              <Grid3x3 size={21} strokeWidth={2} aria-hidden="true" />
-              <span>{t('nav.more')}</span>
-            </button>
-          </div>
-        </nav>
-
-        {/* «Ещё»: остальные разделы + то, что на телефоне спрятано в меню (тема, справка, чат) */}
-        <Sheet open={moreOpen} onClose={() => setMoreOpen(false)} title={t('nav.more_title')} sub={t('nav.more_sub')}>
-          <div className="space-y-2">
-            {moreNav.map(({ to, label, icon: I }) => (
-              <NavLink key={to} to={to} className="more-row" onClick={() => setMoreOpen(false)}>
-                <span className="more-ic"><I size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-                {t(label)}
-              </NavLink>
-            ))}
-            <div className="rule !my-3" />
-            <button type="button" className="more-row" onClick={() => { setMoreOpen(false); setChatOpen(true) }}>
-              <span className="more-ic"><MessageCircle size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-              {t('more.chat')}
-            </button>
-            <button type="button" className="more-row" onClick={() => { setMoreOpen(false); cycle() }}>
-              <span className="more-ic">{mode === 'light' ? <Sun size={17} /> : mode === 'dark' ? <Moon size={17} /> : <Monitor size={17} />}</span>
-              {t('st.theme')}
-            </button>
-            <button type="button" className="more-row" onClick={() => { setMoreOpen(false); setHelpOpen(true) }}>
-              <span className="more-ic"><HelpCircle size={17} strokeWidth={1.8} aria-hidden="true" /></span>
-              {t('more.keys')}
-            </button>
-          </div>
-        </Sheet>
-
-        <Chat open={chatOpen} onClose={() => setChatOpen(false)} seed={chatSeed} />
-        <Palette open={palOpen} onClose={() => setPalOpen(false)} openChat={() => setChatOpen(true)} setTheme={setMode} />
-        {/* Справка по горячим клавишам — список собирается из того же реестра HOTKEYS */}
-        <Sheet open={helpOpen} onClose={() => setHelpOpen(false)} title={t('hot.title')} sub={t('hot.sub')}>
-          <div className="space-y-1.5">
-            {HOTKEYS.map((hk) => (
-              <div key={hk.id} className="flex items-center justify-between gap-4 rounded-xl px-3.5 py-3" style={{ background: 'var(--surface-2)' }}>
-                <span className="text-[13.5px]">{t(hk.label)}</span>
-                <span className="flex shrink-0 gap-1.5">
-                  {hk.combo.map((c) => <span key={c} className="kbd mono">{c}</span>)}
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="faint mt-4 text-[12.5px]">{t('hot.footer')}</div>
-        </Sheet>
-        <Toaster />
-      </div>
-    </>
+    <AppShell
+      live={live}
+      busy={busy}
+      health={health}
+      inbox={inbox}
+      inboxOpen={inboxOpen}
+      onInbox={() => setInboxOpen((v) => !v)}
+      pathKey={loc.pathname}
+      address={address}
+      onSearch={() => setPalOpen(true)}
+      chatOpen={chatOpen}
+      chatSeed={chatSeed}
+      onChat={() => setChatOpen(true)}
+      onChatClose={() => setChatOpen(false)}
+      palOpen={palOpen}
+      onPalClose={() => setPalOpen(false)}
+      onPalChat={() => { setPalOpen(false); setChatOpen(true) }}
+      setTheme={setMode}
+      mode={mode}
+      onTheme={cycle}
+      helpOpen={helpOpen}
+      onHelp={() => setHelpOpen(true)}
+      onHelpClose={() => setHelpOpen(false)}
+      hotkeys={HOTKEYS}
+      tabs={tabs}
+      more={more}
+      compact={prefs.compactNav}
+      hiddenNav={hiddenNav}
+      onRefresh={onRefresh}
+    >
+      <PageGuard pathKey={loc.pathname}>
+        <Routes location={loc}>
+          <Route path="/" element={<Today openChat={() => setChatOpen(true)} address={address} />} />
+          <Route path="/finance" element={<Finance />} />
+          <Route path="/calendar" element={<Calendar />} />
+          <Route path="/tasks" element={<Tasks />} />
+          <Route path="/orders" element={<Orders />} />
+          <Route path="/mind" element={<Mind />} />
+          <Route path="/board" element={<BoardPage />} />
+          <Route path="/board/:id" element={<BoardPage />} />
+          <Route path="/people" element={<People />} />
+          <Route path="/memory" element={<Memory />} />
+          <Route path="/settings" element={<Settings health={health} />} />
+          <Route path="*" element={<NotFound />} />
+        </Routes>
+      </PageGuard>
+    </AppShell>
   )
 }
+
+/* Живое соединение с ядром: useLive держит SSE-подобный опрос и пульс ПК-клиента */
 
 function Gate({ denied }) {
   const { t } = useI18n()
