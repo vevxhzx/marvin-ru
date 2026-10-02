@@ -2,20 +2,83 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
+    <!-- viewport-fit=cover — safe-area работает только с ним; maximum-scale НЕ ставим: pinch-zoom должен остаться -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <!-- один theme-color: значения #ecece9 / #050507 проставляет App.jsx (useThemeState) под светлую/тёмную тему -->
-    <meta name="theme-color" content="#ecece9" />
+    <!-- color-scheme: браузер красит свои поверхности (скроллбары, подмену формы) в тему, а не в белый -->
+    <meta name="color-scheme" content="light dark" />
+    <!-- Два theme-color: до первого рендера берётся системная тема, потом App.jsx (useThemeState)
+         оставляет только первый и ставит своё значение под выбранную тему. -->
+    <meta name="theme-color" content="#0f1530" media="(prefers-color-scheme: dark)" />
+    <meta name="theme-color" content="#e9ecf3" media="(prefers-color-scheme: light)" />
+
+    <!-- iOS: standalone + полупрозрачная строка состояния (контент уходит под чёлку, дальше считает safe-area) -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Ассистент" />
-    <link rel="manifest" href="/manifest.json" />
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%230e0e0e'/><path d='M16 7v18M7 16h18M9.6 9.6l12.8 12.8M22.4 9.6L9.6 22.4' stroke='white' stroke-width='2.6' stroke-linecap='butt'/></svg>" />
-    <title>Ассистент</title>
-    <script type="module" crossorigin src="/assets/index-4FUGjSj_.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-W7ETEvZn.css">
+    <meta name="apple-mobile-web-app-title" content="Marvin" />
+    <meta name="application-name" content="Marvin" />
+
+    <!-- PWA-манифест: статикой из public/ (собирается в web/site и отдаётся бэкендом как есть) -->
+    <link rel="manifest" href="/manifest.webmanifest" />
+
+    <!-- Иконки. apple-touch-icon обязан быть 180x180 и без прозрачности — иначе iOS рисует чёрные углы.
+         Шрифты грузим заранее: иначе первый кадр после старта — системный, потом «прыжок» на Onest.
+         crossorigin обязателен: @font-face всегда ходит в CORS-режиме, иначе preload не совпадёт. -->
+    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preload" href="/fonts/Onest-cyrillic.woff2" as="font" type="font/woff2" crossorigin />
+    <link rel="preload" href="/fonts/Onest-latin.woff2" as="font" type="font/woff2" crossorigin />
+
+    <title>Marvin</title>
+
+    <!-- Критический стиль: рисует фон приложения ДО загрузки бандла, поэтому запуска не бывает белой вспышки.
+         Значения повторяют --bg из src/index.css (светлая #e9ecf3, тёмная #0f1530). -->
+    <style>
+      html { background: #e9ecf3; color-scheme: light dark; }
+      @media (prefers-color-scheme: dark) { html { background: #0f1530; } }
+
+      /* Стартовый экран: та же фоновая ступень, что и приложение, плюс знак. Убирается из main.jsx
+         сразу после первого рендера — на всё время, пока грузится бандл, видно оболочку, а не белый лист. */
+      #boot {
+        position: fixed; inset: 0; z-index: 9999;
+        display: grid; place-items: center; align-content: center; gap: 18px;
+        padding-top: env(safe-area-inset-top, 0px);
+        background: #e9ecf3; color: #101114;
+        transition: opacity .22s ease-out;
+      }
+      @media (prefers-color-scheme: dark) { #boot { background: #0f1530; color: #f5f5f7; } }
+      #boot svg { width: 68px; height: 68px; animation: boot-breathe 2.4s ease-in-out infinite; }
+      #boot .boot-mark { stroke: currentColor; }
+      #boot .boot-bar {
+        width: 96px; height: 3px; border-radius: 99px; overflow: hidden;
+        background: currentColor; opacity: .14;
+      }
+      #boot .boot-bar i { display: block; width: 40%; height: 100%; border-radius: inherit; background: currentColor; opacity: .55; animation: boot-slide 1.3s ease-in-out infinite; }
+      #boot.is-out { opacity: 0; pointer-events: none; }
+      #boot-noscript { font: 500 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif; opacity: .7; }
+      @keyframes boot-breathe { 0%, 100% { transform: scale(1); opacity: .75 } 50% { transform: scale(1.06); opacity: 1 } }
+      @keyframes boot-slide { 0% { transform: translateX(-100%) } 100% { transform: translateX(250%) } }
+      @media (prefers-reduced-motion: reduce) {
+        #boot svg, #boot .boot-bar i { animation: none }
+        #boot .boot-bar i { width: 100%; opacity: .35 }
+        #boot { transition: none }
+        #boot.is-out { opacity: 0 }
+      }
+    </style>
+    <script type="module" crossorigin src="/assets/index-BjKMBt0m.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-COtFHEhU.css">
   </head>
   <body>
+    <!-- Стартовый экран живёт вне #root, чтобы пережить первый рендер React -->
+    <div id="boot">
+      <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+        <path class="boot-mark" d="M16 7v18M7 16h18M9.6 9.6l12.8 12.8M22.4 9.6L9.6 22.4"
+              stroke="currentColor" stroke-width="2.6" stroke-linecap="butt" />
+      </svg>
+      <div class="boot-bar" aria-hidden="true"><i></i></div>
+      <noscript><span id="boot-noscript">Для работы Marvin нужен включённый JavaScript.</span></noscript>
+    </div>
     <div id="root"></div>
   </body>
 </html>
