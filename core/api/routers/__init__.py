@@ -60,6 +60,8 @@ def register(app) -> None:
     `/api/diagnose`, `/api/ui-prefs`, `/api/edition`, `/api/client/info`,
     `/api/llm`, `/api/settings`, `/api/status*`, `/api/phone*`, `/api/runs*`,
     `/api/tg/*`, `/api/game`, `/api/google/*`, `/api/backup*`).
+    Позже добавлен домен `learn` (7 роутов: `/api/english/*` — блок обучения
+    английскому в настройках). Он ставится ПЕРЕД `system`, чтобы тот остался последним.
     Оба SSE (`/api/events/stream`, `/api/chat/stream`) и статика/SPA остаются
     в `core/api/app.py` — см. докстринг модуля.
     Порядок вызовов = порядок модулей из `reviews/P7_refactor.md` §2.2 —
@@ -67,7 +69,7 @@ def register(app) -> None:
 
     Вызывается из `core/api/app.py` ДО регистрации статики и SPA-catch-all.
     """
-    from . import boards, finance, mind, orders, pc, people, system, tasks
+    from . import boards, chat, finance, learn, mind, orders, pc, people, system, tasks
 
     finance.register(app)
     orders.register(app)
@@ -76,4 +78,6 @@ def register(app) -> None:
     tasks.register(app)
     mind.register(app)
     pc.register(app)
+    chat.register(app)     # «да/нет» по предложенному факту + suggest_fact в ответы /api/chat(+/stream), см. chat.py
+    learn.register(app)    # обучение английскому: /api/english/* (абзац дня, прогресс, свои тексты)
     system.register(app)  # ← ПОСЛЕДНИМ: статика/SPA в app.py регистрируются ещё позже
