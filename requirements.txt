@@ -1,21 +1,43 @@
+# Ядро. Версии — нижние границы, проверенные на .venv (Python 3.14).
+# Голос/gpu/оконные зависимости — отдельными файлами (requirements-voice/-gpu/-silero/-windows),
+# чтобы обычная установка не тянула ~1 ГБ.
+
+# --- HTTP и сервер ---
 fastapi>=0.115
 uvicorn[standard]>=0.30
-sqlmodel>=0.0.22,<0.0.23
+python-multipart>=0.0.9          # формы на сайте (загрузка файлов)
+
+# --- БД ---
+# sqlmodel держим на ветке 0.0.x: на 0.1+ меняется поведение Field/relationship, а мы на этом
+# API строим все модели. Шире не расширяем осознанно, сузь не ставим — апдейты 0.0.22 безопасны.
+sqlmodel>=0.0.22,<0.0.23        # тянет sqlalchemy 2.x и pydantic 2.x
+
+# --- Telegram и расписание ---
 aiogram>=3.13
-apscheduler>=3.10,<4
-pyyaml>=6
-httpx[socks]>=0.27
+apscheduler>=3.10,<4            # 4.x — Major с другим API планировщика
+
+# --- сеть/крипто ---
+pyyaml>=6                        # config.yaml
+httpx[socks]>=0.27               # LLM (Ollama/облако), socks-прокси из .env
+aiohttp-socks>=0.9               # SOCKS-прокси для Google Calendar (gcal.py) и Telegram
+cryptography>=42                 # AES-256-GCM для облачного бэкапа (services/cloud_backup.py).
+                                 # Раньше приезжал случайно транзитивно через pdfminer.six —
+                                 # без него облачный бэкап не работал бы на «чистом» pip.
 python-dateutil>=2.9
-aiohttp-socks>=0.9
-segno>=1.6
-faster-whisper>=1.1
-edge-tts>=6.1
+
+# --- разное ---
+segno>=1.6                       # QR для входа
 num2words>=0.5
-av>=12
+psutil>=5.9                      # ПК-агент и мастер настройки
+Pillow>=10                       # картинки-карточки (services/cards.py)
+
+# --- документы (импорт банковских выписок) ---
+pdfplumber>=0.11                 # PDF-выписки (в тянет cryptography — см. выше)
+openpyxl>=3.1                    # Excel/CSV-выписки
+
+# --- голос (основное; тяжёлые части вынесены) ---
+edge-tts>=6.1                    # онлайн-озвучка
+faster-whisper>=1.1              # распознавание; тяжёлые ctranslate2/nvidia-* — в -voice/-gpu
+av>=12                           # декодирование OGG/Opus из Telegram (PyAV, без ffmpeg)
 numpy>=1.26
-torch>=2.2
-python-multipart>=0.0.9
-psutil>=5.9
-Pillow>=10
-pdfplumber>=0.11
-openpyxl>=3.1
+torch>=2.2                       # только для Silero; полный набор — requirements-silero.txt

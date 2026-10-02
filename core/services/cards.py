@@ -415,8 +415,9 @@ def evening_text(data: dict | None = None, first: str | None = None) -> str:
         if sl:
             out.append("")
             out.append(sl)
-    except Exception:  # pragma: no cover
-        pass
+    except Exception as e:  # экранное время — необязательная строка карточки
+        # раньше здесь был `except Exception: pass` — молча пропадала строка без следа
+        log.debug("строка экранного времени не добавлена: %s", e)
 
     out.append("")
     if d["tomorrow"]:

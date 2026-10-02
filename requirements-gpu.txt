@@ -1,3 +1,4 @@
-# Распознавание речи на видеокарте NVIDIA (faster-whisper / ctranslate2): CUDA 12 + cuDNN 9 pip-пакетами, ~1 ГБ.
+# Ускорение на видеокарте NVIDIA (faster-whisper / ctranslate2): CUDA 12 + cuDNN 9 pip-вариант, ~1 ГБ.
+# Ставится вручную; на машинах без NVIDIA не нужен и в requirements.txt не входит.
 nvidia-cublas-cu12
 nvidia-cudnn-cu12>=9

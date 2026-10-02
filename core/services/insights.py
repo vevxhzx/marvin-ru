@@ -9,10 +9,11 @@ import re
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 
+from sqlalchemy import or_
 from sqlmodel import select
 
 from ..config import TZ
-from ..db import Memory, Note, Task, Transaction, get_setting, session, set_setting
+from ..db import Memory, Note, Task, Transaction, cached, get_setting, session, set_setting
 from . import calendar, finance
 from .finance import money
 from .plural import days as _days_word
@@ -72,6 +73,24 @@ def _clone_sched(sched: dict) -> dict:
     return defaultdict(list, {k: list(v) for k, v in sched.items()})
 
 
+def _spend_rows(days: int = 30) -> list[tuple[datetime, float]]:
+    """Переменные траты за окно: (дата, сумма). Без автоплатежей и платежей по долгам.
+
+    Фильтры уехали в SQL: раньше тянулись ВСЕ колонки ВСЕХ операций за 30 дней (до 100 тысяч
+    строк), чтобы в Python отбросить лишние. Дата берётся по datetime.now(), как раньше в
+    finance.list_transactions, — иначе на сервере в другом часовом поясе окно поехало бы.
+    """
+    since = datetime.now() - timedelta(days=days)
+    with session() as s:
+        rows = s.exec(
+            select(Transaction.date, Transaction.amount)
+            .where(Transaction.date >= since, Transaction.kind == "expense",
+                   or_(Transaction.category.is_(None), Transaction.category != "Долги"),
+                   or_(Transaction.note.is_(None), Transaction.note.notlike("%(авто)%")))
+            .order_by(Transaction.date.desc()).limit(100_000)).all()
+    return [(d, float(a)) for d, a in rows]
+
+
 def cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) -> dict:
     """Баланс по дням на N дней вперёд.
 
@@ -80,20 +99,32 @@ def cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) -> 
     ``pessimistic`` (те же оплаты сдвинуты на ``pessimistic_delay_days``, по умолчанию
     ``PESSIMISTIC_DELAY_DAYS``). Верхнеуровневые поля (points/low/low_date/ok/…) — это
     реалистичный сценарий, как и раньше (обратная совместимость).
+
+    Результат кэшируется на несколько секунд (core.db.cached): прогноз считает десятки
+    запросов, а страница зовёт его и сама, и через cash_forecast_text(). Любая запись в базу
+    кэш сразу сбрасывает — цифры не устаревают.
     """
+    return cached(f"forecast:{days}:{pessimistic_delay_days}",
+                  lambda: _cash_forecast(days, pessimistic_delay_days))
+
+
+def _cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) -> dict:
     now = now_tz()
     balance = finance.total_balance()
     rec = finance.list_recurring()
     # средние переменные траты в день за 30 дней (без авто и долгов)
-    txs = [t for t in finance.list_transactions(30, 100_000) if t.kind == "expense" and "(авто)" not in (t.note or "") and t.category != "Долги"]
-    first = min((t.date for t in txs), default=now - timedelta(days=30))
+    txs = _spend_rows(30)
+    first = min((d for d, _ in txs), default=now - timedelta(days=30))
     span = max(7, (now - first).days) if txs else 30
-    per_day = sum(t.amount for t in txs) / span if txs else 0.0
-    # события регулярных платежей/доходов
+    per_day = sum(a for _, a in txs) / span if txs else 0.0
+    # события регулярных платежей/доходов: количество повторов считаем от горизонта, а не
+    # константой — недельная подписка за 90 дней встречается ~13 раз, а не 6 (P2 ревью B).
+    # 7 дней — минимальный период (weekly), дальше цикл обрывается по горизонту.
+    max_repeats = max(6, days // 7 + 2)
     sched_base: dict[date, list[tuple[str, float]]] = defaultdict(list)
     for r in rec:
         d = r.next_date
-        for _ in range(6):
+        for _ in range(max_repeats):
             if d.date() > (now + timedelta(days=days)).date():
                 break
             sched_base[d.date()].append((r.title, r.amount if r.kind == "income" else -r.amount))
@@ -170,7 +201,12 @@ def cash_series(days: int = 30) -> dict:
     за этот день, ``events`` — операции дня (прошлое) или запланированные поступления/списания
     (будущее), чтобы подсказка могла объяснить скачок. Последняя точка прошлого совпадает с
     ``finance.total_balance()`` — единым источником баланса; ``today`` — единый источник даты.
+    Кэш — тот же, что у прогноза (core.db.cached): ряд зовут страница графика и дашборд.
     """
+    return cached(f"series:{int(days or 30)}", lambda: _cash_series(days))
+
+
+def _cash_series(days: int = 30) -> dict:
     horizon = max(7, min(int(days or 30), 365))
     hist = max(30, min(horizon, 90))
     now = now_tz()
@@ -257,24 +293,30 @@ def cash_forecast_text() -> str:
 # ---------------------------------------------------------------- подписки: повторяющиеся списания
 def detect_subscriptions() -> list[dict]:
     """Одинаковые суммы с той же заметкой/категорией раз в ~месяц, которых нет в регулярных."""
-    txs = [t for t in finance.list_transactions(120, 100_000) if t.kind == "expense" and "(авто)" not in (t.note or "")]
+    # четыре нужных поля, а не все колонки операций за 120 дней; фильтр «авто» — в SQL
+    since = datetime.now() - timedelta(days=120)
+    with session() as s:
+        rows = s.exec(select(Transaction.amount, Transaction.note, Transaction.category, Transaction.date)
+                      .where(Transaction.date >= since, Transaction.kind == "expense",
+                             or_(Transaction.note.is_(None), Transaction.note.notlike("%(авто)%")))
+                      .order_by(Transaction.date.desc()).limit(100_000)).all()
     known = {(r.title or "").lower() for r in finance.list_recurring(active_only=False)}
-    groups: dict[tuple, list[Transaction]] = defaultdict(list)
-    for t in txs:
-        key = (round(t.amount), re.sub(r"[^\w]+", " ", (t.note or t.category or "").lower()).strip()[:24])
-        groups[key].append(t)
+    groups: dict[tuple, list] = defaultdict(list)
+    for amount, note, category, when in rows:
+        key = (round(amount), re.sub(r"[^\w]+", " ", (note or category or "").lower()).strip()[:24])
+        groups[key].append((category, when))
     out = []
     for (amount, name), items in groups.items():
         if len(items) < 2 or not name:
             continue
-        ds = sorted(t.date for t in items)
+        ds = sorted(when for _, when in items)
         gaps = [(b - a).days for a, b in zip(ds, ds[1:])]
         if not gaps or not all(24 <= g <= 37 for g in gaps):
             continue
         if any(name in k or k in name for k in known if k):
             continue
         out.append({"name": name, "amount": amount, "times": len(items), "last": ds[-1].isoformat(), "yearly": amount * 12,
-                    "category": items[-1].category})
+                    "category": items[-1][0]})
     out.sort(key=lambda x: -x["amount"])
     return out
 
@@ -283,7 +325,11 @@ def detect_subscriptions() -> list[dict]:
 def streak() -> dict:
     """Сколько дней подряд что-то записывали (траты/задачи/заметки/события)."""
     with session() as s:
-        days = {m.created_at.date() for m in s.exec(select(Memory).where(Memory.created_at >= datetime.now() - timedelta(days=400), Memory.channel != "system"))}
+        # только даты: раньше тянулись все колонки Memory (текст заметки!) ради одного поля
+        stamps = s.exec(select(Memory.created_at)
+                        .where(Memory.created_at >= datetime.now() - timedelta(days=400),
+                               Memory.channel != "system")).all()
+    days = {d.date() for d in stamps}
     today = date.today()
     cur, d = 0, today
     if today not in days:
@@ -301,10 +347,12 @@ def activity_heatmap(weeks: int = 26) -> list[dict]:
     """Количество записей по дням для тепловой карты."""
     since = datetime.now() - timedelta(weeks=weeks)
     with session() as s:
-        rows = s.exec(select(Memory).where(Memory.created_at >= since, Memory.channel != "system")).all()
+        # как и в streak(): одной колонкой с датой, а не целыми строками журнала
+        stamps = s.exec(select(Memory.created_at)
+                        .where(Memory.created_at >= since, Memory.channel != "system")).all()
     counts: dict[str, int] = defaultdict(int)
-    for m in rows:
-        counts[m.created_at.date().isoformat()] += 1
+    for d in stamps:
+        counts[d.date().isoformat()] += 1
     return [{"date": k, "count": v} for k, v in sorted(counts.items())]
 
 

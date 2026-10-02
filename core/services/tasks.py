@@ -12,9 +12,14 @@ from . import coord
 def add_task(title: str, due: datetime | None = None, priority: int = 2,
              project: str | None = None, source: str = "tg") -> Task:
     with session() as s:
-        # дубль открытой задачи с тем же названием — не плодим
-        for d in s.exec(select(Task).where(Task.done == False)).all():  # noqa: E712
-            if d.title.strip().lower() == title.strip().lower():
+        # дубль открытой задачи с тем же названием — не плодим.
+        # Итоговое сравнение осталось в Python (там же trim/lower), но выборка теперь
+        # по регистронезависимому вхождению (icontains → ulower, работает и с кириллицей):
+        # у 500 открытых задач грузили и сравнивали все, база отдаёт только совпавшие по имени.
+        needle = title.strip()
+        dup = s.exec(select(Task).where(Task.done == False, icontains(Task.title, needle))).all()  # noqa: E712
+        for d in dup:
+            if d.title.strip().lower() == needle.lower():
                 if due and not d.due:
                     d.due = due; s.add(d); s.commit()
                 return d
@@ -98,8 +103,13 @@ def due_task_reminders() -> list[tuple[Task, str]]:
     nw = now()
     out: list[tuple[Task, str]] = []
     with session() as s:
-        for t in s.exec(select(Task).where(Task.done == False, Task.due != None)).all():  # noqa: E711,E712
-            if t.due < nw - timedelta(hours=2) or is_all_day(t.due):
+        # нижняя граница окна — в SQL: просроченное и «на весь день» всё равно отбрасываются
+        # ниже по циклу, зачем тянуть в память сотни старых задач каждые 5 минут
+        rows = s.exec(select(Task).where(Task.done == False, Task.due != None,  # noqa: E711,E712
+                                    Task.due >= nw - timedelta(hours=2))
+                      .order_by(Task.due)).all()
+        for t in rows:
+            if is_all_day(t.due):
                 continue
             same_day = t.due.date() == nw.date()
             if t.remind_stage < 1 and same_day and nw.hour >= 9:

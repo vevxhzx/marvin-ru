@@ -285,6 +285,45 @@ def _session_min(w: WorkSession) -> float:
     return max(0.0, (end - w.started_at).total_seconds() / 60)
 
 
+# ---------- пачки вместо N+1 ----------
+# Список из 300 заказов раньше делал по два запроса на каждый (оплаты + сессии) — 600 обращений
+# к базе на один экран. Те же цифры собираются ДВУМЯ запросами на всю выборку; кэш досок
+# (_boards_by_order) появился раньше, эта — его продолжение.
+def _uniq(ids) -> list[int]:
+    return [i for i in dict.fromkeys(ids) if i]
+
+
+def _paid_map(oids) -> dict[int, float]:
+    """Сколько получено по каждому заказу из выборки: {order_id: сумма доходов}."""
+    ids = _uniq(oids)
+    out: dict[int, float] = {}
+    if not ids:
+        return out
+    with session() as s:
+        rows = s.exec(select(Transaction.order_id, Transaction.amount)
+                      .where(Transaction.order_id.in_(ids), Transaction.kind == "income")).all()
+    for oid, amount in rows:
+        out[oid] = out.get(oid, 0.0) + float(amount)
+    return out
+
+
+def _hours_map(oids) -> dict[int, float]:
+    """Часы работы по каждому заказу из выборки (то же, что hours_for, но сразу для всех)."""
+    ids = _uniq(oids)
+    out: dict[int, float] = {}
+    if not ids:
+        return out
+    with session() as s:
+        rows = s.exec(select(WorkSession.order_id, WorkSession.started_at, WorkSession.ended_at, WorkSession.planned_min)
+                      .where(WorkSession.order_id.in_(ids), WorkSession.kind == "focus")).all()
+    now = datetime.now()
+    mins: dict[int, float] = {}
+    for oid, started, ended, planned in rows:
+        end = ended or min(now, started + timedelta(minutes=planned))
+        mins[oid] = mins.get(oid, 0.0) + max(0.0, (end - started).total_seconds() / 60)
+    return {oid: round(m / 60, 2) for oid, m in mins.items()}
+
+
 def _boards_by_order() -> dict[int, int]:
     """Доска заказа (id) по id заказа — одним запросом; кэш на 2 секунды, чтобы список из 300 заказов не делал 300 запросов."""
     import time as _t
@@ -298,12 +337,19 @@ def _boards_by_order() -> dict[int, int]:
     return val
 
 
-def order_view(o: Order, clients: dict[int, str] | None = None) -> dict:
-    """Заказ + производные: оплачено, остаток, часы, ставка, срочность."""
+def order_view(o: Order, clients: dict[int, str] | None = None, paid: float | None = None,
+               hours: float | None = None) -> dict:
+    """Заказ + производные: оплачено, остаток, часы, ставка, срочность.
+
+    `paid`/`hours` — заранее посчитанные по всей выборке значения (см. _paid_map/_hours_map):
+    без них каждый заказ читает базу сам по себе, и список из 300 заказов делает 600 запросов.
+    """
     if clients is None:
         clients = {c.id: c.name for c in list_clients()}
-    paid = paid_for(o.id)
-    hours = hours_for(o.id)
+    if paid is None:
+        paid = paid_for(o.id)
+    if hours is None:
+        hours = hours_for(o.id)
     d = o.model_dump()
     # закрытый заказ ничего не «ждёт», даже если оплату не записывали (старый заказ закрыт статусом вручную).
     # paid_at — отметка «деньги получены»: такой заказ тоже не должен висеть в «ждут оплаты».
@@ -333,8 +379,12 @@ def list_orders(status: str | None = None, include_closed: bool = False, limit: 
         elif not include_closed:
             q = q.where(Order.status.in_(UNPAID))
         rows = list(s.exec(q.order_by(Order.created_at.desc()).limit(limit)))
+    # оплаты и часы — по два запроса на ВСЮ выборку, а не по два на каждый заказ
+    ids = [o.id for o in rows]
+    paid_map = _paid_map(ids)
+    hours_map = _hours_map(ids)
     clients = {c.id: c.name for c in list_clients()}
-    out = [order_view(o, clients) for o in rows]
+    out = [order_view(o, clients, paid_map.get(o.id, 0.0), hours_map.get(o.id, 0.0)) for o in rows]
     # открытые — по дедлайну (без дедлайна в конец), закрытые — по дате
     out.sort(key=lambda d: (d["status"] not in OPEN, d["deadline"] or datetime.max, -(d["id"])))
     return out
@@ -345,10 +395,20 @@ def unpaid_total(include_new: bool = False) -> float:
 
     include_new=False — «обсуждение» ещё не заработано и в ожидание оплаты не входит
     (так считают главная и страница заказов). include_new=True — для статистики, где
-    показывали все незакрытые.
+    показывали все незакрытые. Считаем те же остатки, что и в списке заказов (order_view.left),
+    но без часов/стадии/пульса — ради суммы они не нужны.
     """
     statuses = UNPAID if include_new else ("work", "review", "done")
-    return sum(d["left"] for d in list_orders(include_closed=False) if d["status"] in statuses)
+    with session() as s:
+        rows = list(s.exec(select(Order).where(Order.status.in_(statuses))
+                           .order_by(Order.created_at.desc()).limit(300)))
+    paid_map = _paid_map([o.id for o in rows])
+    total = 0.0
+    for o in rows:
+        if o.status in ("paid", "cancelled") or o.paid_at:
+            continue          # закрыт или уже помечен оплаченным — ничего не ждём
+        total += max(0.0, o.price - paid_map.get(o.id, 0.0))
+    return total
 
 
 def expected_income(days: int = 30) -> list[dict]:
@@ -398,8 +458,9 @@ def pomo_settings() -> dict:
         raw = get_setting("pomodoro")
         if raw:
             out.update({k: v for k, v in json.loads(raw).items() if k in POMO_DEFAULTS})
-    except Exception:
-        pass
+    except Exception as e:
+        # раньше здесь был `except Exception: pass` — битый JSON в настройках молча ломал таймер
+        log.warning("настройки помодоро не читаются, беру значения по умолчанию: %s", e)
     return out
 
 
@@ -583,9 +644,13 @@ def stats(months: int = 6) -> dict:
         sessions = s.exec(select(WorkSession).where(WorkSession.kind == "focus", WorkSession.started_at >= since)).all()
         clients = {c.id: c for c in s.exec(select(Client))}
     by_month: dict[str, float] = {}
+    paid_in_window: dict[int, float] = {}
     for t in txs:
         k = t.date.strftime("%Y-%m")
-        by_month[k] = by_month.get(k, 0) + t.amount
+        by_month[k] = by_month.get(k, 0.0) + t.amount
+        if t.order_id:      # за окно статистики — для ставки; раньше сумма считалась перебором всех txs на каждый заказ
+            paid_in_window[t.order_id] = paid_in_window.get(t.order_id, 0.0) + t.amount
+    paid_all_map = _paid_map([o.id for o in orders])   # «сколько получено от клиента» — за всё время, одним запросом
     months_out = []
     cur = since
     while cur <= nowd:
@@ -594,8 +659,8 @@ def stats(months: int = 6) -> dict:
         cur = (cur.replace(day=28) + timedelta(days=4)).replace(day=1)
     by_client: dict[int | None, dict] = {}
     for o in orders:
-        paid_period = sum(t.amount for t in txs if t.order_id == o.id)   # за окно статистики — для ставки
-        paid_all = paid_for(o.id)                                         # за всё время — «сколько получено от клиента»
+        paid_period = paid_in_window.get(o.id, 0.0)              # за окно статистики — для ставки
+        paid_all = paid_all_map.get(o.id, 0.0)                   # за всё время — «сколько получено от клиента»
         hrs = sum(_session_min(w) for w in sessions if w.order_id == o.id) / 60
         b = by_client.setdefault(o.client_id, {"client": clients[o.client_id].name if o.client_id in clients else "без клиента",
                                                 "client_id": o.client_id, "orders": 0, "paid": 0.0, "_paid_period": 0.0, "total": 0.0,

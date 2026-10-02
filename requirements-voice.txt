@@ -1,5 +1,6 @@
-# Голосовой аддон (install_voice.bat): распознавание речи, слово-активация, микрофон, трей.
-# Также включает распознавание голосовых сообщений Telegram (faster-whisper).
+# Голосовой клиент и офлайн-озвучка (install_voice.bat): распознавание, озвучка, трей, горячие клавиши.
+# Основной набор (faster-whisper, av, numpy, Pillow) уже стоит из requirements.txt —
+# здесь только то, что нужно именно для голоса. Silero/VAD — отдельным файлом requirements-silero.txt.
 faster-whisper>=1.1
 av>=12
 numpy>=1.26
