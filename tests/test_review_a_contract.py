@@ -62,9 +62,8 @@ def test_missing_resource_404(method, path, body):
     assert r.status_code == 404, f"{method} {path} -> {r.status_code} (ожидали 404)"
 
 
-@pytest.mark.xfail(reason="P2: PUT несуществующей фин-сущности отдаёт 400 (FinanceError), а DELETE того же "
-                          "ресурса — 404; клиент не отличает «нет такого» от ошибки валидации",
-                   strict=False)
+# P2 закрыт: несуществующая фин-сущность теперь 404 и на PUT — сервис кидает finance.FinanceNotFound
+# (наследник HTTPException + FinanceError), а не FinanceError → 400 (core/services/finance.py).
 @pytest.mark.parametrize("path,body", [
     ("/api/finance/transactions/999", {"amount": 10}),
     ("/api/finance/categories/999", {"name": "X"}),
@@ -299,6 +298,7 @@ SYSTEM_ROUTES = [
     ("POST", "/api/backup"),
     ("GET", "/api/backups"),
     ("POST", "/api/backups/restore"),
+    ("GET", "/api/backups/{name:path}/download"),
 ]
 
 

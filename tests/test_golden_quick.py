@@ -219,8 +219,8 @@ def _resolve(spec, t0: datetime):
         no_time = parts[1].rstrip("~").endswith("~") or parts[1].endswith("~")
         delta = (wd - t0.weekday()) % 7
         d = t0 + timedelta(days=delta)
-        if delta == 0 and ((h, m) <= (t0.hour, t0.minute) or (no_time and t0.hour >= 20)):
-            d += timedelta(days=7)
+        if delta == 0 and not no_time and (h, m) <= (t0.hour, t0.minute):
+            d += timedelta(days=7)  # время уже прошло — берём следующую неделю
         return d.replace(hour=h, minute=m, second=0, microsecond=0)
     if parts[0] == "dl":                                         # dl_wd4 — дедлайн «до пятницы» (строго следующей)
         wd = int(parts[1][2:])
@@ -461,7 +461,8 @@ GOLDEN = [
     ("планы на завтра", {"reply": "any"}, {}),
     ("что в расписании на среду", {"reply": "any"}, {}),
     ("расписание на неделю", {"reply": "any"}, {}),
-    ("встречи в пятницу", "add_event", {"ev": {"t": "встречи", "s": "wd4_10:00"}, "reply": "any"}),
+    # заголовок события приводится с заглавной буквы — как во всех остальных кейсах
+    ("встречи в пятницу", "add_event", {"ev": {"t": "Встречи", "s": "wd4_10:00~"}, "reply": "any"}),
     ("дела на сегодня", {"reply": "any"}, {}),
     ("доброе утро", {"reply": "any"}, {}),
     ("деньги", {"reply": "any"}, {}),

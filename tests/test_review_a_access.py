@@ -231,9 +231,11 @@ def test_settings_masks_secrets(secret_config):
     body = r.text
     for raw in (SECRET_TOKEN, SECRET_GOOGLE, "CLOUDsuperSECRETkeyVALUE", "GEMsuperSECRETkeyVALUE"):
         assert raw not in body, f"GET /api/settings отдал секрет целиком: {raw[:6]}…"
-    # маска: первые 4 символа + … + последние 3
-    assert SECRET_TOKEN[:4] + "…" in body
-    assert SECRET_GOOGLE[:4] + "…" in body
+    # секрет наружу не отдаётся даже частично: показываем только «задан / не задан»
+    for raw in (SECRET_TOKEN, SECRET_GOOGLE):
+        assert raw[:6] not in body, f"GET /api/settings выдал начало секрета: {raw[:6]}"
+        assert raw[-4:] not in body, f"GET /api/settings выдал конец секрета: {raw[-4:]}"
+    assert "задан" in body, "GET /api/settings должен показывать, что секрет задан"
     assert not _leaks_secret(body), "GET /api/settings отдал сырой секрет из config.yaml"
 
 
@@ -245,6 +247,11 @@ def test_settings_put_mask_does_not_wipe_secret(secret_config):
     assert r.status_code == 200
     assert SECRET_TOKEN in secret_config.read_text(encoding="utf-8"), \
         "маска вместо значения стёрла настоящий токен в config.yaml"
+    # та же история для новой формы маски («задан») — фронт шлёт ровно то, что получил
+    r2 = c.put("/api/settings", json={"changes": {"telegram.token": "задан"}})
+    assert r2.status_code == 200
+    assert SECRET_TOKEN in secret_config.read_text(encoding="utf-8"), \
+        "маска «задан» вместо значения стёрла настоящий токен в config.yaml"
 
 
 def test_status_and_llm_do_not_leak_keys(secret_config):
