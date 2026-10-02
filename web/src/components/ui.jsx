@@ -1,9 +1,17 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { X, Trash2, Check, CalendarDays, Clock } from 'lucide-react'
 import { parseNum } from '../lib/api'
 import { ACCENTS, accentFor, usePageAccent, setPageAccent } from '../lib/prefs'
 import { useI18n, t as T } from '../lib/i18n'
+import { Pressable, useMotionOK } from './Pressable'
+import { CountUp, useCountUp } from './CountUp'
+import { ErrorState, OfflineState, SuccessState } from './States'
+import { PullToRefresh } from './Refresh'
+import { useSheetDrag, SHEET_SNAPS, SNAP_RATIO } from '../lib/gestures'
+
+/* Примитивы из соседних файлов re-exportятся здесь, чтобы страницам хватало одного входа */
+export { Pressable, CountUp, ErrorState, OfflineState, SuccessState, PullToRefresh }
 
 export function Card({ className = '', variant = '', col = '', i = 0, children, lift, ...p }) {
   const vClass = variant === 'hero' ? 'hero' : variant === 'p1' ? 'p1' : variant === 'p2' ? 'p2' : variant === 'blk' ? 'blk' : variant === 'chart' ? 'chart' : ''
@@ -15,36 +23,17 @@ export function Card({ className = '', variant = '', col = '', i = 0, children, 
   )
 }
 
-/* Число, которое считает от 0 до значения: 1.8s expo-out, задержка 500ms ровно как в эталоне */
-export function useCountUp(target, { duration = 1800, delay = 500 } = {}) {
-  const [v, setV] = useState(target)
-  const prev = useRef(0)
-  useEffect(() => {
-    const to = Number.isFinite(target) ? target : 0
-    if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || document.documentElement.classList.contains('no-anim')) {
-      setV(to); prev.current = to; return
-    }
-    let raf
-    const t0 = performance.now() + delay
-    const tick = (now) => {
-      const p = Math.min(Math.max((now - t0) / duration, 0), 1)
-      const current = p < 1 ? to * (1 - Math.pow(2, -10 * p)) : to
-      setV(current)
-      if (p < 1) raf = requestAnimationFrame(tick)
-      else prev.current = to
-    }
-    raf = requestAnimationFrame(tick)
-    return () => cancelAnimationFrame(raf)
-  }, [target, duration, delay])
-  return v
-}
+/* Анимированное число: useCountUp живёт в components/CountUp.jsx (общий примитив),
+   здесь он остаётся реэкспортом — старый контракт <Num value fmt /> прежний. */
+export { useCountUp }
 
 /* Обёртка: <Num value={84007} fmt={money} /> — анимированное число */
 export function Num({ value, fmt, className = '' }) {
   const v = useCountUp(typeof value === 'number' ? value : 0)
   const { locale } = useI18n()
   const f = fmt || ((n) => Math.round(n).toLocaleString(locale).replace(/\s/g, '\u00a0'))
-  return <span className={`n ${className}`}>{f(v)}</span>
+  /* tabular-nums: пока число докручивается, цифры не прыгают по ширине */
+  return <span className={`n num tnum ${className}`} style={{ fontVariantNumeric: 'tabular-nums' }}>{f(v)}</span>
 }
 
 /* Заголовок раздела: компактный, спокойный. idx — счётчик справа от названия.
@@ -86,7 +75,9 @@ export function PageHead({ kicker, title, idx, right, children, sub }) {
   )
 }
 
-/* Пустые состояния: тонкий глиф в стиле сайта + подсказка-кнопка, которая открывает чат с готовой фразой */
+/* Пустые состояния: короткий глиф на подложке (не безликая иконка) + строка в тоне
+   проекта, пояснение и подсказка-кнопка, которая открывает чат с готовой фразой.
+   Шрифты — только по шкале --fs-*, мелкий текст не меньше 12px, подписи --ink-2 (AA). */
 const GLYPHS = {
   calendar: <><rect x="6" y="10" width="36" height="32" rx="6" /><path d="M6 20h36M16 6v8M32 6v8" /><circle cx="24" cy="31" r="3" fill="currentColor" stroke="none" /></>,
   tasks: <><path d="M10 14l4 4 8-8" /><path d="M10 26l4 4 8-8" /><path d="M10 38l4 4 8-8" /><path d="M28 14h12M28 26h12M28 38h12" /></>,
@@ -97,15 +88,43 @@ const GLYPHS = {
   sleep: <><path d="M30 8a16 16 0 1010 24A14 14 0 0130 8z" /></>,
   search: <><circle cx="21" cy="21" r="12" /><path d="M30 30l10 10" /></>,
 }
-export function Empty({ icon, glyph, text, sub, hint, onHint, compact }) {
+export function Empty({ icon, glyph, text, sub, hint, onHint, compact, action }) {
+  const size = compact ? 34 : 42
+  const g = glyph && GLYPHS[glyph]
   return (
     <div className={`empty flex flex-col items-start justify-center ${compact ? 'py-5' : 'py-8 sm:py-10'}`}>
-      {glyph && GLYPHS[glyph] ? (
-        <svg width={compact ? 36 : 44} height={compact ? 36 : 44} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="empty-glyph mb-3">{GLYPHS[glyph]}</svg>
-      ) : icon ? <div className="mb-3 text-2xl">{icon}</div> : null}
-      <div className="h4">{text}</div>
-      {sub && <div className="muted mt-1 text-[13.5px]">{sub}</div>}
-      {hint && <button type="button" className="btn-soft btn-sm mt-4" onClick={() => onHint ? onHint(hint) : window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: hint } }))}>«{hint}» <span>↗</span></button>}
+      {(g || icon) && (
+        <span
+          aria-hidden="true"
+          className="empty-plate"
+          style={{
+            display: 'grid', placeItems: 'center', marginBottom: compact ? 10 : 14,
+            width: size + 16, height: size + 16, borderRadius: 'var(--r-md)',
+            background: 'var(--sf2)', color: 'var(--ink-3)',
+            boxShadow: 'inset 0 0 0 1px var(--line)',
+          }}
+        >
+          {g
+            ? <svg width={size} height={size} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" className="empty-glyph">{g}</svg>
+            : <span style={{ fontSize: size * 0.52, lineHeight: 1 }}>{icon}</span>}
+        </span>
+      )}
+      <div className="h4" style={{ fontSize: 'var(--fs-lg)', maxWidth: '40ch' }}>{text}</div>
+      {sub && <div className="muted" style={{ marginTop: 4, fontSize: 'var(--fs-md)', lineHeight: 'var(--lh-snug)', maxWidth: '46ch' }}>{sub}</div>}
+      {(hint || action) && (
+        <div className="cluster" style={{ marginTop: compact ? 12 : 16 }}>
+          {hint && (
+            <Pressable
+              className="btn-soft btn-sm"
+              title={hint}
+              onClick={() => (onHint ? onHint(hint) : window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: hint } })))}
+            >
+              {`«${hint}» `}<span>↗</span>
+            </Pressable>
+          )}
+          {action}
+        </div>
+      )}
     </div>
   )
 }
@@ -234,6 +253,7 @@ export function useSheetPresence(open, ms = 240) {
 
 /* стек открытых шторок: пока есть хоть одна — нижние вкладки спрятаны; верхняя знает, что она верхняя */
 let _sheetSeq = 0
+let _uidSeq = 0
 const _stack = []
 const _stackEv = new EventTarget()
 
@@ -242,14 +262,116 @@ const FOCUS_SEL = 'a[href], button, input, select, textarea, [tabindex]'
 const focusables = (root) => [...root.querySelectorAll(FOCUS_SEL)].filter((el) =>
   !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0 && getComputedStyle(el).visibility !== 'hidden')
 
-export function Sheet({ open, onClose, title, sub, children, wide }) {
+const PHONE = 640                     // ниже — телефон: шторка выезжает снизу
+const SHEET_MOTION = 'transform var(--t-base) var(--ease-out), height var(--t-base) var(--ease-out), opacity var(--t-base) linear, filter var(--t-base) linear'
+
+/* размер окна + зум из настроек: высоты снапов считаем в тех же единицах, что и .sheet */
+function useViewport() {
+  const read = () => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null
+    let z = 1
+    try {
+      const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom'))
+      if (Number.isFinite(raw) && raw > 0) z = raw
+    } catch { /* без вычисленных стилей — зум 1 */ }
+    return {
+      w: typeof window !== 'undefined' ? window.innerWidth : 1200,
+      h: (vv?.height || (typeof window !== 'undefined' ? window.innerHeight : 800)) / z,
+      top: (vv?.offsetTop || 0) / z,
+    }
+  }
+  const [vp, setVp] = useState(read)
+  useEffect(() => {
+    const on = () => setVp(read())
+    window.addEventListener('resize', on)
+    window.addEventListener('orientationchange', on)
+    window.visualViewport?.addEventListener('resize', on)
+    return () => {
+      window.removeEventListener('resize', on)
+      window.removeEventListener('orientationchange', on)
+      window.visualViewport?.removeEventListener('resize', on)
+    }
+  }, [])
+  return vp
+}
+
+/* Три точки прилипания телефона — имена и доли высоты живут в lib/gestures.js
+   (SHEET_SNAPS / SNAP_RATIO), здесь только пересчёт под размер окна и зум.
+   Шаг по точкам и закрытие по скорости делает useSheetDrag оттуда же. */
+function useSnaps(phone, vp) {
+  return useMemo(() => {
+    if (!phone) return []
+    const avail = Math.max(240, vp.h - vp.top - 6)
+    const half = Math.round(Math.max(avail * SNAP_RATIO.half, 240))
+    const px = {
+      peek: Math.round(Math.min(Math.max(avail * SNAP_RATIO.peek, 132), half - 80)),
+      half,
+      full: Math.round(avail * SNAP_RATIO.full),
+    }
+    const list = SHEET_SNAPS.map((id) => px[id]).sort((a, b) => a - b)
+    return list.filter((v, i) => i === 0 || v - list[i - 1] > 24)
+  }, [phone, vp.h, vp.top])
+}
+
+/* Шторка — единственное окно приложения. Здесь вся разметка и поведение
+   (`.sheet-backdrop > .sheet > .sheet-grip`, role=dialog, ловушка фокуса, Esc,
+   возврат фокуса, стек окон, блокировка фона), а components/SheetHost.jsx — тонкая
+   обёртка над этим компонентом для оболочки: второй реализации нет.
+
+   Высота и сдвиг — обычные инлайновые стили, а переход между ними живёт в CSS
+   (SHEET_MOTION). Поэтому у .sheet в index.css НЕТ animation с fill: заполненная
+   анимация перебила бы инлайновый transform, и свайп за ручку не двигал бы шторку.
+   Свайп, точки прилипания и закрытие по скорости — useSheetDrag из lib/gestures.js. */
+export function Sheet({ open, onClose, title, sub, hint, children, wide, snaps: snapProp, footer, bodyClass, ariaLabel }) {
   const { t } = useI18n()
   const [shown, closing] = useSheetPresence(open)
   const idRef = useRef(0)
+  const uid = useRef('')
+  if (!uid.current) uid.current = `sheet-t${++_uidSeq}`
   const rootRef = useRef(null)
   const sheetRef = useRef(null)
+  const bodyRef = useRef(null)
   const prevFocus = useRef(null)
   const [, force] = useState(0)
+  const vp = useViewport()
+  const phone = vp.w < PHONE
+  const snaps = useSnaps(phone && snapProp !== false, vp)
+  const [snap, setSnap] = useState(1)
+  const [contentH, setContentH] = useState(0)
+  const last = Math.max(0, snaps.length - 1)
+  const fits = (h) => !snaps.length || h <= snaps[0] + 8     // влезает в свёрнутый — растягивать нечего
+
+  /* высота содержимого меряем по внутреннему блоку, а не по самой шторке: она обрезана
+     по max-height, и её scrollHeight всегда равен текущей высоте */
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!open || !el) return undefined
+    const read = () => setContentH(el.scrollHeight)
+    read()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [open])
+
+  /* при открытии берём минимальный снап, в который влезает содержимое (один раз за открытие) */
+  const pickRef = useRef(false)
+  useEffect(() => { if (open) pickRef.current = true }, [open])
+  useEffect(() => {
+    if (!open || !pickRef.current || !snaps.length || !contentH) return
+    pickRef.current = false
+    setSnap(fits(contentH) ? 0 : contentH <= snaps[1] ? 1 : last)
+  }, [open, contentH, snaps]) // eslint-disable-line
+
+  /* Высота = минимум из «снапа» и «контента»: пустого места снизу не появляется,
+     короткая форма не растягивается, а длинная всё равно упирается в потолок шторки. */
+  const snapIdx = Math.min(Math.max(snap, 0), last)
+  const snapH = snaps[snapIdx] ?? snaps[last] ?? 0
+  const prevH = snapIdx > 0 ? (snaps[snapIdx - 1] || 0) : 0
+  const height = !snaps.length || !contentH || (snapIdx === 0 && fits(contentH))
+    ? undefined
+    : Math.min(snapH, Math.max(contentH, prevH))
+
   useEffect(() => {
     if (!open) return
     const h = (e) => {
@@ -286,76 +408,65 @@ export function Sheet({ open, onClose, title, sub, children, wide }) {
     prevFocus.current = null
     if (el && el !== document.body && el.isConnected && typeof el.focus === 'function') el.focus()
   }, [open])
+  // при открытии фокус заходит внутрь шторки — но только если поле не забрало его на себя
+  useEffect(() => {
+    if (!open || closing) return
+    const root = rootRef.current
+    if (!root || root.contains(document.activeElement)) return
+    sheetRef.current?.focus({ preventScroll: true })
+  }, [open, closing])
   useEffect(() => { const h = () => force((x) => x + 1); _stackEv.addEventListener('change', h); return () => _stackEv.removeEventListener('change', h) }, [])
-  // свайп за «ручку» вниз — закрыть, как в обычном приложении
-  const drag = useSheetDrag(sheetRef, onClose, open)
+  // свайп за «ручку»: шторка едет за пальцем между точками прилипания, быстрый флик вниз
+  // закрывает, тап по ручке — шаг по точкам. Жест один на всё приложение (lib/gestures.js).
+  const drag = useSheetDrag({ open, phone, snaps, snap, setSnap, height, onClose })
   if (!shown) return null
   const behind = open && _stack.length > 1 && _stack[_stack.length - 1] !== idRef.current
+  const subText = sub || hint
+  const titled = typeof title === 'string' && !!title
   // рисуем в <body>, а не внутри страницы: иначе анимация страницы (transform/filter)
   // превращает position:fixed в «относительно страницы» и окно уезжает
   return createPortal(
     <div ref={rootRef} className={`sheet-backdrop ${closing ? 'closing' : ''} ${behind ? 'behind' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div
         ref={sheetRef}
-        role="dialog" aria-modal="true" aria-label={typeof title === 'string' ? title : undefined}
-        className={`sheet ${wide ? 'sm:!max-w-2xl' : ''} ${drag.dragging ? 'sheet-dragging' : ''}`}
-        style={drag.dy ? { transform: `translateY(${drag.dy}px)` } : undefined}
+        role="dialog" aria-modal="true" tabIndex={-1}
+        aria-labelledby={titled ? uid.current : undefined}
+        aria-label={ariaLabel || (titled ? title : undefined)}
+        data-snap={snaps.length ? String(snap) : undefined}
+        className={`sheet ${wide ? 'sm:!max-w-2xl' : ''} ${drag.dragging ? 'sheet-dragging' : ''} ${bodyClass || ''}`}
+        style={{
+          ...(height != null ? { height: `${height}px` } : null),
+          ...(drag.dy ? { transform: `translateY(${drag.dy}px)` } : null),
+          ...(drag.dragging ? null : { transition: SHEET_MOTION }),
+        }}
       >
         <div className="sheet-grip" aria-hidden="true" {...drag.grip} />
         <div className="mb-5 flex items-start justify-between gap-4">
           <div className="min-w-0">
-            <h3 className="h2">{title}</h3>
-            {sub && <div className="muted mt-1 text-[13px]">{sub}</div>}
+            <h3 className="h2" id={titled ? uid.current : undefined}>{title}</h3>
+            {subText && <div className="muted" style={{ marginTop: 4, fontSize: 'var(--fs-md)' }}>{subText}</div>}
           </div>
-          <button className="btn-icon shrink-0" onClick={onClose} aria-label={t('common.close')} data-tip={t('common.close')}><X size={16} /></button>
+          <Pressable className="btn-icon shrink-0" onClick={onClose} aria-label={t('common.close')} data-tip={t('common.close')} title={t('common.close')}>
+            <X size={16} />
+          </Pressable>
         </div>
-        {children}
+        <div ref={bodyRef} className="sheet-body">{children}</div>
+        {footer && <div className="sheet-foot" style={{ marginTop: 16 }}>{footer}</div>}
       </div>
     </div>,
     document.body
   )
 }
 
-/* Свайп шторки вниз за «ручку»: тянем — шторка едет за пальцем, отпустил далеко/быстро — закрылась.
-   Работает только для верхней шторки и только на телефоне (проверка по ширине окна). */
-function useSheetDrag(sheetRef, onClose, open) {
-  const [dy, setDy] = useState(0)
-  const [dragging, setDragging] = useState(false)
-  const st = useRef(null)
-  useEffect(() => { if (!open) { setDy(0); setDragging(false); st.current = null } }, [open])
-  const grip = {
-    onTouchStart: (e) => {
-      if (window.innerWidth >= 640 || !e.touches?.length) return
-      const t = e.touches[0]
-      st.current = { y: t.clientY, at: Date.now() }
-      setDragging(true)
-    },
-    onTouchMove: (e) => {
-      if (!st.current || !e.touches?.length) return
-      const d = e.touches[0].clientY - st.current.y
-      // тянем только вниз и с сопротивлением у самого верха — как в iOS
-      setDy(d <= 0 ? d * 0.25 : Math.min(320, d))
-    },
-    onTouchEnd: () => {
-      const s = st.current
-      st.current = null
-      setDragging(false)
-      const fast = s && Date.now() - s.at < 260
-      if (!s) { setDy(0); return }
-      setDy(0)
-      if (dy > 110 || (fast && dy > 45)) onClose?.()
-    },
-    onTouchCancel: () => { st.current = null; setDragging(false); setDy(0) },
-  }
-  return { dy, dragging, grip }
-}
-
 export function Field({ label, hint, error, children, className = '' }) {
   return (
     <label className={`block ${className}`}>
-      <div className="mb-1.5 flex items-baseline justify-between"><span className="label">{label}</span>{hint && <span className="faint text-[11px]">{hint}</span>}</div>
+      <div className="mb-1.5 flex items-baseline justify-between">
+        <span className="label">{label}</span>
+        {hint && <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{hint}</span>}
+      </div>
       {children}
-      {error && <div className="neg mt-1 text-[12px]">{error}</div>}
+      {error && <div className="neg mt-1" style={{ fontSize: 'var(--fs-xs)' }}>{error}</div>}
     </label>
   )
 }
@@ -451,31 +562,34 @@ export function Inline({ value, onSave, fmt = (v) => v, min, max, className = ''
     if (out === value) { setEdit(false); return }
     try { await onSave(out); setEdit(false) } catch (e) { setErr(e.message || t('common.error')) }
   }
-  if (!edit) return <button type="button" title={title || t('common.click_to_edit')} onClick={start} className={`editable text-left ${className}`}>{fmt(value)}</button>
+  if (!edit) return <Pressable title={title || t('common.click_to_edit')} onClick={start} className={`editable text-left ${className}`}>{fmt(value)}</Pressable>
   return (
     <span className="relative inline-flex flex-col">
       <input ref={ref} value={v} onChange={(e) => setV(e.target.value)} inputMode={type === 'num' ? 'decimal' : 'text'}
         onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') commit(); if (e.key === 'Escape') setEdit(false) }}
         className={`inline-edit ${className}`} style={{ width: `${Math.max(4, String(v).length + 1)}ch` }} />
-      {err && <span className="neg absolute -bottom-4 left-0 whitespace-nowrap text-[11px]">{err}</span>}
+      {err && <span className="neg absolute -bottom-4 left-0 whitespace-nowrap" style={{ fontSize: 'var(--fs-xs)' }}>{err}</span>}
     </span>
   )
 }
 
-export function Seg({ value, onChange, options, className = '' }) {
+/* Сегменты: настоящие <button type="button"> с aria-pressed — как требует DESIGN.md
+   («кликабельные span заменены на кнопки»). Классы .sg и .sg button в index.css
+   описаны одинаково, поэтому вид не меняется; font-family — inherit, чтобы
+   кнопка не подставила системный шрифт вместо Inter Tight. */
+export function Seg({ value, onChange, options, className = '', label }) {
   return (
-    <div className={`sg ${className}`}>
+    <div className={`sg ${className}`} role="group" aria-label={label}>
       {options.map(([v, l]) => (
-        <span
+        <Pressable
           key={v}
-          role="button"
-          tabIndex={0}
           className={v === value ? 'on' : ''}
+          aria-pressed={v === value}
+          style={{ fontFamily: 'inherit' }}
           onClick={() => onChange(v)}
-          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onChange(v) } }}
         >
           {l}
-        </span>
+        </Pressable>
       ))}
     </div>
   )
@@ -485,9 +599,17 @@ export function Pill({ children, warn, className = '', ...p }) {
   return <span className={`pl ${warn ? 'y' : ''} ${className}`} {...p}>{children}</span>
 }
 
+/* Строка списка. onClick — это div, а не button: внутрь кладут кнопки (меню, чекбоксы),
+   а <button> внутри <button> невалиден. Поэтому роль и клавиатура добавляются вручную. */
 export function Rowi({ time, title, sub, right, className = '', onClick }) {
   return (
-    <div className={`rowi ${onClick ? 'cursor-pointer' : ''} ${className}`} onClick={onClick}>
+    <div
+      className={`rowi ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(e) } } : undefined}
+    >
       {time && <time>{time}</time>}
       <div className="t">
         {title}
@@ -543,8 +665,7 @@ export function FlowBar({ items = [], note, legend, className = '' }) {
 
 export function Toggle({ on, onChange, label }) {
   return (
-    <button
-      type="button"
+    <Pressable
       role="switch"
       aria-checked={!!on}
       aria-label={label}
@@ -554,24 +675,26 @@ export function Toggle({ on, onChange, label }) {
   )
 }
 
-export function Swatch({ color, active, onClick, title }) {
+export function Swatch({ color, active, onClick, title, label }) {
   return (
-    <i
+    <button
+      type="button"
       style={{ '--c': color }}
       className={active ? 'on' : ''}
       onClick={() => onClick(color)}
-      title={title || color}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === 'Enter') onClick(color) }}
+      title={title || label || color}
+      aria-label={label || title || color}
+      aria-pressed={!!active}
     />
   )
 }
 
-export function Pills({ value, onChange, options, className = '' }) {
+export function Pills({ value, onChange, options, className = '', label }) {
   return (
-    <div className={`flex flex-wrap gap-1.5 ${className}`}>
-      {options.map(([v, l]) => <button type="button" key={v} className={`pill ${v === value ? 'on' : ''}`} onClick={() => onChange(v)}>{l}</button>)}
+    <div className={`flex flex-wrap gap-1.5 ${className}`} role="group" aria-label={label}>
+      {options.map(([v, l]) => (
+        <Pressable key={v} className={`pill ${v === value ? 'on' : ''}`} aria-pressed={v === value} onClick={() => onChange(v)}>{l}</Pressable>
+      ))}
     </div>
   )
 }
@@ -665,27 +788,74 @@ export function useToast() {
 /* Переключатель да/нет */
 export function Switch({ on, onChange, label }) {
   return (
-    <button type="button" role="switch" aria-checked={!!on} aria-label={label} className={`switch ${on ? 'on' : ''}`} onClick={() => onChange(!on)} />
+    <Pressable role="switch" aria-checked={!!on} aria-label={label} className={`switch ${on ? 'on' : ''}`} onClick={() => onChange(!on)} />
   )
 }
 
-export function Skeleton({ h = 80, className = '' }) {
-  return <div className={`fill animate-pulseSoft rounded-2xl ${className}`} style={{ height: h }} />
+/* Скелетоны: шимер по --sf2/--fill (тот же, что .animate-pulseSoft), без спиннера.
+   Высота задаётся заранее, поэтому контент не «прыгает», когда данные пришли.
+   prefers-reduced-motion / «меньше движения» → статичная заливка без блика.
+   Скелетон скрыт от скринридера (aria-hidden) — озвучивать мельтешение незачем. */
+const SHIMMER = {
+  backgroundImage: 'linear-gradient(90deg, var(--fill) 25%, var(--fill-2) 50%, var(--fill) 75%)',
+  backgroundSize: '800px 100%',
 }
-/* Скелет списка: N строк как в реальном списке */
-export function ListSkeleton({ n = 4 }) {
-  return <div className="space-y-3 py-2">{Array.from({ length: n }, (_, i) => <div key={i} className="flex items-center gap-3"><div className="fill animate-pulseSoft h-6 w-6 rounded-full" /><div className="fill animate-pulseSoft h-4 rounded-md" style={{ width: `${45 + ((i * 17) % 40)}%` }} /></div>)}</div>
+const STILL = { background: 'var(--fill)' }
+
+export function Skeleton({ h = 80, w, radius, className = '', style, children }) {
+  const ok = useMotionOK()
+  return (
+    <div
+      aria-hidden="true"
+      className={`sk ${className}`}
+      style={{
+        height: h,
+        ...(w ? { width: w } : null),
+        borderRadius: radius || 'var(--r-md)',
+        ...STILL,
+        ...(ok ? { ...SHIMMER, animation: 'shimmer 1.6s linear infinite' } : null),
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  )
+}
+
+/* Скелет списка: N строк высотой как настоящие (--tap + отступ), с аватаром и
+   двумя полосами — под основной строкой и под подписью. Ширина полос «честная»:
+   меняется по строке, чтобы список не выглядел пустым квадратом. */
+export function ListSkeleton({ n = 4, rowH = 52, avatar = true, className = '' }) {
+  return (
+    <div className={`list-sk space-y-2 py-2 ${className}`} aria-hidden="true" role="presentation">
+      {Array.from({ length: n }, (_, i) => (
+        <div key={i} className="flex items-center gap-3" style={{ height: rowH }}>
+          {avatar && <Skeleton h={28} w={28} radius="50%" className="shrink-0" />}
+          <div className="min-w-0 flex-1">
+            <Skeleton h={12} w={`${58 + ((i * 13) % 26)}%`} radius="var(--r-sm)" />
+            <Skeleton h={10} w={`${30 + ((i * 7) % 22)}%`} radius="var(--r-sm)" style={{ marginTop: 7, opacity: 0.7 }} />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 }
 
 /* Подтверждение вместо window.confirm */
 export function Confirm({ open, title, text, onOk, onClose, danger }) {
   const { t } = useI18n()
   return (
-    <Sheet open={open} onClose={onClose} title={title}>
+    <Sheet open={open} onClose={onClose} title={title} snaps={false}>
       {text && <div className="muted mb-5 text-[14px] leading-relaxed">{text}</div>}
       <div className="flex gap-2">
-        <button className="btn-ghost flex-1" onClick={onClose}>{t('common.cancel')}</button>
-        <button className={`btn-primary flex-1 ${danger ? '!bg-red' : ''}`} style={danger ? { background: 'var(--neg)' } : {}} onClick={onOk}>{t('common.yes')}</button>
+        <Pressable className="btn-ghost flex-1" onClick={onClose}>{t('common.cancel')}</Pressable>
+        <Pressable
+          className="btn-primary flex-1"
+          style={danger ? { background: 'var(--neg)' } : undefined}
+          onClick={onOk}
+        >
+          {t('common.yes')}
+        </Pressable>
       </div>
     </Sheet>
   )
