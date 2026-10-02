@@ -35,7 +35,13 @@ def test_event_done_is_shared_between_calendar_tasks_and_chat():
     """Галочка на событии: видна в /api/events, в /api/tasks?events_too, в «сегодня» дашборда; о сделанном не напоминаем."""
     from core.services import calendar
     c = _client()
-    start = datetime.now().replace(second=0, microsecond=0) + timedelta(hours=2)
+    # событие должно остаться СЕГОДНЯШНИМ: в 23:30 «сейчас + 2 часа» уходит в завтра,
+    # и проверка «виден в делах сегодняшнего дня» ломалась по часам прогона
+    now = datetime.now().replace(second=0, microsecond=0)
+    start = now + timedelta(hours=2)
+    end_of_day = now.replace(hour=23, minute=0)
+    if start > end_of_day:
+        start = end_of_day
     ev = _j(c.post("/api/events", json={"title": "Встреча с мопсом", "start": start.isoformat(), "duration_min": 60}))
     assert ev["done"] is False
     # в «Делах» событие сегодняшнего дня — отдельной строкой kind=event
