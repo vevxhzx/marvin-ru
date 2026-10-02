@@ -25,13 +25,13 @@ STEPS = 3
 
 
 def _pick_python() -> str:
-    """Каким Python создавать .venv. Предпочитаем 3.11–3.13 (под них точно есть все сборки);
+    """Каким Python создавать .venv. Предпочитаем 3.11–3.14 (под них точно есть все сборки);
     если запущены на более новом — ищем через лаунчер `py` другой установленный, иначе пробуем текущий."""
     v = sys.version_info
-    if (3, 10) <= v[:2] <= (3, 13):
+    if (3, 10) <= v[:2] <= (3, 14):
         return sys.executable
     if sys.platform == "win32":
-        for tag in ("3.13", "3.12", "3.11"):
+        for tag in ("3.14", "3.13", "3.12", "3.11"):
             try:
                 out = subprocess.run(["py", f"-{tag}", "-c", "import sys;print(sys.executable)"],
                                      capture_output=True, text=True, timeout=15)
