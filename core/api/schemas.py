@@ -379,6 +379,26 @@ class GoalPut(BaseModel):
     record_tx: bool = True
 
 
+# Режим жизни (services/regime.py). Даты принимаем и как дату, и как строку «2026-10-28»:
+# сервис разбирает оба варианта и сам проверяет, что конец не раньше начала.
+class RegimeIn(BaseModel):
+    title: str = Field(..., min_length=1, max_length=60)
+    start: Optional[str] = None
+    end: Optional[str] = None
+    note: str = ""
+
+
+class RegimePatch(BaseModel):
+    title: Optional[str] = None
+    start: Optional[str] = None
+    end: Optional[str] = None
+    note: Optional[str] = None
+
+
+class RegimeApplyIn(BaseModel):
+    on: bool = False
+
+
 class NoteIn(BaseModel):
     text: str = Field(..., min_length=1, max_length=20000)
     tags: list[str] = []

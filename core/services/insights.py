@@ -14,7 +14,7 @@ from sqlmodel import select
 
 from ..config import TZ
 from ..db import Memory, Note, Task, Transaction, cached, get_setting, session, set_setting
-from . import calendar, finance
+from . import calendar, finance, regime
 from .finance import money
 from .plural import days as _days_word
 
@@ -73,22 +73,27 @@ def _clone_sched(sched: dict) -> dict:
     return defaultdict(list, {k: list(v) for k, v in sched.items()})
 
 
-def _spend_rows(days: int = 30) -> list[tuple[datetime, float]]:
-    """Переменные траты за окно: (дата, сумма). Без автоплатежей и платежей по долгам.
+def _spend_rows(days: int = 30) -> tuple[list[tuple[datetime, float]], int | None]:
+    """Переменные траты за окно: [(дата, сумма)] и дней в окне (None — считаем по всем данным).
 
     Фильтры уехали в SQL: раньше тянулись ВСЕ колонки ВСЕХ операций за 30 дней (до 100 тысяч
     строк), чтобы в Python отбросить лишние. Дата берётся по datetime.now(), как раньше в
     finance.list_transactions, — иначе на сервере в другом часовом поясе окно поехало бы.
+
+    Считается активный «режим жизни» (services/regime.py): если он есть и включён, окно — это
+    его период (с начала по «сегодня»/по дату конца), а не «последние 30 дней».
     """
-    since = datetime.now() - timedelta(days=days)
+    cw = regime.count_window(days)
+    since = cw[0] if cw else datetime.now() - timedelta(days=days)
     with session() as s:
-        rows = s.exec(
-            select(Transaction.date, Transaction.amount)
-            .where(Transaction.date >= since, Transaction.kind == "expense",
-                   or_(Transaction.category.is_(None), Transaction.category != "Долги"),
-                   or_(Transaction.note.is_(None), Transaction.note.notlike("%(авто)%")))
-            .order_by(Transaction.date.desc()).limit(100_000)).all()
-    return [(d, float(a)) for d, a in rows]
+        q = (select(Transaction.date, Transaction.amount)
+             .where(Transaction.date >= since, Transaction.kind == "expense",
+                    or_(Transaction.category.is_(None), Transaction.category != "Долги"),
+                    or_(Transaction.note.is_(None), Transaction.note.notlike("%(авто)%"))))
+        if cw:
+            q = q.where(Transaction.date < cw[1])
+        rows = s.exec(q.order_by(Transaction.date.desc()).limit(100_000)).all()
+    return [(d, float(a)) for d, a in rows], (cw[2] if cw else None)
 
 
 def cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) -> dict:
@@ -112,10 +117,14 @@ def _cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) ->
     now = now_tz()
     balance = finance.total_balance()
     rec = finance.list_recurring()
-    # средние переменные траты в день за 30 дней (без авто и долгов)
-    txs = _spend_rows(30)
-    first = min((d for d, _ in txs), default=now - timedelta(days=30))
-    span = max(7, (now - first).days) if txs else 30
+    # средние переменные траты в день (без авто и долгов): по окну режима жизни, если он
+    # считается, иначе — как раньше, по последним 30 дням
+    txs, win_days = _spend_rows(30)
+    if win_days:
+        span = max(1, win_days)
+    else:
+        first = min((d for d, _ in txs), default=now - timedelta(days=30))
+        span = max(7, (now - first).days) if txs else 30
     per_day = sum(a for _, a in txs) / span if txs else 0.0
     # события регулярных платежей/доходов: количество повторов считаем от горизонта, а не
     # константой — недельная подписка за 90 дней встречается ~13 раз, а не 6 (P2 ревью B).
@@ -168,7 +177,7 @@ def _cash_forecast(days: int = 30, pessimistic_delay_days: int | None = None) ->
             "next_income": next_income.isoformat() if next_income else None, "days_to_income": days_to_income,
             "safe_per_day": round(safe_per_day) if safe_per_day is not None else None,
             "expected_income": round(expected_total), "expected_tax": round(tax_total),
-            "ok": low >= 0, "scenarios": scenarios}
+            "ok": low >= 0, "scenarios": scenarios, "regime": regime.info()}
 
 
 def _tx_balance_delta(t: Transaction, debt_only: set[str]) -> float:
@@ -223,8 +232,13 @@ def _cash_series(days: int = 30) -> dict:
             by_day[t.date.date()].append(t)
 
     spent = income = 0.0
+    # «в среднем в день» по окну режима жизни, если он считается; без режима — по истории ряда
+    cw = regime.count_window(hist)
+    avg_from = cw[0].date() if cw else today - timedelta(days=hist)
+    avg_to = cw[1].date() if cw else today + timedelta(days=1)
+    avg_div = cw[2] if cw else hist
     for d, items in by_day.items():
-        if d < today - timedelta(days=hist):
+        if d < avg_from or d >= avg_to:
             continue
         for t in items:
             if t.kind == "income":
@@ -260,14 +274,19 @@ def _cash_series(days: int = 30) -> dict:
     low_date = next((p["date"] for p in fut if p["balance"] == low), today.isoformat())
     runway = next((i + 1 for i, p in enumerate(fut) if p["balance"] <= 0), None)
     return {"points": points, "horizon_days": horizon, "history_days": hist, "today": today.isoformat(),
-            "avg_day_spent": round(spent / hist), "avg_day_income": round(income / hist),
+            "avg_day_spent": round(spent / avg_div), "avg_day_income": round(income / avg_div),
+            "avg_days": avg_div,
             "runway_days": runway, "min_balance": round(low), "min_date": low_date,
-            "balance": round(balance), "scenarios": fc.get("scenarios")}
+            "balance": round(balance), "scenarios": fc.get("scenarios"), "regime": regime.info()}
 
 
 def cash_forecast_text() -> str:
     f = cash_forecast(30)
     parts = [f"Сейчас **{money(f['points'][0]['balance'])}**, тратите в среднем **{money(f['per_day'])}** в день."]
+    rg = f.get("regime") or {}
+    if rg.get("counted"):
+        # честная пометка: среднее посчитано по режиму, а не по всей истории
+        parts.insert(0, f"Режим: {rg['label']} — средние считаю по нему, а не по всей истории.")
     if f["days_to_income"] is not None:
         parts.append(f"До ближайшего дохода {f['days_to_income']} {_days_word(f['days_to_income'])} — безопасно тратить до **{money(f['safe_per_day'])}** в день.")
     if f.get("expected_income"):

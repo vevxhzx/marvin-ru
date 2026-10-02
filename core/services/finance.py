@@ -11,6 +11,7 @@ from sqlmodel import select
 from starlette.exceptions import HTTPException as _HTTPException
 
 from ..db import cached, icontains, Account, Category, Debt, Recurring, Transaction, log_action, remember, session
+from . import regime
 
 
 class FinanceError(ValueError):
@@ -178,6 +179,10 @@ def safe_to_spend(recurring: list[Recurring] | None = None, accounts: list[Accou
 
     recurring/accounts можно передать готовыми, когда они уже прочитаны (сводка читает их
     один раз и переиспользует) — цифры от этого не меняются.
+
+    `avg_daily` — фактические траты в день по окну расчёта: с началом режима жизни, если он
+    считается (services/regime.py), иначе за последние 30 дней. Раньше этого поля не было —
+    «в среднем в день» показывали только прогноз и сводка.
     """
     now = datetime.now()
     rec = list_recurring() if recurring is None else recurring
@@ -192,10 +197,18 @@ def safe_to_spend(recurring: list[Recurring] | None = None, accounts: list[Accou
     upcoming = [r for r in rec if r.kind == "expense" and r.next_date < next_income]
     reserved = sum(r.amount for r in upcoming)
     free = balance - reserved
+    cw = regime.count_window(30)
+    if cw:
+        rows = _spent_rows(cw[0], cw[1])
+        avg_daily = round(sum(a for _dt, a in rows) / cw[2])
+    else:
+        rows = _spent_rows(now - timedelta(days=30))
+        avg_daily = round(sum(a for _dt, a in rows) / 30)
     return {"balance": balance, "reserved": reserved, "free": free, "days_left": days_left,
             "per_day": free / days_left, "next_income": next_income.isoformat(),
             "upcoming": [{"title": r.title, "amount": r.amount, "date": r.next_date.isoformat()} for r in upcoming],
-            "spent_today": sum(t.amount for t in list_transactions(1, 1000) if t.kind == "expense" and t.date.date() == now.date())}
+            "spent_today": sum(t.amount for t in list_transactions(1, 1000) if t.kind == "expense" and t.date.date() == now.date()),
+            "avg_daily": avg_daily, "regime": regime.info()}
 
 
 def list_categories(kind: str | None = None) -> list[Category]:
@@ -484,10 +497,50 @@ def list_transactions(days: int = 30, limit: int = 200) -> list[Transaction]:
                            .order_by(Transaction.date.desc()).limit(limit)))
 
 
+def list_transactions_between(since: datetime, until: datetime | None = None, limit: int = 100_000) -> list[Transaction]:
+    """Операции за конкретный интервал [since, until) — окно «режима жизни».
+
+    Отдельная функция (а не фильтр поверх list_transactions) нужна, потому что окно режима
+    может начинаться РАНЬше, чем «последние N дней»: чтобы среднее считалось по всему режиму,
+    историю надо тянуть с его начала, а не с границы периода.
+    """
+    with session() as s:
+        q = select(Transaction).where(Transaction.date >= since)
+        if until:
+            q = q.where(Transaction.date < until)
+        return list(s.exec(q.order_by(Transaction.date.desc()).limit(limit)))
+
+
+def _period_txs(days: int, limit: int = 100_000) -> tuple[list[Transaction], int]:
+    """Операции для средних: окно режима, если он считается, иначе последние `days` дней.
+
+    Возвращает (операции, дней в окне) — знаменатель для «в среднем в день». Без режима
+    знаменатель равен `days`, поведение прежнее.
+    """
+    cw = regime.count_window(days)
+    if cw:
+        return list_transactions_between(cw[0], cw[1], limit), cw[2]
+    return list_transactions(days, limit), max(1, int(days or 30))
+
+
+def _spent_rows(since: datetime, until: datetime | None = None) -> list[tuple[datetime, float]]:
+    """Только (дата, сумма) трат за интервал — для средних, где больше ничего не нужно."""
+    with session() as s:
+        q = (select(Transaction.date, Transaction.amount)
+             .where(Transaction.date >= since, Transaction.kind == "expense"))
+        if until:
+            q = q.where(Transaction.date < until)
+        return [(d, float(a)) for d, a in s.exec(q.order_by(Transaction.date.desc()).limit(100_000)).all()]
+
+
 def cashflow(recurring: list[Recurring] | None = None, txs: list[Transaction] | None = None) -> dict:
     """Месячный поток: доход − регулярные − платежи по долгам = свободно.
 
     recurring/txs можно передать готовыми (сводка читает регулярные один раз).
+
+    Средние переменные траты и «средний нерегулярный доход» считаются по окну расчёта:
+    с началом режима жизни, если он считается (services/regime.py), иначе как раньше — за
+    последние 90 дней. Регулярные платежи и долги остаются общими: это планы, а не средние.
     """
     rec = list_recurring() if recurring is None else recurring
     rec_income = sum(r.amount for r in rec if r.kind == "income")
@@ -495,10 +548,17 @@ def cashflow(recurring: list[Recurring] | None = None, txs: list[Transaction] | 
     rec_expense = sum(r.amount for r in rec if r.kind == "expense" and not r.debt_id)
     debt_pay = sum(d.payment for d in list_debts() if not d.closed)
 
-    all_txs = list_transactions(90, 100_000) if txs is None else txs
+    win_days = None
+    if txs is None:
+        all_txs, win_days = _period_txs(90)
+    else:
+        all_txs = txs
     real = [t for t in all_txs if "(авто)" not in (t.note or "")]
 
     def span_months(items: list) -> float:
+        # режим жизни: окно и есть период наблюдения (5 дней режима — это 1/6 месяца, а не месяц)
+        if win_days:
+            return max(1.0 / 30, min(3.0, win_days / 30.0))
         if not items:
             return 1.0
         first = min(t.date for t in items)
@@ -518,6 +578,7 @@ def cashflow(recurring: list[Recurring] | None = None, txs: list[Transaction] | 
         "income": income, "recurring": rec_expense, "debt_payments": debt_pay,
         "free": free, "avg_variable": avg_variable, "left_after_all": free - avg_variable,
         "income_is_estimate": not rec_income,
+        "regime": regime.info(),
     }
 
 
@@ -553,7 +614,15 @@ def summary(days: int = 30) -> dict:
 
 
 def _summary(days: int = 30) -> dict:
-    txs = list_transactions(days, limit=10_000)
+    # Окно расчёта: если режим жизни считается (services/regime.py) — операции только внутри
+    # него, иначе поведение прежнее (последние `days` дней). Знаменатель среднего — дни окна.
+    cw = regime.count_window(days)
+    if cw:
+        txs = list_transactions_between(cw[0], cw[1], limit=10_000)
+        avg_days = cw[2]
+    else:
+        txs = list_transactions(days, limit=10_000)
+        avg_days = None
     spent = sum(t.amount for t in txs if t.kind == "expense")
     earned = sum(t.amount for t in txs if t.kind == "income")
     by_cat: dict[str, float] = {}
@@ -585,7 +654,12 @@ def _summary(days: int = 30) -> dict:
         month_days[next((i for i, e in enumerate(edges) if t.date.day <= e), 6)] += t.amount
         spent_month += t.amount
 
-    avg_daily = round(spent_month / today.day) if today.day else 0
+    # «в среднем в день»: с режимом жизни — по его окну (честный знаменатель в днях),
+    # без режима — как раньше, по текущему календарному месяцу.
+    if avg_days:
+        avg_daily = round(spent / avg_days)
+    else:
+        avg_daily = round(spent_month / today.day) if today.day else 0
     return {
         "days": days,
         "spent": spent,
@@ -595,6 +669,7 @@ def _summary(days: int = 30) -> dict:
         # алиасы, которые читает Today.jsx (иначе страница подставляла выдуманные числа)
         "balance": balance,
         "avg_daily": avg_daily,
+        "avg_days": avg_days or today.day,
         "runway_days": math.floor(balance / avg_daily) if avg_daily else None,
         "weekday": weekday,
         "month_days": month_days,
@@ -605,6 +680,7 @@ def _summary(days: int = 30) -> dict:
         "cashflow": cashflow(rec),
         "budgets": budgets(),
         "safe": safe_to_spend(rec, accounts),
+        "regime": regime.info(),
     }
 
 

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo } from 'react'
 import { api, money, shortDate, toLocalISO } from '../lib/api'
 import { Num, Sheet, Field, Empty, Money, useToast, PageAccent, Confirm } from '../components/ui'
 import CashChart from '../components/CashChart'
+import LifeRegime from '../components/LifeRegime'
 import { ImportButton } from '../components/Widgets'
 import { useRefresh } from '../App'
 import { Plus, Search, Trash2, Edit2, ArrowDownRight, ArrowUpRight, CreditCard, Wallet, Landmark, PiggyBank, Target, Calendar, CheckCircle2, Sparkles, ChevronLeft, EyeOff, Play, Pause } from 'lucide-react'
@@ -40,6 +41,8 @@ export default function Finance() {
   const [techniquesData, setTechniquesData] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [budgets, setBudgets] = useState(null)
+  // Режим жизни (services/regime.py): по умолчанию выключен, цифры считаются как раньше
+  const [regime, setRegime] = useState(null)
 
   // Modal sheets
   const [sheet, setSheet] = useState(null) // 'tx' | 'account' | 'debt' | 'payDebt' | 'recurring' | 'goal' | 'putGoal' | 'budget'
@@ -62,7 +65,7 @@ export default function Finance() {
 
   const load = async () => {
     try {
-      const [s, t, accs, d, rec, g, cats, tech, fc, bg] = await Promise.all([
+      const [s, t, accs, d, rec, g, cats, tech, fc, bg, rg] = await Promise.all([
         api.finSummary(days).catch(() => null),
         api.txs(days).catch(() => []),
         api.accounts().catch(() => []),
@@ -73,6 +76,7 @@ export default function Finance() {
         api.techniques().catch(() => null),
         api.finForecast(days || 90).catch(() => null),
         api.budgets().catch(() => null),
+        api.get('/api/finance/regimes').catch(() => null),   // режим жизни (по умолчанию выключен)
       ])
       if (s) setSum(s)
       setTxs(t || [])
@@ -84,6 +88,8 @@ export default function Finance() {
       if (tech) setTechniquesData(tech)
       if (fc) setForecast(fc)
       setBudgets(bg)
+      // сводка/прогноз уже принесли regime — берём из них, отдельный ответ только как запасной вариант
+      setRegime(s?.regime || fc?.regime || bg?.safe?.regime || rg || null)
     } catch (e) {
       show.err(e)
     }
@@ -102,6 +108,8 @@ export default function Finance() {
   const balance = sum?.total_balance ?? sum?.balance ?? 0
   const spent = sum?.spent ?? 55950
   const earned = sum?.earned ?? 63662
+  // Считаются ли цифры по режиму жизни: берём из ответа сервера (сводка/прогноз), иначе плашка
+  const regCounted = !!(sum?.regime?.counted || forecast?.regime?.counted)
   const debtsTotal = sum?.debts_total ?? (debts.reduce((acc, d) => acc + ((d.total || 0) - (d.paid || 0)), 0) || 205700)
 
   // Расчет долей потока
@@ -238,6 +246,10 @@ export default function Finance() {
         </div>
       </div>
 
+      {/* Режим жизни: чип в шапке + переключатель «считать по режиму». По умолчанию выключен,
+          тогда все цифры ниже считаются по всем данным, как раньше. */}
+      <LifeRegime info={regime} onChanged={(r) => { setRegime(r); load() }} />
+
       {/* Вкладки разделов финансов в едином стиле бенто */}
       <div className="sg r my-4" style={{ '--i': 2 }}>
         <button type="button" className={tab === 'overview' ? 'on' : ''} onClick={() => setTab('overview')}>{t('fin.tab_overview')}</button>
@@ -264,7 +276,11 @@ export default function Finance() {
               <section key="balance" className="c hero s4 r" style={st}>{ctl}
                 <div className="hd"><h2>{t('fin.c_balance')}</h2><small>{t('fin.all_accounts')}</small></div>
                 <div className="big"><Num value={balance} /> ₽</div>
-                <span className="tag">{t('fin.for_days', { n: days, m: money(spent) })}</span>
+                <span className="tag">
+                  {t('fin.for_days', { n: days, m: money(spent) })}
+                  {/* честная пометка: сумма посчитана по окну режима, а не по всем данным */}
+                  {regCounted && ` · ${t('reg.spent_by_regime')}`}
+                </span>
                 <div className="hm">
                   <div><small>{t('fin.income_days', { n: days })}</small><b>+{money(earned)}</b></div>
                   <div><small>{t('fin.c_debts')}</small><b>{money(debtsTotal)}</b></div>
@@ -276,7 +292,9 @@ export default function Finance() {
                 <div className="hd">
                   <h2>{t('fin.cash_on', { n: days || t('common.all'), days: t('run.days_n', { count: days }) })}</h2>
                   <small>
-                    {forecast ? t('fin.fc_now', { bal: money(forecast.balance), pace: money(forecast.avg_day_spent) }) : t('fc.by_pace')}
+                    {forecast
+                      ? `${t('fin.fc_now', { bal: money(forecast.balance), pace: money(forecast.avg_day_spent) })}${regCounted ? ` · ${t('reg.by_regime')}` : ''}`
+                      : t('fc.by_pace')}
                   </small>
                 </div>
                 {!forecast ? (

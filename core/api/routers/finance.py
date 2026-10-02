@@ -22,10 +22,11 @@ from fastapi import APIRouter, HTTPException, Request
 
 from ...brain import agent
 from ...db import Debt, Event, Link, Note, Recurring, Task, Transaction, session
-from ...services import finance, goals, insights
+from ...services import finance, goals, insights, regime
 from .._shared import broadcast
 from ..schemas import (TxIn, TxPatch, CategoryIn, CategoryPatch, BalanceIn, AccountIn, AccountPatch, DebtIn,
-                       PayIn, DebtPatch, RecurringIn, RecurringPatch, GoalIn, GoalPatch, GoalPut)
+                       PayIn, DebtPatch, RecurringIn, RecurringPatch, GoalIn, GoalPatch, GoalPut,
+                       RegimeIn, RegimePatch, RegimeApplyIn)
 
 router = APIRouter()
 
@@ -124,7 +125,12 @@ def fin_forecast(days: int = 30):
     # дельта ОБЩЕГО баланса: перевод между своими счетами и «чисто долговые» счета его
     # не трогают — иначе ряд расходится с total_balance() (P1 ревью B, второй случай)
     debt_only = {a.name for a in finance.list_accounts() if a.kind == "debt_only"}
-    txs = [t for t in finance.list_transactions(hist + 1, 100_000) if t.date]
+    # «в среднем в день» — по окну режима жизни, если он считается (services/regime.py);
+    # без режима — как раньше, по `hist` дням истории.
+    cw = regime.count_window(hist)
+    txs = ([t for t in finance.list_transactions_between(cw[0], cw[1], 100_000) if t.date] if cw
+           else [t for t in finance.list_transactions(hist + 1, 100_000) if t.date])
+    avg_div = cw[2] if cw else hist
     deltas: dict = {}
     spent = income = 0.0
     for t in txs:
@@ -155,11 +161,14 @@ def fin_forecast(days: int = 30):
     low = min((p["balance"] for p in fut), default=balance)
     low_date = next((p["date"] for p in fut if p["balance"] == low), today.isoformat())
     runway = next((i + 1 for i, p in enumerate(fut) if p["balance"] <= 0), None)
-    return {"points": points, "horizon_days": horizon, "avg_day_spent": round(spent / hist),
-            "avg_day_income": round(income / hist), "runway_days": runway, "min_balance": round(low),
+    return {"points": points, "horizon_days": horizon, "avg_day_spent": round(spent / avg_div),
+            "avg_day_income": round(income / avg_div), "avg_days": avg_div,
+            "runway_days": runway, "min_balance": round(low),
             "min_date": low_date, "balance": round(balance),
             # реалистичный/пессимистичный сценарии (ожидаемые оплаты заказов) — только добавление
-            "scenarios": fc.get("scenarios")}
+            "scenarios": fc.get("scenarios"),
+            # честный блок «по чему посчитано»: режим жизни (services/regime.py)
+            "regime": regime.info()}
 
 
 @router.get("/api/finance/transactions")
@@ -310,6 +319,59 @@ def fin_recurring_del(rid: int):
         r.active = False
         s.add(r); s.commit()
     return {"ok": True}
+
+
+# ---------------- режим жизни ----------------
+# Хранится в настройках (services/regime.py), миграции схемы не требует. Новые роуты —
+# только добавление: старые пути, поля и коды ошибок не тронуты.
+@router.get("/api/finance/regimes")
+def fin_regimes():
+    """Список режимов + активный + переключатель «считать по режиму»."""
+    return {"regimes": regime.list_regimes(), **regime.info()}
+
+
+@router.post("/api/finance/regimes")
+def fin_regime_add(p: RegimeIn):
+    try:
+        return regime.add(p.title, p.start, p.end, p.note, "web")
+    except regime.RegimeError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.put("/api/finance/regimes/{rid}")
+def fin_regime_update(rid: int, p: RegimePatch):
+    try:
+        return regime.update(rid, **p.model_dump(exclude_unset=True))
+    except regime.RegimeNotFound:
+        raise HTTPException(404, "Режим не найден")
+    except regime.RegimeError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.post("/api/finance/regimes/{rid}/close")
+def fin_regime_close(rid: int, p: RegimePatch):
+    try:
+        r = regime.close(rid, p.end)
+    except regime.RegimeNotFound:
+        raise HTTPException(404, "Режим не найден")
+    except regime.RegimeError as e:
+        raise HTTPException(400, str(e))
+    if not r:
+        raise HTTPException(404)
+    return r
+
+
+@router.delete("/api/finance/regimes/{rid}")
+def fin_regime_del(rid: int):
+    if not regime.delete(rid, "web"):
+        raise HTTPException(404)
+    return {"ok": True}
+
+
+@router.post("/api/finance/regime/apply")
+def fin_regime_apply(p: RegimeApplyIn):
+    """Переключатель «считать по режиму». По умолчанию выключен — поведение прежнее."""
+    return {"apply": regime.set_apply(p.on), **regime.info()}
 
 
 # ---------------- цели / конверты / техники ----------------

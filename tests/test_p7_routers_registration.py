@@ -5,7 +5,7 @@
 главное — подключение стоит ДО catch-all SPA, иначе `{path:path}` перехватит
 все `/api/*` и сайт перестанет открываться (см. `reviews/P7_refactor.md` §4.2).
 
-Состояние на шаг 7.4: `finance` (42 роута), `orders` (22), `boards` (17),
+Состояние на шаг 7.4: `finance` (42 роута шага 7.0 + 6 роутов режима жизни), `orders` (22), `boards` (17),
 `people` (15), `tasks` (15). `/api/events/stream` (SSE) пока в `app.py` — см.
 `test_events_stream_still_in_app`.
 
@@ -63,6 +63,13 @@ FINANCE_ROUTES = [
     ("POST", "/api/finance/goals/{gid}/put"),
     ("GET", "/api/finance/techniques"),
     ("GET", "/api/export/{what}.{fmt}"),
+    # ---- добавлено: режим жизни (core/services/regime.py), 6 роутов. Старые 42 на месте.
+    ("GET", "/api/finance/regimes"),
+    ("POST", "/api/finance/regimes"),
+    ("PUT", "/api/finance/regimes/{rid}"),
+    ("POST", "/api/finance/regimes/{rid}/close"),
+    ("DELETE", "/api/finance/regimes/{rid}"),
+    ("POST", "/api/finance/regime/apply"),
 ]
 
 # Полный список путей/методов orders.py (22 роута шага 7.2 — `core/api/app.py` до переноса).
@@ -209,10 +216,11 @@ def _router_routes(name):
     return sorted((x.path, tuple(sorted(x.methods))) for x in r.routes)
 
 
-def test_finance_router_has_exactly_42_routes():
+def test_finance_router_has_exactly_48_routes():
+    # 42 роута шага 7.0 + 6 роутов режима жизни (services/regime.py) — только добавление
     got = _router_routes("finance")
     want = sorted((p, (m,)) for m, p in FINANCE_ROUTES)
-    assert len(got) == 42
+    assert len(got) == 48
     assert got == want
 
 

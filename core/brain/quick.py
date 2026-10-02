@@ -1,19 +1,22 @@
 """Быстрые правила без LLM: справки («сколько потратил на еду за неделю», «что у меня завтра», «какие долги»),
 деньги («переведи 5000 на сбер», «снял 3000 наличных», «заплатил Диме 2000», «вернули долг 5000», «закрой долг Диме»,
-«подписка яндекс плюс 399 25-го», «лимит на еду 20000», «отмени подписку яндекс») и короткие реплики («спасибо», «ок»).
+«подписка яндекс плюс 399 25-го», «лимит на еду 20000», «отмени подписку яндекс»), режим жизни
+(«я уезжаю в армию 28 октября», «вернулся», «удали режим») и короткие реплики («спасибо», «ок»).
 
 Всё работает мгновенно и офлайн — это то, что «настоящий ассистент» обязан понимать даже когда мозг спит.
 Каждая функция возвращает (text, actions) или None.
 """
 from __future__ import annotations
 
+import json
 import random
 import re
 
 from .. import identity
 from datetime import datetime, timedelta
 
-from ..services import calendar, finance, tasks
+from ..db import get_setting, set_setting
+from ..services import calendar, finance, regime, tasks
 from ..services.calendar import fmt_dt
 from ..services.finance import money
 from ..services.plural import days as _days_word
@@ -511,11 +514,294 @@ def balance_q(text: str) -> Result | None:
     return f"На «{a.name}» — **{money(a.balance)}**.", ["balance"]
 
 
+# ------------------------------------------------------------------ режим жизни
+# «я уезжаю в армию 28 октября», «с 28 октября в армии», «уехал в командировку до 5 ноября»,
+# «больничный с 3 по 10», «вернулся», «армия закончилась», «поменяй режим на …», «удали режим».
+# Всё офлайн и без LLM. Перед записью — вопрос «да/нет» (как у других записей в чате);
+# пока не сказано «да», ничего не пишется. Подтверждение живёт в отдельной настройке
+# `regime_pending:<канал>` и 5 минут, после чего забывается.
+_PENDING_KEY = "regime_pending:{ch}"
+
+# Название режима берём из узнаваемых слов; если такого нет — саму фразу (обрезанную).
+# `\b` в начале обязателен: без него «развлечения» попадало в «лечени\w*».
+_REGIME_WORDS = (
+    ("армия", r"\b(?:арм\w*|служб\w*|воинск\w*)|в\s+части"),
+    ("командировка", r"\bкомандировк\w*"),
+    ("больничный", r"\bбольнич\w*"),
+    ("учёба", r"\bуч[её]б\w*|\bобучени\w*|\bучит\w*"),
+    ("отпуск", r"\bотпуск\w*|\bотдых\w*|\bотдохн\w*"),
+    ("декрет", r"\bдекрет\w*"),
+    ("сессия", r"\bсесси\w*"),
+    ("лечение", r"\bлеч\w*|\bоздоровлени\w*|\bреабилитац\w*"),
+    ("пропускной", r"\bпропускн\w*"),
+    ("вакансия", r"\bваканс\w*|\bмежсезонь\w*"),
+)
+_REGIME_ANY_RX = re.compile("|".join(rx for _t, rx in _REGIME_WORDS), re.I)
+# Сильные глаголы: сами по себе (или с датой) означают «начался режим» —
+# «уезжаю 28 октября», «начал учиться».
+_REGIME_GO_RX = re.compile(r"(?:уезжаю|уехал|уезжал|уезжаем|уезжали|уеду|уезжает|поеду|поехал|поехали|улетаю|улетел|улетает|"
+                           r"летим|улечу|начал[аио]?|начну|начинаю|завожу|зав[её]л|завела|пош[её]л|пошла|"
+                           r"уш[её]л|ушла)\b", re.I)
+# Слабые глаголы («иду», «работаю») — только вместе со словом режима: «иду на др 12 числа»
+# это день рождения, а не режим.
+_REGIME_MAYBE_RX = re.compile(r"(?:\bиду\b|\bид[её]шь\b|\bнахожусь\b|\bработаю\b|\bслужу\b|\bустроил\w*)\b", re.I)
+# Фразы про календарь/задачи/дни рождения — режимом жизни быть не могут.
+_NOT_REGIME_RX = re.compile(r"\b(?:событи\w*|календар\w*|встреч\w*|напомн\w*|задач\w*|др\b|днюх\w*|"
+                            r"день\s+рождени\w*|билет\w*|подписк\w*|долг\w*|кредит\w*)\b", re.I)
+_REGIME_DEL_RX = re.compile(r"^\s*(?:удали|убери|сотри|забудь|удали-ка)\s+(?:жизненный\s+)?режим\w*\s*$", re.I)
+_REGIME_SET_RX = re.compile(r"^\s*(?:поменяй|смени|замени|переименуй|установи)\s+(?:жизненный\s+)?режим\s+на\s+(.+?)\s*$", re.I)
+_REGIME_APPLY_RX = re.compile(r"^\s*(?:не\s+)?счита[йе]\w*\s+по\s+режиму\s*(вкл(?:юч\w*)?|выкл(?:юч\w*)?|отключ\w*)?\s*[.!]*$", re.I)
+_REGIME_BACK_RX = re.compile(r"^\s*(?:(?:я\s+)?(?:вернулся|вернулась|вернулись|вернулось|уже\s+вернулся|вернулся\s+домой)"
+                            r"(?:\s+.+?)?|(?:[\wё]+)\s+(?:закончил\w*|закончилась|закончилось|окончил\w*|завершил\w*))\s*$", re.I)
+_REGIME_YES_RX = re.compile(r"^\s*(да|давай|ага|угу|подтверждаю|конечно|точно|yes|ок|окей|делай|вот|всё|все)\s*[.!]*\s*$", re.I)
+_REGIME_NO_RX = re.compile(r"^\s*(нет|не надо|отмена|отбой|стоп|неа|передумал|оставь|no)\s*[.!]*\s*$", re.I)
+# дата названа прямо («28 октября», «сегодня») — иначе фразу про режим не разбираем
+_DATE_HINT_RX = re.compile(r"\d|сегодня|завтра|послезавтра|понедельник|вторник|сред[ау]|четверг|пятниц|суббот|воскресень|"
+                          r"январ|феврал|март|апрел|ма[йя]|июн|июл|август|сентябр|октябр|ноябр|декабр", re.I)
+
+
+def _pending_get(channel: str) -> tuple[str, datetime] | None:
+    raw = get_setting(_PENDING_KEY.format(ch=channel)) or ""
+    if "|" not in raw:
+        return None
+    ts, payload = raw.split("|", 1)
+    try:
+        return payload, datetime.fromisoformat(ts)
+    except ValueError:
+        return None
+
+
+def _pending_set(channel: str, payload: str) -> None:
+    set_setting(_PENDING_KEY.format(ch=channel), f"{datetime.now().isoformat()}|{payload}")
+
+
+def _pending_clear(channel: str) -> None:
+    set_setting(_PENDING_KEY.format(ch=channel), "")
+
+
+_MONTHS_RU = ("янв", "фев", "мар", "апр", "ма", "июн", "июл", "авг", "сен", "окт", "ноя", "дек")
+_MONTH_DAY_RX = re.compile(r"\b(\d{1,2})\s*(янв|фев|мар|апр|ма[йя]|июн|июл|авг|сен|окт|ноя|дек)\w*", re.I)
+
+
+def _dom(d: int, mon: str | None = None) -> datetime | None:
+    """«28 октября» / «с 3» → начало дня. Месяц — ЭТОГО года: в режиме жизни «1 мая» значит
+    «1 мая этого года» (человек описывает период, в котором жил), а не «следующей весны».
+    День ограничен 28-м, чтобы «с 30» не уехало в короткий месяц."""
+    now = datetime.now()
+    if mon:
+        low = mon.lower().replace("ё", "е")[:3]
+        idx = next((i + 1 for i, x in enumerate(_MONTHS_RU) if low.startswith(x)), 0)
+        if not idx:
+            return None
+        return now.replace(month=idx, day=min(max(1, int(d)), 28), hour=0, minute=0, second=0, microsecond=0)
+    return now.replace(day=min(max(1, int(d)), 28), hour=0, minute=0, second=0, microsecond=0)
+
+
+def _date_from(frag: str) -> datetime | None:
+    """Дата из куска фразы режима: «28 октября», «28.10», «28.10.2026», «завтра», «в пятницу»."""
+    m = _MONTH_DAY_RX.search(frag or "")
+    if m:
+        return _dom(int(m.group(1)), m.group(2))
+    m = re.search(r"\b(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\b", frag or "")
+    if m:
+        y = int(m.group(3) or datetime.now().year)
+        y = y + 2000 if y < 100 else y
+        try:
+            return datetime(y, int(m.group(2)), int(m.group(1)))
+        except ValueError:
+            return None
+    dt = parse_datetime(frag or "")[0]
+    return dt.replace(hour=0, minute=0, second=0, microsecond=0) if dt else None
+
+
+def _regime_dates(text: str) -> tuple[datetime | None, datetime | None, str]:
+    """(начало, конец, текст без дат) из «с 28 октября», «до 5 ноября», «с 3 по 10»."""
+    rest = text
+    start = end = None
+    m = re.search(r"\b(?:с\s+)?(\d{1,2})\s*(?:по|-|–|—)\s*(\d{1,2})\b(?:\s*([а-яё]{3,12}))?", rest, re.I)
+    if m:   # «больничный с 3 по 10» — оба числа в одном месяце
+        start, end = _dom(int(m.group(1)), m.group(3)), _dom(int(m.group(2)), m.group(3))
+        if start and end and end < start:   # «с 28 по 3» — конец в следующем месяце
+            try:
+                end = end.replace(year=end.year + 1, month=1) if end.month == 12 else end.replace(month=end.month + 1)
+            except ValueError:
+                end = None
+        return start, end, rest[:m.start()] + " " + rest[m.end():]
+    m = re.search(r"\bдо\b\s*(.+)$", rest, re.I)     # «до 5 ноября» — конец режима
+    if m:
+        end = _date_from(m.group(1))
+        if end:
+            rest = rest[:m.start()]
+    m = re.search(r"\b(?:с|начиная)\b\s*(.+)$", rest, re.I)   # «с 28 октября» — начало
+    if m:
+        dt = _date_from(m.group(1))
+        if dt:
+            start = dt
+            rest = rest[:m.start()]
+    if end is None:                                  # «1 мая по 10 мая» / «с 28 октября по 5 ноября»
+        m = re.search(r"\bпо\s+([^,]{2,30})$", rest, re.I)
+        if m and re.search(r"\d", m.group(1)):
+            end = _date_from(m.group(1))
+            if end:
+                rest = rest[:m.start()]
+    if start is None and _DATE_HINT_RX.search(rest):
+        dt = _date_from(rest)     # «я уезжаю в армию 28 октября» — дата без предлога
+        if dt:
+            start = dt
+    return start, end, rest
+
+
+def _regime_title(text: str) -> str:
+    """Название режима: узнаваемое слово («армия», «больничный») или сама фраза, обрезанная."""
+    for title, rx in _REGIME_WORDS:
+        if re.search(rx, text, re.I):
+            return title
+    t = re.sub(r"^\s*(?:я\s+)?(?:уезжаю|уехал|уеду|уезжал|уезжаем|уезжали|поеду|поехал|улетаю|улетел|улетает|"
+               r"летим|начал[аио]?|начну|начинаю|завожу|зав[её]л|завела|иду|ид[её]шь|пош[её]л|пошла|"
+               r"уш[её]л|ушла|нахожусь|работаю|служу|устроился|устроилась|начался|началась)\b", " ", text, flags=re.I)
+    t = re.sub(r"\b(?:в|на|до|с|по)\b", " ", t, flags=re.I)
+    t = " ".join(t.split(" ,.-—:?!"))
+    return (t[:60] or "новый режим").strip().lower()
+
+
+def _regime_confirm(text: str, channel: str) -> Result | None:
+    """Ответ на «да/нет» по отложенному режиму (своя настройка — чужие pending не трогаем)."""
+    p = _pending_get(channel)
+    if not p:
+        return None
+    payload, ts = p
+    if (datetime.now() - ts).total_seconds() > regime.PENDING_TTL_SEC:
+        _pending_clear(channel)
+        return None
+    if _REGIME_YES_RX.match(text):
+        _pending_clear(channel)
+        return _regime_apply(payload, channel)
+    if _REGIME_NO_RX.match(text):
+        _pending_clear(channel)
+        return "Отбой, режим не трогаю — цифры считаю как раньше.", []
+    _pending_clear(channel)   # заговорили о другом — вопрос снимается
+    return None
+
+
+def _regime_apply(payload: str, channel: str) -> Result | None:
+    """Собственно запись из подтверждения. payload — json: {op, …}."""
+    try:
+        d = json.loads(payload)
+    except json.JSONDecodeError:
+        return None
+    op = d.get("op")
+    try:
+        if op == "add":
+            r = regime.add(d["title"], d.get("start"), d.get("end"), d.get("note") or "", channel)
+            regime.set_apply(True)      # режим завели — сразу включаем влияние на цифры
+            when = f"с {r['from_short']}" if r.get("from_short") else "с сегодня"
+            if r.get("to_short"):
+                when = f"с {r['from_short']} по {r['to_short']}"
+            return (f"Завёл режим **{r['title']}** {when}. Теперь средние и прогноз считаю по нему, "
+                    f"а не по всей истории — пока не закроете режим или не выключите переключатель.", ["set_regime"])
+        if op == "close":
+            cur = regime.active()
+            r = regime.close(cur["id"], d.get("when"), channel) if cur else None
+            if not r:
+                return "Открытого режима нет, сэр — считаю как раньше.", []
+            return (f"Режим **{r['title']}** закрыт {r['to_short']}. Средние теперь считаются по его периоду "
+                    f"({r['from_short']}–{r['to_short']}) — можно завести новый режим или выключить влияние.", ["set_regime"])
+        if op == "rename":
+            cur = regime.active()
+            if cur:
+                r = regime.update(cur["id"], title=d["title"])
+                return f"Переименовал режим: теперь он «{r['title']}». Средние считаются по нему.", ["set_regime"]
+            r = regime.add(d["title"], None, None, "", channel)
+            regime.set_apply(True)
+            return f"Завёл режим **{r['title']}** с {r['from_short']} и включил подсчёт по нему.", ["set_regime"]
+        if op == "delete":
+            cur = regime.active()
+            if cur and not regime.delete(cur["id"], channel):
+                return "Не нашёл, что удалять.", []
+            regime.set_apply(False)
+            return "Режим удалён, считаю по всем данным как раньше.", ["set_regime"]
+    except regime.RegimeError as e:
+        return f"Не записал: {e}.", []
+    return None
+
+
+def regimes(text: str, channel: str) -> Result | None:
+    """Фразы о режиме жизни: завести/закрыть/переименовать/удалить/включить-выключить."""
+    t = text.strip(" .?!,")
+    if not t:
+        return None
+
+    if _REGIME_DEL_RX.match(t):
+        cur = regime.active()
+        if not cur:
+            return "Удалять нечего: открытого режима нет, сэр.", []
+        _pending_set(channel, json.dumps({"op": "delete"}, ensure_ascii=False))
+        return f"Удалить режим **{cur['title']}** (с {cur['from_short']})? Цифры вернутся к общим. — да/нет", ["clarify"]
+
+    if _REGIME_APPLY_RX.match(t):
+        off = bool(re.search(r"\bне\b|выкл|отключ", t, re.I))
+        regime.set_apply(not off)
+        cur = regime.current()
+        if off:
+            return "Выключил: считаю по всем данным, сэр. Режим в истории останется.", ["set_regime"]
+        if not cur:
+            return ("Включил, но режима пока нет — цифры считаю как раньше. "
+                    "Скажите «я уезжаю в армию 28 октября», и заведу."), ["set_regime"]
+        return f"Включил: {regime.label(cur)} — пока режим не закроете, цифры будут по нему.", ["set_regime"]
+
+    m = _REGIME_SET_RX.match(t)
+    if m:
+        raw = m.group(1).strip(" .«»\"")
+        if not raw:
+            return "На что поменять режим, сэр? Например: «поменяй режим на командировку».", []
+        # «на командировку» → каноническое «командировка»; своё название оставляем как сказали
+        title = next((canon for canon, rx in _REGIME_WORDS if re.search(rx, raw, re.I)), raw[:60])
+        _pending_set(channel, json.dumps({"op": "rename", "title": title}, ensure_ascii=False))
+        cur = regime.active()
+        tail = f" (сейчас он «{cur['title']}»)" if cur else " (режима ещё нет — заведу новый)"
+        return f"Поменять режим на **{title}**{tail}? — да/нет", ["clarify"]
+
+    if _NOT_REGIME_RX.search(t):
+        return None   # календарь, задачи, дни рождения, подписки, долги — это не режим жизни
+
+    if _REGIME_BACK_RX.match(t) and not re.search(r"вернул\w*\s+долг", t, re.I) \
+            and (re.search(r"вернул", t, re.I) or _REGIME_ANY_RX.search(t)):
+        cur = regime.active()
+        if not cur:
+            return "Открытого режима нет, сэр — считаю как раньше.", []
+        when, _end, _rest = _regime_dates(t)
+        _pending_set(channel, json.dumps({"op": "close", "when": when.isoformat() if when else None}, ensure_ascii=False))
+        dd = f" {when:%d.%m}" if when else " сегодня"
+        return f"Закрыть режим **{cur['title']}**{dd}? Средние будут считаться по его периоду. — да/нет", ["clarify"]
+
+# ---- завести новый режим: нужно либо узнаваемое слово режима, либо дата рядом с глаголом
+    start, end, rest = _regime_dates(t)
+    has_word = bool(_REGIME_ANY_RX.search(t))
+    has_go = bool(_REGIME_GO_RX.search(t)) or (has_word and bool(_REGIME_MAYBE_RX.search(t)))
+    if not has_word and not (has_go and (start or end)):
+        return None
+    title = _regime_title(rest or t)
+    if not title or (title == "новый режим" and not (start or end)):
+        return None
+    _pending_set(channel, json.dumps({"op": "add", "title": title,
+                                      "start": start.date().isoformat() if start else None,
+                                      "end": end.date().isoformat() if end else None}, ensure_ascii=False))
+    when = f"с {start:%d.%m.%Y}" if start else "с сегодня"
+    tail = f" по {end:%d.%m.%Y}. — да/нет" if end else ", до? — да/нет"
+    return f"Заведу режим **{title}** {when}{tail}", ["clarify"]
+
+
 # ------------------------------------------------------------------ вход
 def run(text: str, channel: str) -> Result | None:
     t = text.strip()
     if not t or len(t) > 200:
         return None
+    r = _regime_confirm(t, channel)   # «да/нет» по отложенному режиму
+    if r:
+        return r
+    r = regimes(t, channel)
+    if r:
+        return r
     for fn in (smalltalk, balance_q, spent, agenda):
         r = fn(t)
         if r:
