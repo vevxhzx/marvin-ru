@@ -47,6 +47,15 @@ export const DICT = {
   'state.offline_sync': { ru: 'Последняя синхронизация', en: 'Last sync' },
   'state.offline_available': { ru: 'Офлайн доступно: задачи, заметки и расписание. Новое не отправится, пока не появится сеть.', en: 'Available offline: tasks, notes and the schedule. New entries will not sync until the network is back.' },
   'state.success_done': { ru: 'Готово', en: 'Done' },
+
+  // --- пустые состояния: задачи и календарь (волна экранов) ---
+  'tk.empty_none': { ru: 'Задач пока нет', en: 'No tasks yet' },
+  'tk.empty_none_sub': { ru: 'Добавьте первую — кнопкой сверху или одной строкой в поле ниже.', en: 'Add the first one — the button above, or one line in the field below.' },
+  'tk.empty_today_sub': { ru: 'На сегодня пусто. Дела без срока живут во вкладке «открытые».', en: 'Nothing for today. Tasks without a due date live under "open".' },
+  'tk.empty_done_sub': { ru: 'Закрытые задачи собираются здесь — их можно вернуть в работу.', en: 'Closed tasks collect here — you can send them back to work.' },
+  'cal.e_day': { ru: 'В этот день пусто', en: 'Nothing on this day' },
+  'cal.e_day_sub': { ru: 'Свободный день. Можно записать встречу — или оставить как есть.', en: 'A free day. Add a meeting — or leave it alone.' },
+  'cal.e_upcoming_sub': { ru: 'В календаре пока тихо. Встречи появятся здесь сами.', en: 'The calendar is quiet for now. Meetings will show up here.' },
   'common.cancel': { ru: 'Отмена', en: 'Cancel' },
   'common.yes': { ru: 'Да', en: 'Yes' },
   'common.no': { ru: 'Нет', en: 'No' },

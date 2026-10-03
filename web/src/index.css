@@ -179,8 +179,9 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .hero .hd small { color: var(--hero-ink-70); }
 .tag { display: inline-block; margin-top: 14px; padding: 5px 12px; border-radius: 999px; background: var(--hero-ink-12); font-size: var(--fs-md); font-weight: 500; box-shadow: inset 0 1px 0 var(--hero-ink-30); }
 .days { margin-top: var(--s-7); display: grid; grid-template-columns: repeat(30, 1fr); gap: 3px; }
-.days i { height: 22px; border-radius: 4px; background: var(--hero-ink-16); animation: fade 0.5s both; animation-delay: calc(1s + var(--k) * 30ms); }
-.days i.on { background: var(--hero-ink); box-shadow: 0 0 10px var(--hero-ink-45); }
+.days i { height: 22px; border-radius: 4px; background: var(--hero-ink-12); animation: fade 0.35s backwards; animation-delay: calc(90ms + var(--k) * 18ms); }
+/* заполненные д��и — плотность чернил, а не сплошной чёрный: на лайме кирпич выглядит грязно */
+.days i.on { background: color-mix(in srgb, var(--hero-ink) 58%, transparent); }
 .dl { margin-top: var(--s-2); font-size: var(--fs-xs); color: var(--hero-ink-72); display: flex; justify-content: space-between; }
 
 .chart {
@@ -216,7 +217,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .p1 .hd small, .p2 .hd small { color: inherit; opacity: 0.7; }
 .bars { display: flex; align-items: flex-end; gap: var(--s-2); height: 62px; margin-top: var(--s-6); }
 /* высота в процентах: без минимума «0» превращался в невидимую линию и график выглядел пустым */
-.bars i { flex: 1; min-height: 6px; border-radius: 8px; background: linear-gradient(180deg, currentColor, color-mix(in srgb, currentColor 45%, transparent)); height: max(var(--h), 6px); animation: rise 1.2s calc(1s + var(--k) * 80ms) var(--e) both; transform-origin: bottom; }
+.bars i { flex: 1; min-height: 6px; border-radius: 8px; background: linear-gradient(180deg, currentColor, color-mix(in srgb, currentColor 45%, transparent)); height: max(var(--h), 6px); animation: rise 0.45s calc(70ms + var(--k) * 40ms) var(--e) backwards; transform-origin: bottom; }
 .bars i.z { background: var(--sf2); color: var(--ink3); }
 .bl { display: flex; gap: var(--s-2); margin-top: 6px; font-size: var(--fs-xs); opacity: 0.78; }
 .bl span { flex: 1; text-align: center; }
@@ -2108,3 +2109,12 @@ html[data-pwa="standalone"] .app { padding-top: max(var(--safe-t), 12px); }
 html[data-pwa="standalone"] .gt { padding-top: max(var(--safe-t), 10px); }
 /* Отдельная страница приложения (если откроют без вкладок) тоже не должна уезжать под чёлку */
 html[data-pwa="standalone"] body { overscroll-behavior: none; }
+
+/* --- тач-экраны: переключатели и чипы тоже должны быть пальцем (S1/S2: было 32–36px) --- */
+@media (pointer: coarse) {
+  .seg > button,
+  .chip,
+  .chips > button,
+  .pl { min-height: var(--tap); }
+  .sg > button { min-height: var(--tap); }
+}
