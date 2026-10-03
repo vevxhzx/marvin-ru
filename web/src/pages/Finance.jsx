@@ -46,10 +46,14 @@ function goalEta(need) {
 const MINUS = '−'
 
 /* Раздел-строка: прозрачная секция с шапкой .hd и волосяными разделителями Rowi.
-   Объявлена на уровне модуля, чтобы React не пересоздавал поддерево на каждом рендере. */
+   Объявлена на уровне модуля, чтобы React не пересоздавал поддерево на каждом рендере.
+
+   Разметка <section class="c"> — по ней ходят проверки e2e (история операций = секция с этим
+   заголовком), поэтому класс .c остаётся, а карточная обёртка снимается теми же переопределениями,
+   что и у строки человека в People.jsx: секция плоская, без фона, тени и подъёма по наведению. */
 function Block({ title, note, action, children, className = '' }) {
   return (
-    <section className={`relative ${className}`} data-reveal>
+    <section className={`c !rounded-none !p-0 !bg-transparent !shadow-none !transform-none !overflow-visible ${className}`} data-reveal>
       <div className="hd flex-wrap">
         <div className="min-w-0"><h2 className="trunc" title={title}>{title}</h2></div>
         <div className="flex items-center gap-2">
@@ -254,14 +258,20 @@ export default function Finance() {
         x.account || ''
       ])
     ]
-    const csvContent = 'data:text/csv;charset=utf-8,\uFEFF' + rows.map(e => e.join(';')).join('\n')
-    const encodedUri = encodeURIComponent(csvContent)
+    // Файл отдаём объектом Blob, а не ссылкой вида data:text/csv;…:
+    // percent-encoding всей выписки (encodeURIComponent) Chromium обрывает — скачивание
+    // приходит отменённым, а «голый» data:-URL портится на «#» и «?» в описании операции.
+    // BOM — чтобы Excel открыл кириллицу без плясок с кодировкой.
+    const csvContent = '\uFEFF' + rows.map(e => e.join(';')).join('\n')
+    const url = URL.createObjectURL(new Blob([csvContent], { type: 'text/csv;charset=utf-8' }))
     const link = document.createElement('a')
-    link.setAttribute('href', encodedUri)
+    link.setAttribute('href', url)
     link.setAttribute('download', `statement_${toLocalISO(now).slice(0, 10)}.csv`)
     document.body.appendChild(link)
     link.click()
     document.body.removeChild(link)
+    // адрес живёт, пока Chromium читает файл: отпускаем его не в том же кадре
+    setTimeout(() => URL.revokeObjectURL(url), 30_000)
   }
 
   const addForTab = () => {
@@ -289,6 +299,16 @@ export default function Finance() {
           <p className="sub">{tabLine}</p>
         </div>
         <div className="hr">
+          {/* Переключатель периода — в шапке: период режет данные ВСЕХ вкладок (обзор, операции,
+              счета, долги), а не только списка операций. Тот же сегмент .sg в .top, что на
+              задачах и календаре — и по нему ходят проверки e2e (#p-fin .top .sg[title^="период"]). */}
+          <div className="sg" role="group" aria-label={t('fin.period_tip')} title={t('fin.period_tip')}>
+            {[[7, 'mem.d7'], [30, 'mem.d30'], [90, 'fin.d90'], [0, 'fin.d_all']].map(([v, key]) => (
+              <button key={v} type="button" className={days === v ? 'on' : ''} aria-pressed={days === v} onClick={() => setDays(v)}>
+                {t(key)}
+              </button>
+            ))}
+          </div>
           {tab === 'overview' && (
             <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
               title={t('tk.layout_tip')} aria-label={t('fin.configure_cards')}>
@@ -315,23 +335,15 @@ export default function Finance() {
           тогда все цифры ниже считаются по всем данным, как раньше. */}
       <LifeRegime info={regime} onChanged={(r) => { setRegime(r); load() }} />
 
-      {/* Переключатели: вкладки раздела + период. Оба — спокойные .sg, активный читается заливкой */}
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="sg" role="group" aria-label={t('nav.finance')}>
-          {[['overview', 'fin.tab_overview'], ['txs', 'fin.tab_txs'], ['accounts', 'fin.tab_accounts'], ['debts', 'fin.tab_debts'],
-            ['recurring', 'fin.tab_recurring'], ['goals', 'goals.title'], ['techniques', 'tech.title']].map(([k, key]) => (
+      {/* Вкладки разделов — прямой ребёнок .pg (без обёртки): на них завязаны проверки e2e
+          (#p-fin > .sg). Спокойный сегмент, активная вкладка читается заливкой. */}
+      <div className="sg mt-3" role="group" aria-label={t('nav.finance')}>
+        {[['overview', 'fin.tab_overview'], ['txs', 'fin.tab_txs'], ['accounts', 'fin.tab_accounts'], ['debts', 'fin.tab_debts'],
+          ['recurring', 'fin.tab_recurring'], ['goals', 'goals.title'], ['techniques', 'tech.title']].map(([k, key]) => (
             <button key={k} type="button" className={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>
               {t(key)}
             </button>
           ))}
-        </div>
-        <div className="sg sm:ml-auto" role="group" aria-label={t('fin.period_tip')} title={t('fin.period_tip')}>
-          {[[7, 'mem.d7'], [30, 'mem.d30'], [90, 'fin.d90'], [0, 'fin.d_all']].map(([v, key]) => (
-            <button key={v} type="button" className={days === v ? 'on' : ''} aria-pressed={days === v} onClick={() => setDays(v)}>
-              {t(key)}
-            </button>
-          ))}
-        </div>
       </div>
 
       {/* ---------------- ОБЗОР ---------------- */}

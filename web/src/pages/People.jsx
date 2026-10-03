@@ -216,6 +216,19 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
   )
 }
 
+/* Раздел карточки человека — с волосяной линией сверху. Объявлен на уровне модуля: если держать
+   такой компонент внутри PersonSheet, React видит новый тип компонента на каждом рендере и
+   пересоздаёт всё поддерево — а значит теряет состояние «сохранено» у следующего шага и любые
+   несохранённые правки при перерисовке шторки. */
+function Sec({ title, children }) {
+  return (
+    <section className="border-t py-4 first:border-t-0 first:pt-0" style={{ borderColor: 'var(--line)' }}>
+      {title && <div className="label mb-2">{title}</div>}
+      {children}
+    </section>
+  )
+}
+
 /* Карточка человека — шторка с разделами: контакт, следующий шаг, стадия клиента,
    деньги, заказы, теги. Правка полей контакта и создание нового человека — те же формы,
    что и раньше, просто разложены по разделам с волосяными линиями. */
@@ -264,13 +277,6 @@ function PersonSheet({ open, person, onClose, onDone, onDone2 }) {
       setSaving(false)
     }
   }
-
-  const Sec = ({ title, children }) => (
-    <section className="border-t py-4 first:border-t-0 first:pt-0" style={{ borderColor: 'var(--line)' }}>
-      {title && <div className="label mb-2">{title}</div>}
-      {children}
-    </section>
-  )
 
   return (
     <Sheet open={open} onClose={onClose} title={t(isNew ? 'people.new_title' : 'people.title')}
