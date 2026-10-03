@@ -1,9 +1,11 @@
 import { createPortal } from 'react-dom'
-import { useEffect, useState } from 'react'
-import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2, ChevronDown } from 'lucide-react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2, ChevronDown, X } from 'lucide-react'
 import { playChime } from '../lib/sound'
 import { api, relTime, kb } from '../lib/api'
-import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm } from '../components/ui'
+import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm, useSheetPresence, Pressable } from '../components/ui'
+import { useSheetDrag, SHEET_SNAPS, SNAP_RATIO } from '../lib/gestures'
+import { useMedia } from '../lib/motion'
 import { enableNotifications, disableNotifications, notifyEnabled, notifyState } from '../lib/notify'
 import { usePrefs, prefs as PREFS, ACCENTS, TINTS, FONT_SIZES, RADII, setPageAccent } from '../lib/prefs'
 import { SwatchRow } from '../components/ColorSwatches'
@@ -35,17 +37,28 @@ const GROUPS = [
   ['finance', T('st.g_finance'), ''],
   ['server', T('st.g_server'), ''],
 ]
-/* Категории — только из того, что реально есть в config.yaml и статусе. Ничего нового не выдумываем. */
+/* Подпись раздела в списке слева: тише названия, но читаемая (--ink-3, 12px) */
+const SN_SUB = { display: 'block', marginTop: 3, fontSize: 'var(--fs-xs)', fontWeight: 400, lineHeight: 1.35, color: 'var(--ink-3)' }
+/* Строка раздела на телефоне: те же цвета и воздух, что у .sn на десктопе, но во всю ширину экрана */
+const NAV_ITEM = (on) => ({
+  display: 'block', width: '100%', textAlign: 'left', textDecoration: 'none', cursor: 'pointer', border: 0,
+  padding: '13px 14px', borderRadius: 'var(--r-md)', fontWeight: 500, lineHeight: 1.25,
+  background: on ? 'var(--sf)' : 'transparent', color: on ? 'var(--ink)' : 'var(--ink2)',
+  transition: 'background var(--t-base)',
+})
+/* Категории — только из того, что реально есть в config.yaml и статусе. Ничего нового не выдумываем.
+   caps — ключи подписи под названием раздела в списке (короткая строка, собирается из
+   уже существующих ключей словаря, поэтому переводится вместе с интерфейсом). */
 const CATS = [
-  { id: 'general', label: T('st.g_general'), groups: ['owner', 'assistant', 'persona', 'finance', 'notifications'], extra: ['browser-notif', 'phone'] },
-  { id: 'look', label: T('st.g_look'), groups: [], extra: ['look'] },
-  { id: 'desktop', label: T('st.g_win'), groups: [], extra: ['desktop'] },
-  { id: 'freelance', label: T('st.g_freelance'), groups: [], extra: ['freelance', 'pomodoro'] },
-  { id: 'ai', label: T('st.g_brain'), groups: ['brain', 'brain.cloud'] },
-  { id: 'voice', label: T('st.g_voice2'), groups: ['voice', 'cards'], extra: ['organizer'] },
-  { id: 'memory', label: T('st.g_data'), groups: ['backup'], extra: ['data', 'cloud', 'english'] },
-  { id: 'integrations', label: T('st.g_integrations'), groups: ['telegram', 'google'] },
-  { id: 'system', label: T('st.g_system'), groups: ['server'], extra: ['status', 'diag'] },
+  { id: 'general', label: T('st.g_general'), caps: ['st.g_owner', 'st.g_assistant', 'st.g_notifications'], groups: ['owner', 'assistant', 'persona', 'finance', 'notifications'], extra: ['browser-notif', 'phone'] },
+  { id: 'look', label: T('st.g_look'), caps: ['st.theme_colour', 'st.lang_title'], groups: [], extra: ['look'] },
+  { id: 'desktop', label: T('st.g_win'), caps: ['st.open_window', 'st.no_bat2'], groups: [], extra: ['desktop'] },
+  { id: 'freelance', label: T('st.g_freelance'), caps: ['st.i_am_freelancer', 'st.freelance_weekly'], groups: [], extra: ['freelance', 'pomodoro'] },
+  { id: 'ai', label: T('st.g_brain'), caps: ['st.local_brain', 'st.g_cloud'], groups: ['brain', 'brain.cloud'] },
+  { id: 'voice', label: T('st.g_voice2'), caps: ['st.g_voice3', 'st.organise'], groups: ['voice', 'cards'], extra: ['organizer'] },
+  { id: 'memory', label: T('st.g_data'), caps: ['st.cloud_backups2', 'st.english'], groups: ['backup'], extra: ['data', 'cloud', 'english'] },
+  { id: 'integrations', label: T('st.g_integrations'), caps: ['st.tg_app5', 'st.g_gcal'], groups: ['telegram', 'google'] },
+  { id: 'system', label: T('st.g_system'), caps: ['st.logs', 'st.status'], groups: ['server'], extra: ['status', 'diag'] },
 ]
 
 export default function Settings({ health }) {
@@ -62,20 +75,43 @@ export default function Settings({ health }) {
   const [small, setSmall] = useState(null)   // результат проверки малой модели
   const [llm, setLlm] = useState(null)       // внешняя модель из .env (если сервер её умеет)
   const [pcBusy, setPcBusy] = useState(false) // идёт запуск/перезапуск voice.bat
-  // Ссылка вида /settings#<секция> открывает нужную секцию — и при прямом заходе, и при
+  // Ссылка вида /settings#<секция> открывает нужную раздел — и при прямом заходе, и при
   // переходе по якорю уже открытой страницы (hashchange). Без последнего повторный
   // переход на тот же адрес оставлял старую вкладку.
-  const [cat, setCat] = useState(() => (location.hash.replace('#', '') || localStorage.getItem('settings.cat') || 'general'))
+  const phone = useMedia('(max-width: 639px)')            // ниже — телефон: раздел едет в шторке
+  const known = (id) => CATS.some((c) => c.id === id)      // неизвестный якорь игнорируем
+  const [cat, setCat] = useState(() => {
+    const h = location.hash.replace('#', '')
+    return (h && known(h) ? h : null) || localStorage.getItem('settings.cat') || 'general'
+  })
+  /* Шторка раздела на телефоне: открыта сразу, если пришли по якорю (прямая ссылка
+     вида /settings#look из другого экрана), иначе — сначала список разделов. */
+  const [openSheet, setOpenSheet] = useState(() => {
+    const h = location.hash.replace('#', '')
+    return !!(h && CATS.some((c) => c.id === h))
+  })
   useEffect(() => {
     const onHash = () => {
       const id = location.hash.replace('#', '')
-      if (id && CATS.some((c) => c.id === id)) setCat(id)
+      if (!id || !known(id)) return
+      setCat(id)
+      setOpenSheet(true)     // тот же якорь второй раз — тоже открывает раздел
     }
     window.addEventListener('hashchange', onHash)
     onHash()
     return () => window.removeEventListener('hashchange', onHash)
   }, [])
-  const pick = (id) => { setCat(id); localStorage.setItem('settings.cat', id); history.replaceState(null, '', '#' + id); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  // поворот экрана с десктопа на телефон не должен прятать открытый раздел за списком
+  const wasPhone = useRef(phone)
+  useEffect(() => {
+    if (phone && !wasPhone.current) setOpenSheet(true)
+    wasPhone.current = phone
+  }, [phone])
+  const pick = (id) => {
+    setCat(id); localStorage.setItem('settings.cat', id); setOpenSheet(true)
+    history.replaceState(null, '', '#' + id)
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
 
   const load = () => Promise.all([api.settings().then(setData), api.status().then(setStatus),
     api.get('/api/llm').then(setLlm).catch(() => setLlm(null)),
@@ -131,11 +167,16 @@ export default function Settings({ health }) {
         {prefix === 'voice' && <VoicePicker show={show} />}
         {prefix === 'google' && <GoogleConnect show={show} dirty={dirty} />}
         {prefix === 'telegram' && <MiniApp current={val(items.find((it) => it.key === 'telegram.webapp_url')) || ''} onUse={(u) => setDraft((d) => ({ ...d, 'telegram.webapp_url': u }))} />}
-        <Card className="grid grid-cols-1 gap-5 md:grid-cols-2">
+        {/* настройки — спокойными строками: подпись слева, значение справа, между строками волосок */}
+        <div className="divide-y hair">
           {items.map((it) => <SettingField key={it.key} it={it} value={val(it)} onChange={(v) => setDraft((d) => ({ ...d, [it.key]: v }))} providers={status?.gemini?.providers} />)}
-          {prefix === 'brain.cloud' && <CloudHint prov={val(items.find((it) => it.key === 'brain.cloud.provider')) || 'gemini'} providers={status?.gemini?.providers} />}
-          {prefix === 'brain.cloud' && <CloudPreview />}
-        </Card>
+        </div>
+        {(prefix === 'brain.cloud') && (
+          <div className="mt-5 space-y-4">
+            <CloudHint prov={val(items.find((it) => it.key === 'brain.cloud.provider')) || 'gemini'} providers={status?.gemini?.providers} />
+            <CloudPreview />
+          </div>
+        )}
       </Section>
     )
   }
@@ -205,26 +246,26 @@ export default function Settings({ health }) {
     diag: <Diagnostics key="diag" status={status} diag={diag} onRefresh={load} />,
     phone: (
       <Section key="phone" title={t('st.phone')} hint={t('st.d_phone2')}>
+        <Why lines={[t('st.qr_only_pc'), t('st.new_key_desc2')]} />
         <PhoneAccess />
         <div className="mt-4"><InstallApp /></div>
       </Section>
     ),
     'browser-notif': (
       <Section key="bn" title={t('st.browser_notifications')} hint={t('st.d_browser_notif2')}>
-        <Card className="flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            {notifyEnabled() ? <Bell size={20} className="text-accent" /> : <BellOff size={20} className="faint" />}
-            <div>
-              <div className="h4">{notifyEnabled() ? t('st.on') : notif === 'denied' ? t('st.blocked') : notif === 'unsupported' ? t('st.unsupported') : t('st.off')}</div>
-              <div className="muted text-[13px]">{notif === 'denied' ? t('st.allow_hint') : t('st.browser_notif_desc')}</div>
+        <Why lines={[t('st.browser_notif_desc'), t('st.push_desc')]} />
+        <div className="divide-y hair">
+          <RowLine
+            icon={notifyEnabled() ? <Bell size={19} className="shrink-0 text-accent" /> : <BellOff size={19} className="faint shrink-0" />}
+            title={notifyEnabled() ? t('st.on') : notif === 'denied' ? t('st.blocked') : notif === 'unsupported' ? t('st.unsupported') : t('st.off')}
+            sub={notif === 'denied' ? t('st.allow_hint') : t('st.browser_notif_desc')}>
+            <div className="flex items-center gap-2">
+              <a className="btn-ghost" href="/manifest.webmanifest" target="_blank" rel="noreferrer" data-tip={t('st.pwa')}><Smartphone size={15} /> {t('st.to_phone')}</a>
+              <Switch on={notifyEnabled()} onChange={toggleNotif} label={notifyEnabled() ? t('st.on') : t('st.enable')} />
             </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <a className="btn-ghost" href="/manifest.webmanifest" target="_blank" rel="noreferrer" data-tip={t('st.pwa')}><Smartphone size={15} /> {t('st.to_phone')}</a>
-            <Switch on={notifyEnabled()} onChange={toggleNotif} label={notifyEnabled() ? t('st.on') : t('st.enable')} />
-          </div>
-        </Card>
-        <div className="mt-3"><PushToggle /></div>
+          </RowLine>
+          <PushToggle />
+        </div>
       </Section>
     ),
     data: (
@@ -252,6 +293,34 @@ export default function Settings({ health }) {
 
   const current = CATS.find((c) => c.id === cat) || CATS[0]
   const order = current.id === 'general' ? ['owner', 'assistant', 'persona', 'finance', 'browser-notif', 'notifications', 'phone'] : current.id === 'memory' ? ['backup', 'cloud', 'data', 'english'] : [...current.groups, ...(current.extra || [])]
+  const section = (
+    <div key={cat} className="st2 min-w-0">
+      {order.map((k) => extras[k] || groupBlock(GROUPS.find((g) => g[0] === k)))}
+    </div>
+  )
+  const caps = (c) => c.caps.map((k) => t(k)).join(' · ')
+  /* Список разделов. На десктопе — колонка .sn рядом с содержимым; на телефоне тот же
+     список занимает весь экран вертикальными строками: на узком экране .sn становится
+     горизонтальной лентой плашек, а здесь нужен вертикальный список на весь экран. */
+  const nav = (
+    <div className={phone ? 'sn-list r' : 'sn r'} style={{ '--i': 2, ...(phone ? { display: 'flex', flexDirection: 'column', gap: 6 } : null) }}>
+      {CATS.map((c) => {
+        const on = cat === c.id
+        return (
+          <a key={c.id} href={'#' + c.id} aria-current={on ? 'true' : undefined}
+            style={phone ? NAV_ITEM(on) : undefined} className={(on ? 'on' : '') + ' max-[639px]:!bg-transparent'}
+            onClick={(e) => { e.preventDefault(); pick(c.id) }}>
+            {/* название раздела и короткая подпись под ним — двумя строками, воздух сверху и снизу одинаковый */}
+            <span className="sn-t" style={{ display: 'block' }}>
+              {c.label}
+              {dirtyCats.has(c.id) && ' •'}
+            </span>
+            <span className="sn-s" style={SN_SUB}>{caps(c)}</span>
+          </a>
+        )
+      })}
+    </div>
+  )
 
   return (
     <div className="pg on" id="p-set">
@@ -276,22 +345,207 @@ export default function Settings({ health }) {
         </div>
       )}
 
-      <div className="set">
-        {/* категории */}
-        <div className="sn r" style={{ '--i': 2 }}>
-          {CATS.map((c) => (
-            <a key={c.id} className={cat === c.id ? 'on' : ''} onClick={() => pick(c.id)}>
-              {c.label}
-              {dirtyCats.has(c.id) && ' •'}
-            </a>
-          ))}
-        </div>
-        <div key={cat} className="st2 min-w-0">
-          {order.map((k) => extras[k] || groupBlock(GROUPS.find((g) => g[0] === k)))}
-        </div>
-      </div>
+      {phone
+        ? (
+          /* телефон: список разделов занимает экран, раздел открывается шторкой поверх него */
+          <>
+            {nav}
+            <SectionSheet open={openSheet} onClose={() => setOpenSheet(false)} title={current.label} sub={caps(current)}>
+              {section}
+            </SectionSheet>
+          </>
+        )
+        : (
+          /* десктоп: список слева, содержимое справа — обе колонки в рамках экрана */
+          <div className="set" style={{ gridTemplateColumns: 'minmax(210px, 250px) minmax(0, 1fr)', alignItems: 'start' }}>
+            {nav}
+            {section}
+          </div>
+        )}
 
       {dirty && createPortal(<div className="toast-in fixed inset-x-0 z-[70] flex justify-center md:bottom-8" style={{ bottom: 'calc(5.5rem + env(safe-area-inset-bottom, 0px))' }}><button className="btn-dark shadow-lg" disabled={saving} onClick={save}>{saving ? t('people.saving') : t('st.save_changes_n', { n: Object.keys(draft).length })}</button></div>, document.body)}
+    </div>
+  )
+}
+
+/* ---------- телефонная шторка раздела ----------
+
+   Механика ровно та же, что у шторки приложения: три снапа из lib/gestures
+   (28% / 52% / 92%), ручка, свайп с резиной, закрытие по скорости и по расстоянию,
+   шаг по точкам тапом по ручке, Esc. Высота = min(снап, max(контент, снап)), как в
+   components/ui.jsx#Sheet, и переход между высотами живёт в CSS — inline-transform
+   от свайпа его не перебивает.
+
+   Одно отличие от Sheet: содержимое остаётся внутри #root (Sheet рисуется порталом
+   в body). Так раздел остаётся частью страницы — его находит поиск по видимому тексту
+   и e2e-проверки, а список разделов под шторкой остаётся живым. */
+const SHEET_MOVE = 'transform var(--t-base) var(--ease-out), height var(--t-base) var(--ease-out), opacity var(--t-base) linear, filter var(--t-base) linear'
+
+/* Высота окна и зум из настроек: снапы считаем в тех же единицах, что и .sheet */
+function useVp() {
+  const read = () => {
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null
+    let z = 1
+    try {
+      const raw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--ui-zoom'))
+      if (Number.isFinite(raw) && raw > 0) z = raw
+    } catch { /* без вычисленных стилей — зум 1 */ }
+    return { h: (vv?.height || window.innerHeight || 800) / z, top: (vv?.offsetTop || 0) / z }
+  }
+  const [vp, setVp] = useState(read)
+  useEffect(() => {
+    const on = () => setVp(read())
+    window.addEventListener('resize', on)
+    window.addEventListener('orientationchange', on)
+    window.visualViewport?.addEventListener('resize', on)
+    return () => {
+      window.removeEventListener('resize', on)
+      window.removeEventListener('orientationchange', on)
+      window.visualViewport?.removeEventListener('resize', on)
+    }
+  }, [])
+  return vp
+}
+
+/* Точки прилипания снизу вверх — доли те же, что у шторки приложения */
+function useSnaps() {
+  const vp = useVp()
+  return useMemo(() => {
+    const avail = Math.max(240, vp.h - vp.top - 6)
+    const half = Math.round(Math.max(avail * SNAP_RATIO.half, 240))
+    const px = {
+      peek: Math.round(Math.min(Math.max(avail * SNAP_RATIO.peek, 132), half - 80)),
+      half,
+      full: Math.round(avail * SNAP_RATIO.full),
+    }
+    const list = SHEET_SNAPS.map((id) => px[id]).sort((a, b) => a - b)
+    return list.filter((v, i) => i === 0 || v - list[i - 1] > 24)
+  }, [vp.h, vp.top])
+}
+
+function SectionSheet({ open, onClose, title, sub, children }) {
+  const { t } = useI18n()
+  const [shown, closing] = useSheetPresence(open)
+  const snaps = useSnaps()
+  const [snap, setSnap] = useState(2)
+  const [contentH, setContentH] = useState(0)
+  const bodyRef = useRef(null)
+  const last = Math.max(0, snaps.length - 1)
+
+  /* высоту меряем по внутреннему блоку: сама шторка обрезана по max-height */
+  useLayoutEffect(() => {
+    const el = bodyRef.current
+    if (!open || !el) return undefined
+    const read = () => setContentH(el.scrollHeight)
+    read()
+    if (typeof ResizeObserver === 'undefined') return undefined
+    const ro = new ResizeObserver(read)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [open])
+
+  /* при открытии — самая высокая точка, в которую влезает содержимое (один раз за открытие) */
+  const picked = useRef(false)
+  useEffect(() => { if (open) picked.current = true }, [open])
+  useEffect(() => {
+    if (!open || !picked.current || !snaps.length || !contentH) return
+    picked.current = false
+    setSnap(contentH <= snaps[0] ? 0 : contentH <= (snaps[1] || snaps[0]) ? 1 : last)
+  }, [open, contentH, snaps, last])
+
+  /* пустого места снизу не появляется: короткий раздел не растягивается */
+  const at = Math.min(Math.max(snap, 0), last)
+  const snapH = snaps[at] ?? 0
+  const prevH = at > 0 ? (snaps[at - 1] || 0) : 0
+  const height = !snaps.length || !contentH ? undefined : Math.min(snapH, Math.max(contentH, prevH))
+
+  /* Esc и блокировка прокрутки страницы под шторкой. Ссылка на onClose в ref — эффект
+     зависит только от open и не пересоздаётся на каждом рендере родителя. */
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  useEffect(() => {
+    if (!open) return
+    const k = (e) => {
+      if (e.key !== 'Escape') return
+      // шторка поверх (Confirm из ui.jsx) — Esc закрывает только её, раздел остаётся открытым
+      if (document.querySelectorAll('.sheet-backdrop:not(.closing)').length > 1) return
+      closeRef.current()
+    }
+    window.addEventListener('keydown', k)
+    const lock = () => { if (document.body.style.overflow !== 'hidden') document.body.style.overflow = 'hidden' }
+    lock()
+    /* Confirm на своём закрытии снимает блокировку прокрутки — возвращаем свою: список
+       разделов под шторкой не должен ездить. Ловим уход порталов из body. */
+    let mo = null
+    if (typeof MutationObserver !== 'undefined') { mo = new MutationObserver(lock); mo.observe(document.body, { childList: true }) }
+    return () => {
+      window.removeEventListener('keydown', k)
+      if (mo) mo.disconnect()
+      /* разблокировка — после ухода шторки из DOM (useSheetPresence держит её ~240 мс),
+         и только если сверху не осталось другой шторки: та держит блокировку сама. */
+      const t = setTimeout(() => {
+        if (!document.querySelector('.sheet-backdrop:not(.closing)')) document.body.style.overflow = ''
+      }, 320)
+      return () => clearTimeout(t)
+    }
+  }, [open])
+
+  const drag = useSheetDrag({ open, onClose, snaps, snap, setSnap, height, phone: true })
+  if (!shown) return null
+  return (
+    <div className={`sheet-backdrop ${closing ? 'closing' : ''}`} onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div
+        role="dialog" aria-modal="true" aria-label={title}
+        data-snap={snaps.length ? String(at) : undefined}
+        className={`sheet ${drag.dragging ? 'sheet-dragging' : ''}`}
+        style={{
+          ...(height != null ? { height: `${height}px` } : null),
+          ...(drag.dy ? { transform: `translateY(${drag.dy}px)` } : null),
+          ...(drag.dragging ? null : { transition: SHEET_MOVE }),
+        }}>
+        <div className="sheet-grip" aria-hidden="true" {...drag.grip} />
+        <div className="mb-5 flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h3 className="h2">{title}</h3>
+            {sub && <div className="muted" style={{ marginTop: 4, fontSize: 'var(--fs-md)' }}>{sub}</div>}
+          </div>
+          <Pressable className="btn-icon shrink-0" onClick={onClose} aria-label={t('common.close')} title={t('common.close')} data-tip={t('common.close')}>
+            <X size={16} />
+          </Pressable>
+        </div>
+        <div ref={bodyRef} className="sheet-body">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+/* Пояснение перед блоком: что это, зачем и что будет, если выключить. Текст собран
+   только из уже существующих строк словаря — новых ключей страница не заводит.
+   Стоит под заголовком раздела, а не внутри коробки: читается до того, как человек
+   начал что-то жать. */
+function Why({ lines }) {
+  const list = (lines || []).filter(Boolean)
+  if (!list.length) return null
+  return (
+    <div style={{ marginBottom: 20, maxWidth: '64ch', color: 'var(--ink2)', fontSize: 'var(--fs-md)', lineHeight: 1.5 }}>
+      {list.map((l, i) => <p key={i} style={i ? { marginTop: 6 } : null}>{l}</p>)}
+    </div>
+  )
+}
+
+/* Строка блока настроек: слева подпись с пояснением, справа значение или переключатель.
+   Между строками — волосок из родительского divide-y hair, воздух сверху и снизу одинаковый. */
+function RowLine({ icon, title, sub, children, wide }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: wide ? 'wrap' : 'nowrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 0' }}>
+      <div className="flex min-w-0 items-center gap-3" style={wide ? { flexBasis: '100%' } : { flex: '1 1 0' }}>
+        {icon}
+        <div className="min-w-0">
+          <div className="h4">{title}</div>
+          {sub && <div className="muted mt-0.5" style={{ fontSize: '13px' }}>{sub}</div>}
+        </div>
+      </div>
+      <div style={wide ? { width: '100%' } : { flex: 'none', minWidth: 0 }}>{children}</div>
     </div>
   )
 }
@@ -379,12 +633,14 @@ function Appearance() {
             <span key={id} className={p.radius === id ? 'on' : ''} onClick={() => set({ radius: id })}>{label}</span>
           ))}
         </div>
-        <div className="hr" style={{ marginTop: '26px', justifyContent: 'space-between', flexWrap: 'nowrap' }}>
-          <div>
-            <b style={{ fontWeight: 600 }}>{t('st.animations')}</b><br/>
-            <span style={{ color: 'var(--ink2)', fontSize: '14px' }}>{t('st.animations_desc2')}</span>
+        {/* анимации — та же спокойная строка: подпись слева, переключатель справа */}
+        <div className="rule" style={{ marginTop: 22, marginBottom: 0 }} />
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 0' }}>
+          <div className="min-w-0">
+            <div style={{ fontWeight: 600, fontSize: '14px' }}>{t('st.animations')}</div>
+            <div className="muted mt-1" style={{ fontSize: 'var(--fs-xs)', lineHeight: 1.35 }}>{t('st.animations_desc2')}</div>
           </div>
-          <span className={`tgl ${p.motion ? '' : 'off'}`} onClick={toggleMotion}></span>
+          <Switch on={p.motion} onChange={toggleMotion} label={t('st.animations')} />
         </div>
       </section>
 
@@ -392,6 +648,7 @@ function Appearance() {
 
       {/* Язык интерфейса: тот же переключатель, что в шапке — состояние одно (lib/i18n.js) */}
       <div className="mb-6">
+        <Why lines={[t('st.lang_hint')]} />
         <div className="label mb-2">{t('st.lang_title')}</div>
         <div className="flex flex-wrap gap-2">
           {[['ru', t('st.lang_ru')], ['en', t('st.lang_en')]].map(([code, name]) => (
@@ -407,7 +664,6 @@ function Appearance() {
             </button>
           ))}
         </div>
-        <div className="faint mt-2 text-[12px]">{t('st.lang_hint')}</div>
       </div>
     </>
   )
@@ -426,34 +682,41 @@ function Freelance() {
   if (!p) return <Section title={t('st.freelance_mode')}><Skeleton h={160} /></Section>
   const save = (patch) => { const next = { ...p, ...patch }; setP(next); api.saveFreelance(patch).then((r) => { setP(r); bump(); window.dispatchEvent(new CustomEvent('freelance:changed', { detail: r })) }).catch(show.err) }
   const Row = ({ title, sub, k }) => (
-    <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">{title}</div><div className="muted text-[12.5px]">{sub}</div></div><Switch on={!!p[k]} onChange={(v) => save({ [k]: v })} /></div>
+    <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{title}</div><div className="muted text-[12.5px]">{sub}</div></div><Switch on={!!p[k]} onChange={(v) => save({ [k]: v })} /></div>
   )
+  const Slot = ({ children }) => <div className="py-4">{children}</div>
   return (
     <Section title={t('st.freelance_mode')} hint={t('st.freelance_desc2')}>
-      <Card className="space-y-5">
-        <div className="flex items-center justify-between gap-4"><div><div className="text-[15px] font-medium">{t('st.i_am_freelancer')}</div><div className="muted text-[12.5px]">{t('st.freelancer_hint')}</div></div><Switch on={p.enabled} onChange={(v) => save({ enabled: v })} /></div>
+      {/* строки с волоском между ними, а не коробка одинаковых плиток */}
+      <div className="divide-y hair">
+        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[15px] font-medium">{t('st.i_am_freelancer')}</div><div className="muted text-[12.5px]">{t('st.freelancer_hint')}</div></div><Switch on={p.enabled} onChange={(v) => save({ enabled: v })} /></div>
         {p.enabled && (
-          <div className="space-y-5 animate-rise">
-            <div className="rule" />
+          <>
             <Row k="late_nudge" title={t('st.watch_payments')} sub={t('st.watch_pay_desc')} />
             {p.late_nudge && (
-              <Block label={t('st.count_delay')} hint={p.late_days === 0 ? t('st.right_after') : t('st.days_after_handover', { n: p.late_days })}>
-                <input type="range" min={0} max={30} step={1} value={p.late_days} onChange={(e) => setP({ ...p, late_days: Number(e.target.value) })} onMouseUp={(e) => save({ late_days: Number(e.target.value) })} onTouchEnd={(e) => save({ late_days: Number(e.target.value) })} onKeyUp={(e) => save({ late_days: Number(e.target.value) })} className="range w-full" />
-              </Block>
+              <Slot>
+                <Block label={t('st.count_delay')} hint={p.late_days === 0 ? t('st.right_after') : t('st.days_after_handover', { n: p.late_days })}>
+                  <input type="range" min={0} max={30} step={1} value={p.late_days} onChange={(e) => setP({ ...p, late_days: Number(e.target.value) })} onMouseUp={(e) => save({ late_days: Number(e.target.value) })} onTouchEnd={(e) => save({ late_days: Number(e.target.value) })} onKeyUp={(e) => save({ late_days: Number(e.target.value) })} className="range w-full" />
+                </Block>
+              </Slot>
             )}
             <Row k="rate_check" title={t('st.rate_actual')} sub={t('st.rate_actual_desc')} />
             {p.rate_check && (
-              <Block label={t('st.nag_from')} hint={t('st.pct_over_estimate', { n: p.rate_tolerance })}>
-                <input type="range" min={10} max={100} step={5} value={p.rate_tolerance} onChange={(e) => setP({ ...p, rate_tolerance: Number(e.target.value) })} onMouseUp={(e) => save({ rate_tolerance: Number(e.target.value) })} onTouchEnd={(e) => save({ rate_tolerance: Number(e.target.value) })} onKeyUp={(e) => save({ rate_tolerance: Number(e.target.value) })} className="range w-full" />
-              </Block>
+              <Slot>
+                <Block label={t('st.nag_from')} hint={t('st.pct_over_estimate', { n: p.rate_tolerance })}>
+                  <input type="range" min={10} max={100} step={5} value={p.rate_tolerance} onChange={(e) => setP({ ...p, rate_tolerance: Number(e.target.value) })} onMouseUp={(e) => save({ rate_tolerance: Number(e.target.value) })} onTouchEnd={(e) => save({ rate_tolerance: Number(e.target.value) })} onKeyUp={(e) => save({ rate_tolerance: Number(e.target.value) })} className="range w-full" />
+                </Block>
+              </Slot>
             )}
-            <Block label={t('st.tax_on_orders')} hint={p.tax_percent ? t('st.tax_pct_hint', { n: p.tax_percent }) : t('st.dont_count')}>
-              <Seg value={String(p.tax_percent)} onChange={(v) => save({ tax_percent: Number(v) })} options={[['0', t('common.no')], ['4', t('st.vat4')], ['6', t('st.vat6')], ['13', '13 %']]} />
-            </Block>
+            <Slot>
+              <Block label={t('st.tax_on_orders')} hint={p.tax_percent ? t('st.tax_pct_hint', { n: p.tax_percent }) : t('st.dont_count')}>
+                <Seg value={String(p.tax_percent)} onChange={(v) => save({ tax_percent: Number(v) })} options={[['0', t('common.no')], ['4', t('st.vat4')], ['6', t('st.vat6')], ['13', '13 %']]} />
+              </Block>
+            </Slot>
             <Row k="weekly" title={t('st.freelance_weekly')} sub={t('st.freelance_weekly_desc')} />
-          </div>
+          </>
         )}
-      </Card>
+      </div>
     </Section>
   )
 }
@@ -466,38 +729,46 @@ function Pomodoro() {
   if (!p) return <Section title={t('st.pomodoro')}><Skeleton h={160} /></Section>
   const save = (patch) => { const next = { ...p, ...patch }; setP(next); api.savePomodoro(patch).then(setP).catch(show.err) }
   const num = (key, min, max, label, hint) => (
-    <Block label={label} hint={hint}>
-      <div className="flex items-center gap-2">
-        <input type="range" min={min} max={max} step={1} value={p[key]} onChange={(e) => setP({ ...p, [key]: Number(e.target.value) })} onMouseUp={(e) => save({ [key]: Number(e.target.value) })} onTouchEnd={(e) => save({ [key]: Number(e.target.value) })} onKeyUp={(e) => save({ [key]: Number(e.target.value) })} className="range flex-1" />
-        <span className="num w-[52px] text-right text-[13px] font-medium tabular-nums">{p[key]} мин</span>
-      </div>
-    </Block>
+    <div className="py-4">
+      <Block label={label} hint={hint}>
+        <div className="flex items-center gap-2">
+          <input type="range" min={min} max={max} step={1} value={p[key]} onChange={(e) => setP({ ...p, [key]: Number(e.target.value) })} onMouseUp={(e) => save({ [key]: Number(e.target.value) })} onTouchEnd={(e) => save({ [key]: Number(e.target.value) })} onKeyUp={(e) => save({ [key]: Number(e.target.value) })} className="range flex-1" />
+          <span className="num w-[52px] text-right text-[13px] font-medium tabular-nums">{p[key]} мин</span>
+        </div>
+      </Block>
+    </div>
   )
+  const Slot = ({ children }) => <div className="py-4">{children}</div>
   return (
     <Section title={t('st.pomodoro')} hint={t('st.pomodoro_desc2')}>
-      <Card className="space-y-5">
-        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
-          {num('focus', 5, 90, t('st.focus'))}
-          {num('short', 1, 30, t('st.short_break'))}
-          {num('long', 5, 60, t('st.long_break'))}
+      {/* строки с волоском между ними */}
+      <div className="divide-y hair">
+        {num('focus', 5, 90, t('st.focus'))}
+        {num('short', 1, 30, t('st.short_break'))}
+        {num('long', 5, 60, t('st.long_break'))}
+        <Slot>
           <Block label={t('st.long_break_every')} hint={p.long_every ? t('st.nth_tomato', { n: p.long_every }) : t('common.never')}>
             <Seg value={String(p.long_every)} onChange={(v) => save({ long_every: Number(v) })} options={[['0', t('common.never')], ['2', '2'], ['3', '3'], ['4', '4'], ['6', '6']]} />
           </Block>
-        </div>
-        <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">{t('st.break_alone2')}</div><div className="muted text-[12.5px]">{t('st.auto_break_hint')}</div></div><Switch on={p.auto_break} onChange={(v) => save({ auto_break: v })} /></div>
-        <Block label={t('st.sound_done')} hint={t('st.here_and_pc')}>
-          <div className="flex flex-wrap items-center gap-3">
-            <Seg value={p.sound} onChange={(v) => { save({ sound: v }); if (v !== 'off') playChime(v, p.volume) }} options={POMO_SOUNDS} />
-            {p.sound !== 'off' && <button type="button" className="btn-ghost btn-sm" onClick={() => playChime(p.sound, p.volume)}><Volume2 size={13} /> {t('st.listen')}</button>}
-          </div>
-        </Block>
-        {p.sound !== 'off' && (
-          <Block label={t('st.volume')} hint={`${Math.round(p.volume * 100)}%`}>
-            <input type="range" min={0.1} max={1} step={0.05} value={p.volume} onChange={(e) => setP({ ...p, volume: Number(e.target.value) })} onMouseUp={(e) => { save({ volume: Number(e.target.value) }); playChime(p.sound, Number(e.target.value)) }} onTouchEnd={(e) => save({ volume: Number(e.target.value) })} className="range w-full" />
+        </Slot>
+        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{t('st.break_alone2')}</div><div className="muted text-[12.5px]">{t('st.auto_break_hint')}</div></div><Switch on={p.auto_break} onChange={(v) => save({ auto_break: v })} /></div>
+        <Slot>
+          <Block label={t('st.sound_done')} hint={t('st.here_and_pc')}>
+            <div className="flex flex-wrap items-center gap-3">
+              <Seg value={p.sound} onChange={(v) => { save({ sound: v }); if (v !== 'off') playChime(v, p.volume) }} options={POMO_SOUNDS} />
+              {p.sound !== 'off' && <button type="button" className="btn-ghost btn-sm" onClick={() => playChime(p.sound, p.volume)}><Volume2 size={13} /> {t('st.listen')}</button>}
+            </div>
           </Block>
+        </Slot>
+        {p.sound !== 'off' && (
+          <Slot>
+            <Block label={t('st.volume')} hint={`${Math.round(p.volume * 100)}%`}>
+              <input type="range" min={0.1} max={1} step={0.05} value={p.volume} onChange={(e) => setP({ ...p, volume: Number(e.target.value) })} onMouseUp={(e) => { save({ volume: Number(e.target.value) }); playChime(p.sound, Number(e.target.value)) }} onTouchEnd={(e) => save({ volume: Number(e.target.value) })} className="range w-full" />
+            </Block>
+          </Slot>
         )}
-        <div className="flex items-center justify-between gap-4"><div><div className="text-[14px] font-medium">{t('live.speak')}</div><div className="muted text-[12.5px]">{t('st.speak_hint')}</div></div><Switch on={p.voice} onChange={(v) => save({ voice: v })} /></div>
-      </Card>
+        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{t('live.speak')}</div><div className="muted text-[12.5px]">{t('st.speak_hint')}</div></div><Switch on={p.voice} onChange={(v) => save({ voice: v })} /></div>
+      </div>
     </Section>
   )
 }
@@ -823,6 +1094,7 @@ function CloudBackups({ show }) {
   return (
     <Section title={t('st.cloud_backups')} hint={t('st.d_cloud_backup2')}
       action={<button className="btn-icon outlined" data-tip={t('common.retry')} onClick={load} disabled={!!busy} aria-label={t('st.refresh')}><RefreshCw size={14} /></button>}>
+      <Why lines={[t('st.cloud_off_hint'), t('st.d_backups')]} />
       <Card className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -1000,7 +1272,7 @@ function CloudHint({ prov, providers }) {
   const { t } = useI18n()
   const [text, url, steps] = PROV_HINT[prov] || PROV_HINT.custom
   return (
-    <div className="md:col-span-2 rounded-2xl fill px-4 py-3 text-[13px] leading-relaxed">
+    <div className="rounded-2xl fill px-4 py-3 text-[13px] leading-relaxed">
       <div>{text}</div>
       {steps && <div className="muted mt-1">{t('st.how_to_key5')} {steps}</div>}
       {url && <a className="text-accent mt-1 inline-block" href={url} target="_blank" rel="noreferrer">{t('st.open_keys2')}</a>}
@@ -1021,7 +1293,7 @@ function CloudPreview() {
     api.post('/api/cloud/preview', { text }).then(setRes).catch(() => setRes(null)).finally(() => setBusy(false))
   }
   return (
-    <div className="md:col-span-2 rounded-2xl fill px-4 py-3">
+    <div className="rounded-2xl fill px-4 py-3">
       <div className="label">{t('st.what_goes')}</div>
       <div className="faint mt-1 text-[12.5px]">{t('st.preview_hint2')}</div>
       <textarea className="input mt-2 w-full" rows={2} value={text} onChange={(e) => setText(e.target.value)}
@@ -1042,45 +1314,63 @@ function CloudPreview() {
   )
 }
 
+/* Строка настройки: подпись слева, значение или переключатель справа. Между строками —
+   волосок (--line) из родительского divide-y hair, сверху и снизу одинаковый воздух,
+   к краям ничего не прилипает. wide — для широких управлений (сегмент с шестью
+   вариантами, поле + поле): подпись остаётся, управление уходит на свою строку. */
+function SRow({ label, hint, wide, children }) {
+  return (
+    <div style={{ display: 'flex', flexWrap: wide ? 'wrap' : 'nowrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, padding: '14px 0' }}>
+      <div className="min-w-0" style={wide ? { flexBasis: '100%' } : { flex: '1 1 0' }}>
+        <div className="label">{label}</div>
+        {hint && <div className="faint mt-1" style={{ fontSize: 'var(--fs-xs)', lineHeight: 1.35 }}>{hint}</div>}
+      </div>
+      <div style={wide ? { width: '100%' } : { flex: 'none', minWidth: 0, maxWidth: '58%' }}>{children}</div>
+    </div>
+  )
+}
+
+/* Одна настройка из config.yaml. Раскладка строки одинаковая для всех типов: переключатель,
+   сегмент или поле — справа от подписи. */
 function SettingField({ it, value, onChange, providers }) {
   const { t } = useI18n()
   const [reveal, setReveal] = useState(false)
   if (it.key === 'brain.cloud.provider') {
-    return <Field label={t('st.provider')}><Seg value={value || 'gemini'} onChange={onChange} options={['openrouter', 'groq', 'nvidia', 'deepseek', 'gemini', 'custom'].map((p) => [p, PROV_LABELS[p]])} /></Field>
+    return <SRow wide label={t('st.provider')}><Seg value={value || 'gemini'} onChange={onChange} options={['openrouter', 'groq', 'nvidia', 'deepseek', 'gemini', 'custom'].map((p) => [p, PROV_LABELS[p]])} /></SRow>
   }
   if (it.type === 'bool') {
     return (
-      <Field label={it.label}>
-        <Seg value={value ? 'on' : 'off'} onChange={(v) => onChange(v === 'on')} options={[['on', t('common.yes')], ['off', t('common.no')]]} />
-      </Field>
+      <SRow label={it.label}>
+        <Switch on={!!value} onChange={onChange} label={it.label} />
+      </SRow>
     )
   }
   if (it.key === 'brain.mode') {
-    return <Field label={it.label}><Seg value={value} onChange={onChange} options={[['local', t('st.local_only')], ['hybrid', t('st.hybrid')], ['cloud', t('st.g_cloud')]]} /></Field>
+    return <SRow label={it.label}><Seg value={value} onChange={onChange} options={[['local', t('st.local_only')], ['hybrid', t('st.hybrid')], ['cloud', t('st.g_cloud')]]} /></SRow>
   }
   if (it.key === 'brain.sorter.where') {
-    return <Field label={t('st.lists')} hint={t('st.lists_desc')}><Seg value={value || 'cloud'} onChange={onChange} options={[['cloud', t('st.g_cloud')], ['auto', t('st.pc_fallback')], ['local', t('st.pc_only')]]} /></Field>
+    return <SRow label={t('st.lists')} hint={t('st.lists_desc')}><Seg value={value || 'cloud'} onChange={onChange} options={[['cloud', t('st.g_cloud')], ['auto', t('st.pc_fallback')], ['local', t('st.pc_only')]]} /></SRow>
   }
   if (it.key === 'brain.ollama.small_model') {
     const presets = [['', t('st.off_main')], ['qwen2.5:1.5b', t('st.m_15')], ['qwen2.5:3b', t('st.m_3b')], ['gemma3:1b', t('st.m_gemma')]]
     return (
-      <Field label={t('st.small_model_desc')} hint={t('st.small_model_desc3')}>
+      <SRow wide label={t('st.small_model_desc')} hint={t('st.small_model_desc3')}>
         <Seg value={presets.some(([v]) => v === (value || '')) ? (value || '') : '__custom'} onChange={(v) => v !== '__custom' && onChange(v)} options={[...presets, ['__custom', t('st.custom')]]} />
         <input className="input mt-2" value={value ?? ''} onChange={(e) => onChange(e.target.value)} placeholder={t('st.model_name')} />
-      </Field>
+      </SRow>
     )
   }
   if (it.key === 'brain.vision.where') {
-    return <Field label={t('st.sees_images')}><Seg value={value || 'auto'} onChange={onChange} options={[['auto', t('st.pc_fallback')], ['cloud', t('st.g_cloud')], ['local', t('st.pc_only')]]} /></Field>
+    return <SRow label={t('st.sees_images')}><Seg value={value || 'auto'} onChange={onChange} options={[['auto', t('st.pc_fallback')], ['cloud', t('st.g_cloud')], ['local', t('st.pc_only')]]} /></SRow>
   }
   return (
-    <Field label={it.label} hint={it.secret ? (it.set ? t('st.saved_replace') : t('st.not_set2')) : undefined}>
+    <SRow label={it.label} hint={it.secret ? (it.set ? t('st.saved_replace') : t('st.not_set2')) : undefined}>
       <div className="relative">
         <input className="input pr-10" type={it.secret && !reveal ? 'password' : 'text'} inputMode={it.type === 'int' ? 'numeric' : undefined}
           value={it.secret && value === it.value ? '' : (value ?? '')} onChange={(e) => onChange(e.target.value)} placeholder={it.secret && it.set ? it.value : ''} autoComplete="off" />
         {it.secret && <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 faint" onClick={() => setReveal((v) => !v)}>{reveal ? <EyeOff size={15} /> : <Eye size={15} />}</button>}
       </div>
-    </Field>
+    </SRow>
   )
 }
 
@@ -1261,6 +1551,8 @@ function Diagnostics({ status, diag, onRefresh }) {
           <ChevronDown size={15} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .18s' }} />
         </button>
       </>}>
+      {/* раздел не выключается — поясняем, что показываем и откуда берём */}
+      <Why lines={[t('st.errs_in_memory2')]} />
       {!open ? null : !status ? <ListSkeleton n={4} /> : (
         <div className="space-y-3">
           {/* версии и база */}
@@ -1419,19 +1711,15 @@ function PushToggle() {
 
   const [title, hint] = PUSH_TEXT[state] || PUSH_TEXT.off
   return (
-    <Card className="flex flex-wrap items-center justify-between gap-4">
-      <div className="flex items-center gap-3">
-        {state === 'on' ? <Bell size={20} className="text-accent" /> : <BellOff size={20} className="faint" />}
-        <div>
-          <div className="h4">{busy ? t('st.subscribing') : title}</div>
-          <div className="muted text-[13px]">{hint}</div>
-        </div>
-      </div>
+    <RowLine
+      icon={state === 'on' ? <Bell size={19} className="shrink-0 text-accent" /> : <BellOff size={19} className="faint shrink-0" />}
+      title={busy ? t('st.subscribing') : title}
+      sub={hint}>
       <div className="flex items-center gap-3">
         {state === 'pending' && <span className="faint text-[12px]">{t('st.push_404')}</span>}
         <Switch on={state === 'on'} onChange={toggle} label={t('st.push_sub')} />
       </div>
-    </Card>
+    </RowLine>
   )
 }
 
@@ -1497,6 +1785,7 @@ function English() {
   return (
     <Section title={t('st.english')} hint={t('st.d_en2')}
       action={<button className="btn-icon outlined" data-tip={t('common.retry')} aria-label={t('st.refresh')} disabled={!!busy} onClick={() => load().catch(() => {})}><RefreshCw size={14} /></button>}>
+      <Why lines={[t('st.gen_off_desc2')]} />
       <Card className="space-y-5">
         <div>
           <div className="mb-2 flex items-baseline justify-between gap-3">

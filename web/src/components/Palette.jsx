@@ -5,11 +5,15 @@ import { useNavigate } from 'react-router-dom'
 import { Clapperboard, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings, Search, MessageCircle, Plus, Moon, Sun, Monitor, Undo2, Gamepad2, BarChart3, Coins, Flame, History, Link2, FileText, CornerDownLeft, Briefcase, Timer, Target, Users, Share2 } from 'lucide-react'
 import { api, kb, kbAlt } from '../lib/api'
 import { renderMd } from './Chat'
+import { Empty } from './ui'
 import { useI18n, t as T } from '../lib/i18n'
 
 /* ⌘K — командная палитра: страницы, действия, поиск по Мозгу; всё остальное — фраза ассистенту.
    Fuzzy-поиск (подпоследовательность + вхождение), категории, недавние в localStorage, полная навигация с клавиатуры.
    label/hint — ключи словаря: подписи переключаются вместе с языком.
+   Поверхность — обычная elevated-карточка (--surface-2 + --line): спокойно в обеих темах; подложка —
+   затемнение из токена фона. Строки — --tap, анимируется только transform/opacity (rise/fade),
+   уважается prefers-reduced-motion (общее правило в index.css).
    Строки в run()/ctx.send() — это фразы для ЯДРА, они остаются на русском (i18n-raw). */
 const PAGES = [
   { id: 'p-today', label: 'pal.today', icon: Sparkles, to: '/', get kbd() { return kbAlt('1') } },
@@ -132,40 +136,46 @@ export default function Palette({ open, onClose, openChat, setTheme }) {
   if (!open) return null
   let lastGroup = null
   return createPortal(
-    <div className="fixed inset-0 z-[90] flex items-start justify-center px-3 pt-[calc(10vh/var(--ui-zoom))] sm:pt-[calc(14vh/var(--ui-zoom))]" onMouseDown={(e) => e.target === e.currentTarget && onClose()} style={{ background: 'rgba(10,10,12,.32)', animation: 'fade .16s ease-out' }}>
-      <div className="elevated w-full max-w-[600px] overflow-hidden" style={{ animation: 'rise .22s var(--ease-out)' }} role="dialog" aria-label={t('pal.aria')}>
-        <div className="flex items-center gap-3 border-b hair px-4">
-          <Search size={16} className="faint shrink-0" />
-          <input ref={inp} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('pal.ph')} className="h-[52px] w-full bg-transparent text-[15.5px] outline-none placeholder:text-[var(--ink-3)]" />
-          <span className="kbd">esc</span>
+    <div className="fixed inset-0 flex items-start justify-center px-3 pt-[calc(10vh/var(--ui-zoom))] sm:pt-[calc(14vh/var(--ui-zoom))]"
+      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
+      style={{ zIndex: 'var(--z-scrim)', background: 'color-mix(in srgb, var(--bg) 40%, rgba(8, 8, 12, .46))', animation: 'fade .16s ease-out' }}>
+      <div className="elevated flex max-h-[86dvh] w-full max-w-[600px] flex-col overflow-hidden" style={{ animation: 'rise .22s var(--ease-out)' }}
+        role="dialog" aria-modal="true" aria-label={t('pal.aria')}>
+        <div className="hair flex items-center gap-3 border-b px-4">
+          <Search size={16} className="faint shrink-0" aria-hidden="true" />
+          <input ref={inp} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('pal.ph')} aria-label={t('pal.ph')}
+            className="w-full bg-transparent outline-none placeholder:text-[var(--ink-3)]" style={{ height: 52, fontSize: 'var(--fs-base)' }} />
+          <span className="kbd" aria-hidden="true">esc</span>
         </div>
         {(answer || busy) && (
-          <div className="border-b hair px-4 py-3 text-[14px] leading-relaxed animate-rise">
-            {busy ? <span className="muted flex items-center gap-2 text-[13px]"><span className="thinking flex items-center gap-1 text-accent"><span /><span /><span /></span> {t('chat.thinking')}</span>
+          <div className="hair animate-rise border-b px-4 py-3" style={{ fontSize: 'var(--fs-base)', lineHeight: 'var(--lh-body)' }}>
+            {busy ? <span className="muted flex items-center gap-2" style={{ fontSize: 'var(--fs-md)' }}><span className="thinking flex items-center gap-1 text-accent"><span /><span /><span /></span> {t('chat.thinking')}</span>
               : <div className="md whitespace-pre-wrap">{renderMd(String(answer).replace(/\s*(⚡|🧠|☁️)\s*$/u, ''))}</div>}
           </div>
         )}
-        <div ref={list} className="scroll-thin max-h-[calc(50vh/var(--ui-zoom))] overflow-y-auto py-1.5">
+        <div ref={list} className="scroll-thin min-h-0 flex-1 overflow-y-auto py-1.5">
           {items.map((it, i) => {
             const I = it.icon
             const head = it.group !== lastGroup ? (lastGroup = it.group, t(GROUP[it.group])) : null
             return (
               <div key={it.id}>
-                {head && <div className="label px-4 pb-1 pt-2.5 !text-[10px]">{head}</div>}
-                <button data-i={i} onMouseMove={() => sel !== i && setSel(i)} onClick={() => run(it)}
-                  className={`mx-1.5 flex w-[calc(100%-12px)] items-center gap-3 rounded-lg px-2.5 py-2 text-left transition-colors ${i === sel ? 'fill' : ''}`} style={i === sel ? { background: 'var(--fill)' } : {}}>
-                  <span className={`grid h-6 w-6 shrink-0 place-items-center rounded-md ${i === sel ? 'text-accent' : 'muted'}`}><I size={15} /></span>
-                  <span className="min-w-0 flex-1 truncate text-[14px]">{it.label}</span>
-                  {it.kbd ? <span className="kbd">{it.kbd}</span> : <span className="faint text-[11px]">{it.hint}</span>}
-                  {i === sel && <CornerDownLeft size={12} className="faint" />}
+                {head && <div className="label px-4 pb-1 pt-2.5">{head}</div>}
+                <button type="button" data-i={i} onMouseMove={() => sel !== i && setSel(i)} onClick={() => run(it)} title={it.label}
+                  aria-selected={i === sel}
+                  className={`mx-1.5 flex min-h-[var(--tap)] w-[calc(100%-12px)] items-center gap-3 rounded-xl px-2.5 text-left transition-colors ${i === sel ? 'fill' : ''}`}>
+                  <span aria-hidden="true" className={`grid h-6 w-6 shrink-0 place-items-center rounded-md ${i === sel ? 'text-accent' : 'muted'}`}><I size={15} /></span>
+                  <span className="min-w-0 flex-1 truncate" style={{ fontSize: 'var(--fs-base)' }}>{it.label}</span>
+                  {it.kbd ? <span className="kbd shrink-0">{it.kbd}</span> : <span className="faint shrink-0 truncate" style={{ fontSize: 'var(--fs-xs)' }}>{it.hint}</span>}
+                  {i === sel && <CornerDownLeft size={12} className="faint shrink-0" aria-hidden="true" />}
                 </button>
               </div>
             )
           })}
-          {!items.length && <div className="faint px-4 py-6 text-center text-[13px]">{t('pal.nothing')}</div>}
+          {!items.length && <Empty compact glyph="search" text={t('pal.nothing')} />}
         </div>
-        <div className="faint flex items-center justify-between border-t hair px-4 py-2 text-[11px]">
-          <span><span className="kbd">↑↓</span> {t('pal.pick')} · <span className="kbd">↵</span> {t('pal.run')} · <span className="kbd">tab</span> {t('pal.next')}</span><span className="kbd">⌘K</span>
+        <div className="faint hair flex items-center justify-between gap-3 border-t px-4 py-2" style={{ fontSize: 'var(--fs-xs)' }}>
+          <span className="truncate"><span className="kbd">↑↓</span> {t('pal.pick')} · <span className="kbd">↵</span> {t('pal.run')} · <span className="kbd">tab</span> {t('pal.next')}</span>
+          <span className="kbd shrink-0">{kb('K')}</span>
         </div>
       </div>
     </div>, document.body)
