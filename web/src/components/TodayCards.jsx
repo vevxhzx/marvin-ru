@@ -219,6 +219,7 @@ export function HabitsWidget({ streak }) {
 /* ---------- «ближайшее дело»: следующая встреча/задача и свободное окно до неё ---------- */
 export function NextUpWidget({ events, tasks, onOpen }) {
   const { t } = useI18n()
+  const fmt = useNumFormats()
   const now = new Date()
   const big = useBigSize('var(--hero-fs-2)')
   const items = []
