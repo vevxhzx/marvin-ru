@@ -54,41 +54,32 @@ from datetime import datetime, timedelta
 import pytest
 
 os.environ.setdefault("ASSISTANT_TEST", "1")
-# Часовой пояс владельца в тестах = часовой пояс машины, на которой идёт прогон.
-# Иначе на CI (UTC) вечером «сегодня» в продукте (Europe/Moscow) и в тесте расходится
-# на сутки: продукт уже считает новый день, а тест ещё ждёт старый.
-os.environ.setdefault("JARVIS_OWNER_TIMEZONE", "")  # подсказка для наладки, см. фикстуру ниже
 
 from dateutil.relativedelta import relativedelta  # noqa: E402
 from sqlalchemy import event  # noqa: E402
 from sqlmodel import create_engine, select  # noqa: E402
 
-import pathlib  # noqa: E402
-import tempfile as _tf  # noqa: E402
+import pytest as _pytest  # noqa: E402
+
+from core.brain import dates as _dates  # noqa: E402
 
 
-def _pin_local_timezone():
-    """Временный config.yaml, где timezone владельца = локальный пояс машины.
-
-    Продукт считает «сегодня» в часовом поясе владельца; тест ожидает дату по локальному
-    времени. Чтобы обе стороны считали одинаково, в тестах они приравниваются к поясу машины.
-    """
+def _local_tz_name() -> str:
     import datetime as _dt
-    import yaml as _yaml
 
-    local = _dt.datetime.now().astimezone().tzinfo
-    name = getattr(local, "key", None) or str(local)
-    src = pathlib.Path(__file__).resolve().parent.parent / "config.example.yaml"
-    data = _yaml.safe_load(src.read_text(encoding="utf-8")) or {}
-    data.setdefault("owner", {})["timezone"] = name
-    tmp = _tf.mkdtemp(prefix="golden-tz-")
-    cfg = pathlib.Path(tmp) / "config.yaml"
-    cfg.write_text(_yaml.safe_dump(data, allow_unicode=True), encoding="utf-8")
-    os.environ["JARVIS_CONFIG"] = str(cfg)
-    return cfg
+    tz = _dt.datetime.now().astimezone().tzinfo
+    return getattr(tz, "key", None) or str(tz)
 
 
-_pin_local_timezone()
+@_pytest.fixture(autouse=True)
+def _pin_local_timezone(monkeypatch):
+    """Продукт считает «сегодня» в часовом поясе владельца, набор ждёт локальную дату.
+
+    На CI (часовой пояс машины — UTC) вечером эти две даты расходились на сутки.
+    Здесь оба считают в поясе машины; патч локальный для этого набора и снимается после теста.
+    """
+    monkeypatch.setattr(_dates, "TZ", _local_tz_name(), raising=False)
+
 
 from core import db  # noqa: E402
 from core.brain.dates import parse_amount, parse_datetime, parse_datetime_ex, task_due  # noqa: E402
