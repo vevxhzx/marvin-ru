@@ -6,9 +6,11 @@ import { rgbOf, lumOf, mixHex, fitAccentInk } from './color'
 export { lumOf } // обратная совместимость: раньше lumOf жил здесь
 
 /* Акценты: пара light/dark на каждый, чтобы контраст держался в обеих темах. hue — для «фон в тон».
-   label — ключ словаря (см. lib/i18n.js), а не готовый текст: подписи переключаются вместе с языком. */
+   label — ключ словаря (см. lib/i18n.js), а не готовый текст: подписи переключаются вместе с языком.
+   Синий — акцент макета-основы (#3458f5 в светлой теме, поднятый до #5a85fa в тёмной:
+   на почти чёрном фоне прямой #3458f5 даёт 3.3:1, а поднятый — 5.3:1). */
 export const ACCENTS = {
-  blue: { label: 'accent.blue', light: '#0a2bff', dark: '#3b5bff', hue: 230 },
+  blue: { label: 'accent.blue', light: '#3458f5', dark: '#5f83ff', hue: 230 },
   black: { label: 'accent.graphite', light: '#111111', dark: '#f2f2f0', ink: { dark: '#0e0e0d' }, hue: 0, mono: true },
   indigo: { label: 'accent.indigo', light: '#3730a3', dark: '#818cf8', hue: 243 },
   violet: { label: 'accent.violet', light: '#6d28d9', dark: '#a78bfa', hue: 262 },
@@ -37,7 +39,7 @@ export const RADII = { soft: ['radius.soft', 1], sharp: ['radius.sharp', 0.45], 
 
 const KEY = 'ui.prefs.v1'
 export const DEFAULTS = {
-  accent: 'blue', accentHex: '#0a3cff', tint: 'neutral', font: 'md', radius: 'soft', motion: true, compactNav: false,
+  accent: 'blue', accentHex: '#3458f5', tint: 'neutral', font: 'md', radius: 'soft', motion: true, compactNav: false,
   address: '', // как обращаться: пусто — берём из настроек ядра («сэр»)
   hiddenNav: [], // скрытые разделы в боковой панели (кроме «сегодня» и «настройки»)
   tabbar: ['/', '/tasks', '/finance', '/mind'], // нижняя панель телефона (4 раздела + «Ещё»)
@@ -109,15 +111,17 @@ export function hexHsl(hex) {
 }
 /* Акцент должен читаться и в светлой, и в тёмной теме: слишком светлый — притемняем, слишком тёмный — осветляем.
    В тёмной теме осветляем к светлому, но фирменному синему подмешиваем голубой, а не белый:
-   белый давал сиреневый подтон, и «синий» читался как фиолетовый. Светлая тема не меняется. */
+   белый давал сиреневый подтон, и «синий» читался как фиолетовый. Светлая тема не меняется.
+   Базовые стопы — из макета-основы (#3458f5 в светлой); в тёмной из него же получается
+   поднятый #5a85fa — на почти чёрном фоне этого достаточно для 4.5:1. */
 export function accentFor(hex, dark) {
-  const base = /^#[0-9a-f]{6}$/i.test(String(hex)) ? hex : '#0a3cff'
+  const base = /^#[0-9a-f]{6}$/i.test(String(hex)) ? hex : '#3458f5'
   const L = lumOf(base)
   /* синие варианты акцента (свотч «синий» и пара из ACCENTS.blue) — подмешиваем голубой */
-  const lift = /^#(0a3cff|0a2bff|3b5bff)$/i.test(base) ? '#7fb2ff' : '#ffffff'
+  const lift = /^#(3458f5|0a3cff|0a2bff|3b5bff|5f83ff)$/i.test(base) ? '#7fb2ff' : '#ffffff'
   if (dark && L < 0.16) return mixHex(base, lift, 0.5)
   if (dark && L < 0.3) return mixHex(base, lift, 0.28)
-  if (!dark && L > 0.62) return mixHex(base, '#101114', 0.55)
+  if (!dark && L > 0.62) return mixHex(base, '#17191f', 0.55)
   return base
 }
 
@@ -222,9 +226,11 @@ export function usePageAccent(page) {
       '--accent-dark': accentFor(hex, true),
       '--accent-ink': fit.ink,
       '--accent-soft': `color-mix(in srgb, ${acc} 16%, transparent)`,
-      '--bg': paint(dark ? '#0f1530' : '#e9ecf3', dark ? 2.4 : 1.7),
-      '--sf': paint(dark ? '#151c3d' : '#ffffff', dark ? 2 : 1),
-      '--sf2': paint(dark ? '#1c2550' : '#f0f1f6', dark ? 2.4 : 1.4),
+      // базовые поверхности — те же, что и в index.css (палитра макета-основы):
+      // иначе страница со своим акцентом выглядит чуть иначе в светлой и тёмной теме
+      '--bg': paint(dark ? '#090a0e' : '#eef0f5', dark ? 2.4 : 1.7),
+      '--sf': paint(dark ? '#15161c' : '#ffffff', dark ? 2 : 1),
+      '--sf2': paint(dark ? '#202129' : '#f5f6f9', dark ? 2.4 : 1.4),
       '--g1': `color-mix(in srgb, ${acc} 30%, transparent)`,
     },
   }

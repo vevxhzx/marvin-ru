@@ -1,51 +1,31 @@
-/* components/Dock.jsx — плавающая пилюля-док внизу (телефон).
+/* components/Dock.jsx — нижняя навигация телефона: тёмная размытая плашка
+   с ОДНОЙ прокручиваемой строкой, в которой лежат ВСЕ разделы.
 
-   Не таб-бар на всю ширину, а пилюля по центру: 4 раздела из настроек + «Ещё».
-   Активный пункт разворачивается в пилюлю с подписью — ширина и прозрачность идут
-   пружиной (lib/motion.js), фон-подложка переезжает от пункта к пункту тем же
-   движением. Ничего не зависит от наведения: подпись и подсветка приезжают по
-   нажатию, всё работает пальцем.
+   По макету-основе: слева/справа 10px, снизу max(10px, safe-area), радиус 23px,
+   фон rgba(19,20,27,.94) с blur(20px). Внутри — ряд кнопок 75×60: иконка 19px
+   и подпись 11px, радиус 17px, активная — заливкой акцентом. Ряд листается
+   пальцем (горизонтальная прокрутка без полосы), поэтому из любой подвкладки
+   можно уйти в любой раздел — «списка подвкладок» больше нет.
 
-   Размеры и отступы — из токенов A1 (--dock-h, --dock-gap, --tap) с запасными
-   значениями, поэтому док корректен и без них. На десктопе док не рисуется вовсе
-   (видимость переключает media-query, а не CSS-класс).
+   Раньше здесь было 4 раздела из настроек + «Ещё» и подпись активного пункта,
+   которая раскрывалась пружиной. Подписи теперь на всех пунктах (иначе строка
+   не читается), поэтому морфинг подписи и ездящая подложка не нужны: активный
+   пункт — обычное состояние .on.
+
+   Геометрия и цвета — в index.css, блок «ДОК ТЕЛЕФОНА». Здесь только данные
+   (список разделов), прокрутка и то, что док уезжает на время шторки/доски.
+   Пружинное нажатие — lib/motion.js (press), как и раньше.
 */
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { Grid3x3, MessageCircle, HelpCircle, Sun, Moon, Monitor, Download } from 'lucide-react'
 import { useI18n, t as T } from '../lib/i18n'
-import { animate, motionOff, press, springCurve, usePhone, EASE_OUT } from '../lib/motion'
+import { motionOff, press, usePhone } from '../lib/motion'
 import { toast } from './ui'
 import { canInstall, installPwa } from '../lib/sw'
-import { isActiveRoute } from '../lib/nav'
+import { isActiveRoute, NAV } from '../lib/nav'
 import SheetHost from './SheetHost'
-
-const ICON = 20                                   // размер иконки в пилюле
-const GAP = 8                                     // зазор иконка↔подпись
-const PAD = 12                                    // поля пункта слева/справа
-const SNAP_W = ICON + PAD * 2                     // свёрнутый пункт = var(--tap)
-const PILL_SPRING = { stiffness: 360, damping: 30 }
-
-/** Подпись пункта раскрывается/закрывается пружиной: width + opacity. */
-function morphLabel(el, on) {
-  if (!el) return
-  const target = on ? Math.ceil(el.scrollWidth) : 0
-  const from = el.getBoundingClientRect().width
-  const commit = () => {
-    try {
-      el.style.width = `${target}px`
-      el.style.opacity = on ? '1' : '0'
-      el.getAnimations?.().forEach((a) => a.cancel())
-    } catch {}
-  }
-  const anim = animate(el, [
-    { width: `${from}px`, opacity: on ? '0' : '1' },
-    { width: `${target}px`, opacity: on ? '1' : '0' },
-  ], { ...springCurve(PILL_SPRING), fill: 'both' })
-  if (anim) anim.finished.then(commit).catch(commit)
-  else commit()
-}
 
 /** Можно ли поставить приложение: браузер предложил — значит, кнопка живая. */
 function useInstallable() {
@@ -59,6 +39,13 @@ function useInstallable() {
   return yes
 }
 
+/** Канонический порядок разделов: им же приложение показывает их в строке и в «Ещё». */
+const orderOf = (() => {
+  const m = new Map()
+  NAV.forEach((n, i) => m.set(n.to, i))
+  return (to) => (m.has(to) ? m.get(to) : 999)
+})()
+
 export default function Dock({
   tabs, pathname, compact, more, onChat, onTheme, onHelp, mode = 'auto', langNode,
 }) {
@@ -67,96 +54,51 @@ export default function Dock({
   const [moreOpen, setMoreOpen] = useState(false)
   const installable = useInstallable()
 
-  const pillRef = useRef(null)
-  const items = useRef({})         // to → { item, label }
-  const rect = useRef(null)        // где подложка была в прошлый раз
+  const rowRef = useRef(null)
+  const items = useRef({})         // to → DOM-узел пункта
   const pressClean = useRef([])
 
   /* список разделов пересоздаётся на каждом рендере — для эффектов нужен ключ, а не массив */
   const tabsKey = (tabs || []).map((it) => it.to).join('|')
+
+  /* Все разделы в одном списке: выбранные в настройках + остальные (то, что раньше
+     было «Ещё»). Порядок — реестровый (lib/nav.js), чтобы строка не прыгала при
+     смене настроек; скрытые разделы сюда не попадают, их отдаёт pickMore. */
+  const sections = useMemo(() => {
+    const seen = new Map()
+    for (const s of [...(tabs || []), ...(more || [])]) if (s?.to) seen.set(s.to, s)
+    return [...seen.values()].sort((a, b) => orderOf(a.to) - orderOf(b.to))
+  }, [tabsKey, (more || []).map((it) => it.to).join('|')]) // eslint-disable-line
+
   const activeTo = useMemo(
-    () => (tabs || []).find((it) => isActiveRoute(it.to, pathname))?.to || '',
-    [tabsKey, pathname], // eslint-disable-line
+    () => sections.find((it) => isActiveRoute(it.to, pathname))?.to || '',
+    [sections, pathname],
   )
 
-  /* Подложка переезжает на активный пункт: left/width идут пружиной.
-     widthHint — ширина, которую пункт получит, когда подпись раскроется (считаем сами,
-     чтобы подложка поехала одновременно с подписью, а не после неё). */
-  const movePill = useCallback((key, animateIt = true, widthHint = 0) => {
-    const pill = pillRef.current
-    if (!pill) return
-    const rec = key ? items.current[key] : null
-    if (!rec?.item || !rec.item.isConnected) {
-      /* активного пункта в доке нет (раздел открыт из «Ещё») — подложка тихо гаснет */
-      rect.current = null
-      const a = animate(pill, [{ opacity: 1 }, { opacity: 0 }], { duration: motionOff() ? 0 : 160, easing: EASE_OUT, fill: 'forwards' })
-      if (a) a.finished.then(() => { try { pill.style.opacity = '0' } catch {} }).catch(() => {})
-      else { try { pill.style.opacity = '0' } catch {} }
-      return
-    }
-    const el = rec.item
-    const next = { left: el.offsetLeft, width: widthHint || el.offsetWidth }
-    const prev = rect.current
-    rect.current = next
-    const finish = () => {
-      try {
-        pill.style.left = `${next.left}px`
-        pill.style.width = `${next.width}px`
-        pill.style.opacity = '1'
-        pill.getAnimations?.().forEach((a) => a.cancel())
-      } catch {}
-    }
-    if (!animateIt || !prev || motionOff()) { finish(); return }
-    const anim = animate(pill, [
-      { left: `${prev.left}px`, width: `${prev.width}px`, opacity: 1 },
-      { left: `${next.left}px`, width: `${next.width}px`, opacity: 1 },
-    ], { ...springCurve(PILL_SPRING), fill: 'both' })
-    if (anim) anim.finished.then(finish).catch(finish)
-    else finish()
-  }, [])
-
-  /* подписи: у активного раскрыта, у остальных свёрнуты (в компактном режиме — только иконки) */
+  /* активный пункт не должен прятаться за краем плашки — долистываем строку к нему */
   useEffect(() => {
-    if (!phone) return
-    let labelW = 0
-    for (const it of tabs || []) {
-      const rec = items.current[it.to]
-      if (!rec?.label) continue
-      const open = it.to === activeTo && !compact
-      if (open) labelW = Math.ceil(rec.label.scrollWidth)
-      morphLabel(rec.label, open)
-    }
-    /* подложка едет вместе с подписью, а не после неё */
-    if (activeTo && !compact) movePill(activeTo, true, SNAP_W + GAP + labelW)
-    else movePill(activeTo, true)
-    /* и сверяем её с реальными размерами пункта, когда пружина отработает */
-    const t = setTimeout(() => { if (activeTo) movePill(activeTo) }, 340)
-    return () => clearTimeout(t)
-  }, [activeTo, tabsKey, compact, phone, movePill])
-
-  /* первый показ и смена размеров окна */
-  useLayoutEffect(() => {
-    if (!phone) return
-    movePill(activeTo, false)
-    const onResize = () => movePill(activeTo, false)
-    window.addEventListener('resize', onResize)
-    window.addEventListener('orientationchange', onResize)
-    return () => { window.removeEventListener('resize', onResize); window.removeEventListener('orientationchange', onResize) }
-  }, [phone, activeTo, tabsKey, movePill])
+    const row = rowRef.current
+    const el = activeTo ? items.current[activeTo] : null
+    if (!row || !el || !el.isConnected) return
+    const left = el.offsetLeft - (row.clientWidth - el.offsetWidth) / 2
+    const to = Math.max(0, Math.min(left, row.scrollWidth - row.clientWidth))
+    if (Math.abs(row.scrollLeft - to) < 2) return
+    try { row.scrollTo({ left: to, behavior: motionOff() ? 'auto' : 'smooth' }) } catch { row.scrollLeft = to }
+  }, [activeTo, sections.length])
 
   /* пружинное нажатие на пунктах */
   useEffect(() => {
     pressClean.current.forEach((fn) => fn())
     pressClean.current = []
     /* забытые разделы (пункт убрали из настроек) — выкидываем из реестра */
-    const keep = new Set((tabs || []).map((it) => it.to))
+    const keep = new Set(sections.map((it) => it.to))
     for (const k of Object.keys(items.current)) if (!keep.has(k)) delete items.current[k]
-    for (const rec of Object.values(items.current)) if (rec?.item) pressClean.current.push(press(rec.item))
+    for (const rec of Object.values(items.current)) if (rec) pressClean.current.push(press(rec))
     return () => { pressClean.current.forEach((fn) => fn()); pressClean.current = [] }
-  }, [phone, tabsKey])
+  }, [phone, tabsKey, sections.length])
 
-  /* Пока открыта шторка или открыта доска — док уезжает: правила для .tabbar в CSS
-   относятся к старой разметке, поэтому прячем его сами. */
+  /* Пока открыта шторка или открыта доска — док уезжает: правил для него в CSS нет,
+    поэтому прячем его сами (тело получает класс .sheet-open / .board-page). */
   const [muted, setMuted] = useState(false)
   useEffect(() => {
     const check = () => setMuted(document.body.classList.contains('sheet-open') || document.body.classList.contains('board-page'))
@@ -182,98 +124,33 @@ export default function Dock({
         data-dock=""
         style={{
           display: phone ? 'flex' : 'none',
-          position: 'fixed',
-          left: '50%',
-          /* Telegram отдаёт свою безопасную зону, обычный телефон — env() */
-          bottom: 'calc(max(var(--safe-b, 0px), var(--tg-safe-area-inset-bottom, 0px)) + var(--dock-gap, 12px))',
-          transform: `translateX(-50%) translate3d(0, ${muted ? 140 : 0}%, 0)`,
+          transform: motionOff() ? 'none' : `translate3d(0, ${muted ? 140 : 0}%, 0)`,
           opacity: muted ? 0 : 1,
-          zIndex: 'var(--z-dock, 60)',
-          alignItems: 'center',
-          gap: 4,
-          padding: 'var(--dock-pad, 6px)',
-          maxWidth: 'calc(100vw - 16px - var(--safe-l, 0px) - var(--safe-r, 0px))',
-          borderRadius: '999px',
-          background: 'color-mix(in srgb, var(--bg) 78%, transparent)',
-          WebkitBackdropFilter: 'blur(18px) saturate(160%)',
-          backdropFilter: 'blur(18px) saturate(160%)',
-          border: '1px solid var(--line)',
-          boxShadow: 'var(--shadow-2)',
-          transition: motionOff() ? 'none' : 'transform var(--t-base) var(--ease-out), opacity var(--t-base) var(--ease-out)',
+          transition: motionOff() ? 'none' : undefined,
           pointerEvents: muted ? 'none' : undefined,
         }}
       >
-        <div className="dock-row" style={{ position: 'relative', display: 'flex', alignItems: 'stretch', gap: 2 }}>
-          {/* подложка активного пункта — едет пружиной, а не щёлкает */}
-          <span
-            className="dock-pill"
-            ref={pillRef}
-            aria-hidden="true"
-            style={{
-              position: 'absolute',
-              top: 0,
-              bottom: 0,
-              left: 0,
-              width: SNAP_W,
-              borderRadius: '999px',
-              background: 'var(--accent-soft)',
-              border: '1px solid color-mix(in srgb, var(--accent) 26%, transparent)',
-              pointerEvents: 'none',
-            }}
-          />
-          {(tabs || []).map(({ to, label, icon: Icon }) => {
-            const on = to === activeTo && !compact      // в компактном режиме док — только иконки
+        <div className="dock-row" ref={rowRef}>
+          {sections.map(({ to, label, icon: Icon }) => {
+            const on = to === activeTo
             return (
               <NavLink
                 key={to}
                 to={to}
                 end={to === '/'}
-                ref={(el) => { items.current[to] = { item: el, label: el?.querySelector('.dock-l') || null } }}
+                ref={(el) => { items.current[to] = el }}
                 className={`dock-item ${on ? 'on' : ''}`}
                 aria-label={t(label)}
-                aria-current={to === activeTo ? 'page' : undefined}
+                aria-current={on ? 'page' : undefined}
                 title={t(label)}
-                data-tip={t(label)}
-                style={{
-                  position: 'relative',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: GAP,
-                  height: 'var(--dock-h, 46px)',
-                  minWidth: 'var(--tap, 44px)',
-                  width: on ? undefined : 'var(--tap, 44px)',
-                  padding: on ? `0 ${PAD}px` : 0,
-                  borderRadius: '999px',
-                  color: on ? 'var(--accent)' : 'var(--ink-3)',
-                  fontSize: 13,
-                  fontWeight: on ? 600 : 500,
-                  textDecoration: 'none',
-                  lineHeight: 1.1,
-                  background: 'transparent',
-                  transition: 'color var(--t-fast) var(--ease-out)',
-                  WebkitTapHighlightColor: 'transparent',
-                }}
               >
-                <Icon size={ICON} strokeWidth={on ? 2.2 : 1.9} aria-hidden="true" style={{ flex: 'none' }} />
-                <span
-                  className="dock-l"
-                  style={{
-                    display: 'inline-block',
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    verticalAlign: 'bottom',
-                    width: 0,
-                    opacity: 0,
-                    willChange: 'width, opacity',
-                  }}
-                >
-                  {t(label)}
-                </span>
+                <Icon size={19} strokeWidth={on ? 2.2 : 1.8} aria-hidden="true" />
+                <span className="dock-l">{t(label)}</span>
               </NavLink>
             )
           })}
-          {/* «Ещё»: все остальные разделы и действия */}
+          {/* «Ещё» — последним пунктом строки (чат, язык, тема, справка, установка).
+              Отдельной кнопкой-логотипом он не был и не должен становиться. */}
           <button
             type="button"
             className={`dock-item dock-more ${moreOpen ? 'on' : ''}`}
@@ -282,23 +159,9 @@ export default function Dock({
             aria-haspopup="dialog"
             aria-expanded={moreOpen}
             title={moreLabel}
-            style={{
-              position: 'relative',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: GAP,
-              height: 'var(--dock-h, 46px)',
-              minWidth: 'var(--tap, 44px)',
-              padding: 0,
-              border: 0,
-              borderRadius: '999px',
-              background: 'transparent',
-              color: 'var(--ink-3)',
-              WebkitTapHighlightColor: 'transparent',
-            }}
           >
-            <Grid3x3 size={ICON} strokeWidth={1.9} aria-hidden="true" style={{ flex: 'none' }} />
+            <Grid3x3 size={19} strokeWidth={1.8} aria-hidden="true" />
+            <span className="dock-l">{moreLabel}</span>
           </button>
         </div>
       </nav>
@@ -341,7 +204,7 @@ export default function Dock({
             {t('more.keys')}
           </button>
           {installable && (
-            <button type="button" className="more-row" onClick={() => { doInstall(); }}>
+            <button type="button" className="more-row" onClick={() => { doInstall() }}>
               <span className="more-ic"><Download size={17} strokeWidth={1.8} aria-hidden="true" /></span>
               {t('st.install')}
             </button>

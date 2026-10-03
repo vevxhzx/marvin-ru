@@ -143,7 +143,11 @@ function SideTimer({ min }) {
   )
 }
 
-/* ---------- сайдбар (десктоп; на телефоне его прячет CSS) ---------- */
+/* ---------- сайдбар (десктоп; на телефоне его прячет CSS) ----------
+   Колонка тёмная в обеих темах (палитра макета-основы в index.css, --sb-*), поэтому
+   бренд, подписи разделов, статус и помодоро берут светлые чернила из --sb-ink/--sb-dim.
+   Ниже две кликабельные строки (помодоро и статус) — это по сути кнопки, поэтому у них
+   есть роль и работа с клавиатуры: обводка фокуса идёт от общих правил index.css. */
 function Sidebar({ live, busy, hiddenNav = [] }) {
   const { t } = useI18n()
   const st = assistantState(live, busy)
@@ -152,6 +156,8 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
   const [pop, setPop] = useState(false)
   const pomoTime = tmr?.active ? mmss(left) : '90:00'
   const pomoLabel = tmr?.active ? (tmr.order || (tmr.kind === 'break' ? t('unit.break') : t('unit.focus'))) : t('unit.pomodoro')
+  /* Enter/пробел — как обычный клик по строке */
+  const onEnter = (fn) => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn() } }
 
   return (
     <aside>
@@ -198,7 +204,9 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
         </NavLink>
       </nav>
       <div className="sb">
-        <div className="pomo select-none" onClick={() => nav('/orders')} style={{ cursor: 'pointer', outline: 'none' }}>
+        <div className="pomo select-none" role="button" tabIndex={0}
+          onClick={() => nav('/orders')} onKeyDown={onEnter(() => nav('/orders'))}
+          style={{ cursor: 'pointer', outline: 'none' }}>
           <svg className="pomo-gauge" viewBox="0 0 24 24" style={{ outline: 'none', border: 'none', boxShadow: 'none' }}>
             <defs>
               <linearGradient id="pomoSideGrad" x1="0" y1="0" x2="1" y2="1">
@@ -212,7 +220,9 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
           <span><b className="mono">{pomoTime}</b> {pomoLabel}</span>
         </div>
         <div className="relative">
-          <div className="st" onClick={() => setPop((v) => !v)} style={{ cursor: 'pointer' }} title={st.text}>
+          <div className="st" role="button" tabIndex={0} aria-expanded={pop}
+            onClick={() => setPop((v) => !v)} onKeyDown={onEnter(() => setPop((v) => !v))}
+            style={{ cursor: 'pointer' }} title={st.text}>
             <i className="dot" style={{ background: st.dot }}></i>
             {st.text}
           </div>
