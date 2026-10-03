@@ -2,9 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useI18n } from '../lib/i18n'
+import { Empty, Skeleton } from '../components/ui'
 
-/* Граф «второго мозга»: люди · заказы · заметки · ссылки · теги. Связи выводятся сами (имена, теги, [[скобки]], смысл).
-   Простой force-layout на canvas без библиотек. Клик по узлу — фокус на его окрестности; двойной клик — открыть. */
+/* Граф «второго мозга»: люди · заказы · мысли · ссылки · теги. Связи выводятся сами (имена, теги,
+   [[скобки]], смысл). Простой force-layout на canvas без библиотек.
+
+   Правила, из-за которых этот файл вообще трогали:
+   • подписи узлов не уезжают в микрошрифт при отдалении и не режутся краем холста —
+     кегль считается в экранных пикселях (мировой = экранный / k), а подпись прижимается
+     к краю и рисуется с обводкой цветом фона, чтобы её не перечёркивали связи;
+   • подсказка по узлу стоит РЯДОМ с узлом (координаты считаются в том же кадре отрисовки
+     и едут через transform), а не в углу холста, где её не видно на телефоне;
+   • вместо пустого холста — пустое состояние с подсказкой, пока грузим — шимер. */
 const COLORS = {
   person: 'var(--accent)', order: 'var(--warn)', note: 'var(--ink)', link: 'var(--pos)', tag: 'var(--ink-3)',
   debt: 'var(--neg)', goal: 'var(--pos)', task: 'var(--ink-2)', event: 'var(--ink-2)', money: 'var(--warn)', project: 'var(--ink-3)',
@@ -12,12 +21,22 @@ const COLORS = {
 /* Подписи узлов и связей — ключи словаря (см. lib/i18n.js) */
 const KIND_RU = { person: 'graph.kind_people', order: 'graph.kind_orders', note: 'graph.kind_notes', link: 'graph.kind_links', tag: 'graph.kind_tags', debt: 'graph.kind_debts', goal: 'graph.kind_goals', task: 'graph.kind_tasks', event: 'graph.kind_events', money: 'graph.kind_money', project: 'graph.kind_projects' }
 const KIND_ONE = { person: 'graph.one_person', order: 'graph.one_order', note: 'graph.one_note', link: 'graph.one_link', tag: 'graph.one_tag', debt: 'graph.one_debt', goal: 'graph.one_goal', task: 'graph.one_task', event: 'graph.one_event', money: 'graph.one_category', project: 'graph.one_project' }
-// как связаны — подпись при наведении
+// как связаны — подпись в карточке узла
 const REL_RU = { client: 'graph.rel_client', mention: 'graph.rel_mention', tag: 'graph.one_tag', wiki: 'graph.rel_wiki', similar: 'graph.rel_similar', debt: 'graph.rel_debt', work: 'graph.rel_work', project: 'graph.one_project', pay: 'graph.rel_pay', same: 'graph.rel_same' }
 const LEGEND = ['person', 'order', 'money', 'note', 'link', 'tag', 'debt', 'task']
+const FONT = 'Onest, Inter, system-ui, sans-serif'
 const cssVar = (name, el) => getComputedStyle(el || document.documentElement).getPropertyValue(name.slice(4, -1)).trim() || '#888'
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v)
 
-export default function Graph({ height = 520, focus: initialFocus = null, compact = false }) {
+/** Подпись узла влезает в холст: обрезаем по ширине, а не молча уводим в край. */
+function fitLabel(ctx, text, maxW) {
+  if (ctx.measureText(text).width <= maxW) return text
+  let s = text
+  while (s.length > 1 && ctx.measureText(`${s}…`).width > maxW) s = s.slice(0, -1)
+  return `${s}…`
+}
+
+export default function Graph({ height, focus: initialFocus = null, compact = false }) {
   const { t, fmtNumber } = useI18n()
   const [data, setData] = useState(null)
   const [focus, setFocus] = useState(initialFocus)
@@ -30,6 +49,7 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
   const warm = (t) => { alphaRef.current = Math.max(alphaRef.current, t) }
   const [hidden, setHidden] = useState(() => new Set())
   const canvasRef = useRef(null)
+  const cardRef = useRef(null)            // карточка узла: едет за узлом через transform
   const nodesRef = useRef([])
   const dragRef = useRef(null)
   const viewRef = useRef({ x: 0, y: 0, k: 1, user: false })   // user=true — человек сам двигал/масштабировал, авто-подгонку выключаем
@@ -59,13 +79,14 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
     let raf, running = true
     alphaRef.current = 1
     const dpr = window.devicePixelRatio || 1
-    const resize = () => { const w = cv.clientWidth, h = cv.clientHeight; cv.width = w * dpr; cv.height = h * dpr }
+    const resize = () => { const w = cv.clientWidth, h = cv.clientHeight; cv.width = Math.max(1, w * dpr); cv.height = Math.max(1, h * dpr) }
     resize()
     const ro = new ResizeObserver(resize); ro.observe(cv)
     const { nodes, edges } = layout
     const col = (k) => cssVar(COLORS[k] || 'var(--ink-3)', cv)
     const palette = Object.fromEntries(Object.keys(COLORS).map((k) => [k, col(k)]))
     const line = cssVar('var(--line-2)', cv), ink = cssVar('var(--ink)', cv), bg = cssVar('var(--bg)', cv), ink3 = cssVar('var(--ink-3)', cv)
+    const sf = cssVar('var(--sf)', cv)
 
     const rep = Math.min(900, 220 + nodes.length * 6)   // маленький граф не разлетается
     const fit = () => {
@@ -127,6 +148,11 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
         ctx.beginPath(); ctx.moveTo(e.a.x, e.a.y); ctx.lineTo(e.b.x, e.b.y); ctx.stroke()
       }
       ctx.setLineDash([])
+      /* Подпись: кегль в ЭКРАННЫХ пикселях (мировой = экранный / k) — на телефоне при отдалении
+         текст не превращается в полоску, а текст по краю холста не уезжает за границу.
+         Обводка цветом подложки отделяет подпись от рёбер, которые её перечёркивают. */
+      const maxLabelW = Math.max(80, (w / v.k) * 0.86)
+      const padL = 10 / v.k, padT = 10 / v.k
       for (const n of nodes) {
         const dim = hi && !hi.has(n.id)
         ctx.globalAlpha = dim ? 0.25 : 1
@@ -134,16 +160,36 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
         ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill()
         if (n.kind === 'note' || n.kind === 'tag' || n.kind === 'money' || n.kind === 'project') { ctx.fillStyle = bg; ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(1, n.r - 2), 0, Math.PI * 2); ctx.fill(); ctx.fillStyle = palette[n.kind]; ctx.beginPath(); ctx.arc(n.x, n.y, Math.max(0.5, n.r - 3.5), 0, Math.PI * 2); ctx.fill() }
         const showLabel = n.kind === 'person' || n.r > 8 || (hi && hi.has(n.id)) || v.k > 1.4 || nodes.length < 60
-        if (showLabel) {
-          ctx.globalAlpha = dim ? 0.3 : 0.9
-          ctx.fillStyle = ink
-          const fs = (n.kind === 'person' ? 12 : 11) / Math.max(0.75, Math.min(1, v.k))
-          ctx.font = `${n.kind === 'person' ? 600 : 400} ${fs}px Inter, system-ui, sans-serif`
-          ctx.textAlign = 'center'
-          ctx.fillText(n.label.length > 26 ? n.label.slice(0, 25) + '…' : n.label, n.x, n.y + n.r + fs + 1)
-        }
+        if (!showLabel) continue
+        const want = (n.kind === 'person' ? 13.5 : 12.5) / v.k
+        const fs = Math.min(want, 30)                       // при сильном zoom-out подпись не раздувается в полосы
+        const bold = n.kind === 'person'
+        ctx.font = `${bold ? 600 : 400} ${fs}px ${FONT}`
+        const halfW = Math.min(maxLabelW, ctx.measureText(fitLabel(ctx, n.label, maxLabelW)).width) / 2
+        const lx = Math.min(Math.max(n.x, -w / (2 * v.k) + halfW + padL), w / (2 * v.k) - halfW - padL)
+        const ly = Math.min(Math.max(n.y + n.r + fs * 0.95, -h / (2 * v.k) + fs), h / (2 * v.k) - padT)
+        ctx.textAlign = 'center'
+        ctx.textBaseline = 'alphabetic'
+        ctx.globalAlpha = dim ? 0.35 : 0.95
+        ctx.lineJoin = 'round'
+        ctx.lineWidth = Math.max(2, 3 / v.k)
+        ctx.strokeStyle = sf
+        const text = fitLabel(ctx, n.label, maxLabelW)
+        ctx.strokeText(text, lx, ly)
+        ctx.fillStyle = ink
+        ctx.fillText(text, lx, ly)
       }
       ctx.restore(); ctx.globalAlpha = 1
+      /* карточка узла — рядом с узлом: тот же кадр, тот же transform, обрезается краем холста */
+      const card = cardRef.current
+      if (card && hover) {
+        const sx = w / 2 + v.x + hover.x * v.k
+        const sy = h / 2 + v.y + hover.y * v.k
+        const cw = card.offsetWidth || 200, ch = card.offsetHeight || 90
+        const right = sx + 20 + cw <= w - 8
+        const left = right ? sx + 20 : sx - 20 - cw
+        card.style.transform = `translate3d(${Math.round(clamp(left, 8, Math.max(8, w - cw - 8)))}px, ${Math.round(clamp(sy - ch / 2, 8, Math.max(8, h - ch - 8)))}px, 0)`
+      }
       if (running) raf = requestAnimationFrame(step)
     }
     raf = requestAnimationFrame(step)
@@ -186,7 +232,7 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
 
   const st = data?.stats || {}
   const empty = data && data.nodes.length === 0
-  // «клиент: Кот Прод · оплата: Доход по заказам · упоминание: 3»
+  /* «клиент: Кот Прод · оплата: Доход по заказам · упоминание: 3» */
   const hoverRels = useMemo(() => {
     if (!hover || !layout) return ''
     const by = {}
@@ -196,27 +242,48 @@ export default function Graph({ height = 520, focus: initialFocus = null, compac
     }
     return Object.entries(by).map(([r, ls]) => `${t(REL_RU[r]) || r}: ${ls.length <= 2 ? ls.map((l) => (l.length > 22 ? l.slice(0, 21) + '…' : l)).join(', ') : ls.length}`).join(' · ')
   }, [hover, layout])
+
   return (
-    <div className="relative">
-      <canvas ref={canvasRef} className="w-full rounded-3xl" style={{ height, background: 'var(--fill)', cursor: hover ? 'pointer' : 'grab', touchAction: 'none' }}
+    <div className="relative overflow-hidden" style={{ borderRadius: 'var(--r-xl)', background: 'var(--fill)', boxShadow: 'inset 0 0 0 1px var(--line)' }}>
+      <canvas ref={canvasRef} className="w-full" style={{ height: height || 'clamp(380px, 58vh, 620px)', display: 'block', cursor: hover ? 'pointer' : 'grab', touchAction: 'none' }}
         role="img" aria-label={`${t('graph.stats', { people: st.people || 0, notes: st.notes || 0, links: st.links || 0, edges: st.edges || 0 })}. ${t('graph.nav_hint')}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { if (!touchRef.current) setHover(null) }} onDoubleClick={onDbl} />
-      {!compact && (
-        <div className="pointer-events-none absolute left-3 top-3 flex flex-wrap gap-1.5">
+
+      {!data && <div className="absolute inset-0 p-4" aria-hidden="true"><Skeleton h={28} w="60%" /><Skeleton h={220} className="mt-4" radius="var(--r-lg)" /></div>}
+
+      {/* легенда — одна прокручиваемая строка, чтобы не съедать угол холста на телефоне */}
+      {!compact && data && !empty && (
+        <div className="no-scrollbar pointer-events-none absolute inset-x-0 top-0 flex gap-1.5 overflow-x-auto px-3 pt-3">
           {LEGEND.map((k) => (
-            <button key={k} type="button" className={`pointer-events-auto chip !bg-[var(--bg)] ${hidden.has(k) ? 'opacity-40' : ''}`} onClick={() => setHidden((h) => { const n = new Set(h); n.has(k) ? n.delete(k) : n.add(k); return n })}>
-              <span className="h-2 w-2 rounded-full" style={k === 'money' || k === 'tag' || k === 'note' ? { border: `1.5px solid ${COLORS[k]}` } : { background: COLORS[k] }} />{t(KIND_RU[k])}
+            <button key={k} type="button" className={`chip pointer-events-auto !bg-[var(--bg)] shrink-0 !min-h-[var(--tap)] ${hidden.has(k) ? 'opacity-40' : ''}`} onClick={() => setHidden((h) => { const n = new Set(h); n.has(k) ? n.delete(k) : n.add(k); return n })} aria-pressed={!hidden.has(k)}>
+              <span className="h-2 w-2 shrink-0 rounded-full" style={k === 'money' || k === 'tag' || k === 'note' ? { border: `1.5px solid ${COLORS[k]}` } : { background: COLORS[k] }} />{t(KIND_RU[k])}
             </button>
           ))}
         </div>
       )}
-      {focus && <button type="button" className="btn-soft btn-sm absolute right-3 top-3" onClick={() => { viewRef.current.user = false; setFocus(null) }}>{t('graph.whole')}</button>}
-      {hover && <div className="pointer-events-none absolute bottom-3 left-3 max-w-[70%] rounded-xl px-3 py-1.5 text-[12.5px]" style={{ background: 'var(--ink)', color: 'var(--bg)' }}>
-        {t(KIND_ONE[hover.kind]) || hover.kind} · {hover.label}{hover.kind === 'money' && hover.total ? ` · ${fmtNumber(hover.total)} ₽` : ''}{hover.kind === 'order' && hover.price ? ` · ${hover.paid ? `${fmtNumber(hover.paid)} ${t('graph.of')} ` : ''}${fmtNumber(hover.price)} ₽` : ''}
-        {hoverRels && <div className="mt-0.5 text-[11.5px] opacity-75">{hoverRels}</div>}
-      </div>}
-      {!compact && data && !empty && <div className="faint absolute bottom-3 right-3 text-[11.5px]">{t('graph.stats', { people: st.people || 0, notes: st.notes || 0, links: st.links || 0, edges: st.edges || 0 })}{st.lonely ? ` · ${t('graph.lonely', { n: st.lonely })}` : ''}</div>}
-      {empty && <div className="absolute inset-0 grid place-items-center text-center"><div><div className="text-[14px] font-medium">{t('graph.empty_title')}</div><div className="muted mt-1 max-w-[320px] text-[12.5px]">{t('graph.empty_hint')}</div></div></div>}
+      {focus && <button type="button" className="btn-soft btn-sm absolute bottom-2 left-3 z-10" onClick={() => { viewRef.current.user = false; setFocus(null) }}>{t('graph.whole')}</button>}
+
+      {/* карточка узла: едет за узлом (transform в кадре отрисовки) и всегда внутри холста */}
+      {hover && (
+        <div ref={cardRef} aria-hidden="true"
+          className="pointer-events-none absolute left-0 top-0 max-w-[calc(100%-16px)] rounded-2xl px-3 py-2 text-[12.5px] leading-snug"
+          style={{ background: 'var(--ink)', color: 'var(--bg)', boxShadow: 'var(--shadow-2)', willChange: 'transform', animation: 'fade .14s ease-out both' }}>
+          <div className="font-medium">{t(KIND_ONE[hover.kind]) || hover.kind} · {hover.label}{hover.kind === 'money' && hover.total ? ` · ${fmtNumber(hover.total)} ₽` : ''}{hover.kind === 'order' && hover.price ? ` · ${hover.paid ? `${fmtNumber(hover.paid)} ${t('graph.of')} ` : ''}${fmtNumber(hover.price)} ₽` : ''}</div>
+          {hoverRels && <div className="mt-0.5 opacity-80">{hoverRels}</div>}
+        </div>
+      )}
+
+      {empty && (
+        <div className="absolute inset-0 grid place-items-center p-4">
+          <Empty compact glyph="mind" text={t('graph.empty_title')} sub={t('graph.empty_hint')} />
+        </div>
+      )}
+
+      {!compact && !empty && (
+        <div className="pointer-events-none absolute bottom-2 right-3 rounded-full px-2 py-1 text-[12px]" style={{ background: 'var(--bg)' }}>
+          <span className="faint">{t('graph.stats', { people: st.people || 0, notes: st.notes || 0, links: st.links || 0, edges: st.edges || 0 })}{st.lonely ? ` · ${t('graph.lonely', { n: st.lonely })}` : ''}</span>
+        </div>
+      )}
     </div>
   )
 }

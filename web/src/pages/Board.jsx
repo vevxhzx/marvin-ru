@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { Plus, MousePointer2, Hand, StickyNote, Type, Film, ArrowUpRight, Pencil, Eraser, Image as ImageIcon, Undo2, Redo2, Trash2, Copy, Maximize2, Minus, Download, ChevronLeft, LayoutGrid, Clock, MessageCircle, Archive, MoreHorizontal, X, Briefcase, Target, Bold, Italic, AlignLeft, AlignCenter, AlignRight, Keyboard, RefreshCw, Focus } from 'lucide-react'
+import { Plus, MousePointer2, Hand, StickyNote, Type, Film, ArrowUpRight, Pencil, Eraser, Image as ImageIcon, Undo2, Redo2, Trash2, Copy, Maximize2, Minus, Download, ChevronLeft, LayoutGrid, Clock, MessageCircle, Archive, MoreHorizontal, X, Briefcase, Target, Bold, Italic, AlignLeft, AlignCenter, AlignRight, Keyboard, RefreshCw, Focus, ArrowLeft, ArrowRight } from 'lucide-react'
 import { api } from '../lib/api'
 import { PageHead, Empty, Sheet, Field, Seg, Pills, useToast, Confirm, Skeleton } from '../components/ui'
 import BoardCanvas from '../components/BoardCanvas'
@@ -35,41 +35,60 @@ function BoardList() {
   const [, show] = useToast()
   const load = useCallback(() => api.get(`/api/boards${archived ? '?archived=true' : ''}`).then(setBoards).catch(() => setBoards([])), [archived])
   useEffect(() => { load() }, [load])
-  const restore = async (e, b) => { e.stopPropagation(); try { await api.put(`/api/boards/${b.id}`, { archived: false }); load() } catch (er) { show.err(er) } }
+  const restore = async (b) => { try { await api.put(`/api/boards/${b.id}`, { archived: false }); load() } catch (er) { show.err(er) } }
   return (
-    <div>
+    <div className="pg">
       <PageHead kicker={t('bd.kicker')} title={t('nav.board')} idx={boards?.length}
         right={<div className="flex items-center gap-2">
-          <Seg value={archived ? 'arch' : 'live'} onChange={(v) => setArchived(v === 'arch')} options={[['live', t('bd.live')], ['arch', t('bd.arch')]]} />
-          <button className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('nav.board')}</button>
+          <Seg className="min-h-[var(--tap)] [&>button]:!min-h-[var(--tap)]" value={archived ? 'arch' : 'live'} onChange={(v) => setArchived(v === 'arch')} options={[['live', t('bd.live')], ['arch', t('bd.arch')]]} />
+          <button type="button" className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('bd.new_board')}</button>
         </div>} />
-      {boards === null ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} h={150} />)}</div>
-        : boards.length === 0 ? <Empty glyph="mind" text={t(archived ? 'bd.arch_empty' : 'bd.none')} sub={archived ? '' : t('bd.none_sub')} hint={archived ? undefined : t('bd.hint_example')} onHint={archived ? undefined : () => setSheet(true)} />
-        : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {boards.map((b) => (
-              <button key={b.id} onClick={() => nav(`/board/${b.id}`)} className="card animate-rise group overflow-hidden text-left transition hover:-translate-y-0.5" style={{ padding: 0 }}>
-                <div className="relative aspect-[16/9] w-full overflow-hidden" style={{ background: 'var(--fill)' }}>
-                  {b.cover ? <img src={`/media/${b.cover}`} alt="" className="h-full w-full object-cover" /> : <BoardGlyph kind={b.kind} />}
-                  <span className="label absolute left-3 top-3 rounded-md px-1.5 py-0.5" style={{ background: 'var(--surface)', color: 'var(--ink-2)' }}>{t(KIND_RU[b.kind])}</span>
-                  {archived && <button type="button" onClick={(e) => restore(e, b)} className="btn-soft btn-sm absolute right-3 top-3">{t('aims.restore')}</button>}
-                </div>
-                <div className="p-4">
-                  <div className="truncate text-[15px] font-semibold tracking-[-0.01em]">{b.title}</div>
-                  <div className="muted mt-1 flex items-center gap-2 truncate text-[12.5px]">
-                    {(() => {
-                      const count = Array.isArray(b.items) ? b.items.length : (typeof b.items === 'number' ? b.items : 0)
-                      return <span>{t('bd.objects_n', { count })}</span>
-                    })()}
-                    {b.order_title && <span className="flex items-center gap-1 truncate"><Briefcase size={11} />{b.order_title}</span>}
-                    {b.aim_title && <span className="flex items-center gap-1 truncate"><Target size={11} />{b.aim_title}</span>}
-                  </div>
-                </div>
-              </button>
-            ))}
-          </div>
-        )}
+      {boards === null ? (
+        <div className="flex flex-col gap-3">{[0, 1, 2].map((i) => <Skeleton key={i} h={132} radius="var(--r-xl)" />)}</div>
+      ) : boards.length === 0 ? (
+        /* пусто не «белым экраном»: что это, как начать и кнопка создания */
+        <div className="panel p-5 sm:p-7">
+          <Empty glyph="mind" text={t(archived ? 'bd.arch_empty' : 'bd.none')} sub={archived ? '' : t('bd.none_sub')}
+            hint={archived ? undefined : t('bd.hint_example')} onHint={archived ? undefined : () => setSheet(true)}
+            action={archived ? undefined : <button type="button" className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('bd.new_board')}</button>} />
+        </div>
+      ) : (
+        /* доска — строка-карточка: превью сцены слева (на телефоне — сверху), рядом название и состав */
+        <div className="stagger flex flex-col gap-3">
+          {boards.map((b) => <BoardRow key={b.id} b={b} archived={archived} onRestore={restore} />)}
+        </div>
+      )}
       <NewBoardSheet open={sheet} onClose={() => setSheet(false)} onDone={(b) => { setSheet(false); nav(`/board/${b.id}`) }} onErr={show.err} />
+    </div>
+  )
+}
+
+/* Строка доски: превью не растягивается (object-fit в кадре 16:9), длинное название переносится,
+   а «вернуть» в архиве — соседняя кнопка, а не вложенная в кнопку перехода. */
+function BoardRow({ b, archived, onRestore }) {
+  const { t } = useI18n()
+  const nav = useNavigate()
+  const [coverBad, setCoverBad] = useState(false)   // битая обложка — показываем глиф типа доски, а не «дыру»
+  const count = Array.isArray(b.items) ? b.items.length : (typeof b.items === 'number' ? b.items : 0)
+  return (
+    <div className="panel relative overflow-hidden">
+      <button type="button" className="flex w-full flex-col text-left sm:flex-row" onClick={() => nav(`/board/${b.id}`)}>
+        <span className="relative block w-full shrink-0 sm:w-[210px]" style={{ aspectRatio: '16 / 9', background: 'var(--fill)' }}>
+          {b.cover && !coverBad
+            ? <img src={`/media/${b.cover}`} alt="" loading="lazy" onError={() => setCoverBad(true)} className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
+            : <span className="absolute inset-0"><BoardGlyph kind={b.kind} /></span>}
+          <span className="badge absolute left-3 top-3">{t(KIND_RU[b.kind])}</span>
+        </span>
+        <span className="block flex-1 p-4">
+          <span className="block h3" style={{ overflowWrap: 'anywhere' }}>{b.title}</span>
+          <span className="muted mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
+            <span>{t('bd.objects_n', { count })}</span>
+            {b.order_title && <span className="flex min-w-0 items-center gap-1"><Briefcase size={12} />{b.order_title}</span>}
+            {b.aim_title && <span className="flex min-w-0 items-center gap-1"><Target size={12} />{b.aim_title}</span>}
+          </span>
+        </span>
+      </button>
+      {archived && <button type="button" className="btn-soft btn-sm absolute right-3 top-3 z-10" onClick={() => onRestore(b)}>{t('aims.restore')}</button>}
     </div>
   )
 }
@@ -132,6 +151,10 @@ function BoardEditor({ id }) {
   const [renaming, setRenaming] = useState(false)
   const [gridSheet, setGridSheet] = useState(false)
   const [keysSheet, setKeysSheet] = useState(false)
+  // на телефоне мелкая панель инструментов не годится: те же действия — крупными кнопками и шторками
+  const [framesSheet, setFramesSheet] = useState(false)
+  const [textSheet, setTextSheet] = useState(false)
+  const [rev, setRev] = useState(0)          // список кадров перечитываем сразу после перестановки
   const [side, setSide] = useState(() => localStorage.getItem('board.side') !== '0')
   const controls = useRef(null), fileRef = useRef(null)
   const nav = useNavigate()
@@ -148,7 +171,7 @@ function BoardEditor({ id }) {
     if (s === 'conflict') { setConflict(e); setStatus('conflict'); return }
     setStatus(s); if (s === 'err') show.err(e); if (s === 'saved') setTick((t) => t + 1)
   }, [show])
-  const frames = useMemo(() => (controls.current?.items?.() || board?.items || []).filter((i) => i.type === 'frame').sort((a, b) => (a.data.n || 0) - (b.data.n || 0)), [board, status, selection, tick]) // eslint-disable-line
+  const frames = useMemo(() => (controls.current?.items?.() || board?.items || []).filter((i) => i.type === 'frame').sort((a, b) => (a.data.n || 0) - (b.data.n || 0)), [board, status, selection, tick, rev]) // eslint-disable-line
   const total = frames.reduce((a, f) => a + (+f.data.seconds || 0), 0)
 
   const pick = (t) => { if (t === 'image') { fileRef.current?.click(); return } setTool(t) }
@@ -163,9 +186,20 @@ function BoardEditor({ id }) {
   const askAssistant = () => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: `что по доске «${board.title}»?`, send: true } }))
   const rename = async (t) => { setRenaming(false); if (!t.trim() || t === board.title) return; try { const b = await api.put(`/api/boards/${id}`, { title: t.trim() }); setBoard((x) => ({ ...x, title: b.title })); bump() } catch (e) { show.err(e) } }
   const patchSel = (data) => controls.current.setSelData(data)
+  /* Перестановка сцен: меняем местами и номера, и координаты — список и холст остаются одной правдой.
+     Холст нумерует кадры по положению (renumber), поэтому одних номеров мало. */
+  const moveFrame = (i, dir) => {
+    const j = i + dir
+    const a = frames[i], b = frames[j]
+    const c = controls.current
+    if (!a || !b || !c) return
+    c.focusItem(a.id); c.setSelProps({ x: b.x, y: b.y }); c.setSelData({ n: b.data.n })
+    c.focusItem(b.id); c.setSelProps({ x: a.x, y: a.y }); c.setSelData({ n: a.data.n })
+    setRev((r) => r + 1)
+  }
 
   if (err) return <div className="py-16 text-center"><div className="label mb-2">{t('nav.board')}</div><div className="h1-sm">{t('bd.not_found')}</div><button className="btn-soft btn-sm mt-4" onClick={() => nav('/board')}>{t('bd.to_list')}</button></div>
-  if (!board) return <Skeleton h={480} />
+  if (!board) return <Skeleton h={480} radius="var(--r-xl)" />
   const sel1 = selection.length === 1 ? selection[0] : null
   const types = new Set(selection.map((s) => s.type))
   const textLike = selection.filter((s) => ['sticky', 'text', 'frame', 'arrow'].includes(s.type))
@@ -174,6 +208,7 @@ function BoardEditor({ id }) {
   const showStickyBar = tool === 'sticky' || types.has('sticky')
   const showPenBar = tool === 'pen' || tool === 'arrow' || types.has('ink') || types.has('arrow')
   const showFrameBar = tool === 'frame' || types.has('frame')
+  const withFrames = board.kind !== 'script'
 
   return (
     // ширина и высота — от реальных отступов: раньше отрицательный отступ
@@ -185,36 +220,37 @@ function BoardEditor({ id }) {
     }}>
       {/* шапка */}
       <div className="flex shrink-0 items-center gap-2 border-b hair px-2 py-1.5 sm:px-4" style={{ background: 'var(--bg)' }}>
-        <button className="btn-icon" onClick={() => nav('/board')} aria-label={t('bd.to_list')} data-tip={t('bd.all_boards')}><ChevronLeft size={16} /></button>
+        <button className="btn-icon" onClick={() => nav('/board')} aria-label={t('bd.to_list')} data-tip={t('bd.all_boards')} title={t('bd.all_boards')}><ChevronLeft size={16} /></button>
         <div className="min-w-0 flex-1">
           {renaming ? <input autoFocus className="input !h-8 max-w-[360px] !text-[14px]" defaultValue={board.title} onBlur={(e) => rename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setRenaming(false) }} />
-            : <button className="max-w-full truncate text-left text-[15px] font-semibold tracking-[-0.01em] hover:opacity-70" onClick={() => setRenaming(true)} title={t('common.rename')}>{board.title}</button>}
-          <div className="muted flex items-center gap-2 text-[11.5px]">
+            : <button className="max-w-full truncate text-left text-[15px] font-semibold tracking-[-0.01em] hover:opacity-70" onClick={() => setRenaming(true)} title={t('common.rename')} aria-label={t('common.rename')}>{board.title}</button>}
+          <div className="muted flex flex-wrap items-center gap-2 text-[12px]">
             <span>{t(KIND_RU[board.kind])}</span>
-            {board.order_title && <span className="hidden items-center gap-1 sm:flex"><Briefcase size={10} />{board.order_title}</span>}
+            {board.order_title && <span className="hidden items-center gap-1 sm:flex"><Briefcase size={11} />{board.order_title}</span>}
             {frames.length > 0 && <span className="hidden sm:inline">· {t('bd.frames_n', { count: frames.length })}{total ? ` · ${fmtSec(total)}` : ''}</span>}
             <span className={`ml-1 transition ${status === 'dirty' ? 'opacity-70' : status === 'err' || status === 'conflict' ? 'neg' : 'opacity-40'}`}>{t(status === 'dirty' ? 'people.saving' : status === 'err' ? 'bd.not_saved' : status === 'conflict' ? 'bd.changed_elsewhere' : 'common.saved')}</span>
           </div>
         </div>
         <div className="hidden items-center gap-0.5 md:flex">
-          <button className="btn-icon" onClick={() => controls.current.undo()} data-tip={t('bd.undo_tip')} aria-label={t('bd.undo')}><Undo2 size={15} /></button>
-          <button className="btn-icon" onClick={() => controls.current.redo()} data-tip={t('bd.redo_tip')} aria-label={t('bd.redo')}><Redo2 size={15} /></button>
+          <button className="btn-icon" onClick={() => controls.current.undo()} data-tip={t('bd.undo_tip')} aria-label={t('bd.undo')} title={t('bd.undo_tip')}><Undo2 size={15} /></button>
+          <button className="btn-icon" onClick={() => controls.current.redo()} data-tip={t('bd.redo_tip')} aria-label={t('bd.redo')} title={t('bd.redo_tip')}><Redo2 size={15} /></button>
           <div className="mx-1 h-5 w-px" style={{ background: 'var(--line)' }} />
           <button className="btn-icon" onClick={() => controls.current.zoomOut()} aria-label={t('bd.zoom_out')} data-tip="Ctrl −"><Minus size={15} /></button>
           <button className="mono min-w-[54px] rounded-md px-1.5 py-1 text-center text-[12px] hover:bg-[var(--fill)]" onClick={() => controls.current.zoomTo(1)} data-tip="100% · Ctrl+0">{Math.round(zoom * 100)}%</button>
           <button className="btn-icon" onClick={() => controls.current.zoomIn()} aria-label={t('bd.zoom_in')} data-tip="Ctrl +"><Plus size={15} /></button>
-          <button className="btn-icon" onClick={() => controls.current.fit()} data-tip={t('bd.fit_tip')} aria-label={t('bd.fit')}><Maximize2 size={15} /></button>
-          {selection.length > 0 && <button className="btn-icon" onClick={() => controls.current.fitSelection()} data-tip={t('bd.fit_sel_tip')} aria-label={t('bd.fit_sel')}><Focus size={15} /></button>}
+          <button className="btn-icon" onClick={() => controls.current.fit()} data-tip={t('bd.fit_tip')} aria-label={t('bd.fit')} title={t('bd.fit_tip')}><Maximize2 size={15} /></button>
+          {selection.length > 0 && <button className="btn-icon" onClick={() => controls.current.fitSelection()} data-tip={t('bd.fit_sel_tip')} aria-label={t('bd.fit_sel')} title={t('bd.fit_sel_tip')}><Focus size={15} /></button>}
           <div className="mx-1 h-5 w-px" style={{ background: 'var(--line)' }} />
-          <button className="btn-icon" onClick={() => setKeysSheet(true)} data-tip={t('hot.title')} aria-label={t('hot.title')}><Keyboard size={15} /></button>
+          <button className="btn-icon" onClick={() => setKeysSheet(true)} data-tip={t('hot.title')} aria-label={t('hot.title')} title={t('hot.title')}><Keyboard size={15} /></button>
           <button className="btn-ghost btn-sm ml-1" onClick={askAssistant}><MessageCircle size={14} /> {t('bd.discuss')}</button>
         </div>
         <div className="relative">
-          <button className="btn-icon" onClick={() => setMenu((v) => !v)} aria-label={t('bd.menu')}><MoreHorizontal size={16} /></button>
+          <button className="btn-icon" onClick={() => setMenu((v) => !v)} aria-label={t('bd.menu')} title={t('bd.menu')}><MoreHorizontal size={16} /></button>
           {menu && <div className="elevated absolute right-0 top-[42px] z-[70] w-[250px] !p-1.5 text-[13px]" onMouseLeave={() => setMenu(false)}>
             <MenuItem icon={Download} onClick={() => { setMenu(false); exportPng(false) }}>{t('bd.export_all')}</MenuItem>
             {selection.length > 0 && <MenuItem icon={Download} onClick={() => { setMenu(false); exportPng(true) }}>{t('bd.export_sel')}</MenuItem>}
             {frames.length > 0 && <MenuItem icon={Film} onClick={() => { setMenu(false); exportStoryboard() }}>{t('bd.export_pdf')}</MenuItem>}
+            {withFrames && frames.length > 0 && <MenuItem icon={Film} onClick={() => { setMenu(false); setFramesSheet(true) }}>{t('bd.frames_label')}</MenuItem>}
             <MenuItem icon={LayoutGrid} onClick={() => { setMenu(false); setGridSheet(true) }}>{t('bd.add_grid')}</MenuItem>
             <MenuItem icon={Keyboard} onClick={() => { setMenu(false); setKeysSheet(true) }}>{t('hot.title')}</MenuItem>
             <div className="my-1 border-t hair" />
@@ -225,35 +261,47 @@ function BoardEditor({ id }) {
         </div>
       </div>
 
-      {/* контекстная панель — своя строка под шапкой, ничего не перекрывает */}
-      <div className="board-ctx flex h-[44px] shrink-0 items-center gap-x-3 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b hair px-3 text-[12.5px]" style={{ background: 'var(--surface)' }}>
+      {/* контекстная панель — своя строка под шапкой, ничего не перекрывает (десктоп) */}
+      <div className="board-ctx hidden h-[44px] shrink-0 items-center gap-x-3 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b hair px-3 text-[12.5px] md:flex" style={{ background: 'var(--surface)' }}>
         {!showTextBar && !showStickyBar && !showPenBar && !showFrameBar && <span className="muted">{t(tool === 'hand' ? 'bd.hint_hand' : tool === 'select' ? 'bd.hint_select' : tool === 'eraser' ? 'bd.hint_eraser' : tool === 'image' ? 'bd.hint_image' : 'bd.hint_default')}</span>}
         {showStickyBar && <Group label={t('page_accent.short')}>{Object.keys(STICKY).map((c) => <Swatch key={c} color={STICKY[c][document.documentElement.classList.contains('dark') ? 'dark' : 'light']} on={(sel1?.type === 'sticky' ? sel1.data.color : style.stickyColor) === c} onClick={() => { setStyle({ ...style, stickyColor: c }); if (types.has('sticky')) patchSel({ color: c }) }} label={c} />)}</Group>}
         {showFrameBar && <Group label={t('board.frame')}>{Object.keys(RATIOS).map((r) => <button key={r} onClick={() => { setStyle({ ...style, ratio: r }); if (types.has('frame')) patchSel({ ratio: r }) }} className={`mono rounded-full px-2 py-0.5 text-[11px] ${(types.has('frame') ? sel1?.data?.ratio === r : style.ratio === r) ? 'bg-[var(--ink)] text-[var(--bg)]' : 'hover:bg-[var(--fill)]'}`}>{r}</button>)}
           {sel1?.type === 'frame' && <><span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /><label className="flex items-center gap-1.5"><Clock size={12} className="faint" /><input type="number" min={0} step={0.5} className="input !h-7 !w-[64px] num !px-2 !text-[12px]" aria-label={t('bd.duration')} value={sel1.data.seconds || ''} placeholder={t('unit.sec')} onChange={(e) => patchSel({ seconds: Number(e.target.value) || 0 })} /></label>
-            <button className="btn-soft btn-sm !h-7" onClick={() => fileRef.current?.click()}><ImageIcon size={12} /> {t('bd.image')}</button>{sel1.data.image && <button className="btn-icon !h-7 !w-7" data-tip={t('bd.remove_img')} aria-label={t('bd.remove_img')} onClick={() => patchSel({ image: null })}><X size={12} /></button>}</>}
+            <button className="btn-soft btn-sm !h-7" onClick={() => fileRef.current?.click()}><ImageIcon size={12} /> {t('bd.image')}</button>{sel1.data.image && <button className="btn-icon !h-7 !w-7" data-tip={t('bd.remove_img')} aria-label={t('bd.remove_img')} title={t('bd.remove_img')} onClick={() => patchSel({ image: null })}><X size={12} /></button>}</>}
         </Group>}
         {showPenBar && <Group label={t(tool === 'arrow' || types.has('arrow') ? 'bd.line' : 'bd.pencil')}>
           {INK_COLORS.map((c) => <Swatch key={c} color={themeColor(c, document.documentElement.classList.contains('dark'))} on={(types.has('ink') || types.has('arrow') ? (sel1?.data?.color || 'ink') : style.inkColor) === c} onClick={() => { setStyle({ ...style, inkColor: c }); if (types.has('ink') || types.has('arrow')) patchSel({ color: c }) }} label={c} />)}
           <span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} />
-          {[2, 3, 6, 10].map((w) => <button key={w} onClick={() => { setStyle({ ...style, inkWidth: w }); if (types.has('ink') || types.has('arrow')) patchSel({ width: w }) }} aria-label={t('bd.width', { n: w })} className={`grid h-6 w-6 place-items-center rounded-full ${(types.has('ink') || types.has('arrow') ? (sel1?.data?.width || 3) === w : style.inkWidth === w) ? 'bg-[var(--fill-2)]' : 'hover:bg-[var(--fill)]'}`}><span className="rounded-full" style={{ width: w + 2, height: w + 2, background: 'var(--ink)' }} /></button>)}
+          {[2, 3, 6, 10].map((w) => <button key={w} onClick={() => { setStyle({ ...style, inkWidth: w }); if (types.has('ink') || types.has('arrow')) patchSel({ width: w }) }} aria-label={t('bd.width', { n: w })} title={t('bd.width', { n: w })} className={`grid h-6 w-6 place-items-center rounded-full ${(types.has('ink') || types.has('arrow') ? (sel1?.data?.width || 3) === w : style.inkWidth === w) ? 'bg-[var(--fill-2)]' : 'hover:bg-[var(--fill)]'}`}><span className="rounded-full" style={{ width: w + 2, height: w + 2, background: 'var(--ink)' }} /></button>)}
           {types.has('arrow') && <><span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /><Seg value={sel1?.data?.style || 'arrow'} onChange={(v) => patchSel({ style: v })} options={[['arrow', t('bd.arrow')], ['line', t('bd.line')]]} /></>}
         </Group>}
         {showTextBar && first && <Group label={t('board.text')}>
           <select className="input !h-7 !w-[92px] !rounded-lg !px-2 !text-[12px]" value={first.data.font || 'inter'} onChange={(e) => patchSel({ font: e.target.value })} aria-label={t('bd.font')}>{Object.keys(FONTS).map((f) => <option key={f} value={f}>{FONT_LABEL[f]}</option>)}</select>
           <SizeInput value={Math.round(fontSize(first))} onChange={(v) => patchSel({ font_size: v })} />
-          <button className={`btn-icon !h-7 !w-7 ${first.data.bold ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ bold: !first.data.bold })} aria-label={t('bd.bold')} data-tip={t('bd.bold')}><Bold size={13} /></button>
-          <button className={`btn-icon !h-7 !w-7 ${first.data.italic ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ italic: !first.data.italic })} aria-label={t('bd.italic')} data-tip={t('bd.italic')}><Italic size={13} /></button>
-          {[['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]].map(([a, I]) => <button key={a} className={`btn-icon !h-7 !w-7 ${(first.data.align || 'left') === a ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ align: a })} aria-label={a}><I size={13} /></button>)}
+          <button className={`btn-icon !h-7 !w-7 ${first.data.bold ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ bold: !first.data.bold })} aria-label={t('bd.bold')} data-tip={t('bd.bold')} title={t('bd.bold')}><Bold size={13} /></button>
+          <button className={`btn-icon !h-7 !w-7 ${first.data.italic ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ italic: !first.data.italic })} aria-label={t('bd.italic')} data-tip={t('bd.italic')} title={t('bd.italic')}><Italic size={13} /></button>
+          {[['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]].map(([a, I]) => <button key={a} className={`btn-icon !h-7 !w-7 ${(first.data.align || 'left') === a ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ align: a })} aria-label={a} title={a}><I size={13} /></button>)}
           <span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} />
           {TEXT_COLORS.map((c) => <Swatch key={c} color={themeColor(c, document.documentElement.classList.contains('dark'))} on={(first.data.text_color || (first.type === 'sticky' ? '' : 'ink')) === c} onClick={() => patchSel({ text_color: c })} label={c} />)}
           <input type="color" className="h-6 w-7 cursor-pointer rounded border-0 bg-transparent p-0" value={/^#/.test(first.data.text_color || '') ? first.data.text_color : '#3b5bff'} onChange={(e) => patchSel({ text_color: e.target.value })} aria-label={t('bd.custom_color')} title={t('bd.custom_color')} />
         </Group>}
         {selection.length > 0 && <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-3">
           {selection.length > 1 && <>{[['left', 'bd.al_left'], ['hcenter', 'bd.al_hcenter'], ['right', 'bd.al_right'], ['top', 'bd.al_top'], ['vcenter', 'bd.al_vcenter'], ['bottom', 'bd.al_bottom'], ['row', 'bd.al_row']].map(([h, lk]) => <button key={h} className="rounded-md px-1.5 py-0.5 text-[11.5px] hover:bg-[var(--fill)]" onClick={() => controls.current.alignSel(h)}>{t(lk)}</button>)}<span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /></>}
-          <button className="btn-icon !h-7 !w-7" onClick={() => controls.current.duplicateSel()} data-tip={t('bd.dup_tip')} aria-label={t('bd.dup')}><Copy size={13} /></button>
-          <button className="btn-icon !h-7 !w-7 neg" onClick={() => controls.current.deleteSel()} data-tip={t('bd.del_tip')} aria-label={t('common.delete')}><Trash2 size={13} /></button>
+          <button className="btn-icon !h-7 !w-7" onClick={() => controls.current.duplicateSel()} data-tip={t('bd.dup_tip')} aria-label={t('bd.dup')} title={t('bd.dup_tip')}><Copy size={13} /></button>
+          <button className="btn-icon !h-7 !w-7 neg" onClick={() => controls.current.deleteSel()} data-tip={t('bd.del_tip')} aria-label={t('common.delete')} title={t('bd.del_tip')}><Trash2 size={13} /></button>
         </div>}
+      </div>
+
+      {/* телефон: те же действия крупными кнопками (зона нажатия — --tap), детали — в шторках */}
+      <div className="board-ctx flex shrink-0 items-center gap-2 overflow-x-auto border-b hair px-3 py-1 md:hidden" style={{ background: 'var(--surface)', minHeight: 'var(--tap)' }}>
+        {!showTextBar && !showStickyBar && !showPenBar && !showFrameBar && !withFrames && <span className="muted min-w-0 flex-1 truncate text-[12.5px]">{t(tool === 'hand' ? 'bd.hint_hand' : tool === 'select' ? 'bd.hint_select' : tool === 'eraser' ? 'bd.hint_eraser' : tool === 'image' ? 'bd.hint_image' : 'bd.hint_default')}</span>}
+        {showTextBar && <BarBtn icon={Type} onClick={() => setTextSheet(true)} label={t('board.text')} />}
+        {showFrameBar && sel1?.type === 'frame' && <BarBtn icon={ImageIcon} onClick={() => fileRef.current?.click()} label={t('bd.image')} />}
+        {withFrames && <BarBtn icon={Film} onClick={() => setFramesSheet(true)} label={t('bd.frames_label')} count={frames.length} />}
+        {withFrames && <BarBtn icon={Plus} onClick={() => { controls.current.addFrameNext(); setRev((r) => r + 1) }} label={t('bd.add_frame')} />}
+        {withFrames && <BarBtn icon={LayoutGrid} onClick={() => setGridSheet(true)} label={t('bd.grid')} />}
+        {selection.length > 0 && <BarBtn icon={Copy} onClick={() => controls.current.duplicateSel()} label={t('bd.dup')} />}
+        {selection.length > 0 && <BarBtn icon={Trash2} onClick={() => controls.current.deleteSel()} label={t('common.delete')} danger />}
       </div>
 
       {conflict && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b hair px-3 py-1.5 text-[12.5px]" style={{ background: 'var(--warn-soft)' }}>
@@ -266,68 +314,171 @@ function BoardEditor({ id }) {
         {/* панель инструментов: слева, вне холста, чтобы не прятать объекты */}
         <div className="hidden shrink-0 flex-col items-center gap-0.5 border-r hair px-1.5 py-2 md:flex" style={{ background: 'var(--surface)' }}>
           {TOOLS.map(([t, I, label, key]) => (
-            <button key={t} onClick={() => pick(t)} data-tip={`${label} · ${key}`} data-tip-side="right" aria-label={label}
+            <button key={t} onClick={() => pick(t)} data-tip={`${label} · ${key}`} data-tip-side="right" aria-label={label} title={`${label} · ${key}`}
               className={`grid h-9 w-9 place-items-center rounded-xl transition ${tool === t ? '' : 'hover:bg-[var(--fill)]'}`} style={tool === t ? { background: 'var(--ink)', color: 'var(--bg)' } : {}}><I size={16} /></button>
           ))}
-          {board.kind !== 'script' && <><div className="my-1 w-6 border-t hair" /><button onClick={() => controls.current.addFrameNext()} data-tip={t('bd.add_frame')} data-tip-side="right" aria-label={t('bd.add_frame')} className="grid h-9 w-9 place-items-center rounded-xl hover:bg-[var(--fill)]"><Plus size={16} /></button></>}
+          {withFrames && <><div className="my-1 w-6 border-t hair" /><button onClick={() => { controls.current.addFrameNext(); setRev((r) => r + 1) }} data-tip={t('bd.add_frame')} data-tip-side="right" aria-label={t('bd.add_frame')} title={t('bd.add_frame')} className="grid h-9 w-9 place-items-center rounded-xl hover:bg-[var(--fill)]"><Plus size={16} /></button></>}
         </div>
 
         <div className="min-w-0 flex-1">
           <BoardCanvas board={board} tool={tool} setTool={setTool} style={style} onDirty={onDirty} onSelectionChange={setSelection} onViewChange={(v) => setZoom(v.k)} controlsRef={controls} />
         </div>
 
-        {side && board.kind !== 'free' && frames.length > 0 && (
+        {side && withFrames && frames.length > 0 && (
           <aside aria-label={t('board.frames')} className="hidden w-[250px] shrink-0 overflow-y-auto border-l hair p-3 lg:block" style={{ background: 'var(--surface)' }}>
-            <div className="mb-2 flex items-center justify-between"><div className="label">{t('bd.frames_label')} · {frames.length}{total ? ` · ${fmtSec(total)}` : ''}</div><button className="btn-icon !h-7 !w-7" onClick={() => setSide(false)} aria-label={t('bd.hide')}><X size={13} /></button></div>
+            <div className="mb-2 flex items-center justify-between"><div className="label">{t('bd.frames_label')} · {frames.length}{total ? ` · ${fmtSec(total)}` : ''}</div><button className="btn-icon !h-7 !w-7" onClick={() => setSide(false)} aria-label={t('bd.hide')} title={t('bd.hide')}><X size={13} /></button></div>
             <div className="space-y-0.5">{frames.map((f) => (
               <button key={f.id} onClick={() => controls.current.focusItem(f.id)} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--fill)] ${sel1?.id === f.id ? 'bg-[var(--fill)]' : ''}`}>
                 <span className="mono mt-0.5 w-5 shrink-0 text-[11.5px] font-semibold" style={{ color: 'var(--ink-2)' }}>{f.data.n}</span>
                 <span className="min-w-0 flex-1"><span className={`block truncate text-[13px] ${f.data.label ? '' : 'faint'}`}>{f.data.label || t('bd.no_caption')}</span><span className="faint mono text-[11px]">{f.data.image ? t('bd.image') : t('bd.empty')}{f.data.seconds ? ` · ${fmtSec(f.data.seconds)}` : ''}</span></span>
               </button>))}</div>
-            <button className="btn-soft btn-sm mt-3 w-full" onClick={() => controls.current.addFrameNext()}><Plus size={14} /> {t('board.frame')}</button>
+            <button className="btn-soft btn-sm mt-3 w-full" onClick={() => { controls.current.addFrameNext(); setRev((r) => r + 1) }}><Plus size={14} /> {t('board.frame')}</button>
           </aside>
         )}
-        {!side && board.kind !== 'free' && frames.length > 0 && <button className="btn-soft btn-sm absolute right-3 top-3 z-10 hidden lg:inline-flex" onClick={() => setSide(true)}><Film size={13} /> {t('bd.frames_label')}</button>}
+        {!side && withFrames && frames.length > 0 && <button className="btn-soft btn-sm absolute right-3 top-3 z-10 hidden lg:inline-flex" onClick={() => setSide(true)}><Film size={13} /> {t('bd.frames_label')}</button>}
 
         {/* телефон */}
         <div className="absolute inset-x-0 bottom-0 z-20 flex items-center justify-around gap-1 border-t hair px-2 py-1.5 md:hidden" style={{ background: 'var(--surface)' }}>
-          {TOOLS.filter(([t]) => ['hand', 'select', 'sticky', 'text', 'frame', 'pen'].includes(t)).map(([t, I, label]) => <button key={t} onClick={() => pick(t)} aria-label={label} className="grid h-10 w-10 place-items-center rounded-xl" style={tool === t ? { background: 'var(--ink)', color: 'var(--bg)' } : {}}><I size={17} /></button>)}
-          <button onClick={() => controls.current.undo()} aria-label={t('bd.undo')} className="grid h-10 w-10 place-items-center rounded-xl"><Undo2 size={17} /></button>
-          <button onClick={() => controls.current.fit()} aria-label={t('bd.fit')} className="grid h-10 w-10 place-items-center rounded-xl"><Maximize2 size={17} /></button>
-          {selection.length > 0 && <button onClick={() => controls.current.deleteSel()} aria-label={t('common.delete')} className="neg grid h-10 w-10 place-items-center rounded-xl"><Trash2 size={17} /></button>}
+          {TOOLS.filter(([t]) => ['hand', 'select', 'sticky', 'text', 'frame', 'pen'].includes(t)).map(([t, I, label]) => <button key={t} onClick={() => pick(t)} aria-label={label} title={label} className="grid h-10 w-10 place-items-center rounded-xl" style={tool === t ? { background: 'var(--ink)', color: 'var(--bg)' } : {}}><I size={17} /></button>)}
+          <button onClick={() => controls.current.undo()} aria-label={t('bd.undo')} title={t('bd.undo')} className="grid h-10 w-10 place-items-center rounded-xl"><Undo2 size={17} /></button>
+          <button onClick={() => controls.current.fit()} aria-label={t('bd.fit')} title={t('bd.fit')} className="grid h-10 w-10 place-items-center rounded-xl"><Maximize2 size={17} /></button>
+          {selection.length > 0 && <button onClick={() => controls.current.deleteSel()} aria-label={t('common.delete')} title={t('common.delete')} className="neg grid h-10 w-10 place-items-center rounded-xl"><Trash2 size={17} /></button>}
         </div>
       </div>
 
       <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => { const fs = [...e.target.files]; e.target.value = ''; if (!fs.length) return; const fr = sel1?.type === 'frame' && fs.length === 1 ? sel1.id : null; fs.forEach((f) => controls.current.uploadImage(f, fr)) }} />
       <Confirm open={confirmArch} onClose={() => setConfirmArch(false)} title={t('bd.arch_q')} text={t('bd.arch_note')} onOk={async () => { try { await controls.current.flushNow(); await api.del(`/api/boards/${id}`); bump(); nav('/board') } catch (e) { show.err(e) } }} />
-      <Sheet open={gridSheet} onClose={() => setGridSheet(false)} title={t('bd.grid')}><GridForm ratio={style.ratio} onDone={(n, ratio) => { setGridSheet(false); controls.current.addFramesGrid(n, ratio) }} /></Sheet>
+      <Sheet open={gridSheet} onClose={() => setGridSheet(false)} title={t('bd.grid')}><GridForm ratio={style.ratio} onDone={(n, ratio) => { setGridSheet(false); controls.current.addFramesGrid(n, ratio); setRev((r) => r + 1) }} /></Sheet>
       <Sheet open={keysSheet} onClose={() => setKeysSheet(false)} title={t('hot.title')} wide>
         <div className="grid gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2">{SHORTCUTS.map(([k, v]) => <div key={k} className="flex items-baseline justify-between gap-3 border-b hair py-1.5"><span className="mono text-[12px]" style={{ color: 'var(--ink-2)' }}>{k}</span><span className="text-right">{t(v)}</span></div>)}</div>
+      </Sheet>
+
+      {/* Раскадровка: сетка кадров 2–3 колонки, тап — перейти к кадру на холсте,
+          перестановка — стрелками (номер и место меняются местами), добавление — снизу. */}
+      <Sheet open={framesSheet} onClose={() => setFramesSheet(false)} wide
+        title={t('bd.frames_label')} sub={`${t('bd.frames_n', { count: frames.length })}${total ? ` · ${fmtSec(total)}` : ''}`}>
+        {!withFrames ? (
+          <Empty compact glyph="mind" text={t('bd.no_frames')} sub={t('bd.d_script')} />
+        ) : !frames.length ? (
+          <Empty compact glyph="mind" text={t('bd.no_frames')} sub={t('bd.d_storyboard')} hint={t('bd.hint_example')} onHint={() => { setFramesSheet(false); setGridSheet(true) }} />
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              {frames.map((f, i) => (
+                <div key={f.id} className={`c !p-2 ${sel1?.id === f.id ? 'tint-acc' : ''}`}>
+                  <button type="button" className="block w-full text-left" onClick={() => { controls.current.focusItem(f.id); setFramesSheet(false) }}>
+                    <span className="relative block w-full overflow-hidden" style={{ aspectRatio: String(RATIOS[f.data.ratio] || 1.78), background: 'var(--sf2)', borderRadius: 'var(--r-sm)' }}>
+                      {f.data.image
+                        ? <img src={`/media/${f.data.image}`} alt="" className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
+                        : <span className="mono absolute inset-0 grid place-items-center text-[13px]" style={{ color: 'var(--ink-3)' }}>{f.data.n}</span>}
+                    </span>
+                    <span className="clamp-2 mt-1.5 block text-[12.5px] leading-snug">{f.data.label || t('bd.no_caption')}</span>
+                    <span className="faint mono block text-[12px]">{f.data.seconds ? fmtSec(f.data.seconds) : t('bd.empty')}</span>
+                  </button>
+                  <div className="mt-1 flex items-center justify-between">
+                    <span className="mono text-[12px]" style={{ color: 'var(--ink-2)' }}>#{f.data.n}</span>
+                    <span className="flex items-center">
+                      <button type="button" className="btn-icon !h-9 !w-9" disabled={i === 0} onClick={() => moveFrame(i, -1)} aria-label={t('bd.al_left')} title={t('bd.al_left')}><ArrowLeft size={15} /></button>
+                      <button type="button" className="btn-icon !h-9 !w-9" disabled={i === frames.length - 1} onClick={() => moveFrame(i, 1)} aria-label={t('bd.al_right')} title={t('bd.al_right')}><ArrowRight size={15} /></button>
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <button type="button" className="btn-ghost min-h-[var(--tap)]" onClick={() => setGridSheet(true)}><LayoutGrid size={15} /> {t('bd.add_grid')}</button>
+              <button type="button" className="btn-primary min-h-[var(--tap)]" onClick={() => { controls.current.addFrameNext(); setRev((r) => r + 1) }}><Plus size={15} /> {t('board.frame')}</button>
+            </div>
+          </>
+        )}
+      </Sheet>
+
+      {/* Правка текста и шрифта крупными кнопками: на телефоне 28px пиксельные иконки не попасть пальцем */}
+      <Sheet open={textSheet} onClose={() => setTextSheet(false)} title={t('board.text')}>
+        {!first ? (
+          <Empty compact glyph="mind" text={t('bd.hint_select')} />
+        ) : (
+          <div className="space-y-4">
+            <Field label={t('bd.font')}>
+              <select className="input" value={first.data.font || 'inter'} onChange={(e) => patchSel({ font: e.target.value })} aria-label={t('bd.font')}>
+                {Object.keys(FONTS).map((f) => <option key={f} value={f}>{FONT_LABEL[f]}</option>)}
+              </select>
+            </Field>
+            <Field label={t('bd.font_size')}>
+              <div className="flex items-center gap-2">
+                <button type="button" className="btn-icon outlined !h-[var(--tap)] !w-[var(--tap)]" onClick={() => patchSel({ font_size: FONT_SIZES.filter((s) => s < fontSize(first)).pop() || fontSize(first) - 1 })} aria-label={t('bd.smaller')} title={t('bd.smaller')}><Minus size={16} /></button>
+                <div className="num flex-1 text-center" style={{ fontSize: 'var(--fs-xl)' }}>{Math.round(fontSize(first))}</div>
+                <button type="button" className="btn-icon outlined !h-[var(--tap)] !w-[var(--tap)]" onClick={() => patchSel({ font_size: FONT_SIZES.find((s) => s > fontSize(first)) || fontSize(first) + 1 })} aria-label={t('bd.bigger')} title={t('bd.bigger')}><Plus size={16} /></button>
+              </div>
+            </Field>
+            <div>
+              <div className="label mb-1.5">{t('board.text')}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <BigToggle on={!!first.data.bold} onClick={() => patchSel({ bold: !first.data.bold })} label={t('bd.bold')}><Bold size={17} /></BigToggle>
+                <BigToggle on={!!first.data.italic} onClick={() => patchSel({ italic: !first.data.italic })} label={t('bd.italic')}><Italic size={17} /></BigToggle>
+                {[['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]].map(([a, I]) => (
+                  <BigToggle key={a} on={(first.data.align || 'left') === a} onClick={() => patchSel({ align: a })} label={a}><I size={17} /></BigToggle>
+                ))}
+              </div>
+            </div>
+            <div>
+              <div className="label mb-1.5">{t('bd.custom_color')}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                {TEXT_COLORS.map((c) => (
+                  <button key={c} type="button" onClick={() => patchSel({ text_color: c })} aria-label={c} title={c} aria-pressed={(first.data.text_color || (first.type === 'sticky' ? '' : 'ink')) === c}
+                    className="grid !h-[var(--tap)] !w-[var(--tap)] place-items-center rounded-full" style={{ background: 'var(--fill)' }}>
+                    <span className="h-5 w-5 rounded-full" style={{ background: themeColor(c, document.documentElement.classList.contains('dark')), boxShadow: (first.data.text_color || (first.type === 'sticky' ? '' : 'ink')) === c ? '0 0 0 2px var(--ink)' : 'inset 0 0 0 1px var(--line-2)' }} />
+                  </button>
+                ))}
+                <input type="color" className="h-[var(--tap)] w-[var(--tap)] cursor-pointer rounded-xl border-0 bg-transparent p-0" value={/^#/.test(first.data.text_color || '') ? first.data.text_color : '#3b5bff'} onChange={(e) => patchSel({ text_color: e.target.value })} aria-label={t('bd.custom_color')} title={t('bd.custom_color')} />
+              </div>
+            </div>
+          </div>
+        )}
       </Sheet>
     </div>
   )
 }
 
-function Group({ label, children }) { return <div className="flex shrink-0 items-center gap-1"><span className="label mr-1 !text-[10px]">{label}</span>{children}</div> }
-function Swatch({ color, on, onClick, label }) { return <button onClick={onClick} aria-label={label} className="h-5 w-5 rounded-full border-2 transition hover:scale-110" style={{ background: color, borderColor: on ? 'var(--ink)' : 'transparent', boxShadow: on ? '0 0 0 1px var(--bg) inset' : '0 0 0 1px var(--line) inset' }} /> }
+/* Крупная кнопка строки инструментов на телефоне */
+function BarBtn({ icon: I, onClick, label, count, danger }) {
+  return (
+    <button type="button" onClick={onClick} aria-label={label} title={label}
+      className={`btn-soft shrink-0 !h-[var(--tap)] gap-1.5 rounded-full px-3.5 text-[13px] ${danger ? 'neg' : ''}`}>
+      {I && <I size={15} />}{label}{count != null ? <span className="num opacity-60">{count}</span> : null}
+    </button>
+  )
+}
+/* Крупный переключатель в шторке текста: зона нажатия — --tap */
+function BigToggle({ on, onClick, label, children }) {
+  return (
+    <button type="button" onClick={onClick} aria-pressed={!!on} aria-label={label} title={label}
+      className="grid !h-[var(--tap)] min-w-[var(--tap)] place-items-center rounded-xl px-3"
+      style={{ background: on ? 'var(--ink)' : 'var(--fill)', color: on ? 'var(--bg)' : 'var(--ink)' }}>
+      {children}
+    </button>
+  )
+}
+function Group({ label, children }) { return <div className="flex shrink-0 items-center gap-1"><span className="label mr-1 !text-[12px]">{label}</span>{children}</div> }
+function Swatch({ color, on, onClick, label }) { return <button type="button" onClick={onClick} aria-label={label} title={label} aria-pressed={!!on} className="h-6 w-6 rounded-full border-2 transition hover:scale-110" style={{ background: color, borderColor: on ? 'var(--ink)' : 'transparent', boxShadow: on ? '0 0 0 1px var(--bg) inset' : '0 0 0 1px var(--line) inset' }} /> }
 function SizeInput({ value, onChange }) {
   const { t } = useI18n()
   const [v, setV] = useState(value); useEffect(() => setV(value), [value])
   const commit = (n) => { n = Math.max(6, Math.min(240, Math.round(Number(n) || value))); setV(n); if (n !== value) onChange(n) }
   return <div className="flex items-center">
-    <button className="btn-icon !h-7 !w-6" onClick={() => commit(FONT_SIZES.filter((s) => s < value).pop() || value - 1)} aria-label={t('bd.smaller')}>−</button>
+    <button type="button" className="btn-icon !h-7 !w-6" onClick={() => commit(FONT_SIZES.filter((s) => s < value).pop() || value - 1)} aria-label={t('bd.smaller')} title={t('bd.smaller')}>−</button>
     <input className="input !h-7 !w-[46px] num !px-1 !text-center !text-[12px]" value={v} list="board-font-sizes" onChange={(e) => setV(e.target.value)} onBlur={(e) => commit(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} aria-label={t('bd.font_size')} />
     <datalist id="board-font-sizes">{FONT_SIZES.map((s) => <option key={s} value={s} />)}</datalist>
-    <button className="btn-icon !h-7 !w-6" onClick={() => commit(FONT_SIZES.find((s) => s > value) || value + 1)} aria-label={t('bd.bigger')}>+</button>
+    <button type="button" className="btn-icon !h-7 !w-6" onClick={() => commit(FONT_SIZES.find((s) => s > value) || value + 1)} aria-label={t('bd.bigger')} title={t('bd.bigger')}>+</button>
   </div>
 }
-function MenuItem({ icon: I, children, onClick, danger }) { return <button className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill)] ${danger ? 'neg' : ''}`} onClick={onClick}><I size={14} className="faint" />{children}</button> }
+function MenuItem({ icon: I, children, onClick, danger }) { return <button type="button" className={`flex w-full min-h-[var(--tap)] items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill)] ${danger ? 'neg' : ''}`} onClick={onClick}><I size={14} className="faint" />{children}</button> }
 function GridForm({ onDone, ratio: r0 }) {
   const { t } = useI18n()
   const [n, setN] = useState(6); const [ratio, setRatio] = useState(r0 || '16:9')
   return <div className="space-y-4">
     <div className="grid grid-cols-2 gap-3"><Field label={t('bd.frames_word')}><input type="number" min={1} max={40} className="input num" value={n} onChange={(e) => setN(Number(e.target.value))} /></Field><Field label={t('bd.ratio')}><select className="input" value={ratio} onChange={(e) => setRatio(e.target.value)}>{Object.keys(RATIOS).map((r) => <option key={r}>{r}</option>)}</select></Field></div>
-    <button className="btn-primary w-full" onClick={() => onDone(Math.max(1, Math.min(40, n)), ratio)}>{t('common.add')}</button>
+    <button className="btn-primary w-full min-h-[var(--tap)]" onClick={() => onDone(Math.max(1, Math.min(40, n)), ratio)}>{t('common.add')}</button>
   </div>
 }
 /* Готовый HTML для печати/сохранения — это файл, а не интерфейс: подписи в нём

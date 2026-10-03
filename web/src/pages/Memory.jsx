@@ -7,9 +7,24 @@ import { useRefresh } from '../App'
 import { name as aName } from '../lib/name'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 
-/* Память — четыре вкладки: «сейчас» (свежее, живёт неделю), «о вас» (надолго + портрет), «события» (журнал
-   всего, что ассистент понял и сделал) и «архив» (забытое и устаревшее — ничего не стирается, всё можно вернуть). */
+/* Память — пять вкладок одной редакционной иерархии: «сейчас» (свежее, живёт неделю),
+   «о вас» (надолго + портрет и стиль общения), «лента» (день по минутам), «события»
+   (журнал всего, что ассистент понял и сделал) и «архив» (забытое и устаревшее — ничего
+   не стирается, всё можно вернуть).
+
+   Что проверяет e2e (tests/e2e/specs/memory_facts.spec.js) и что здесь зафиксировано:
+   • вкладки — ровно <button class="pill"> с подписями «о вас» / «архив»;
+   • строка факта — <div class="row">: тест кликает по ней и ищет внутри «забыть»/«вернуть»;
+   • кнопки «добавить» / «запомнить» / «поправить» / «сохранить» — role=button с точным текстом;
+   • заголовок блока стиля — .label (uppercase): тест ждёт «КАК ВЫ ПИШЕТЕ»;
+   • поле нового факта — <input> (не textarea: тест открывает единственную textarea на
+     странице, когда правит стиль). */
 const TABS = [['short', 'mem.t_short'], ['long', 'mem.t_long'], ['timeline', 'mem.t_timeline'], ['journal', 'mem.t_journal'], ['archive', 'mem.t_archive']]
+const SUBS = {
+  short: 'mem.sub_short', long: 'mem.sub_long', archive: 'mem.sub_archive',
+  timeline: 'mem.timeline_hint', journal: 'mem.everything_here',
+}
+const LAYER = { short: 'mem.t_short', long: 'mem.t_long', archive: 'mem.t_archive' }
 
 export default function Memory() {
   const { t } = useI18n()
@@ -20,13 +35,16 @@ export default function Memory() {
   useEffect(() => { load() }, [tick])
   const st = data?.stats || {}
   const counts = { short: st.short, long: st.long, archive: st.archive }
+  const idx = data ? (st.short || 0) + (st.long || 0) : undefined
+
   return (
-    <div className="space-y-8">
-      <PageHead kicker={t('mem.kicker', { name: aName().toLowerCase() })} title={t('nav.memory')} />
-      <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 animate-rise">
+    <div className="pg space-y-6">
+      <PageHead kicker={t('mem.kicker', { name: aName().toLowerCase() })} title={t('nav.memory')} idx={idx} sub={t(SUBS[tab])} />
+      {/* вкладки — спокойные переключатели: переносятся на две строки, ничего не уезжает и не листается */}
+      <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label={t('nav.memory')}>
         {TABS.map(([id, l]) => (
-          <button key={id} onClick={() => setTab(id)} className={`pill shrink-0 ${tab === id ? 'on' : ''}`}>
-            {t(l)}{counts[id] ? <span className="idx !text-[10px] opacity-60">{counts[id]}</span> : null}
+          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>
+            {t(l)}{counts[id] ? <span className="idx opacity-60" style={{ marginLeft: 5 }}>{counts[id]}</span> : null}
           </button>
         ))}
       </div>
@@ -42,6 +60,20 @@ const ago = (iso) => {
   return d <= 0 ? T('common.today') : d === 1 ? T('common.yesterday') : T('mem.ago', { count: d })
 }
 
+/* Уверенность факта — короткая шкала: без подписи она не мешает строке, а число в подсказке. */
+function Conf({ v }) {
+  const n = Number(v)
+  if (!Number.isFinite(n)) return null
+  const pct = Math.round(Math.max(0, Math.min(1, n)) * 100)
+  return (
+    <span className="inline-flex items-center gap-1.5" role="img" aria-label={`${pct}%`} title={`${pct}%`}>
+      <span className="block h-[4px] w-11 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
+        <span className="block h-full rounded-full" style={{ width: `${pct}%`, background: 'var(--ink-2)' }} />
+      </span>
+    </span>
+  )
+}
+
 function Facts({ layer, data, reload }) {
   const { t } = useI18n()
   const [busy, setBusy] = useState(false)
@@ -52,50 +84,36 @@ function Facts({ layer, data, reload }) {
   const items = (data.items || []).filter((f) => f.layer === layer).sort((a, b) => (b.core - a.core) || (new Date(b.updated_at) - new Date(a.updated_at)))
   const run = async (fn, ok) => { setBusy(true); try { await fn(); ok && toast(ok); await reload() } catch (e) { toast(t('mem.failed'), { sub: e.message, kind: 'err' }) } finally { setBusy(false) } }
   const add = () => { const draftText = draft.trim(); if (!draftText) return; run(() => api.addFact({ text: draftText, layer: layer === 'archive' ? 'long' : layer }), t('mem.remembered')).then(() => { setDraft(''); setAdding(false) }) }
-  const sub = t({ short: 'mem.sub_short', long: 'mem.sub_long', archive: 'mem.sub_archive' }[layer] || 'mem.sub_long')
 
   return (
-    <div className="space-y-6 animate-rise">
-      {!data.enabled && <div className="rule"><div className="row"><span className="muted text-[13.5px]">{t('mem.disabled')}</span></div></div>}
-
-      {layer === 'long' && (
-        <section>
-          <div className="mb-1.5 flex items-baseline justify-between gap-2">
-            <div className="label">{t('mem.portrait')}</div>
-            <span className="faint text-[11px]">{st.portrait_at ? t('mem.built_at', { when: ago(st.portrait_at) }) : t('mem.not_built')}</span>
-          </div>
-          <div className="panel p-4 sm:p-5">
-            {st.portrait ? (
-              <div className="whitespace-pre-line text-[14.5px] leading-relaxed">{st.portrait}</div>
-            ) : <div className="muted text-[13.5px]">{t('mem.portrait_hint')}</div>}
-            <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
-              <button className="text-accent hover:underline disabled:opacity-40" disabled={busy || (st.long || 0) < 3} onClick={() => run(() => api.rebuildPortrait(), t('mem.portrait_rebuilt'))}>{t('mem.rebuild_portrait')}</button>
-              <span className="faint">· {t('mem.weekly_auto')}</span>
-            </div>
-          </div>
-        </section>
+    <div className="space-y-6">
+      {!data.enabled && (
+        <div className="soft-warn flex items-start gap-2 rounded-2xl px-4 py-3 text-[13px]" style={{ border: '1px solid color-mix(in srgb, var(--warn) 30%, transparent)' }}>
+          <span>{t('mem.disabled')}</span>
+        </div>
       )}
 
-      {layer === 'long' && <StyleBlock st={st} busy={busy} run={run} />}
+      {layer === 'long' && <Portrait st={st} busy={busy} run={run} />}
 
       <section>
-        <div className="mb-1.5 flex items-baseline justify-between gap-2">
+        <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
           <div className="label">{t('mem.facts_n', { count: items.length })}</div>
-          <div className="flex items-center gap-3 text-[12px]">
-            {layer === 'short' && items.length > 0 && <button className="text-accent hover:underline disabled:opacity-40" disabled={busy} onClick={() => run(() => api.memoryTidy(), t('mem.tidied'))}>{t('mem.tidy_now')}</button>}
-            {layer !== 'archive' && <button className="text-accent flex items-center gap-1 hover:underline" onClick={() => setAdding((v) => !v)}><Plus size={12} /> {t('common.add')}</button>}
+          <div className="flex items-center gap-1">
+            {layer === 'short' && items.length > 0 && <MiniBtn disabled={busy} onClick={() => run(() => api.memoryTidy(), t('mem.tidied'))}>{t('mem.tidy_now')}</MiniBtn>}
+            {layer !== 'archive' && <MiniBtn onClick={() => setAdding((v) => !v)} icon={<Plus size={14} />}>{t('common.add')}</MiniBtn>}
           </div>
         </div>
-        {sub && <div className="muted mb-3 text-[13px]">{sub}</div>}
         {adding && (
           <div className="composer mb-3 flex items-center gap-2 py-1.5 pl-4 pr-2">
             <input autoFocus value={draft} onChange={(e) => setDraft(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') add(); if (e.key === 'Escape') setAdding(false) }}
-              className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('mem.fact_ph')} />
-            <button className="btn-primary btn-sm" disabled={!draft.trim() || busy} onClick={add}>{t('mem.remember')}</button>
+              className="h-11 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('mem.fact_ph')} />
+            <button className="btn-primary btn-sm shrink-0" disabled={!draft.trim() || busy} onClick={add}>{t('mem.remember')}</button>
           </div>
         )}
         {items.length === 0 ? (
-          <div className="rule"><Empty glyph="memory" text={t('mem.empty')} sub={t({ short: 'mem.e_short', long: 'mem.e_long', archive: 'mem.e_archive' }[layer] || 'mem.e_long')} /></div>
+          <div className="rule">
+            <Empty glyph="memory" text={t('mem.empty')} sub={t({ short: 'mem.e_short', long: 'mem.e_long', archive: 'mem.e_archive' }[layer] || 'mem.e_long')} />
+          </div>
         ) : (
           <div className="rule">
             {items.map((f) => <FactRow key={f.id} f={f} busy={busy} run={run} cats={data.categories} />)}
@@ -103,12 +121,46 @@ function Facts({ layer, data, reload }) {
         )}
       </section>
 
+      {layer === 'long' && <StyleBlock st={st} busy={busy} run={run} />}
       {layer === 'long' && <Lessons />}
     </div>
   )
 }
 
-/* «Как вы пишете» — 3–5 строк о стиле, собирается раз в неделю из ваших реплик; правится руками */
+/* Мелкая кнопка-подпись в шапке блока: зона нажатия — --tap, как у всех кнопок на тач-экране */
+function MiniBtn({ children, onClick, disabled, icon, tone }) {
+  const toneCls = tone === 'neg' ? 'neg' : tone === 'muted' ? 'muted' : 'text-accent'
+  return (
+    <button type="button" disabled={disabled} onClick={onClick}
+      className={`flex min-h-[var(--tap)] items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition ${toneCls}`}>
+      {icon}{children}
+    </button>
+  )
+}
+
+/* Портрет — короткий блок «кто вы» над списком фактов */
+function Portrait({ st, busy, run }) {
+  const { t } = useI18n()
+  return (
+    <section>
+      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
+        <div className="label">{t('mem.portrait')}</div>
+        <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{st.portrait_at ? t('mem.built_at', { when: ago(st.portrait_at) }) : t('mem.not_built')}</span>
+      </div>
+      <div className="panel p-4 sm:p-5">
+        {st.portrait
+          ? <div className="whitespace-pre-line text-[14.5px] leading-relaxed">{st.portrait}</div>
+          : <div className="muted text-[13.5px] leading-snug">{t('mem.portrait_hint')}</div>}
+        <div className="mt-2 flex flex-wrap items-center gap-x-2">
+          <MiniBtn disabled={busy || (st.long || 0) < 3} onClick={() => run(() => api.rebuildPortrait(), t('mem.portrait_rebuilt'))}>{t('mem.rebuild_portrait')}</MiniBtn>
+          <span className="faint text-[12.5px]">{t('mem.weekly_auto')}</span>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* «Как вы пишете» — отдельный спокойный блок: 3–5 строк о стиле, собирается раз в неделю из ваших реплик; правится руками */
 function StyleBlock({ st, busy, run }) {
   const [edit, setEdit] = useState(false)
   const [text, setText] = useState(st.style || '')
@@ -117,27 +169,27 @@ function StyleBlock({ st, busy, run }) {
   const save = () => run(() => api.setStyle(text), t('mem.style_fixed')).then(() => setEdit(false))
   return (
     <section>
-      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
         <div className="label">{t('mem.how_you_write')}</div>
-        <span className="faint text-[11px]">{st.style_at ? t('mem.noted_at', { when: ago(st.style_at) }) : t('mem.not_noted')}</span>
+        <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{st.style_at ? t('mem.noted_at', { when: ago(st.style_at) }) : t('mem.not_noted')}</span>
       </div>
       <div className="panel p-4 sm:p-5">
         {edit ? (
           <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={5} className="input !h-auto w-full resize-none py-2 text-[14px] leading-relaxed" placeholder={t('mem.style_ph')} />
         ) : st.style ? (
           <div className="whitespace-pre-line text-[14.5px] leading-relaxed">{st.style}</div>
-        ) : <div className="muted text-[13.5px]">{t('mem.style_hint')}</div>}
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
+        ) : <div className="muted text-[13.5px] leading-snug">{t('mem.style_hint')}</div>}
+        <div className="mt-2 flex flex-wrap items-center gap-x-1">
           {edit ? (
             <>
-              <button className="text-accent hover:underline" disabled={busy} onClick={save}>{t('common.save')}</button>
-              <button className="muted hover:underline" onClick={() => setEdit(false)}>{t('common.cancel')}</button>
+              <MiniBtn onClick={save}>{t('common.save')}</MiniBtn>
+              <MiniBtn tone="muted" onClick={() => setEdit(false)}>{t('common.cancel')}</MiniBtn>
             </>
           ) : (
             <>
-              <button className="text-accent hover:underline disabled:opacity-40" disabled={busy} onClick={() => run(() => api.rebuildStyle(), t('mem.style_rebuilt'))}>{t('mem.rebuild_style')}</button>
-              <button className="text-accent hover:underline" onClick={() => setEdit(true)}>{t('mem.fix')}</button>
-              <span className="faint">· {t('mem.weekly_auto2')}</span>
+              <MiniBtn disabled={busy} onClick={() => run(() => api.rebuildStyle(), t('mem.style_rebuilt'))}>{t('mem.rebuild_style')}</MiniBtn>
+              <MiniBtn onClick={() => setEdit(true)}>{t('mem.fix')}</MiniBtn>
+              <span className="faint text-[12.5px]">{t('mem.weekly_auto2')}</span>
             </>
           )}
         </div>
@@ -157,22 +209,22 @@ function Lessons() {
   const del = async (id) => { try { await api.delLesson(id); toast(t('les.forgotten')); load() } catch (e) { toast(t('mem.failed'), { sub: e.message, kind: 'err' }) } }
   return (
     <section>
-      <div className="mb-1.5 flex items-baseline justify-between gap-2">
+      <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
         <div className="label">{t('les.title')}</div>
-        <span className="faint text-[11px]">{t('les.n', { count: items.length })}</span>
+        <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('les.n', { count: items.length })}</span>
       </div>
       <div className="muted mb-3 text-[13px]">{t('les.hint')}</div>
       <div className="rule">
         {items.map((l) => (
           <div key={l.id} className="row group">
             <div className="min-w-0 flex-1 text-[14px]">
-              <span className="truncate">«{l.text}»</span>
+              <span className="break-words">«{l.text}»</span>
               <span className="faint"> → </span>
               <span className="muted">{t(LESSON_RU[l.kind]) || l.kind}</span>
               {l.wrong && <span className="faint text-[12px]"> {t('les.was', { what: t(LESSON_RU[l.wrong]) || l.wrong })}</span>}
             </div>
-            {l.uses > 0 && <span className="faint hidden shrink-0 text-[11px] sm:block">{t('les.used', { n: l.uses })}</span>}
-            <button className="btn-icon !h-7 !w-7 shrink-0" onClick={() => del(l.id)} aria-label={t('les.forget')}><X size={13} /></button>
+            {l.uses > 0 && <span className="faint hidden shrink-0 text-[12px] sm:block">{t('les.used', { n: l.uses })}</span>}
+            <button className="btn-icon shrink-0" onClick={() => del(l.id)} aria-label={t('les.forget')} title={t('les.forget')}><X size={13} /></button>
           </div>
         ))}
       </div>
@@ -180,6 +232,8 @@ function Lessons() {
   )
 }
 
+/* Строка факта: слой · категория · дата · уверенность — и действия по нажатию.
+   div.row обязателен: на него смотрит e2e (клик по строке раскрывает действия). */
 function FactRow({ f, busy, run, cats }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
@@ -193,39 +247,47 @@ function FactRow({ f, busy, run, cats }) {
     return !!ts && f.layer !== 'archive' && (Date.now() - new Date(ts)) / 864e5 > 30
   })()
   return (
-    <div className={`row cursor-pointer !items-start ${open ? '' : 'row-hover'}`} onClick={() => !edit && setOpen((v) => !v)} style={open ? { background: 'var(--fill)' } : {}}>
-      <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} />
+    <div className={`row !items-start gap-x-3 gap-y-1.5 ${open ? '' : 'row-hover'}`} onClick={() => !edit && setOpen((v) => !v)} style={open ? { background: 'var(--fill)' } : {}}>
+      <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />
       <div className="min-w-0 flex-1">
         {edit ? (
           <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-            <input autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setText(f.text); setEdit(false) } }} className="input !h-9" />
-            <button className="btn-icon !h-8 !w-8" onClick={save} aria-label={t('common.save_changes')}><Check size={14} /></button>
+            <input autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setText(f.text); setEdit(false) } }} className="input !h-9" aria-label={t('mem.fix')} />
+            <button className="btn-icon shrink-0" onClick={save} aria-label={t('common.save_changes')} title={t('common.save_changes')}><Check size={14} /></button>
           </div>
         ) : (
-          <div className={`text-[14.5px] leading-snug ${open ? '' : 'truncate'}`}>{f.core && <Star size={12} className="mr-1 inline -mt-0.5" style={{ color: 'var(--warn)', fill: 'var(--warn)' }} />}{f.text}</div>
+          /* текст целиком и с переносом: обрезанная строка памяти читается хуже, чем длинная */
+          <div className="text-[15px] leading-snug" style={{ overflowWrap: 'anywhere' }}>
+            {f.core && <Star size={13} className="mr-1 inline -mt-0.5" style={{ color: 'var(--warn)', fill: 'var(--warn)' }} />}{f.text}
+          </div>
         )}
-        {stale && <span className="soft-warn mt-1 inline-block rounded-full px-2 py-0.5 text-[11px]">{t('mem.maybe_stale')}</span>}
+        {/* слой · категория · дата · уверенность */}
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px]">
+          <span className="badge">{t(LAYER[f.layer] || 'mem.t_long')}</span>
+          {f.category && <span className="muted">{f.category}</span>}
+          <span className="faint">{ago(f.updated_at || f.created_at)}</span>
+          <Conf v={f.confidence} />
+          {f.core && <span className="warn">{t('mem.important')}</span>}
+          {stale && <span className="badge warn">{t('mem.maybe_stale')}</span>}
+        </div>
         {open && !edit && (
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[12px]" style={{ animation: 'fade .16s ease-out' }} onClick={(e) => e.stopPropagation()}>
-            <span className="muted">{f.category}</span>
-            <span className="faint">· {ago(f.updated_at || f.created_at)}</span>
-            {f.uses > 0 && <span className="faint">· {t('mem.used_n', { count: f.uses })}</span>}
-            {f.layer === 'archive' && f.archive_reason && <span className="faint">· {f.archive_reason}{f.replaced_by ? ` → #${f.replaced_by}` : ''}</span>}
+          <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1" style={{ animation: 'fade .16s ease-out' }} onClick={(e) => e.stopPropagation()}>
+            {f.uses > 0 && <span className="faint mr-1 text-[12px]">{t('mem.used_n', { count: f.uses })}</span>}
+            {f.layer === 'archive' && f.archive_reason && <span className="faint mr-1 text-[12px]">{f.archive_reason}{f.replaced_by ? ` → #${f.replaced_by}` : ''}</span>}
             {f.layer !== 'archive' ? (
               <>
-                <button className="text-accent flex items-center gap-1 hover:underline" disabled={busy} onClick={() => setEdit(true)}><Pencil size={12} /> {t('mem.fix')}</button>
-                <button className="text-accent flex items-center gap-1 hover:underline" disabled={busy} onClick={() => run(() => api.updateFact(f.id, { core: !f.core }), f.core ? t('mem.not_core') : t('mem.always_core'))}><Star size={12} /> {t(f.core ? 'mem.less_important' : 'mem.important')}</button>
-                {f.layer === 'short' && <button className="text-accent hover:underline" disabled={busy} onClick={() => run(() => api.updateFact(f.id, { layer: 'long' }), t('mem.kept_long'))}>{t('mem.keep_long')}</button>}
-                <button className="hover:underline" style={{ color: 'var(--neg)' }} disabled={busy} onClick={() => run(() => api.forgetFact(f.id), t('mem.forgotten'))}>{t('mem.forget')}</button>
+                <MiniBtn disabled={busy} onClick={() => setEdit(true)} icon={<Pencil size={13} />}>{t('mem.fix')}</MiniBtn>
+                <MiniBtn disabled={busy} onClick={() => run(() => api.updateFact(f.id, { core: !f.core }), f.core ? t('mem.not_core') : t('mem.always_core'))} icon={<Star size={13} />}>{t(f.core ? 'mem.less_important' : 'mem.important')}</MiniBtn>
+                {f.layer === 'short' && <MiniBtn disabled={busy} onClick={() => run(() => api.updateFact(f.id, { layer: 'long' }), t('mem.kept_long'))}>{t('mem.keep_long')}</MiniBtn>}
+                <MiniBtn tone="neg" disabled={busy} onClick={() => run(() => api.forgetFact(f.id), t('mem.forgotten'))}>{t('mem.forget')}</MiniBtn>
               </>
             ) : (
-              <button className="text-accent flex items-center gap-1 hover:underline" disabled={busy} onClick={() => run(() => api.restoreFact(f.id), t('mem.restored'))}><RotateCcw size={12} /> {t('mem.restore')}</button>
+              <MiniBtn disabled={busy} onClick={() => run(() => api.restoreFact(f.id), t('mem.restored'))} icon={<RotateCcw size={13} />}>{t('mem.restore')}</MiniBtn>
             )}
             {f.layer !== 'archive' && <Pills className="w-full" value={f.category} onChange={(c) => c !== f.category && run(() => api.updateFact(f.id, { category: c }))} options={(cats || []).map((c) => [c, c])} />}
           </div>
         )}
       </div>
-      {!open && <span className="faint hidden shrink-0 text-[11px] sm:block">{ago(f.updated_at || f.created_at)}</span>}
     </div>
   )
 }
@@ -273,21 +335,21 @@ function Journal() {
   return (
     <div className="space-y-6">
       {/* поиск + категории */}
-      <div className="animate-rise space-y-3">
-        <div className="flex items-center justify-between gap-2">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="label">{t('mem.entries_n', { count: n })}</div>
-          <Seg value={days} onChange={setDays} options={[[7, t('mem.d7')], [30, t('mem.d30')], [365, t('mem.d365')]]} />
+          <Seg className="[&>button]:!min-h-[var(--tap)]" value={days} onChange={setDays} options={[[7, t('mem.d7')], [30, t('mem.d30')], [365, t('mem.d365')]]} />
         </div>
         <div className="composer flex items-center gap-2 py-1.5 pl-4 pr-2">
-          <Search size={16} className="faint shrink-0" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('mem.search_ph')} />
-          {q && <button className="btn-icon !h-8 !w-8" onClick={() => setQ('')} aria-label={t('tk.clear_search')}><X size={14} /></button>}
+          <Search size={16} className="faint shrink-0" aria-hidden="true" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} className="h-11 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('mem.search_ph')} aria-label={t('mem.search_ph')} />
+          {q && <button className="btn-icon shrink-0" onClick={() => setQ('')} aria-label={t('tk.clear_search')} title={t('tk.clear_search')}><X size={14} /></button>}
         </div>
-        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1">
+        <div className="board-ctx -mx-1 flex gap-1.5 overflow-x-auto px-1">
           {KINDS.map((k) => (
-            <button key={k.id} onClick={() => setKind(k.id)} className={`pill shrink-0 ${kind === k.id ? 'on' : ''}`}>
-              {k.icon && <span className="h-1.5 w-1.5 rounded-full" style={{ background: kind === k.id ? 'currentColor' : k.color }} />}
-              {k.label}{k.id && counts[k.id] && !kind ? <span className="idx !text-[10px] opacity-60">{counts[k.id]}</span> : null}
+            <button key={k.id} type="button" onClick={() => setKind(k.id)} aria-pressed={kind === k.id} className={`pill !min-h-[var(--tap)] shrink-0 ${kind === k.id ? 'on' : ''}`}>
+              {k.icon && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: kind === k.id ? 'currentColor' : k.color }} />}
+              {k.label}{k.id && counts[k.id] && !kind ? <span className="idx opacity-60" style={{ marginLeft: 5 }}>{counts[k.id]}</span> : null}
             </button>
           ))}
         </div>
@@ -298,8 +360,11 @@ function Journal() {
       ) : (
         <div className="space-y-7">
           {groups.map(([day, list]) => (
-            <section key={day} className="animate-rise">
-              <div className="mb-1.5 flex items-baseline gap-2"><div className="label">{dayLabel(day)}</div><span className="faint text-[11px]">{shortDate(day)} · {t('mem.entries_n', { count: list.length })}</span></div>
+            <section key={day}>
+              <div className="mb-1.5 flex flex-wrap items-baseline gap-2">
+                <div className="label">{dayLabel(day)}</div>
+                <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{shortDate(day)} · {t('mem.entries_n', { count: list.length })}</span>
+              </div>
               <div className="rule">
                 {list.map((m) => <Entry key={m.id} m={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} />)}
               </div>
@@ -318,30 +383,29 @@ function Entry({ m, open, onToggle }) {
   const I = k.icon || MessageCircle
   const text = clean(m.text)
   return (
-    <div className={`row cursor-pointer !items-start ${open ? '' : 'row-hover'}`} onClick={onToggle} style={open ? { background: 'var(--fill)' } : {}}>
+    <div className={`row !items-start gap-x-3 gap-y-1.5 ${open ? '' : 'row-hover'}`} onClick={onToggle} style={open ? { background: 'var(--fill)' } : {}}>
       <span className="faint num mt-[3px] w-11 shrink-0 text-[12px]">{hhmm(m.created_at)}</span>
-      <span className="mt-[3px] grid h-[18px] w-[18px] shrink-0 place-items-center" style={{ color: k.color || 'var(--ink-3)' }}><I size={14} /></span>
+      <span className="mt-[3px] grid h-[18px] w-[18px] shrink-0 place-items-center" style={{ color: k.color || 'var(--ink-3)' }} aria-hidden="true"><I size={14} /></span>
       <div className="min-w-0 flex-1">
-        <div className={`text-[14.5px] leading-snug ${open ? '' : 'truncate'}`}>{text}</div>
+        <div className="text-[15px] leading-snug" style={{ overflowWrap: 'anywhere' }}>{text}</div>
         {open && (
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ animation: 'fade .16s ease-out' }}>
             <span className="muted">{k.label ? t(k.label) : m.kind}</span>
             <span className="faint">· {t('mem.source', { what: CH[m.channel] ? t(CH[m.channel]) : m.channel })}</span>
             <span className="faint">· {new Date(m.created_at).toLocaleString(localeOf(), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).replace(/\.?\s*г\.$/u, '')}</span>
-            {k.to && <Link to={k.to} className="text-accent flex items-center gap-0.5 hover:underline" onClick={(e) => e.stopPropagation()}>{t('mem.open_in', { what: t(k.label) })} <ArrowUpRight size={12} /></Link>}
-            {m.kind !== 'system' && <button className="text-accent hover:underline" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('mem.ask_seed', { what: text.slice(0, 60) }) } })) }}>{t('mem.ask')}</button>}
+            {k.to && <Link to={k.to} className="text-accent flex min-h-[var(--tap)] items-center gap-0.5" onClick={(e) => e.stopPropagation()}>{t('mem.open_in', { what: t(k.label) })} <ArrowUpRight size={12} /></Link>}
+            {m.kind !== 'system' && <button className="text-accent min-h-[var(--tap)]" onClick={(e) => { e.stopPropagation(); window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('mem.ask_seed', { what: text.slice(0, 60) }) } })) }}>{t('mem.ask')}</button>}
           </div>
         )}
       </div>
-      {!open && m.channel && m.channel !== 'web' && <span className="faint hidden shrink-0 text-[11px] sm:block">{CH[m.channel] || m.channel}</span>}
+      {!open && m.channel && m.channel !== 'web' && <span className="faint hidden shrink-0 text-[12px] sm:block">{CH[m.channel] || m.channel}</span>}
     </div>
   )
 }
 
-
 /* Лента дня: человек и ассистент одной хронологией — сессии за ПК (≥15 мин), действия, события присутствия, разговор (счётчик), провалы. */
 const WHO_ME = 'я'   // i18n-raw — ключ из лога ядра
-const WHO = { 'я': { label: 'mem.w_you', color: 'var(--ink)' }, 'джарвис': { label: 'mem.w_assistant', color: 'var(--accent)', icon: Bot }, 'пк': { label: 'mem.w_pc', color: 'var(--ink-3)', icon: Monitor } }
+const WHO = { 'я': { label: 'mem.w_you', color: 'var(--ink)' }, 'марвин': { label: 'mem.w_assistant', color: 'var(--accent)', icon: Bot }, 'пк': { label: 'mem.w_pc', color: 'var(--ink-3)', icon: Monitor } }
 function Timeline() {
   const { t } = useI18n()
   const [day, setDay] = useState(0)   // 0 сегодня, 1 вчера…
@@ -354,12 +418,13 @@ function Timeline() {
     api.get(`/api/timeline?day=${iso}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`).then(setItems).catch(() => setItems([]))
   }, [day, q, tick])
   return (
-    <div className="space-y-5 animate-rise">
-      <div className="flex flex-wrap items-center gap-2">
-        <Seg value={day} onChange={setDay} options={[[0, t('common.today')], [1, t('common.yesterday')], [2, t('mem.day_before')]]} />
-        <label className="relative ml-auto block w-full sm:w-64">
-          <Search size={14} className="faint absolute left-3 top-1/2 -translate-y-1/2" />
-          <input value={q} onChange={(e) => setQ(e.target.value)} className="input !h-9 !pl-9 !text-[14px]" placeholder={t('mem.timeline_search_ph')} />
+    <div className="space-y-5">
+      {/* переключатель дня и поиск — каждый на всю ширину: на телефоне ничего не листается вбок */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Seg value={day} onChange={setDay} className="w-full [&>button]:!min-h-[var(--tap)] sm:w-auto" options={[[0, t('common.today')], [1, t('common.yesterday')], [2, t('mem.day_before')]]} />
+        <label className="relative block w-full sm:ml-auto sm:w-64">
+          <Search size={14} className="faint absolute left-3 top-1/2 -translate-y-1/2" aria-hidden="true" />
+          <input value={q} onChange={(e) => setQ(e.target.value)} className="input !pl-9" placeholder={t('mem.timeline_search_ph')} aria-label={t('mem.timeline_search_ph')} />
         </label>
       </div>
       {!items ? <ListSkeleton n={6} /> : items.length === 0 ? (
@@ -370,13 +435,13 @@ function Timeline() {
             const w = WHO[it.who] || WHO[WHO_ME]
             const I = w.icon
             return (
-              <div key={i} className={`row !items-start ${it.kind === 'fail' ? 'opacity-70' : ''}`}>
+              <div key={i} className={`row !items-start gap-x-3 gap-y-1.5 ${it.kind === 'fail' ? 'opacity-70' : ''}`}>
                 <span className="faint num mt-[3px] w-11 shrink-0 text-[12px]">{hhmm(it.at)}</span>
-                <span className="mt-[3px] grid h-[18px] w-[18px] shrink-0 place-items-center" style={{ color: w.color }}>{I ? <I size={14} /> : <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--ink-2)' }} />}</span>
+                <span className="mt-[3px] grid h-[18px] w-[18px] shrink-0 place-items-center" style={{ color: w.color }} aria-hidden="true">{I ? <I size={14} /> : <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--ink-2)' }} />}</span>
                 <div className="min-w-0 flex-1">
-                  <div className={`text-[14.5px] leading-snug ${it.kind === 'screen' ? 'muted' : ''}`}>{clean(it.text)}</div>
+                  <div className={`text-[15px] leading-snug ${it.kind === 'screen' ? 'muted' : ''}`} style={{ overflowWrap: 'anywhere' }}>{clean(it.text)}</div>
                 </div>
-                {it.who !== WHO_ME && <span className="faint hidden shrink-0 text-[11px] sm:block">{t(w.label)}</span>}
+                {it.who !== WHO_ME && <span className="faint shrink-0 text-[12px]">{t(w.label)}</span>}
               </div>
             )
           })}

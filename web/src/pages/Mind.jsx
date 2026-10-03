@@ -1,25 +1,41 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Pencil, Trash2 } from 'lucide-react'
+import { Pencil, Trash2, Plus, Search, X, Sparkles } from 'lucide-react'
 import Graph from '../components/Graph'
 import { api, relTime, listOf } from '../lib/api'
-import { useToast, PageAccent, Empty, ListSkeleton, Sheet, Field, Confirm } from '../components/ui'
+import { useToast, PageAccent, PageHead, Empty, ListSkeleton, Sheet, Field, Confirm, useLeave, useArrived } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import { useI18n } from '../lib/i18n'
 
+/* Второй мозг: заметки, ссылки, фото и граф. Страница собрана как редакционная иерархия —
+   крупная шапка, спокойные вкладки, а лента мыслей идёт СПИСКОМ строк переменной высоты
+   (по содержимому), без сетки одинаковых коробок: короткая мысль занимает две строки,
+   длинная с картинкой — пол-экрана.
+
+   Кнопки AI-правки, история версий и удаление спрятаны не в меню, а в саму строку:
+   на телефоне до них один тап, зоны нажатия — --tap. */
 const URL_RE = /https?:\/\/[^\s]+/
-const TABS = ['all', 'note', 'photo', 'link', 'graph']
+const TABS = [
+  ['all', 'common.all'], ['note', 'mind.tab_notes'], ['photo', 'mind.tab_photos'], ['link', 'mind.tab_links'], ['graph', 'mind.tab_graph'],
+]
+const EMPTY = {
+  note: ['mind.empty_title', 'mind.empty_hint', 'mind.empty_hint_example'],
+  photo: ['mind.empty_title', 'mind.empty_hint', 'mind.empty_hint_example'],
+  link: ['mind.empty_title', 'mind.empty_hint', 'mind.empty_hint_example'],
+  all: ['mind.empty_title', 'mind.empty_hint', 'mind.empty_hint_example'],
+  graph: ['graph.empty_title', 'graph.empty_hint'],
+}
+const imgSrc = (s) => (!s ? '' : String(s).startsWith('http') ? String(s) : `/media/${s}`)
 
 export default function Mind() {
   const { t } = useI18n()
   const [params, setParams] = useSearchParams()
   const pageAcc = usePageAccent('mind')
-  const [tab, setTab] = useState(() => (TABS.includes(params.get('tab')) ? params.get('tab') : 'all'))
+  const [tab, setTab] = useState(() => (TABS.some(([id]) => id === params.get('tab')) ? params.get('tab') : 'all'))
   const [q, setQ] = useState(() => params.get('q') || '')
   const [notes, setNotes] = useState([])
   const [links, setLinks] = useState([])
-  const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
   // правка и удаление записи (сами записи храним, пока шторка закрывается — иначе заголовок мигает)
@@ -31,8 +47,11 @@ export default function Mind() {
   const [editBusy, setEditBusy] = useState(false)
   const [askDel, setAskDel] = useState(null)
   const [askOpen, setAskOpen] = useState(false)
+  // добавление мысли — шторка с тремя снапами и крупным полем
+  const [addOpen, setAddOpen] = useState(false)
+  const [text, setText] = useState('')
   // правка заметки нейронкой: было/стало + история версий (только заметки, ссылки не трогаем)
-  const [pol, setPol] = useState(null)         // { note, mode, original, polished, hist, tab }
+  const [pol, setPol] = useState(null)         // { note, mode, original, polished, hist }
   const [polOpen, setPolOpen] = useState(false)
   const [polBusy, setPolBusy] = useState('')   // '' | rewrite | expand | apply | revert
   const [hist, setHist] = useState([])
@@ -42,6 +61,8 @@ export default function Mind() {
   const [histBusy, setHistBusy] = useState(false)
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
+  const [leavingCls, leave] = useLeave()
+  const addRef = useRef(null)
 
   const load = () => {
     const p = q.trim().length >= 3
@@ -96,13 +117,16 @@ export default function Mind() {
     }
   }
 
+  // удаление — строка сначала уезжает, потом уходит запрос: не остаётся «прыгающего» списка
   const doDel = async () => {
     const it = askDel
     setAskOpen(false)
     if (!it) return
     try {
-      if (it._t === 'note') await api.delNote(it.id)
-      else await api.delLink(it.id)
+      await leave(it._t + it.id, 'card', async () => {
+        if (it._t === 'note') await api.delNote(it.id)
+        else await api.delLink(it.id)
+      })
       show(t(it._t === 'note' ? 'mind.note_deleted' : 'mind.link_deleted'))
       load()
       bump()
@@ -118,7 +142,7 @@ export default function Mind() {
     try {
       const r = await api.post(`/api/mind/notes/${it.id}/polish`, { mode })
       const revs = await api.get(`/api/mind/notes/${it.id}/revisions`).catch(() => [])
-      setPol({ note: it, mode, original: r.original, polished: r.polished, hist: revs || [], tab: 'after' })
+      setPol({ note: it, mode, original: r.original, polished: r.polished, hist: revs || [] })
       setPolOpen(true)
     } catch (er) {
       show.err(er)   // 503 от сервера (LLM недоступна) — текст ошибки уходит в тост как есть
@@ -143,7 +167,7 @@ export default function Mind() {
     }
   }
 
-  const revertPol = async () => {   // «← предыдущая версия» прямо из шита сравнения
+  const revertPol = async () => {   // «← предыдущая версия» прямо из шторки сравнения
     if (!pol || polBusy) return
     setPolBusy('revert')
     try {
@@ -204,6 +228,7 @@ export default function Mind() {
         show(t('mind.note_saved'))
       }
       setText('')
+      setAddOpen(false)
       load()
       bump()
     } catch (er) {
@@ -213,7 +238,7 @@ export default function Mind() {
     }
   }
 
-  const items = [
+  const items = useMemo(() => [
     ...(notes || []).map((n) => ({ ...n, _t: 'note' })),
     ...(links || []).map((l) => ({ ...l, _t: 'link' })),
   ].filter((x) => {
@@ -222,182 +247,157 @@ export default function Mind() {
     if (tab === 'note') return x._t === 'note' && !x.image
     if (tab === 'link') return x._t === 'link'
     return true
-  }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0))
+  }).sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0)), [notes, links, tab])
 
   // честный счётчик: до загрузки — «—», а не выдуманные «25 записей»
   const count = loaded ? items.length : null
+  const arrived = useArrived(items.map((x) => `${x._t}${x.id}`))
 
   // «← предыдущая версия» показываем, только если в истории есть куда откатываться
   // (первая версия обычно = оригинал; raw впереди может быть, если заметку уже причёсывали в фоне)
   const polCurIdx = pol ? (pol.hist || []).findIndex((v) => v.current) : -1
   const polHasPrev = !!pol && (polCurIdx > 0 || (!!pol.note.raw && pol.note.raw !== pol.original))
 
+  const emptyKeys = EMPTY[tab] || EMPTY.all
+  const emptyNode = (
+    <div className="c" style={{ gridColumn: '1 / -1' }}>
+      <Empty glyph={tab === 'graph' ? 'mind' : 'mind'} text={t(q && tab !== 'graph' ? 'common.no_results' : emptyKeys[0])} sub={t(q && tab !== 'graph' ? 'mind.empty_query' : emptyKeys[1])} hint={q || tab === 'graph' ? undefined : t(emptyKeys[2])} />
+    </div>
+  )
+
   return (
     <div className="pg on" id="p-brain" style={pageAcc.style}>
-      {/* Шапка */}
-      <div className="top">
-        <div>
-          <h1 className="r" style={{ '--i': 0 }}>{t('nav.mind')}</h1>
-          <p className="sub r" style={{ '--i': 1 }}>{t('mind.second_brain')} · {count != null ? t('mind.entries_n', { count }) : '—'}</p>
-        </div>
-        <div className="hr r" style={{ '--i': 1 }}>
-          <div className="sg">
-            <button type="button" className={tab === 'all' ? 'on' : ''} onClick={() => setTab('all')}>{t('common.all')}</button>
-            <button type="button" className={tab === 'note' ? 'on' : ''} onClick={() => setTab('note')}>{t('mind.tab_notes')}</button>
-            <button type="button" className={tab === 'photo' ? 'on' : ''} onClick={() => setTab('photo')}>{t('mind.tab_photos')}</button>
-            <button type="button" className={tab === 'link' ? 'on' : ''} onClick={() => setTab('link')}>{t('mind.tab_links')}</button>
-            <button type="button" className={tab === 'graph' ? 'on' : ''} onClick={() => setTab('graph')}>{t('mind.tab_graph')}</button>
-          </div>
-        </div>
+      <PageHead kicker={t('mind.second_brain')} title={t('nav.mind')} idx={count}
+        sub={count != null ? t('mind.entries_n', { count }) : undefined}
+        right={<>
+          <PageAccent page="mind" />
+          <button type="button" className="btn-primary head-primary" onClick={() => setAddOpen(true)}>
+            <Plus size={15} /> {t('common.add')}
+          </button>
+        </>} />
+
+      {/* вкладки — спокойные переключатели, а не «простыня кнопок» */}
+      <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label={t('nav.mind')}>
+        {TABS.map(([id, l]) => (
+          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>{t(l)}</button>
+        ))}
       </div>
 
-      {/* Быстрый ввод */}
-      <div className="comp r" style={{ '--i': 2 }}>
-        <i></i>
-        <input
-          className="ph0"
-          style={{ background: 'transparent', border: 0, outline: 'none', width: '100%', color: 'inherit' }}
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submit(e)}
-          placeholder={t('mind.composer_ph')}
-        />
-        <span className="send" style={{ fontSize: '24px', cursor: 'pointer' }} onClick={submit}>+</span>
+      {/* поиск по смыслу: одна строка, поле на всю ширину — на телефоне нечему горизонтально листаться */}
+      <div className="mt-3 flex items-center gap-2" style={{ minHeight: 'var(--tap)' }}>
+        <Search size={16} className="faint shrink-0" aria-hidden="true" />
+        <input value={q} onChange={(e) => setQ(e.target.value)} className="input flex-1" placeholder={t('mind.search_ph')} aria-label={t('mind.search_ph')} />
+        {q && <button className="btn-icon shrink-0" onClick={() => setQ('')} aria-label={t('tk.clear_search')} title={t('tk.clear_search')}><X size={15} /></button>}
       </div>
 
-      {/* Поисковая строка по смыслу */}
-      <div className="search r" style={{ width: '100%', height: '54px', marginTop: '16px', '--i': 3 }}>
-        <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-          <circle cx="9" cy="9" r="6" />
-          <path d="m14 14 3.5 3.5" />
-        </svg>
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          style={{ background: 'transparent', border: 0, outline: 'none', width: '100%', color: 'inherit', font: 'inherit', marginLeft: '8px' }}
-          placeholder={t('mind.search_ph')}
-        />
-      </div>
-
-      {/* Masonry-сетка заметок или Граф */}
       {tab === 'graph' ? (
-        <div className="mt-8 animate-rise">
-          <Graph height={Math.max(450, window.innerHeight - 300)} />
+        <div className="mt-4">{loaded ? <Graph /> : <div className="c"><ListSkeleton n={3} /></div>}</div>
+      ) : !loaded ? (
+        <div className="mt-4"><ListSkeleton n={5} /></div>
+      ) : !items.length ? (
+        <div className="mt-4">{emptyNode}</div>
+      ) : tab === 'photo' ? (
+        /* Галерея: крупные превью в две колонки, кадр фиксированный (4:3) и картинка
+           вписывается по object-fit — на телефоне фото не растягивается. */
+        <div className="stagger mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+          {items.map((it) => (
+            <figure key={`${it._t}-${it.id}`} className={`c overflow-hidden !p-0 ${arrived(`${it._t}${it.id}`)} ${leavingCls(it._t + it.id)}`}>
+              <button type="button" className="block w-full text-left" onClick={() => startEdit(it)}>
+                <Thumb src={imgSrc(it.image)} alt={it.title || it.text || it.summary || it.url || ''} ratio="4 / 3" />
+                <span className="block p-3">
+                  <span className="clamp-2 block text-[13.5px] leading-snug">{it.title || it.text || it.summary || it.url}</span>
+                  <span className="faint mt-1 flex flex-wrap items-center gap-x-2 text-[12px]">
+                    <time>{relTime(it.created_at)}</time>
+                    {it._t === 'link' && it.domain && <span className="trunc">{it.domain}</span>}
+                  </span>
+                </span>
+              </button>
+              <div className="flex items-center justify-end gap-1 px-2 pb-2">
+                <button type="button" className="btn-icon" title={t('common.edit')} aria-label={t('common.edit')} onClick={() => startEdit(it)}><Pencil size={15} /></button>
+                <button type="button" className="btn-icon neg" title={t('common.delete')} aria-label={t('common.delete')}
+                  onClick={() => { setAskDel(it); setAskOpen(true) }}><Trash2 size={15} /></button>
+              </div>
+            </figure>
+          ))}
         </div>
       ) : (
-        <div className="mas" style={{ marginTop: '28px' }}>
-          {!loaded ? (
-            <ListSkeleton n={6} />
-          ) : !items.length ? (
-            <div className="c p2" style={{ gridColumn: '1 / -1' }}>
-              <Empty glyph="mind" text={t(q ? 'common.no_results' : 'mind.empty_title')}
-                sub={t(q ? 'mind.empty_query' : 'mind.empty_hint')}
-                hint={q ? null : t('mind.empty_hint_example')} />
-            </div>
-          ) : items.map((it, idx) => (
-            // id у заметок и ссылок начинаются с 1 — ключ составной, иначе дубли
-            <section className="c r" key={`${it._t}-${it.id}`} style={{ '--i': 4 + (idx % 6) }}>
-              {/* Превью показываем только когда картинка есть (иначе карточка остаётся текстовой) */}
-              {it.image && (
-                <div style={{
-                  position: 'relative', width: '100%', aspectRatio: '16 / 9',
-                  borderRadius: '18px', overflow: 'hidden', border: '1px solid var(--line)',
-                  background: 'var(--sf2)', marginBottom: '14px',
-                }}>
-                  <img
-                    src={it.image.startsWith('http') ? it.image : '/media/' + it.image}
-                    alt={it.title || it.text || it.summary || it.url || ''}
-                    loading="lazy"
-                    onError={(e) => { const box = e.currentTarget.parentElement; if (box) box.style.display = 'none' }}
-                    style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' }}
-                  />
-                  {it._t === 'link' && it.domain && (
-                    <span style={{
-                      position: 'absolute', left: '8px', bottom: '8px', maxWidth: 'calc(100% - 16px)',
-                      padding: '2px 8px', borderRadius: '999px', background: 'rgba(16, 17, 20, 0.55)', color: '#fff',
-                      font: '11px "Inter Tight", "Inter", sans-serif',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>{it.domain}</span>
-                  )}
-                </div>
-              )}
-              {it.title && <h3>{it.title}</h3>}
-              <p>{it.text || it.summary || it.body || it.url}</p>
-              {/* ✨ правка нейронкой — только у заметок (у ссылок свой редактор) */}
-              {it._t === 'note' && (
-                <div className="chips !m-0 !gap-1.5">
-                  <button type="button" disabled={!!polBusy}
-                    onClick={() => runPolish(it, 'rewrite')}>✨ {t(polBusy === 'rewrite' ? 'common.loading' : 'mind.pol_rewrite')}</button>
-                  <button type="button" disabled={!!polBusy}
-                    onClick={() => runPolish(it, 'expand')}>✨ {t(polBusy === 'expand' ? 'common.loading' : 'mind.pol_expand')}</button>
-                  <button type="button" onClick={() => openHist(it)}>{t('mind.history')}</button>
-                </div>
-              )}
-              <div className="tg">
-                <small>{relTime(it.created_at)}</small>
-                {listOf(it.tags).map((t) => <span key={t}>#{t}</span>)}
-                <div className="ml-auto flex items-center gap-1">
-                  <button type="button" className="btn-icon !h-7 !w-7" title={t('common.edit')} aria-label={t('common.edit')}
-                    onClick={() => startEdit(it)}><Pencil size={13} /></button>
-                  <button type="button" className="btn-icon !h-7 !w-7" style={{ color: 'var(--neg)' }} title={t('common.delete')} aria-label={t('common.delete')}
-                    onClick={() => { setAskDel(it); setAskOpen(true) }}><Trash2 size={13} /></button>
-                </div>
-              </div>
-            </section>
+        /* Лента мыслей: строки переменной высоты, каскад появления 40 мс */
+        <div className="stagger mt-4 flex flex-col gap-3">
+          {items.map((it) => (
+            <MindRow key={`${it._t}-${it.id}`} it={it} tag={q}
+              cls={`${arrived(`${it._t}${it.id}`)} ${leavingCls(it._t + it.id)}`}
+              polBusy={polBusy} onPolish={runPolish} onHistory={openHist} onEdit={startEdit}
+              onAskDel={() => { setAskDel(it); setAskOpen(true) }} />
           ))}
         </div>
       )}
+
+      {/* Добавление мысли: шторка (на телефоне — три снапа, ручка тянется, быстрый флик закрывает),
+          поле крупное — 17px, чтобы iOS не зумил страницу. Ссылка в тексте сама уедет в «ссылки». */}
+      <Sheet open={addOpen} onClose={() => !busy && setAddOpen(false)} title={t('nav.mind')} sub={t('mind.composer_ph')} ariaLabel={t('nav.mind')}>
+        <form onSubmit={submit} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e) }}>
+          <textarea ref={addRef} autoFocus value={text} onChange={(e) => setText(e.target.value)}
+            rows={7} className="input !text-[17px] leading-relaxed" placeholder={t('mind.composer_ph')} aria-label={t('mind.composer_ph')} />
+          <div className="mt-4 flex items-center justify-end gap-2">
+            <button type="button" className="btn-ghost min-h-[var(--tap)]" onClick={() => setAddOpen(false)}>{t('common.cancel')}</button>
+            <button type="submit" className="btn-primary min-h-[var(--tap)]" disabled={busy || !text.trim()}>{t(busy ? 'common.loading' : 'common.save')}</button>
+          </div>
+        </form>
+      </Sheet>
 
       {/* Правка записи: тот же Sheet + Field, что и на остальных страницах */}
       <Sheet open={editOpen} onClose={() => setEditOpen(false)}
         title={t(edit?._t === 'link' ? 'mind.edit_link' : 'mind.edit_note')}
         sub={edit?._t === 'link' ? edit.url : undefined}>
         <form onSubmit={saveEdit} className="space-y-4">
+          {edit?.image && (
+            <div className="relative w-full overflow-hidden" style={{ aspectRatio: '16 / 9', borderRadius: 'var(--r-md)', background: 'var(--sf2)' }}>
+              <img src={imgSrc(edit.image)} alt="" className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
+            </div>
+          )}
           <Field label={t('common.title')}>
             <input className="input" value={editTitle} onChange={(e) => setEditTitle(e.target.value)} placeholder={t('mind.title_ph')} />
           </Field>
           <Field label={t(edit?._t === 'link' ? 'common.comment' : 'mind.note_text')}>
-            <textarea className="input" rows={edit?._t === 'link' ? 3 : 6} value={editText}
+            <textarea className="input !text-[16px]" rows={edit?._t === 'link' ? 3 : 6} value={editText}
               onChange={(e) => setEditText(e.target.value)} required={edit?._t === 'note'} />
           </Field>
           <Field label={t('common.tags')} hint={t('mind.tags_hint')}>
             <input className="input" value={editTags} onChange={(e) => setEditTags(e.target.value)} placeholder={t('mind.tags_ph')} />
           </Field>
           <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn g" onClick={() => setEditOpen(false)}>{t('common.cancel')}</button>
-            <button type="submit" className="btn" disabled={editBusy}>{t(editBusy ? 'people.saving' : 'common.save')}</button>
+            <button type="button" className="btn-ghost min-h-[var(--tap)]" onClick={() => setEditOpen(false)}>{t('common.cancel')}</button>
+            <button type="submit" className="btn-primary min-h-[var(--tap)]" disabled={editBusy}>{t(editBusy ? 'people.saving' : 'common.save')}</button>
           </div>
         </form>
       </Sheet>
 
-      {/* Сравнение «было/стало» после правки нейронкой: применяем только по кнопке */}
+      {/* Сравнение «было/стало»: две колонки, перенос строк сохранён, кнопки — во всю ширину тапа */}
       <Sheet open={polOpen} onClose={() => !polBusy && setPolOpen(false)}
         title={t(pol?.mode === 'expand' ? 'mind.pol_expand' : 'mind.pol_rewrite')}
         sub={pol?.note?.title || undefined}>
         {pol && (
           <div className="space-y-3">
-            <div className="flex gap-2">
-              <button type="button" className={`chip !mt-0 ${pol.tab === 'before' ? 'on' : ''}`}
-                onClick={() => setPol({ ...pol, tab: 'before' })}>{t('mind.before')}</button>
-              <button type="button" className={`chip !mt-0 ${pol.tab === 'after' ? 'on' : ''}`}
-                onClick={() => setPol({ ...pol, tab: 'after' })}>{t('mind.after')}</button>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <div className="label mb-1.5">{t('mind.before')}</div>
+                <div className="rounded-2xl p-3 text-[14.5px] leading-relaxed" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', background: 'var(--sf)', border: '1px solid var(--line)', maxHeight: '38vh', overflow: 'auto' }}>{pol.original}</div>
+              </div>
+              <div>
+                <div className="label mb-1.5">{t('mind.after')}</div>
+                <textarea className="input !text-[16px] leading-relaxed" rows={8} value={pol.polished}
+                  onChange={(e) => setPol({ ...pol, polished: e.target.value })} aria-label={t('mind.after')} />
+              </div>
             </div>
-            {pol.tab === 'before' ? (
-              <textarea className="input" rows={8} readOnly value={pol.original}
-                style={{ opacity: 0.7, cursor: 'default' }} />
-            ) : (
-              <textarea className="input" rows={8} value={pol.polished}
-                onChange={(e) => setPol({ ...pol, polished: e.target.value })} />
-            )}
-            <div className="flex flex-wrap justify-end gap-2">
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:justify-end">
               {polHasPrev && (
-                <button type="button" className="btn g" disabled={!!polBusy} onClick={revertPol}>
+                <button type="button" className="btn-ghost min-h-[var(--tap)]" disabled={!!polBusy} onClick={revertPol}>
                   {t(polBusy === 'revert' ? 'mind.restoring' : 'mind.prev_version')}
                 </button>
               )}
-              <button type="button" className="btn g" disabled={!!polBusy}
+              <button type="button" className="btn-ghost min-h-[var(--tap)]" disabled={!!polBusy}
                 onClick={() => setPolOpen(false)}>{t('mind.keep_original')}</button>
-              <button type="button" className="btn" disabled={!!polBusy || !pol.polished.trim()} onClick={applyPol}>
+              <button type="button" className="btn-primary min-h-[var(--tap)]" disabled={!!polBusy || !pol.polished.trim()} onClick={applyPol}>
                 {t(polBusy === 'apply' ? 'mind.applying' : 'common.apply')}
               </button>
             </div>
@@ -411,41 +411,36 @@ export default function Mind() {
         {histBusy ? (
           <ListSkeleton n={3} />
         ) : !hist.length ? (
-          <p className="muted">{t('mind.no_versions')}</p>
+          <p className="muted text-[13.5px] leading-snug">{t('mind.no_versions')}</p>
         ) : (
           <div className="space-y-2">
             {[...hist].reverse().map((v) => (   // свежие сверху
-              <div key={v.id} role="button" tabIndex={0}
-                onClick={() => setHistSel(v)}
-                onKeyDown={(e) => e.key === 'Enter' && setHistSel(v)}
+              <button key={v.id} type="button" onClick={() => setHistSel(v)}
+                className="block w-full rounded-2xl px-3 py-2.5 text-left transition hover:bg-[var(--fill)]"
                 style={{
-                  padding: '10px 12px', borderRadius: '14px', cursor: 'pointer',
                   border: `1px solid ${histSel?.id === v.id ? 'var(--acc)' : 'var(--line)'}`,
                   background: histSel?.id === v.id ? 'var(--sf2)' : 'transparent',
                 }}>
-                <div className="flex items-center gap-2" style={{ fontSize: '12px', opacity: 0.7 }}>
-                  <span>#{v.id}</span>
+                <div className="flex flex-wrap items-center gap-2 text-[12px]" style={{ color: 'var(--ink-3)' }}>
+                  <span className="num">#{v.id}</span>
                   <span>{relTime(v.at)}</span>
                   {v.action && <span>· {v.action}</span>}
-                  {v.current && <span className="chip on !mt-0 !py-0.5">{t('mind.current')}</span>}
+                  {v.current && <span className="badge accent">{t('mind.current')}</span>}
                 </div>
-                <p style={{ whiteSpace: 'pre-wrap', marginTop: '6px', marginBottom: 0 }}>
+                <p className="mb-0 mt-1.5 text-[13.5px] leading-snug" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>
                   {String(v.text || '').slice(0, 400)}
                 </p>
-              </div>
+              </button>
             ))}
             {histSel && (
               <>
-                <div className="rounded-2xl px-4 py-3 text-[13.5px] leading-relaxed"
-                  style={{
-                    whiteSpace: 'pre-wrap', maxHeight: '30vh', overflow: 'auto',
-                    background: 'var(--sf2)', border: '1px solid var(--line)', opacity: 0.9,
-                  }}>
+                <div className="rounded-2xl px-4 py-3 text-[14.5px] leading-relaxed"
+                  style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', maxHeight: '30vh', overflow: 'auto', background: 'var(--sf2)', border: '1px solid var(--line)' }}>
                   {histSel.text}
                 </div>
-                <div className="flex justify-end gap-2">
-                  <button type="button" className="btn g" disabled={histBusy} onClick={() => setHistSel(null)}>{t('common.close')}</button>
-                  <button type="button" className="btn" disabled={histBusy || histSel.current}
+                <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+                  <button type="button" className="btn-ghost min-h-[var(--tap)]" disabled={histBusy} onClick={() => setHistSel(null)}>{t('common.close')}</button>
+                  <button type="button" className="btn-primary min-h-[var(--tap)]" disabled={histBusy || histSel.current}
                     onClick={() => revertTo(histSel)}>
                     {t(histBusy ? 'mind.restoring' : histSel.current ? 'mind.is_current' : 'mind.restore_this')}
                   </button>
@@ -462,5 +457,70 @@ export default function Mind() {
         text={askDel ? t('md.del_card_text', { title: String(askDel.title || askDel.text || askDel.comment || askDel.url || '').slice(0, 80) }) : ''}
         onOk={doDel} onClose={() => setAskOpen(false)} />
     </div>
+  )
+}
+
+/* Превью: кадр фиксированный, картинка вписывается по object-fit (не растягивается),
+   а битая ссылка не оставляет «дыру» — блок просто исчезает, текст остаётся. */
+function Thumb({ src, alt, ratio = '16 / 9', badge, className = '' }) {
+  const [bad, setBad] = useState(false)
+  if (!src || bad) return null
+  return (
+    <div className={`relative w-full overflow-hidden ${className}`} style={{ aspectRatio: ratio, borderRadius: 'var(--r-md)', background: 'var(--sf2)' }}>
+      <img src={src} alt={alt} loading="lazy" onError={() => setBad(true)} className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
+      {badge && <span className="absolute bottom-2 left-2 max-w-[calc(100%-16px)] truncate rounded-full px-2 py-[3px] text-[12px]" style={{ background: 'rgba(16, 17, 20, 0.55)', color: '#fff' }}>{badge}</span>}
+    </div>
+  )
+}
+
+/* Строка ленты: текст мысли или ссылки, теги чипами, время «20 ч назад»,
+   правка и удаление — на расстоянии одного тапа от текста. */
+function MindRow({ it, tag, cls, polBusy, onPolish, onHistory, onEdit, onAskDel }) {
+  const { t } = useI18n()
+  const tags = listOf(it.tags)
+  const text = it.text || it.summary || it.body || it.url
+  const shown = tag ? String(text || '').slice(0, 400) : text
+  return (
+    <article className={`c ${cls}`}>
+        <Thumb className="mb-3" src={imgSrc(it.image)} alt={it.title || it.text || it.summary || it.url || ''}
+          badge={it._t === 'link' ? it.domain : null} />
+      {it.title && <h3 className="h3" style={{ overflowWrap: 'anywhere' }}>{it.title}</h3>}
+      {it._t === 'link' && !it.title && it.url && (
+        <h3 className="h3" style={{ overflowWrap: 'anywhere' }}>{it.url}</h3>
+      )}
+      {shown && (
+        <p className="t-body muted mt-1" style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{shown}</p>
+      )}
+      {/* ✨ правка нейронкой — только у заметок (у ссылок свой редактор) */}
+      {it._t === 'note' && (
+        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+          <button type="button" className="btn-soft min-h-[var(--tap)] rounded-full px-3 text-[13px]" disabled={!!polBusy}
+            onClick={() => onPolish(it, 'rewrite')} title={t('mind.pol_rewrite')}>
+            <Sparkles size={14} /> {t(polBusy === 'rewrite' ? 'common.loading' : 'mind.pol_rewrite')}
+          </button>
+          <button type="button" className="btn-soft min-h-[var(--tap)] rounded-full px-3 text-[13px]" disabled={!!polBusy}
+            onClick={() => onPolish(it, 'expand')} title={t('mind.pol_expand')}>
+            <Sparkles size={14} /> {t(polBusy === 'expand' ? 'common.loading' : 'mind.pol_expand')}
+          </button>
+          <button type="button" className="btn-ghost min-h-[var(--tap)] rounded-full px-3 text-[13px]" onClick={() => onHistory(it)} title={t('mind.version_history')}>
+            {t('mind.history')}
+          </button>
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-2 border-t hair pt-3">
+        <time className="faint shrink-0 text-[12px]">{relTime(it.created_at)}</time>
+        {tags.length > 0 && (
+          <div className="flex min-w-0 flex-wrap items-center gap-1">
+            {tags.map((x) => <span key={x} className="chip">#{x}</span>)}
+          </div>
+        )}
+        <div className="ml-auto flex items-center gap-1">
+          <button type="button" className="btn-icon" title={t('common.edit')} aria-label={t('common.edit')} data-tip={t('common.edit')}
+            onClick={() => onEdit(it)}><Pencil size={15} /></button>
+          <button type="button" className="btn-icon neg" title={t('common.delete')} aria-label={t('common.delete')} data-tip={t('common.delete')}
+            onClick={onAskDel}><Trash2 size={15} /></button>
+        </div>
+      </div>
+    </article>
   )
 }
