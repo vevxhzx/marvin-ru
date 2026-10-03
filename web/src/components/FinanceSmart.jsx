@@ -124,7 +124,9 @@ function PutSheet({ goal, onClose, onDone, onErr }) {
   )
 }
 
-/* Умные финансы одним блоком: 50/30/20, месяц к месяцу, «на сколько хватит», хватит ли на платежи, годовые. */
+/* Умные финансы одним блоком: 50/30/20, месяц к месяцу, «на сколько хватит», хватит ли на платежи, годовые.
+   Внутри — спокойные переключатели и числа, без « Bento V7»: раздел «финансы» держит
+   один герой на экране, поэтому техники — ровнями и полосками внутри своей панели. */
 export function Techniques({ t: data, onOpenCat }) {
   const { t } = useI18n()
   const [tab, setTab] = useState('buckets')
@@ -132,23 +134,27 @@ export function Techniques({ t: data, onOpenCat }) {
   const tabs = [['buckets', t('tech.tab_buckets')], ['compare', t('tech.tab_compare')], ['runway', t('tech.tab_runway')], ['annual', t('tech.tab_annual')]]
   const pay = data.payments
   return (
-    <Section title={t('tech.title')} hint={t('tech.hint')}>
+    <div>
+      <div className="hd flex-wrap">
+        <div className="min-w-0"><h2 className="trunc">{t('tech.title')}</h2></div>
+        <small className="trunc">{t('tech.hint')}</small>
+      </div>
       {pay?.short > 0 && (
-        <div className="soft-neg mb-5 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-2.5 text-[13px]">
+        <div className="soft-neg mb-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-2.5 text-[length:var(--fs-md)]">
           <span>{t('tech.short_text', { days: pay.days, need: money(pay.need), bal: money(pay.balance), short: money(pay.short) })}</span>
           <button className="btn-ghost btn-sm" style={{ color: 'inherit', borderColor: 'currentColor' }} onClick={() => ask(T('tech.ask_enough'))}>{t('common.details')}</button>
         </div>
       )}
-      <div className="mb-5 flex flex-wrap gap-1">
-        {tabs.map(([k, l]) => <button key={k} className={`rounded-md px-2.5 py-1 text-[13px] transition-colors ${tab === k ? 'bg-[var(--fill)] text-[var(--ink)]' : 'muted hover:text-[var(--ink)]'}`} onClick={() => setTab(k)}>{l}</button>)}
+      <div className="seg mb-4" role="group" aria-label={t('tech.title')}>
+        {tabs.map(([k, l]) => (
+          <button key={k} type="button" className={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>
+        ))}
       </div>
-      <div className="rule pt-6">
-        {tab === 'buckets' && <Buckets b={data.buckets} onOpenCat={onOpenCat} />}
-        {tab === 'compare' && <Compare c={data.compare} />}
-        {tab === 'runway' && <Runway r={data.runway} p={pay} />}
-        {tab === 'annual' && <Annual a={data.annual} />}
-      </div>
-    </Section>
+      {tab === 'buckets' && <Buckets b={data.buckets} onOpenCat={onOpenCat} />}
+      {tab === 'compare' && <Compare c={data.compare} />}
+      {tab === 'runway' && <Runway r={data.runway} p={pay} />}
+      {tab === 'annual' && <Annual a={data.annual} />}
+    </div>
   )
 }
 
@@ -163,16 +169,24 @@ function Buckets({ b, onOpenCat }) {
       <div className="mt-1.5 flex h-[3px] w-full overflow-hidden rounded-full opacity-40" style={{ background: 'var(--fill-2)' }} title={t('tech.norm')}>
         {b.buckets.map((x) => <div key={x.bucket} className="h-full" style={{ width: `${x.norm * 100}%`, background: BUCKET_GRAD[x.bucket] || BUCKET_TONE[x.bucket] }} />)}
       </div>
-      <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
+      <div className="mt-5">
         {b.buckets.map((x) => (
-          <div key={x.bucket}>
-            <div className="flex items-center gap-1.5"><i className="h-2 w-2 rounded-full" style={{ background: BUCKET_TONE[x.bucket] }} /><span className="label">{t.sv(x.label) || x.label}</span></div>
-            <div className={`num mt-2 text-[26px] font-medium leading-none tracking-[-0.03em] sm:text-[32px] ${x.status === 'over' ? 'neg' : x.status === 'low' ? 'warn' : ''}`}>{Math.round(x.share * 100)}<span className="text-[16px]"> %</span></div>
-            <div className="muted mt-1 text-[12px]">{money(x.amount)} · {t('tech.norm')} {Math.round(x.norm * 100)} %{x.status === 'over' ? t('tech.over') : x.status === 'low' ? t('tech.under') : ''}</div>
+          <div key={x.bucket} className="rule row">
+            <span className="flex min-w-0 items-center gap-2">
+              <i className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_TONE[x.bucket] }} />
+              <span className="label trunc">{t.sv(x.label) || x.label}</span>
+            </span>
+            <span className={`num shrink-0 text-[length:var(--fs-lg)] font-medium ${x.status === 'over' ? 'neg' : x.status === 'low' ? 'warn' : ''}`}>
+              {Math.round(x.share * 100)} <span className="text-[length:var(--fs-md)]">%</span>
+            </span>
+            <span className="num ml-auto shrink-0 text-[length:var(--fs-md)] text-[var(--ink-2)]">{money(x.amount)}</span>
+            <span className="muted shrink-0 truncate text-[length:var(--fs-xs)]">
+              {t('tech.norm')} {Math.round(x.norm * 100)} %{x.status === 'over' ? t('tech.over') : x.status === 'low' ? t('tech.under') : ''}
+            </span>
           </div>
         ))}
       </div>
-      <div className="muted mt-5 text-[12.5px]">
+      <div className="muted mt-4 text-[length:var(--fs-md)]">
         {t('tech.counting', { base: b.income > 0 ? t('tech.from_income') : t('tech.from_spend') })}{money(b.base)}.
         {b.unassigned > 0 && <> {t('tech.unassigned')} <b className="num">{money(b.unassigned)}</b> — {b.unassigned_cats.slice(0, 4).map((c, i) => <button key={c} className="underline decoration-dotted underline-offset-2 hover:text-accent" onClick={() => onOpenCat?.(c)}>{c}{i < Math.min(4, b.unassigned_cats.length) - 1 ? ', ' : ''}</button>)} — {t('tech.pick_cat')}</>}
       </div>
@@ -187,23 +201,42 @@ function Compare({ c }) {
   const pct = c.spent_prev_same ? Math.round((d / c.spent_prev_same) * 100) : null
   return (
     <div>
-      <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
-        <div><div className="label">{t('cmp.by_day', { day: c.day })}</div><div className="num mt-2 text-[26px] font-medium leading-none tracking-[-0.03em] sm:text-[32px]">{money(c.spent)}</div><div className="muted mt-1 text-[12px]">{t('cmp.prev_same_day')} · {money(c.spent_prev_same)}</div></div>
-        <div><div className="label">{t('cmp.diff')}</div><div className={`num mt-2 flex items-center gap-1 text-[26px] font-medium leading-none tracking-[-0.03em] sm:text-[32px] ${d > 0 ? 'neg' : d < 0 ? 'pos' : ''}`}>{d > 0 ? <ArrowUpRight size={22} /> : d < 0 ? <ArrowDownRight size={22} /> : null}{money(Math.abs(d))}</div><div className="muted mt-1 text-[12px]">{t(pct == null ? 'cmp.prev_empty' : d > 0 ? 'cmp.more' : d < 0 ? 'cmp.less' : 'cmp.same', { n: Math.abs(pct) })}</div></div>
-        <div><div className="label">{t('cmp.avg_check')}</div><div className="num mt-2 text-[26px] font-medium leading-none tracking-[-0.03em] sm:text-[32px]">{money(c.avg_check)}</div><div className="muted mt-1 text-[12px]">{t('cmp.prev')} · {money(c.avg_check_prev)}</div></div>
-        <div><div className="label">{t('cmp.income')}</div><div className="num mt-2 text-[26px] font-medium leading-none tracking-[-0.03em] sm:text-[32px]">{money(c.earned)}</div><div className="muted mt-1 text-[12px]">{t('cmp.prev_total')} · {money(c.earned_prev)}</div></div>
+      <div>
+        <div className="row">
+          <span className="label min-w-0 flex-1 trunc">{t('cmp.by_day', { day: c.day })}</span>
+          <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">{money(c.spent)}</span>
+          <span className="muted shrink-0 text-[length:var(--fs-xs)]">{t('cmp.prev_same_day')} · {money(c.spent_prev_same)}</span>
+        </div>
+        <div className="row">
+          <span className="label min-w-0 flex-1 trunc">{t('cmp.diff')}</span>
+          <span className={`num flex shrink-0 items-center gap-1 text-[length:var(--fs-lg)] font-medium ${d > 0 ? 'neg' : d < 0 ? 'pos' : ''}`}>
+            {d > 0 ? <ArrowUpRight size={18} /> : d < 0 ? <ArrowDownRight size={18} /> : null}{money(Math.abs(d))}
+          </span>
+          <span className="muted shrink-0 text-[length:var(--fs-xs)]">{t(pct == null ? 'cmp.prev_empty' : d > 0 ? 'cmp.more' : d < 0 ? 'cmp.less' : 'cmp.same', { n: Math.abs(pct) })}</span>
+        </div>
+        <div className="row">
+          <span className="label min-w-0 flex-1 trunc">{t('cmp.avg_check')}</span>
+          <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">{money(c.avg_check)}</span>
+          <span className="muted shrink-0 text-[length:var(--fs-xs)]">{t('cmp.prev')} · {money(c.avg_check_prev)}</span>
+        </div>
+        <div className="row">
+          <span className="label min-w-0 flex-1 trunc">{t('cmp.income')}</span>
+          <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">{money(c.earned)}</span>
+          <span className="muted shrink-0 text-[length:var(--fs-xs)]">{t('cmp.prev_total')} · {money(c.earned_prev)}</span>
+        </div>
       </div>
       {c.categories.length > 0 && (
-        <div className="mt-6 grid grid-cols-1 gap-x-10 gap-y-2 md:grid-cols-2">
+        <div className="mt-3">
           {c.categories.slice(0, 8).map((r) => (
-            <div key={r.category} className="flex items-baseline justify-between gap-3 text-[13.5px]">
-              <span className="truncate">{t.sv(r.category) || r.category}</span>
-              <span className="num shrink-0"><b>{money(r.current)}</b> <span className="faint">/ {money(r.prev_same)}</span> <span className={`ml-1 inline-block w-[64px] text-right text-[12px] ${r.delta > 0 ? 'neg' : r.delta < 0 ? 'pos' : 'faint'}`}>{r.delta_pct == null ? (r.current ? t('cmp.new') : '') : `${r.delta > 0 ? '+' : ''}${Math.round(r.delta_pct * 100)} %`}</span></span>
+            <div key={r.category} className="row">
+              <span className="truncate text-[length:var(--fs-md)]">{t.sv(r.category) || r.category}</span>
+              <span className="num ml-auto shrink-0"><b>{money(r.current)}</b> <span className="faint">/ {money(r.prev_same)}</span></span>
+              <span className={`num w-[64px] shrink-0 text-right text-[length:var(--fs-md)] ${r.delta > 0 ? 'neg' : r.delta < 0 ? 'pos' : 'faint'}`}>{r.delta_pct == null ? (r.current ? t('cmp.new') : '') : `${r.delta > 0 ? '+' : ''}${Math.round(r.delta_pct * 100)} %`}</span>
             </div>
           ))}
         </div>
       )}
-      <div className="muted mt-4 text-[12px]">{t('cmp.note')}</div>
+      <div className="muted mt-3 text-[length:var(--fs-md)]">{t('cmp.note')}</div>
     </div>
   )
 }
@@ -213,17 +246,29 @@ function Runway({ r, p }) {
   if (!r) return null
   const days = r.runway_days
   return (
-    <div className="grid grid-cols-2 gap-6 md:grid-cols-4">
-      <div className="col-span-2">
-        <div className="label">{t('run.will_last')}</div>
-        <div className={`num mt-2 text-[40px] font-medium leading-none tracking-[-0.04em] sm:text-[52px] ${days == null ? 'muted' : r.ok ? 'accent' : 'neg'}`}>{days == null ? '—' : t('run.days_n', { count: days })}</div>
-        <div className="muted mt-2 text-[13px]">{days == null ? t('run.no_avg') : t(r.ok ? 'run.enough' : 'run.not_enough', { days: r.days_left_to_income, safe: money(r.safe_per_day) })}</div>
+    <div>
+      <div className="rule row">
+        <span className="label min-w-0 flex-1 trunc">{t('run.will_last')}</span>
+        <span className={`num shrink-0 text-[length:var(--fs-2xl)] font-medium tracking-[-0.03em] ${days == null ? 'muted' : r.ok ? 'accent' : 'neg'}`}>{days == null ? '—' : t('run.days_n', { count: days })}</span>
       </div>
-      <div><div className="label">{t('run.free')}</div><div className="num mt-2 text-[24px] font-medium leading-none tracking-[-0.03em] sm:text-[30px]">{money(r.free)}</div><div className="muted mt-1.5 text-[12px]">{t('run.after_mandatory')}</div></div>
-      <div><div className="label">{t('run.per_day')}</div><div className="num mt-2 text-[24px] font-medium leading-none tracking-[-0.03em] sm:text-[30px]">{money(r.per_day_avg)}</div><div className="muted mt-1.5 text-[12px]">{t('run.avg30')}</div></div>
-      {p && <div className="col-span-2 md:col-span-4 muted text-[12.5px]">
-        {t('run.pays', { days: p.days, need: money(p.need), bal: money(p.balance) })}{p.payments.length ? ` (${p.payments.slice(0, 3).map((x) => x.title).join(', ')})` : ''}{p.incoming.length ? ` · ${t('run.incoming', { m: money(p.incoming.reduce((s, x) => s + x.amount, 0)) })}` : ''} → {p.short > 0 ? <b className="neg">{t('run.short', { m: money(p.short) })}</b> : <b className="pos">{t('run.enough_short')}</b>}
-      </div>}
+      <div className="row">
+        <span className="label min-w-0 flex-1 trunc">{t('run.free')}</span>
+        <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">{money(r.free)}</span>
+        <span className="muted shrink-0 text-[length:var(--fs-xs)]">{t('run.after_mandatory')}</span>
+      </div>
+      <div className="row">
+        <span className="label min-w-0 flex-1 trunc">{t('run.per_day')}</span>
+        <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">{money(r.per_day_avg)}</span>
+        <span className="muted shrink-0 text-[length:var(--fs-xs)]">{t('run.avg30')}</span>
+      </div>
+      <div className="muted mt-3 text-[length:var(--fs-md)]">
+        {days == null ? t('run.no_avg') : t(r.ok ? 'run.enough' : 'run.not_enough', { days: r.days_left_to_income, safe: money(r.safe_per_day) })}
+      </div>
+      {p && (
+        <div className="muted mt-1 text-[length:var(--fs-md)]">
+          {t('run.pays', { days: p.days, need: money(p.need), bal: money(p.balance) })}{p.payments.length ? ` (${p.payments.slice(0, 3).map((x) => x.title).join(', ')})` : ''}{p.incoming.length ? ` · ${t('run.incoming', { m: money(p.incoming.reduce((s, x) => s + x.amount, 0)) })}` : ''} → {p.short > 0 ? <b className="neg">{t('run.short', { m: money(p.short) })}</b> : <b className="pos">{t('run.enough_short')}</b>}
+        </div>
+      )}
     </div>
   )
 }
@@ -233,12 +278,28 @@ function Annual({ a }) {
   if (!a?.items?.length) return <Empty glyph="money" text={t('ann.none')} sub={t('ann.none_hint')} hint={t('ann.hint_example')} compact />
   return (
     <div>
-      <div className="grid grid-cols-2 gap-6">
-        <div><div className="label">{t('ann.per_year')}</div><div className="num mt-2 text-[26px] font-medium leading-none tracking-[-0.03em] sm:text-[32px]">{money(a.total_year)}</div></div>
-        <div><div className="label">{t('ann.per_month_label')}</div><div className="num accent mt-2 text-[26px] font-medium leading-none tracking-[-0.03em] sm:text-[32px]">{money(a.per_month)}</div><div className="muted mt-1 text-[12px]">{t('ann.note')}</div></div>
+      <div className="row">
+        <span className="label min-w-0 flex-1 trunc">{t('ann.per_year')}</span>
+        <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">{money(a.total_year)}</span>
+        <span className="muted shrink-0 text-[length:var(--fs-xs)]">{t('ann.note')}</span>
       </div>
-      <div className="rule mt-5">
-        {a.items.map((i) => <div key={i.title} className="row"><div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{i.title}</div><div className="muted text-[12px]">{new Date(i.next).toLocaleDateString(localeOf(), { day: 'numeric', month: 'long' }).replace(/\.?\s*г\.$/u, '')} · {t('ann.in_months', { count: i.months })}</div></div><div className="num text-right"><div className="text-[14px] font-medium">{money(i.amount)}</div><div className="muted text-[11.5px]">{money(Math.round(i.amount / 12))} / {t('unit.month')}</div></div></div>)}
+      <div className="row">
+        <span className="label min-w-0 flex-1 trunc">{t('ann.per_month_label')}</span>
+        <span className="num accent shrink-0 text-[length:var(--fs-lg)] font-medium">{money(a.per_month)}</span>
+      </div>
+      <div className="mt-1">
+        {a.items.map((i) => (
+          <div key={i.title} className="row">
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-[length:var(--fs-base)] font-medium">{i.title}</span>
+              <span className="muted block text-[length:var(--fs-xs)]">{new Date(i.next).toLocaleDateString(localeOf(), { day: 'numeric', month: 'long' }).replace(/\.?\s*г\.$/u, '')} · {t('ann.in_months', { count: i.months })}</span>
+            </span>
+            <span className="num shrink-0 text-right">
+              <span className="block text-[length:var(--fs-base)] font-medium">{money(i.amount)}</span>
+              <span className="muted block text-[length:var(--fs-xs)]">{money(Math.round(i.amount / 12))} / {t('unit.month')}</span>
+            </span>
+          </div>
+        ))}
       </div>
     </div>
   )

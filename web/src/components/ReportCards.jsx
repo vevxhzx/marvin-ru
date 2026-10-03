@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, money, shortDate, hhmm } from '../lib/api'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
-import { Num } from './ui'
+import { Num, Rowi } from './ui'
+import { useNumFormats } from './Widgets'
 import { useTip } from './ChartTip'
-import { Check, Sparkles, AlertCircle, Calendar, ArrowUpRight, ArrowDownRight, Wallet, Target, Clock } from 'lucide-react'
+import { Check, Sparkles } from 'lucide-react'
 
 /**
- * Премиальные интерактивные карточки отчётов в точном стиле эталона Jarvis Bento V7.
+ * Премиальные интерактивные карточки отчётов в точном стиле эталона Marvin Bento V7.
  * Заменяют скучные текстовые и монохромные телеграм-карточки на богатый Bento-дизайн:
  * - Градиентные Hero-плитки
  * - Акцентные сине-фиолетовые и изумрудные карточки p1, p2, blk
@@ -345,13 +346,16 @@ export function WeekSummaryCard({ data, ownerName }) {
 
 /**
  * Виджет «Сводка дня» (Today's Summary Widget):
- * Агрегирует ключевые данные: задачи на сегодня, встречи в календаре,
- * финансовый баланс и дневной лимит в единую информативную Bento-карточку.
+ * агрегирует ключевые данные — задачи на сегодня, встречи в календаре,
+ * финансовый баланс и дневной лимит.
+ *
+ * Безголовый: заголовок блока рисует главная (Today.jsx). Внутри — три строки
+ * на волосяных разделителях, а не три вложенные коробки: день, дела и деньги
+ * должны читаться одной строкой каждая, а не сеткой.
  */
 export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFinance }) {
   const { t } = useI18n()
   const d = data || {}
-  const now = new Date()
   const tasks = d.tasks || []
   const events = d.events || []
   // Никаких захардкоженных чисел: если данные ещё не пришли — честный ноль, а не «красивая» выдумка
@@ -359,110 +363,55 @@ export function TodaySummaryWidget({ data, onOpenTasks, onOpenCalendar, onOpenFi
   const spentToday = d.spentToday ?? 0
   const dailyBudget = d.dailyBudget ?? 0
 
-  const openTasks = tasks.filter((t) => !t.done)
-  const doneTasks = tasks.filter((t) => t.done)
+  const openTasks = tasks.filter((x) => !x.done)
+  const doneTasks = tasks.filter((x) => x.done)
 
   return (
-    <div className="summary-widget-wrap h-full flex flex-col justify-between">
-      <div className="hd !mb-3">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-blue-500/15 text-blue-500">
-            <Sparkles size={15} />
-          </span>
-          <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{t('rc.day_summary')}</h2>
-        </div>
-        <small className="mono text-[12px] opacity-60">
-          {now.toLocaleDateString(localeOf(), { weekday: 'short', day: 'numeric', month: 'short' }).replace(/\.?\s*г\.$/u, '')}
-        </small>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 my-1">
-        {/* Финансы */}
-        <div
-          onClick={onOpenFinance}
-          className="rounded-2xl p-3 bg-[var(--sf2)] border border-[var(--line)] hover:border-[var(--acc)] transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between text-xs opacity-70 mb-1">
-            <span>{t('rc.money')}</span>
-            <Wallet size={13} className="text-blue-400" />
-          </div>
-          <div className="text-[17px] font-semibold mono tracking-tight text-[var(--ink)]">
-            <Num value={balance} /> ₽
-          </div>
-          <div className="text-[11px] opacity-60 mt-1">
-            {t('rc.spent_short', { m: money(spentToday) })}
-          </div>
-        </div>
-
-        {/* Календарь */}
-        <div
-          onClick={onOpenCalendar}
-          className="rounded-2xl p-3 bg-[var(--sf2)] border border-[var(--line)] hover:border-[var(--acc)] transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between text-xs opacity-70 mb-1">
-            <span>{t('rc.meetings')}</span>
-            <Calendar size={13} className="text-purple-400" />
-          </div>
-          <div className="text-[17px] font-semibold mono tracking-tight text-[var(--ink)]">
-            {t('rc.events_n', { count: events.length })}
-          </div>
-          <div className="text-[11px] opacity-60 mt-1 truncate">
-            {events[0] ? `${events[0].title.slice(0, 16)}…` : t('nextup.day_free')}
-          </div>
-        </div>
-
-        {/* Задачи */}
-        <div
-          onClick={onOpenTasks}
-          className="rounded-2xl p-3 bg-[var(--sf2)] border border-[var(--line)] hover:border-[var(--acc)] transition cursor-pointer flex flex-col justify-between"
-        >
-          <div className="flex items-center justify-between text-xs opacity-70 mb-1">
-            <span>{t('rc.things')}</span>
-            <Check size={13} className="text-emerald-400" />
-          </div>
-          <div className="text-[17px] font-semibold mono tracking-tight text-[var(--ink)]">
-            {t('rc.tasks_n', { count: openTasks.length })}
-          </div>
-          <div className="text-[11px] opacity-60 mt-1">
-            {doneTasks.length ? t('rc.closed_n', { count: doneTasks.length }) : t('rc.all_ahead')}
-          </div>
-        </div>
-      </div>
-
-      {/* Быстрая полоска статуса дня */}
-      <div className="mt-3 pt-3 border-t border-[var(--line)] flex items-center justify-between text-xs text-[var(--ink2)]">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full bg-[var(--pos)] animate-pulseSoft"></span>
-          {t('rc.available_today')}: <b className="text-[var(--ink)] num font-semibold">{money(dailyBudget)}</b>
+    <div>
+      <Rowi
+        title={t('rc.money')}
+        sub={t('rc.spent_short', { m: money(spentToday) })}
+        right={<span className="amt">{money(balance)}</span>}
+        onClick={onOpenFinance}
+      />
+      <Rowi
+        title={t('rc.meetings')}
+        sub={events[0]?.title || t('nextup.day_free')}
+        right={<span className="num text-[length:var(--fs-base)]">{events.length}</span>}
+        onClick={onOpenCalendar}
+      />
+      <Rowi
+        title={t('rc.things').toLowerCase()}
+        sub={doneTasks.length ? t('rc.closed_n', { count: doneTasks.length }) : t('rc.all_ahead')}
+        right={<span className="num text-[length:var(--fs-base)]">{openTasks.length}</span>}
+        onClick={onOpenTasks}
+      />
+      {/* одна строка состояния дня — без отдельной плашки */}
+      <div className="rule mt-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-1 pt-3 text-[length:var(--fs-md)] text-[var(--ink-2)]">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className="dot-live h-2 w-2 shrink-0 rounded-full" style={{ background: 'var(--pos)', color: 'var(--pos)' }} />
+          <span className="trunc">{t('rc.available_today')}: <b className="num text-[var(--ink)]">{money(dailyBudget)}</b></span>
         </span>
-        <span className="mono text-[11px] opacity-70">{t('rc.focus_active')}</span>
+        <span className="mono shrink-0 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{t('rc.focus_active')}</span>
       </div>
     </div>
   )
 }
 
 /**
- * Виджет «Экранное время за ПК» (Bento-стиль)
+ * Виджет «Экранное время за ПК».
+ *
+ * Безголовый: заголовок блока рисует главная (Today.jsx) — общий для всех блоков.
+ * Внутри — часы крупно, почасовые столбики с подсказкой и топ приложений.
+ * Пустое состояние — честная строка вместо выдуманных демо-данных.
  */
 export function ScreenTimeBentoWidget({ data }) {
   const { t } = useI18n()
+  const fmt = useNumFormats()
   const tip = useTip()
   const d = data
-  // Пустой виджет: раньше здесь были захардкоженные демо-данные. Теперь честно и компактно.
   if (!d || !(d.active_min > 0) || !(d.hours || []).some((v) => v > 0)) {
-    return (
-      <div className="screen-time-widget flex flex-col justify-between h-full">
-        <div className="hd !mb-2">
-          <div className="flex items-center gap-2">
-            <span className="flex h-7 w-7 items-center justify-center rounded-xl" style={{ background: 'color-mix(in srgb, var(--ai) 14%, transparent)', color: 'var(--ai)' }}>
-              <Clock size={15} />
-            </span>
-            <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{t('screen.title')}</h2>
-          </div>
-        </div>
-        <div className="muted py-6 text-center text-[13px]">{t(d?.pc_alive === false ? 'screen.empty_dead' : 'screen.off_hint')}</div>
-      </div>
-    )
+    return <div className="muted py-2 text-[length:var(--fs-md)]">{t(d?.pc_alive === false ? 'screen.empty_dead' : 'screen.off_hint')}</div>
   }
 
   const hours = Math.floor(d.active_min / 60)
@@ -473,45 +422,39 @@ export function ScreenTimeBentoWidget({ data }) {
   const hourLabel = (h, v) => t('rc.hour_min', { h, m: v })
   const curH = tip.active?.i != null ? slice[tip.active.i] : null
 
+  /* Цвета по смыслу: работа/общение/браузер/медиа — нейтральные оттенки акцента и тона,
+     прочее — приглушённый текст. Смысловых цветов (лайм/янтарь/красный) здесь нет. */
   const CAT_COLORS = {
-    работа: '#2f57ff',
-    общение: '#a07bff',
-    браузер: '#5b8bd6',
-    медиа: '#ff9500',
-    прочее: 'var(--ink3)',
+    'работа': 'var(--accent)',
+    'общение': 'var(--ai)',
+    'браузер': 'var(--ink-3)',
+    'медиа': 'var(--warn)',
+    'прочее': 'var(--line-2)',
   }
 
   return (
-    <div className="screen-time-widget flex flex-col justify-between h-full">
-      <div className="hd !mb-2">
-        <div className="flex items-center gap-2">
-          <span className="flex h-7 w-7 items-center justify-center rounded-xl bg-purple-500/15 text-purple-400">
-            <Clock size={15} />
-          </span>
-          <h2 className="text-[17px] font-semibold tracking-[-0.02em]">{t('screen.title')}</h2>
-        </div>
-        <small className="mono font-semibold text-[13px] text-[var(--acc)]">
-          {hours} {t('unit.hour')} {mins} {t('unit.min')}
-        </small>
+    <div>
+      <div className="num font-medium leading-none tracking-[-0.03em]" style={{ fontSize: 'var(--hero-fs-2)' }}>
+        {fmt.nb(`${fmt.int(hours)} ${t('unit.hour')} ${fmt.int(mins)} ${t('unit.min')}`)}
       </div>
 
-      {/* Почасовой график активности: подсказка по наведению и по тапу (раньше был только title) */}
-      <div className="my-2">
-        <div className="relative flex items-end h-10 gap-1 px-1" ref={tip.hostRef}>
+      {/* Почасовой график активности: подсказка по наведению и по тапу */}
+      <div className="my-3">
+        <div className="relative flex items-end gap-1 px-1" style={{ height: 64 }} ref={tip.hostRef} {...tip.host}>
           {slice.map((val, idx) => {
             const h = idx + 8
             // контейнеру нужна явная высота: иначе height в процентах считается от
-            // элемента с auto-высотой и все столбцы схлопывались в 0
+            // элемента с auto-высотой и все столбцы схлопываются в 0
             const pct = Math.max(14, (val / maxH) * 100)
             return (
-              <div key={h} className="h-full flex-1 flex flex-col items-center justify-end gap-1 group relative">
+              <div key={h} className="flex h-full flex-1 items-end">
                 <div
-                  className="chart-pt w-full rounded-md transition-all"
+                  className="chart-pt w-full rounded-md"
                   style={{
                     height: `${pct}%`,
-                    background: val > 20 ? 'linear-gradient(180deg, #8a5cff, #2f57ff)'
-                      : val > 0 ? 'color-mix(in srgb, #8a5cff 55%, transparent)'
-                      : 'var(--line)',
+                    background: val > 20
+                      ? 'linear-gradient(180deg, color-mix(in srgb, var(--ai) 70%, transparent), var(--acc))'
+                      : val > 0 ? 'color-mix(in srgb, var(--acc) 45%, transparent)' : 'var(--line)',
                   }}
                   {...tip.bind(idx, `${hourLabel(h, val)}, ${t('tip.share_active', { p: Math.round((val / sumH) * 100) })}`)}
                 />
@@ -519,7 +462,7 @@ export function ScreenTimeBentoWidget({ data }) {
             )
           })}
         </div>
-        <div className="flex justify-between text-[10px] mono text-[var(--ink3)] mt-1 px-1">
+        <div className="mono mt-1 flex justify-between px-1 text-[length:var(--fs-xs)] text-[var(--ink-3)]">
           <span>08:00</span>
           <span>14:00</span>
           <span>20:00</span>
@@ -530,15 +473,15 @@ export function ScreenTimeBentoWidget({ data }) {
         rows: curH != null ? [t('tip.share_active', { p: Math.round((curH / sumH) * 100) })] : [],
       })}
 
-      {/* Топ приложений */}
-      <div className="space-y-1.5 mt-2">
+      {/* Топ приложений — строками, а не плашками */}
+      <div>
         {(d.apps || []).slice(0, 3).map(([name, m, cat], i) => (
-          <div key={i} className="flex items-center justify-between text-xs">
-            <span className="flex items-center gap-2 truncate">
-              <span className="w-2 h-2 rounded-full shrink-0" style={{ background: CAT_COLORS[cat] || '#8a5cff' }}></span>
-              <span className="truncate font-medium">{name}</span>
+          <div key={i} className="row" style={{ fontSize: 'var(--fs-md)' }}>
+            <span className="min-w-0 flex-1 trunc">
+              <span className="mr-2 inline-block h-2 w-2 shrink-0 align-middle rounded-full" style={{ background: CAT_COLORS[cat] || 'var(--ink-3)' }} />
+              <span className="font-medium">{name}</span>
             </span>
-            <span className="mono opacity-70 shrink-0">{m} мин</span>
+            <span className="mono shrink-0 text-[var(--ink-2)]">{fmt.int(m)} {t('unit.min')}</span>
           </div>
         ))}
       </div>

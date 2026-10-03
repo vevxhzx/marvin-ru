@@ -5,6 +5,72 @@ import { api, money } from '../lib/api'
 import CashChart from './CashChart'
 import { useTip } from './ChartTip'
 import { useI18n, t as T } from '../lib/i18n'
+import { CountUp } from './CountUp'
+import { Skeleton } from './ui'
+import { motionOff, stagger } from '../lib/motion'
+
+/* ---------- общие примитивы редакционной раскладки (главная и финансы) ----------
+
+   Три мелочи, которые нужны обоим экранам, чтобы иерархия выглядела одинаково:
+
+   • useReveal — каскад появления блоков: transform + opacity, шаг 52 мс, только
+     элементы с data-reveal. Движение выключено — ставится конечное состояние сразу.
+   • useNumFormats — форматы чисел, где разряды разделены НЕРАЗРЫВНЫМ пробелом
+     (число не переносится и не «прыгает» при смене разрядности).
+   • BigMoney — одна строка денег: число весом, знак ₽ мельче и легче. */
+export const CUR = '₽'
+
+/* Неразрывный пробел везде, где стоит обычный: и в разрядах, и в «1,5 млн» */
+const NBSP = (s) => String(s ?? '').replace(/[\s\u202f]/g, '\u00a0')
+
+export function useNumFormats() {
+  const { fmtNumber, fmtMoney } = useI18n()
+  return useMemo(() => ({
+    int: (n) => NBSP(fmtNumber(Math.round(Number(n) || 0), { maximumFractionDigits: 0 })),
+    money: (n) => NBSP(fmtMoney(n)),
+    short: (n) => NBSP(fmtMoney(n, { compact: true })),
+    nb: NBSP,
+  }), [fmtNumber, fmtMoney])
+}
+
+/* Каскад появления: ref на контейнер, data-reveal на блоках внутри. Ничего не
+   скрываем намертво — после конца анимации элемент просто встаёт на место. */
+export function useReveal(dep) {
+  const ref = useRef(null)
+  useEffect(() => {
+    if (motionOff()) return undefined
+    const host = ref.current
+    if (!host) return undefined
+    const els = host.querySelectorAll('[data-reveal]')
+    if (!els.length) return undefined
+    return stagger(els, { step: 52, dy: 12, duration: 420, from: 40, max: 24 })
+  }, [dep])
+  return ref
+}
+
+/* Сумма одной строкой: число тянет на себя вес, ₽ — на полтона кегля легче. */
+export function BigMoney({ value, format, label, className = '', fs = 'var(--hero-fs)' }) {
+  return (
+    <span className={`big ${className}`} style={{ fontSize: fs }}>
+      <span aria-hidden="true">
+        <CountUp value={Number(value) || 0} format={format} roll={false} />
+        <span style={{ fontSize: '0.5em', fontWeight: 400, opacity: 0.75, marginLeft: '0.18em' }}>{CUR}</span>
+      </span>
+      <span className="sr-only">{label}</span>
+    </span>
+  )
+}
+
+/* Строка «подпись — значение» прямо на поверхности героя: подпись приглушена,
+   значение читается. Контраст подписи на лаймовом фоне ≈ 5.9:1 (AA). */
+export function HeroLine({ label, value }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 py-1 opacity-75">
+      <span className="trunc text-[length:var(--fs-md)]">{label}</span>
+      <span className="num shrink-0 whitespace-nowrap opacity-100 text-[length:var(--fs-base)]">{value}</span>
+    </div>
+  )
+}
 
 /* ---------- Тепловая карта активности (как на GitHub) + стрик ---------- */
 export function Heatmap({ days = [], heatmap = [], weeks = 26 }) {
@@ -92,7 +158,9 @@ export function Streak({ streak }) {
 export function Forecast({ f, compact = false, txs = null }) {
   const { t } = useI18n()
   // тот же CashChart, что и в «финансах»: точка = баланс на конец дня, подсказка в две строки
-  if (!f?.points?.length) return null
+  const h = compact ? 120 : 170
+  // высоту резервируем скелетом: когда данные приходят, график не «прыгает» вниз
+  if (!f?.points?.length) return <Skeleton h={h} radius="var(--r-md)" className="my-3" />
   const dm = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}`
   const perDay = f.per_day ?? f.avg_day_spent
   const low = f.low ?? f.min_balance
@@ -100,7 +168,7 @@ export function Forecast({ f, compact = false, txs = null }) {
   const ok = f.ok ?? (low >= 0)
   return (
     <div>
-      <CashChart f={f} height={compact ? 120 : 170} compact={compact} txs={txs} />
+      <CashChart f={f} height={h} compact={compact} txs={txs} />
       {!compact && (
         <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
           {perDay != null && <span className="muted">{t('fc.avg')} <b className="num" style={{ color: 'var(--ink)' }}>{money(perDay)}</b>{t('fc.per_day')}</span>}

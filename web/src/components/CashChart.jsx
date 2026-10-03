@@ -1,7 +1,9 @@
-import { useId, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { money } from '../lib/api'
 import { t as T } from '../lib/i18n'
 import { useTip } from './ChartTip'
+import { Skeleton } from './ui'
+import { stagger } from '../lib/motion'
 
 /* График «касса на N дней» — общий для раздела «финансы» и виджета на главной.
  *
@@ -17,6 +19,9 @@ import { useTip } from './ChartTip'
  * не вылезает за края и не прыгает. Здесь она целиком в portal, поэтому карточка с
  * overflow:hidden её не срезает. Набор подписей (data-date/data-bal/data-kind) прежний —
  * на них завязан e2e-тест tests/e2e/specs/cash_chart.spec.js.
+ *
+ * Движение: только transform/opacity — маркеры событий проявляются каскадом (lib/motion),
+ * высоты графика зарезервированы заранее (скелетон), поэтому данные не «прыгают».
  */
 const W = 600, H = 200                       // система координат viewBox
 const dm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`   // без new Date(iso) — иначе минус день у клиента в UTC−
@@ -123,7 +128,14 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
     setSel(i); tip.open(i, () => dotRef.current)
   }
 
-  if (!geo) return <p className="py-10 text-center text-sm text-[var(--ink3)]">{T('chart.too_few')}</p>
+  /* Мало точек — честная подпись на месте скелетона: высота зарезервирована, страница не прыгает */
+  if (!geo) {
+    return (
+      <Skeleton h={height} radius="var(--r-md)" className="my-2 grid place-items-center">
+        <span className="text-[length:var(--fs-md)] text-[var(--ink-3)]">{T('chart.too_few')}</span>
+      </Skeleton>
+    )
+  }
 
   const curX = sel != null ? xPct(sel) : 0
   const evs = cur ? events(sel) : []
@@ -132,6 +144,16 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
   const dayLine = (p, i) => `${T('chart.per_day')}${p.kind === 'future' ? T('chart.forecast_tag') : ''}: `
     + (delta(i) === 0 ? T('chart.no_change') : money(delta(i), { plus: true }))
   const tipId = `${hintId}-tip`
+
+  /* Маркеры событий проявляются каскадом: только opacity, высоты не трогаем */
+  useEffect(() => {
+    if (!geo) return undefined
+    const host = tip.hostRef.current
+    if (!host) return undefined
+    const els = host.querySelectorAll('[data-pt]')
+    if (!els.length) return undefined
+    return stagger(els, { step: 26, dy: 0, duration: 300, from: 120, max: 24 })
+  }, [geo, pts, tip.hostRef])
 
   return (
     <div>
@@ -160,12 +182,12 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
 
         {/* слой HTML: точки событий, подпись нуля, точка выбора — их нельзя рисовать в растянутом svg */}
         <div className="pointer-events-none absolute inset-0" style={{ height }}>
-          <span className="absolute right-0 -translate-y-full pr-0.5 text-[10.5px] leading-none text-[var(--ink3)]" style={{ top: yPx(0) }}>{T('chart.zero')}</span>
+          <span className="absolute right-0 -translate-y-full pr-0.5 leading-none text-[length:var(--fs-xs)] text-[var(--ink3)]" style={{ top: yPx(0) }}>{T('chart.zero')}</span>
           {pts.map((p, i) => {
             const ev = events(i)
             if (!ev.length) return null
             const up = ev.some((e) => e.amount > 0)
-            return <span key={i} className="absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-[var(--bg)]"
+            return <span key={i} data-pt className="absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-[var(--bg)]"
               style={{ left: `${xPct(i)}%`, top: yPx(p.balance), background: up ? 'var(--pos)' : 'var(--ink-3)' }} />
           })}
           <span className="absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]"
@@ -195,7 +217,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
       })}
 
       {/* ось X: реальные даты точек, метка «сегодня» стоит ровно у маркера */}
-      <div className="mono relative mt-1.5 h-4 text-[11.5px] text-[var(--ink3)]" data-testid="cash-axis">
+      <div className="mono relative mt-1.5 h-4 text-[length:var(--fs-xs)] text-[var(--ink3)]" data-testid="cash-axis">
         {axis.map((a) => (
           <span key={a.i} data-testid="cash-tick" data-today={a.today ? '1' : '0'}
             className={`absolute top-0 -translate-x-1/2 whitespace-nowrap ${a.today ? 'text-[var(--ink2)]' : ''}`}
