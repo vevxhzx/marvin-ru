@@ -1433,7 +1433,10 @@ select.input { appearance: none; }
 /* композер (главная и чат) */
 .composer { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-xl); box-shadow: var(--shadow-1); transition: border-color var(--t-base), box-shadow var(--t-base); }
 .composer:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft), var(--shadow-1); }
-.composer textarea { background: transparent; border: 0; outline: none; resize: none; width: 100%; font-size: 15px; line-height: 1.5; color: var(--ink); }
+/* min-width:0 + flex — иначе поле шириной 100% не учитывает круглую кнопку отправки
+   и текст-подсказка уезжает под неё */
+.composer textarea { background: transparent; border: 0; outline: none; resize: none; flex: 1 1 auto;
+  min-width: 0; width: 100%; font-size: 15px; line-height: 1.5; color: var(--ink); }
 .composer textarea::placeholder { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* карточка результата действия ассистента */
@@ -2117,4 +2120,13 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   .chips > button,
   .pl { min-height: var(--tap); }
   .sg > button { min-height: var(--tap); }
+}
+
+/* --- телефон: последний элемент списка должен полностью уезжать выше плавающей панели ---
+   Панель висит над контентом, поэтому снизу нужен запас: её высота + два зазора +
+   домашний индикатор + воздух, иначе последняя строка прячется под пилюлей. */
+@media (max-width: 820px) {
+  [data-page-root] {
+    padding-bottom: calc(var(--dock-h) + (var(--dock-gap) * 2) + var(--safe-b) + var(--s-8));
+  }
 }
