@@ -2130,3 +2130,16 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
     padding-bottom: calc(var(--dock-h) + (var(--dock-gap) * 2) + var(--safe-b) + var(--s-8));
   }
 }
+
+/* --- полировка: элементы ниже 32px на тач-экранах ---
+   Проверка сплошного прохода нашла: «настроить главную», поля поиска и несколько мелких
+   кнопок ниже зоны касания. Зоны нажатия растут, высота строки — нет. */
+@media (pointer: coarse) {
+  .cfg,
+  .search,
+  .search input,
+  input[type='search'],
+  input[type='text'].input,
+  .head-actions .btn-ghost { min-height: var(--tap); }
+  .search { padding-left: var(--s-4); }
+}

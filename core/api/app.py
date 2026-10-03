@@ -314,13 +314,34 @@ def media(path: str):
     return FileResponse(f, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
 
+@app.get("/manifest.webmanifest", include_in_schema=False)
 @app.get("/manifest.json", include_in_schema=False)
 def manifest():
-    # Источник правды — статический web/public/manifest.webmanifest (его копирует сборка
-    # в web/site). Этот эндпоинт остаётся редиректом, чтобы старые закладки, ссылка
-    # в настройках и уже установленные PWA не получали устаревший JSON.
-    from fastapi.responses import RedirectResponse
-    return RedirectResponse("/manifest.webmanifest", status_code=307)
+    """Манифест PWA.
+
+    Имя и цвета берём из настроек (identity + тема), структуру и иконки — из статического
+    файла web/public/manifest.webmanifest, который копирует сборка в web/site. Поэтому
+    переименование ассистента в конфиге меняет имя установленного приложения, а поля
+    (иконки, ярлыки, режим standalone) живут в одном месте.
+    """
+    from fastapi.responses import JSONResponse
+    from ..brain import persona
+
+    static = ROOT / "web" / "site" / "manifest.webmanifest"
+    data: dict = {}
+    if static.is_file():
+        try:
+            data = _json.loads(static.read_text(encoding="utf-8"))
+        except Exception as e:  # pragma: no cover - битый статический файл
+            log.warning("манифест PWA не прочитан: %s", e)
+    name = persona.display_name() or data.get("name") or "Marvin"
+    data["name"] = name
+    data["short_name"] = name[:12]
+    # цвета — из темы: фон страницы тёмной темы и светлой
+    dark, light = "#0f1530", "#e9ecf3"
+    data.setdefault("theme_color", dark)
+    data.setdefault("background_color", dark)
+    return JSONResponse(data, headers={"Cache-Control": "no-cache"})
 
 
 # ---------------- роутеры по доменам (ФАЗА 7) ----------------
