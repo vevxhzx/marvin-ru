@@ -42,7 +42,7 @@ export const DEFAULTS = {
   accent: 'blue', accentHex: '#3458f5', tint: 'neutral', font: 'md', radius: 'soft', motion: true, compactNav: false,
   address: '', // как обращаться: пусто — берём из настроек ядра («сэр»)
   hiddenNav: [], // скрытые разделы в боковой панели (кроме «сегодня» и «настройки»)
-  tabbar: ['/', '/tasks', '/finance', '/mind'], // нижняя панель телефона (4 раздела + «Ещё»)
+  tabbar: ['/', '/tasks', '/calendar', '/finance'], // нижняя панель телефона (4 раздела + «Ещё» — по макету)
   showGreeting: true, showContext: true, showQuick: true, density: 'calm',
   hiddenBlocks: ['upcoming', 'recent'], // блоки главной, скрытые по умолчанию
   tasksSort: 'priority', // сортировка внутри групп задач: priority | due | new

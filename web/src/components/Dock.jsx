@@ -1,20 +1,18 @@
-/* components/Dock.jsx — нижняя навигация телефона: тёмная размытая плашка
-   с ОДНОЙ прокручиваемой строкой, в которой лежат ВСЕ разделы.
+/* components/Dock.jsx — нижняя навигация телефона: плавающая пилюля по макету
+   владельца (свежий макет «marvin · дизайн главной и финансов»).
 
-   По макету-основе: слева/справа 10px, снизу max(10px, safe-area), радиус 23px,
-   фон rgba(19,20,27,.94) с blur(20px). Внутри — ряд кнопок 75×60: иконка 19px
-   и подпись 11px, радиус 17px, активная — заливкой акцентом. Ряд листается
-   пальцем (горизонтальная прокрутка без полосы), поэтому из любой подвкладки
-   можно уйти в любой раздел — «списка подвкладок» больше нет.
+   В пилюле ровно ПЯТЬ слотов: четыре раздела из настроек (prefs.tabbar) +
+   «Ещё», которая открывает шторку «все разделы» (заказы, мозг, доска, люди,
+   память, настройки + чат, язык, тема, справка, установка). Активный пункт
+   разворачивается в пилюлю с подписью СПРАВА от иконки (подпись выезжает по
+   ширине и прозрачности — правила в index.css, блок «ДОК ТЕЛЕФОНА»), остальные
+   пункты — только иконки. На не-корневых разделах из шторки активной остаётся
+   «Ещё»: так видно, где находишься.
 
-   Раньше здесь было 4 раздела из настроек + «Ещё» и подпись активного пункта,
-   которая раскрывалась пружиной. Подписи теперь на всех пунктах (иначе строка
-   не читается), поэтому морфинг подписи и ездящая подложка не нужны: активный
-   пункт — обычное состояние .on.
-
-   Геометрия и цвета — в index.css, блок «ДОК ТЕЛЕФОНА». Здесь только данные
-   (список разделов), прокрутка и то, что док уезжает на время шторки/доски.
-   Пружинное нажатие — lib/motion.js (press), как и раньше.
+   Пилюля по центру, ширина по содержимому, снизу max(10px, safe-area) — док
+   всегда над домашним индикатором. Сам док уезжает на время шторки и доски
+   (тело получает класс .sheet-open / .board-page). Пружинное нажатие —
+   lib/motion.js (press); геометрия и цвета — в index.css.
 */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -24,7 +22,7 @@ import { useI18n, t as T } from '../lib/i18n'
 import { motionOff, press, usePhone } from '../lib/motion'
 import { toast } from './ui'
 import { canInstall, installPwa } from '../lib/sw'
-import { isActiveRoute, NAV } from '../lib/nav'
+import { isActiveRoute } from '../lib/nav'
 import SheetHost from './SheetHost'
 
 /** Можно ли поставить приложение: браузер предложил — значит, кнопка живая. */
@@ -38,13 +36,6 @@ function useInstallable() {
   }, [])
   return yes
 }
-
-/** Канонический порядок разделов: им же приложение показывает их в строке и в «Ещё». */
-const orderOf = (() => {
-  const m = new Map()
-  NAV.forEach((n, i) => m.set(n.to, i))
-  return (to) => (m.has(to) ? m.get(to) : 999)
-})()
 
 export default function Dock({
   tabs, pathname, compact, more, onChat, onTheme, onHelp, mode = 'auto', langNode,
@@ -61,19 +52,16 @@ export default function Dock({
   /* список разделов пересоздаётся на каждом рендере — для эффектов нужен ключ, а не массив */
   const tabsKey = (tabs || []).map((it) => it.to).join('|')
 
-  /* Все разделы в одном списке: выбранные в настройках + остальные (то, что раньше
-     было «Ещё»). Порядок — реестровый (lib/nav.js), чтобы строка не прыгала при
-     смене настроек; скрытые разделы сюда не попадают, их отдаёт pickMore. */
-  const sections = useMemo(() => {
-    const seen = new Map()
-    for (const s of [...(tabs || []), ...(more || [])]) if (s?.to) seen.set(s.to, s)
-    return [...seen.values()].sort((a, b) => orderOf(a.to) - orderOf(b.to))
-  }, [tabsKey, (more || []).map((it) => it.to).join('|')]) // eslint-disable-line
+  /* В пилюле — только разделы из настроек (prefs.tabbar), порядок реестровый (lib/nav.js).
+     Остальные разделы живут в шторке «Ещё»; скрытые не попадают ни туда, ни сюда. */
+  const sections = useMemo(() => (tabs || []).filter((s) => s?.to), [tabsKey]) // eslint-disable-line
 
   const activeTo = useMemo(
     () => sections.find((it) => isActiveRoute(it.to, pathname))?.to || '',
     [sections, pathname],
   )
+  /* открытый раздел из шторки (заказы, доска, люди…) — активной остаётся «Ещё» */
+  const moreActive = !activeTo && (more || []).some((it) => it?.to && isActiveRoute(it.to, pathname))
 
   /* активный пункт не должен прятаться за краем плашки — долистываем строку к нему */
   useEffect(() => {
@@ -144,24 +132,25 @@ export default function Dock({
                 aria-current={on ? 'page' : undefined}
                 title={t(label)}
               >
-                <Icon size={19} strokeWidth={on ? 2.2 : 1.8} aria-hidden="true" />
-                <span className="dock-l" aria-hidden={!on}>{t(label)}</span>
+                <Icon size={22} strokeWidth={on ? 2.1 : 1.8} aria-hidden="true" />
+                <span className="dock-l" aria-hidden="true">{t(label)}</span>
               </NavLink>
             )
           })}
-          {/* «Ещё» — последним пунктом строки (чат, язык, тема, справка, установка).
-              Отдельной кнопкой-логотипом он не был и не должен становиться. */}
+          {/* «Ещё» — последним пунктом строки: шторка «все разделы» (заказы, мозг, доска,
+              люди, память, настройки + чат, язык, тема). Активна и на открытых из неё
+              разделах — так видно, где находишься. */}
           <button
             type="button"
-            className={`dock-item dock-more ${moreOpen ? 'on' : ''}`}
+            className={`dock-item dock-more ${moreOpen || moreActive ? 'on' : ''}`}
             onClick={() => setMoreOpen(true)}
             aria-label={moreLabel}
             aria-haspopup="dialog"
             aria-expanded={moreOpen}
             title={moreLabel}
           >
-            <Grid3x3 size={19} strokeWidth={1.8} aria-hidden="true" />
-            <span className="dock-l" aria-hidden={moreOpen}>{moreLabel}</span>
+            <Grid3x3 size={22} strokeWidth={1.8} aria-hidden="true" />
+            <span className="dock-l" aria-hidden="true">{moreLabel}</span>
           </button>
         </div>
       </nav>
