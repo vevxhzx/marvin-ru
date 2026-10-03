@@ -63,6 +63,12 @@ export const DICT = {
   'bd.frame_move_left': { ru: 'влевее', en: 'move left' },
   'bd.frame_move_right': { ru: 'правее', en: 'move right' },
   'bd.frames_sheet_hint': { ru: 'тап — перейти к кадру', en: 'tap to jump to the frame' },
+
+  // --- заказы и люди: подписи, которые раньше брались из чужих ключей (волна экранов) ---
+  'or.stage_filter': { ru: 'СТАДИЯ ЗАКАЗА', en: 'ORDER STAGE' },
+  'or.followups': { ru: 'напоминания', en: 'follow-ups' },
+  'people.money_section': { ru: 'деньги', en: 'money' },
+  'people.search': { ru: 'поиск по людям', en: 'search people' },
   'common.cancel': { ru: 'Отмена', en: 'Cancel' },
   'common.yes': { ru: 'Да', en: 'Yes' },
   'common.no': { ru: 'Нет', en: 'No' },
