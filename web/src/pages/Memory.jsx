@@ -6,6 +6,26 @@ import { Empty, Seg, PageHead, ListSkeleton, Pills, toast } from '../components/
 import { useRefresh } from '../App'
 import { name as aName } from '../lib/name'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
+import { usePhone } from '../lib/motion'
+
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+
+/* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
+   отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
+   На десктопе (≥821px) класс не действует — вид раздела прежний. */
+const CARD_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+/* Панель-поверхность (портрет, стиль) на телефоне — тоже без рамки и тени */
+const PANEL_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!border-0 max-[820px]:!shadow-none'
+
+/* Блок списка: на десктопе прозрачный, с волосяными линиями строк; на телефоне карточка,
+   внутри которой строки остаются на тех же линиях (макет: «строки с волосяными
+   разделителями» — но уже внутри карточки, а не вплотную к фону страницы). */
+const listCls = (phone) => (phone ? `c ${CARD_M_LIGHT}` : 'rule')
+
+/* Вкладки на телефоне — одна прокручиваемая строка */
+const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 /* Память — пять вкладок одной редакционной иерархии: «сейчас» (свежее, живёт неделю),
    «о вас» (надолго + портрет и стиль общения), «лента» (день по минутам), «события»
@@ -31,6 +51,7 @@ export default function Memory() {
   const [tab, setTab] = useState('long')
   const [data, setData] = useState(null)
   const { tick } = useRefresh()
+  const phone = usePhone()          // ≤820px: телефонная раскладка по макету
   const load = () => api.facts().then(setData).catch(() => setData({ items: [], stats: {}, enabled: false, categories: [] }))
   useEffect(() => { load() }, [tick])
   const st = data?.stats || {}
@@ -38,12 +59,12 @@ export default function Memory() {
   const idx = data ? (st.short || 0) + (st.long || 0) : undefined
 
   return (
-    <div className="pg space-y-6">
+    <div className={`pg space-y-6 ${FIELD_LABEL_M}`}>
       <PageHead kicker={t('mem.kicker', { name: aName().toLowerCase() })} title={t('nav.memory')} idx={idx} sub={t(SUBS[tab])} />
       {/* вкладки — спокойные переключатели: переносятся на две строки, ничего не уезжает и не листается */}
-      <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label={t('nav.memory')}>
+      <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="tablist" aria-label={t('nav.memory')}>
         {TABS.map(([id, l]) => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>
+          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>
             {t(l)}{counts[id] ? <span className="idx opacity-60" style={{ marginLeft: 5 }}>{counts[id]}</span> : null}
           </button>
         ))}
@@ -76,6 +97,7 @@ function Conf({ v }) {
 
 function Facts({ layer, data, reload }) {
   const { t } = useI18n()
+  const phone = usePhone()
   const [busy, setBusy] = useState(false)
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
@@ -111,11 +133,11 @@ function Facts({ layer, data, reload }) {
           </div>
         )}
         {items.length === 0 ? (
-          <div className="rule">
+          <div className={listCls(phone)}>
             <Empty glyph="memory" text={t('mem.empty')} sub={t({ short: 'mem.e_short', long: 'mem.e_long', archive: 'mem.e_archive' }[layer] || 'mem.e_long')} />
           </div>
         ) : (
-          <div className="rule">
+          <div className={listCls(phone)}>
             {items.map((f) => <FactRow key={f.id} f={f} busy={busy} run={run} cats={data.categories} />)}
           </div>
         )}
@@ -147,7 +169,7 @@ function Portrait({ st, busy, run }) {
         <div className="label">{t('mem.portrait')}</div>
         <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{st.portrait_at ? t('mem.built_at', { when: ago(st.portrait_at) }) : t('mem.not_built')}</span>
       </div>
-      <div className="panel p-4 sm:p-5">
+      <div className={`panel p-4 sm:p-5 ${PANEL_M_LIGHT}`}>
         {st.portrait
           ? <div className="whitespace-pre-line text-[14.5px] leading-relaxed">{st.portrait}</div>
           : <div className="muted text-[13.5px] leading-snug">{t('mem.portrait_hint')}</div>}
@@ -173,7 +195,7 @@ function StyleBlock({ st, busy, run }) {
         <div className="label">{t('mem.how_you_write')}</div>
         <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{st.style_at ? t('mem.noted_at', { when: ago(st.style_at) }) : t('mem.not_noted')}</span>
       </div>
-      <div className="panel p-4 sm:p-5">
+      <div className={`panel p-4 sm:p-5 ${PANEL_M_LIGHT}`}>
         {edit ? (
           <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={5} className="input !h-auto w-full resize-none py-2 text-[14px] leading-relaxed" placeholder={t('mem.style_ph')} />
         ) : st.style ? (
@@ -202,6 +224,7 @@ function StyleBlock({ st, busy, run }) {
 const LESSON_RU = { expense: 'les.expense', income: 'les.income', debt: 'les.debt', order: 'les.order', task: 'les.task', event: 'les.event', note: 'les.note', mute: 'les.mute' }
 function Lessons() {
   const { t } = useI18n()
+  const phone = usePhone()
   const [items, setItems] = useState(null)
   const load = () => api.lessons().then(setItems).catch(() => setItems([]))
   useEffect(() => { load() }, [])
@@ -214,7 +237,7 @@ function Lessons() {
         <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('les.n', { count: items.length })}</span>
       </div>
       <div className="muted mb-3 text-[13px]">{t('les.hint')}</div>
-      <div className="rule">
+      <div className={listCls(phone)}>
         {items.map((l) => (
           <div key={l.id} className="row group">
             <div className="min-w-0 flex-1 text-[14px]">
@@ -312,6 +335,7 @@ const clean = (s) => s.replace(/^(Мысль|Задача|Запланирова
 
 function Journal() {
   const { t } = useI18n()
+  const phone = usePhone()
   const [kind, setKind] = useState('')
   const [days, setDays] = useState(30)
   const [q, setQ] = useState('')
@@ -356,7 +380,7 @@ function Journal() {
       </div>
 
       {!items ? <ListSkeleton n={6} /> : groups.length === 0 ? (
-        <div className="rule"><Empty glyph="memory" text={t(q ? 'common.no_results' : 'mem.empty')} sub={t(q ? 'mem.try_words' : 'mem.everything_here')} hint={q ? undefined : t('mem.hint_example')} /></div>
+        <div className={listCls(phone)}><Empty glyph="memory" text={t(q ? 'common.no_results' : 'mem.empty')} sub={t(q ? 'mem.try_words' : 'mem.everything_here')} hint={q ? undefined : t('mem.hint_example')} /></div>
       ) : (
         <div className="space-y-7">
           {groups.map(([day, list]) => (
@@ -365,7 +389,7 @@ function Journal() {
                 <div className="label">{dayLabel(day)}</div>
                 <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{shortDate(day)} · {t('mem.entries_n', { count: list.length })}</span>
               </div>
-              <div className="rule">
+              <div className={listCls(phone)}>
                 {list.map((m) => <Entry key={m.id} m={m} open={openId === m.id} onToggle={() => setOpenId(openId === m.id ? null : m.id)} />)}
               </div>
             </section>
@@ -408,6 +432,7 @@ const WHO_ME = 'я'   // i18n-raw — ключ из лога ядра
 const WHO = { 'я': { label: 'mem.w_you', color: 'var(--ink)' }, 'марвин': { label: 'mem.w_assistant', color: 'var(--accent)', icon: Bot }, 'пк': { label: 'mem.w_pc', color: 'var(--ink-3)', icon: Monitor } }
 function Timeline() {
   const { t } = useI18n()
+  const phone = usePhone()
   const [day, setDay] = useState(0)   // 0 сегодня, 1 вчера…
   const [q, setQ] = useState('')
   const [items, setItems] = useState(null)
@@ -428,9 +453,9 @@ function Timeline() {
         </label>
       </div>
       {!items ? <ListSkeleton n={6} /> : items.length === 0 ? (
-        <div className="rule"><Empty glyph="memory" text={t(q ? 'mem.timeline_none' : 'mem.timeline_empty')} sub={t(q ? 'mem.timeline_other' : 'mem.timeline_hint')} /></div>
+        <div className={listCls(phone)}><Empty glyph="memory" text={t(q ? 'mem.timeline_none' : 'mem.timeline_empty')} sub={t(q ? 'mem.timeline_other' : 'mem.timeline_hint')} /></div>
       ) : (
-        <div className="rule">
+        <div className={listCls(phone)}>
           {items.map((it, i) => {
             const w = WHO[it.who] || WHO[WHO_ME]
             const I = w.icon

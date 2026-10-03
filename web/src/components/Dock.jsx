@@ -145,7 +145,7 @@ export default function Dock({
                 title={t(label)}
               >
                 <Icon size={19} strokeWidth={on ? 2.2 : 1.8} aria-hidden="true" />
-                <span className="dock-l">{t(label)}</span>
+                <span className="dock-l" aria-hidden={!on}>{t(label)}</span>
               </NavLink>
             )
           })}
@@ -161,7 +161,7 @@ export default function Dock({
             title={moreLabel}
           >
             <Grid3x3 size={19} strokeWidth={1.8} aria-hidden="true" />
-            <span className="dock-l">{moreLabel}</span>
+            <span className="dock-l" aria-hidden={moreOpen}>{moreLabel}</span>
           </button>
         </div>
       </nav>

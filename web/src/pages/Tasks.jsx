@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { Plus, Search as SearchIcon, X, ChevronRight, ChevronLeft, EyeOff, Pencil, Check } from 'lucide-react'
+import { Plus, Search as SearchIcon, X, ChevronRight, ChevronLeft, EyeOff, Pencil, Check, Settings2 } from 'lucide-react'
 import { api, hhmm, isSameDay, isAllDay } from '../lib/api'
 import { Num, Empty, Swipe, PRIORITY, useToast, useLeave, useArrived, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
@@ -11,24 +11,32 @@ import { usePrefs, prefs as PREFS } from '../lib/prefs'
 import { usePageAccent } from '../lib/prefs'
 import { useCardLayout, CardCtl } from '../lib/layout'
 import { useI18n } from '../lib/i18n'
+import { usePhone } from '../lib/motion'
 
-/* pages/Tasks.jsx — «Задачи» as an editorial hierarchy:
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
 
-     headline + the one primary action           (.top)
-     a calm counter strip — it is also the view switcher, active state readable
-     quick add (one line, your own words)        (.comp)
-     search + project filter                     (local, no requests)
-     the list itself: rows with hairline rules, a big checkbox, a priority dot,
-     and a swipe (right — close, left — edit)
+/* pages/Tasks.jsx — «Задачи» в двух раскладках, одна разметка:
 
-   No hero card: on this screen the hero is only money/success (DESIGN.md), so the
-   counters stay a quiet one-line strip instead of a lime block. The list sits on the
-   page background — hairlines instead of a card, and the swipe foreground of .swipe
-   (.swipe-fg is painted with var(--bg)) matches the page exactly.
+   десктоп (≥821px) — панели-карточки: счётчики отдельной карточкой, быстрый ввод и поиск
+                     отдельной, группы задач — поверхностями с шапкой и волосяными
+                     разделителями внутри;
+   телефон (≤820px) — плоские разделы и строки на фоне страницы, крупные зоны нажатия.
+
+   Переключает только CSS (cardM ниже), логика, данные и разметка строк общие.
 
    Rows keep the markup e2e relies on: #p-tasks .rowi with the task title, the checkbox
    input[aria-label="закрыть задачу"], the view switcher inside .top .sg («выполнено»)
    and the primary action «+ задача». */
+
+/* Поверхность-карточка в обеих раскладках: на десктопе (≥821px) с волосяной рамкой
+   --line и отступом pad, на телефоне (≤820px) тот же блок, но легче — отступ 21px,
+   радиус из токена (--r-lg), без тени и без хайрлайна: разделение тоном (макет).
+   Параметр pad задаёт внутренние отступы блока: на десктопе своё значение, на телефоне
+   отступ карточки всё равно 21px, поэтому разметка не дублируется. */
+const cardM = (pad = '!p-[var(--card-pad)]') =>
+  `c !rounded-[var(--r-lg)] ${pad} max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none`
 
 /* Blocks of the page in the «настроить» mode. Stored under a fresh key (tasks2):
    the old layout (done/list/empty/sort cards of the bento grid) has no blocks to
@@ -51,6 +59,9 @@ const SORT_FN = {
 /* Общие размеры: зоны нажатия — из токенов, без «сырых» чисел */
 const PILL = { minHeight: 'var(--tap)', padding: '0 16px' }
 const SEG_BTN = { minHeight: 'var(--tap)', padding: '0 16px' }
+
+/* Ряд чипов на телефоне: одна прокручиваемая строка вместо переноса в несколько рядов */
+const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 /* Точка приоритета в строке: крупная зона нажатия (--tap) и меню через портал в body —
    строка лежит внутри .swipe с overflow:hidden, обычный absolute-попап там обрезался бы. */
@@ -135,17 +146,18 @@ function PriorityCell({ value, onChange }) {
   )
 }
 
-/* Полоса счётчиков: плоская, с волосяными разделителями, без капсулы-героя.
-   Это и есть переключатель вида, поэтому второго сегмента на странице нет.
-   Разметка .sg остаётся (единый сегмент системы), вид задаётся токенами. */
+/* Полоса счётчиков — это и есть переключатель вида, поэтому второго сегмента на странице
+   нет. Разметка .sg остаётся (единый сегмент системы, на неё ходят проверки e2e).
+   На десктопе её границы отдаёт карточка-обёртка, на телефоне сама полоса волосяная:
+   телефонная карточка вокруг уже есть, вторая линия была бы лишней. */
 function Counters({ items, view, onChange, label }) {
   const { t } = useI18n()
+  const phone = usePhone()
   return (
     <div
-      className="sg w-full"
+      className={`sg w-full !gap-0 !rounded-none !bg-transparent !p-0 !shadow-none max-w-[760px] min-[821px]:!max-w-none max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto ${phone ? '!border-0' : 'border-y border-[var(--line)]'}`}
       role="group"
       aria-label={label}
-      style={{ padding: 0, gap: 0, background: 'transparent', borderRadius: 0, borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)', maxWidth: '760px' }}
     >
       {items.map((c, i) => {
         const on = c.id === view
@@ -203,6 +215,7 @@ export default function Tasks() {
   const [cardsEdit, setCardsEdit] = useState(false)
   const { order: blockOrder, setOrder: setBlockOrder, move, reset: resetBlocks } = useCardLayout('tasks2', BLOCKS)
   const pageAcc = usePageAccent('tasks')
+  const phone = usePhone()          // ≤820px: телефонная раскладка по макету
   /* row flashes on arrival and leaves nicely when closed */
   const [leaveCls, leave] = useLeave()
   const arriveCls = useArrived((tasks || []).map((t) => t.id))
@@ -302,7 +315,7 @@ export default function Tasks() {
     : (view === 'today' ? todayList : view === 'done' ? done : open)
   const kicker = filtering
     ? t('tk.found_n', { n: currentList.length })
-    : open.length ? t('tk.open_n', { n: open.length }) : t('tk.all_done')
+    : open.length ? t('tk.open_n', { count: open.length }) : t('tk.all_done')
 
   const counters = [
     { id: 'open', label: 'tk.open', n: open.length },
@@ -348,7 +361,7 @@ export default function Tasks() {
   ) : null)
 
   return (
-    <div className="pg on" id="p-tasks" style={pageAcc.style}>
+    <div className={`pg on ${FIELD_LABEL_M}`} id="p-tasks" style={pageAcc.style}>
       {/* Header: headline + the one primary action. The counter strip lives inside .top —
           it is the view switcher (e2e looks for «выполнено» inside .top .sg). */}
       <header className="top">
@@ -360,14 +373,17 @@ export default function Tasks() {
         </div>
         {view !== 'aims' && (
           <div className="hr head-actions r" style={{ '--i': 1 }}>
+            {/* Настройка блоков — одна точка входа: на десктопе кнопка с подписью,
+                на телефоне та же кнопка иконкой (подпись и тултип остаются в aria). */}
             <button
               type="button"
-              className="btn-ghost btn-sm"
+              className={`btn-ghost btn-sm ${phone ? '!px-2.5' : ''}`}
               onClick={() => setCardsEdit((v) => !v)}
               title={t('tk.layout_tip')}
+              aria-label={t('tk.layout')}
               aria-pressed={cardsEdit}
             >
-              {t('tk.layout')}
+              {phone ? <Settings2 size={15} /> : t('tk.layout')}
             </button>
             <button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>
               + {t('tk.task')}
@@ -375,7 +391,9 @@ export default function Tasks() {
           </div>
         )}
         {blockOrder.includes('stats') && (
-          <div className="r w-full" style={{ '--i': 2 }}>
+          /* Счётчики — и переключатель вида: на десктопе своя карточка, на телефоне та же
+             полоса с волосяными границами, что и раньше. Разметка .sg не меняется. */
+          <div className={`r w-full ${cardM('!p-2')}`} style={{ '--i': 2 }}>
             <Counters items={counters} view={view} onChange={setView} label={t('nav.tasks')} />
           </div>
         )}
@@ -387,12 +405,14 @@ export default function Tasks() {
         </div>
       ) : (
         <>
-          {/* Quick add — one line, your own words */}
+          {/* Quick add — one line, your own words. На десктопе панель-карточка, на телефоне
+              тот же блок без обёртки. */}
           {blockOrder.includes('tools') && (
-            <section className="relative">
+            <section className={`relative ${cardM('!p-4')} mt-6`}>
               {ctl('tools')}
               <div className={cardsEdit ? 'pt-8' : ''}>
-                <div className="comp">
+                {/* .comp сам отступает от верха страницы; внутри карточки отступ отдаёт она */}
+                <div className="comp min-[821px]:!mt-0">
                   <i aria-hidden="true" />
                   <input
                     className="ph0"
@@ -443,7 +463,7 @@ export default function Tasks() {
                 </div>
 
                 {projects.length > 0 && (
-                  <div className="cluster mt-3" role="group" aria-label={t('task.project')}>
+                  <div className={`cluster mt-3 ${CHIPS_ROW_M}`} role="group" aria-label={t('task.project')}>
                     <span className="label">{t('task.project')}</span>
                     <button
                       type="button"
@@ -458,7 +478,7 @@ export default function Tasks() {
                       <button
                         key={p}
                         type="button"
-                        className={`pill ${proj === p ? 'on' : ''}`}
+                        className={`pill max-[820px]:!shrink-0 ${proj === p ? 'on' : ''}`}
                         aria-pressed={proj === p}
                         style={{ ...PILL, maxWidth: '46vw' }}
                         title={p}
@@ -480,9 +500,10 @@ export default function Tasks() {
             </section>
           )}
 
-          {/* The list: rows on the page background, hairline rules, cascade on arrival */}
+          {/* The list: на десктопе панель-карточка с шапкой и волосяными разделителями,
+              на телефоне плоский раздел на фоне страницы. Каскад появления общий. */}
           {blockOrder.includes('list') && (
-            <section className="relative mt-7">
+            <section className={`relative mt-7 ${cardM()}`}>
               {ctl('list')}
               <div
                 className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"

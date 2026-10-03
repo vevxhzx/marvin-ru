@@ -7,7 +7,7 @@ import { useTip } from './ChartTip'
 import { useI18n, t as T } from '../lib/i18n'
 import { CountUp } from './CountUp'
 import { Skeleton } from './ui'
-import { motionOff, stagger } from '../lib/motion'
+import { motionOff, stagger, usePhone } from '../lib/motion'
 
 /* ---------- общие примитивы редакционной раскладки (главная и финансы) ----------
 
@@ -48,10 +48,21 @@ export function useReveal(dep) {
   return ref
 }
 
+/* Крупное число на телефоне — ровно 44px, а не clamp(): «жидкий» размер едет вместе
+   с шириной окна, цифры меняют вес при повороте экрана, и счётчик (CountUp) «прыгает»
+   ещё сильнее. На десктопе размер прежний — та же токенная шкала (--hero-fs /
+   --hero-fs-2), её не трогаем. Табличные цифры даёт .big. */
+export const BIG_PHONE_PX = 44
+export function useBigSize(fs = 'var(--hero-fs)') {
+  const phone = usePhone()
+  return phone ? `${BIG_PHONE_PX}px` : fs
+}
+
 /* Сумма одной строкой: число тянет на себя вес, ₽ — на полтона кегля легче. */
 export function BigMoney({ value, format, label, className = '', fs = 'var(--hero-fs)' }) {
+  const size = useBigSize(fs)
   return (
-    <span className={`big ${className}`} style={{ fontSize: fs }}>
+    <span className={`big ${className}`} style={{ fontSize: size }}>
       <span aria-hidden="true">
         <CountUp value={Number(value) || 0} format={format} roll={false} />
         <span style={{ fontSize: '0.5em', fontWeight: 400, opacity: 0.75, marginLeft: '0.18em' }}>{CUR}</span>
@@ -62,12 +73,14 @@ export function BigMoney({ value, format, label, className = '', fs = 'var(--her
 }
 
 /* Строка «подпись — значение» прямо на поверхности героя: подпись приглушена,
-   значение читается. Контраст подписи на лаймовом фоне ≈ 5.9:1 (AA). */
+   значение читается. Контраст подписи на лаймовом фоне ≈ 5.9:1 (AA).
+   На узком телефоне (≤380px) подписи в герое и у полей уменьшаются на ступень —
+   иначе длинная подпись съедает строку и число уезжает за край. */
 export function HeroLine({ label, value }) {
   return (
-    <div className="flex items-baseline justify-between gap-3 py-1 opacity-75">
-      <span className="trunc text-[length:var(--fs-md)]">{label}</span>
-      <span className="num shrink-0 whitespace-nowrap opacity-100 text-[length:var(--fs-base)]">{value}</span>
+    <div className="flex items-baseline justify-between gap-3 py-1 opacity-75 max-[380px]:!py-0.5">
+      <span className="trunc text-[length:var(--fs-md)] max-[380px]:text-[length:var(--fs-xs)]">{label}</span>
+      <span className="num shrink-0 whitespace-nowrap opacity-100 text-[length:var(--fs-base)] max-[380px]:text-[length:var(--fs-md)]">{value}</span>
     </div>
   )
 }

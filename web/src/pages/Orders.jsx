@@ -12,11 +12,26 @@ import MenuButton from '../components/RowMenu'
 import { ClientStageSelect, ClientStageNote } from '../components/ClientStage'
 import { ORDER_STAGES, ORDER_STAGE_LABEL, ORDER_STAGE_TONE, stageOf, NEXT_STEP, STAGE_TO_STATUS } from '../lib/crm'
 import { useI18n, t as T } from '../lib/i18n'
+import { usePhone } from '../lib/motion'
+
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+
+/* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
+   отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
+   На десктопе (≥821px) класс не действует: там разделы остаются плоскими, как были. */
+const CARD_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+
+/* Раздел страницы на телефоне — карточка, на десктопе — как было */
+const sectionCls = (phone) => (phone ? `c ${CARD_M_LIGHT}` : '')
 
 /* Срезы списка. Названия — ключи словаря (см. lib/i18n.js). */
 const VIEWS = [['open', 'or.v_open'], ['unpaid', 'or.v_unpaid'], ['all', 'common.all']]
 /* Цвет точки стадии: смысловой тон из DESIGN.md, иначе — акцент. */
 const STAGE_VAR = { warn: 'var(--warn)', pos: 'var(--pos)', neg: 'var(--neg)' }
+/* Подписи мелким кеглем на узком телефоне (≤380px) уменьшаются на ступень */
+const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
 const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ${T('unit.hour')}` : h > 0 ? `${Math.round(h * 60)} ${T('unit.min')}` : '—')
 
@@ -59,6 +74,7 @@ export default function Orders() {
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
   const { t: timer, left } = useTimer()
+  const phone = usePhone()          // ≤820px: телефонная раскладка по макету
   /* Глубокая ссылка на заказ: /orders?order=12 открывает панель заказа. Так из карточки
      человека можно попасть прямо в заказ, а не «вернуться и искать его в списке». */
   const [params] = useSearchParams()
@@ -137,7 +153,7 @@ export default function Orders() {
   ].filter(Boolean)
 
   return (
-    <div className="bento-page pg space-y-6 pt-4" style={pageAcc.style}>
+    <div className={`bento-page pg space-y-6 pt-4 ${FIELD_LABEL_M}`} style={pageAcc.style}>
       <PageHead kicker={kicker} title={t('nav.orders')}
         sub={<StatRow items={counters} />}
         right={<>
@@ -146,9 +162,11 @@ export default function Orders() {
           <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
         </>} />
 
+      {/* Подсказка «как это работает» на телефоне свёрнута (см. HowToOrders) и открывается
+          одной кнопкой «?» — это её единственная точка входа, второй кнопки в шапке нет. */}
       <div className="-mt-4"><HowToOrders /></div>
 
-      <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
+      <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 !pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />
         <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('or.quick_ph')} aria-label={t('or.quick_ph')} />
         <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label={t('common.add')} data-tip={t('or.quick_tip')}>
@@ -215,11 +233,11 @@ export default function Orders() {
       {orders === null
         ? <ListSkeleton n={5} rowH={78} avatar={false} />
         : layout === 'board' ? (
-          <Section title={t('or.layout_board')} idx={list.length} hint={t('or.board_hint')}>
+          <Section className={sectionCls(phone)} title={t('or.layout_board')} idx={list.length} hint={t('or.board_hint')}>
             <Board orders={list} onOpen={openDrawer} onStage={setStage} />
           </Section>
         ) : (
-          <Section title={t(VIEWS.find((v) => v[0] === view)[1])} idx={list.length}>
+          <Section className={sectionCls(phone)} title={t(VIEWS.find((v) => v[0] === view)[1])} idx={list.length}>
             {list.length === 0 ? (
               <div className="animate-rise">
                 {view === 'open' ? <Empty glyph="tasks" text={t('or.empty_open')} sub={t('or.empty_open_sub')} hint={t('or.empty_open_hint')} />
@@ -259,7 +277,7 @@ export function StatRow({ items }) {
       {items.map((it, i) => {
         const body = (
           <>
-            <span className="faint leading-tight" style={{ fontSize: 'var(--fs-xs)' }}>{it.label}</span>
+            <span className={`faint leading-tight ${SMALL_M}`} style={{ fontSize: 'var(--fs-xs)' }}>{it.label}</span>
             <span className="num font-medium" style={{ fontSize: 'var(--fs-lg)', color: toneColor[it.tone] || 'var(--ink)' }}>{it.value}</span>
             {it.hint && <span className="faint trunc" style={{ fontSize: 'var(--fs-xs)', maxWidth: '22ch' }} title={it.hint}>{it.hint}</span>}
           </>
@@ -533,7 +551,7 @@ function LostSheet({ order, onClose, onDone }) {
   const [reason, setReason] = useState('')
   useEffect(() => { setReason('') }, [order?.id])
   return (
-    <Sheet open={!!order} onClose={onClose} title={t('or.mark_lost')} sub={order ? `«${order.title}»` : ''}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={!!order} onClose={onClose} title={t('or.mark_lost')} sub={order ? `«${order.title}»` : ''}>
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (reason.trim()) onDone(reason.trim()) }}>
         <Field label={t('or.why_lost')} hint={t('or.why_lost_hint')}>
           <input autoFocus className="input" value={reason} onChange={(e) => setReason(e.target.value)}
@@ -572,7 +590,7 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
     await save({ next_step: step, next_step_at: stepAt ? `${stepAt}T12:00:00` : null })
   }
   return (
-    <Sheet open={!!cid} onClose={onClose} wide title={d?.client?.name || t('graph.one_client')} sub={d?.source ? t('mem.source', { what: d.source }) : ''}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={!!cid} onClose={onClose} wide title={d?.client?.name || t('graph.one_client')} sub={d?.source ? t('mem.source', { what: d.source }) : ''}>
       {!d ? <ListSkeleton n={3} rowH={40} avatar={false} /> : (
         <div className="space-y-5 text-[13px]">
           <section>
@@ -628,9 +646,10 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
 /* Аналитика CRM: конверсия воронки и топ клиентов (read-only) */
 function AnalyticsBlock({ a }) {
   const { t } = useI18n()
+  const phone = usePhone()
   const max = Math.max(1, ...a.funnel.map((f) => f.count))
   return (
-    <Section title={t('or.an_title')} hint={t('or.an_hint')}>
+    <Section className={sectionCls(phone)} title={t('or.an_title')} hint={t('or.an_hint')}>
       <div className="space-y-2">
         {a.funnel.map((f) => (
           <div key={f.stage} className="flex items-center gap-3 text-[12.5px]">
@@ -652,12 +671,13 @@ function AnalyticsBlock({ a }) {
 
 function StatsBlock({ stats, onUnpaid }) {
   const { t } = useI18n()
+  const phone = usePhone()
   const [more, setMore] = useState(false)
   const max = Math.max(1, ...stats.months.map((m) => m.income))
   const maxF = Math.max(1, ...stats.focus_days.map((d) => d.min))
   const lastMonth = stats.months.at(-1)?.month
   return (
-    <Section title={t('or.st_title')} hint={t('or.st_hint')}>
+    <Section className={sectionCls(phone)} title={t('or.st_title')} hint={t('or.st_hint')}>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div>
           <div className="label mb-4">{t('or.st_income')}</div>
@@ -767,7 +787,7 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   }
   const toggleDone = (v) => setF({ ...f, done: v, stage: v ? 'delivered' : f.stage === 'delivered' ? 'in_work' : f.stage })
   return (
-    <Sheet open={open} onClose={onClose} title={t(order ? 'od.order' : 'or.new_order')} sub={order ? undefined : t('or.new_order_sub')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t(order ? 'od.order' : 'or.new_order')} sub={order ? undefined : t('or.new_order_sub')}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('or.what_do')}><input autoFocus className="input !text-[19px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder={t('or.what_do_ph')} /></Field>
         {hint && (
@@ -832,7 +852,7 @@ function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
     try { onDone(await api.payOrder(order.id, n, { note: note || null, account: account || null, date: date && date !== today ? `${date}T12:00:00` : null, idem_key: payKey || null })) } catch (err) { onErr(err) }
   }
   return (
-    <Sheet open={!!order} onClose={onClose} title={t('or.pay_title')} sub={order ? `«${order.title}»${order.left ? ` · ${t('or.left', { m: money(order.left) })}` : ''}` : ''}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={!!order} onClose={onClose} title={t('or.pay_title')} sub={order ? `«${order.title}»${order.left ? ` · ${t('or.left', { m: money(order.left) })}` : ''}` : ''}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('common.amount')}><Money value={amount} onChange={setAmount} big autoFocus /></Field>
         {order?.left > 0 && <div className="flex flex-wrap gap-1.5">

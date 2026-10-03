@@ -2,9 +2,16 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, money, shortDate, hhmm } from '../lib/api'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 import { Num, Rowi } from './ui'
-import { useNumFormats } from './Widgets'
+import { useNumFormats, useBigSize } from './Widgets'
+import { usePhone } from '../lib/motion'
 import { useTip } from './ChartTip'
 import { Check, Sparkles } from 'lucide-react'
+
+/* Подписи мелким кеглем на телефоне (≤820px) уменьшаются на ступень: в колонке из трёх
+   плиток на 375px кегль 12.5px превращается в полосу точек, а под осью графика он же
+   съедает ещё и высоту самого графика. Всё, что длиннее одной строки, на телефоне
+   перестаёт быть подписью — значение остаётся, пояснение живёт в подсказке по тапу. */
+const F_XS = 'max-[820px]:text-[length:var(--fs-xs)]'
 
 /**
  * Премиальные интерактивные карточки отчётов в точном стиле эталона Marvin Bento V7.
@@ -65,8 +72,8 @@ export function MorningDigestCard({ data, ownerName }) {
         {/* Баланс - карточка с градиентом */}
         <div className="c hero !p-4 !rounded-2xl">
           <div className="hd !mb-2">
-            <h3 className="text-[13px] font-semibold opacity-90">{t('rc.balance')}</h3>
-            <small className="opacity-75">{t('rc.free')}</small>
+            <h3 className={`text-[13px] font-semibold opacity-90 ${F_XS}`}>{t('rc.balance')}</h3>
+            <small className={`opacity-75 ${F_XS}`}>{t('rc.free')}</small>
           </div>
           <div className="text-[26px] font-semibold tracking-[-0.03em]"><Num value={balance} /> ₽</div>
         </div>
@@ -74,8 +81,8 @@ export function MorningDigestCard({ data, ownerName }) {
         {/* Можно тратить в день - p2 изумрудный градиент */}
         <div className="c p2 !p-4 !rounded-2xl">
           <div className="hd !mb-2">
-            <h3 className="text-[13px] font-semibold">{t('rc.can_spend')}</h3>
-            <small>{t('rc.per_day')}</small>
+            <h3 className={`text-[13px] font-semibold ${F_XS}`}>{t('rc.can_spend')}</h3>
+            <small className={F_XS}>{t('rc.per_day')}</small>
           </div>
           <div className="text-[26px] font-semibold tracking-[-0.03em] text-[var(--pos)]">
             <Num value={dailyBudget ?? 0} /> ₽
@@ -409,6 +416,7 @@ export function ScreenTimeBentoWidget({ data }) {
   const { t } = useI18n()
   const fmt = useNumFormats()
   const tip = useTip()
+  const big = useBigSize('var(--hero-fs-2)')
   const d = data
   if (!d || !(d.active_min > 0) || !(d.hours || []).some((v) => v > 0)) {
     return <div className="muted py-2 text-[length:var(--fs-md)]">{t(d?.pc_alive === false ? 'screen.empty_dead' : 'screen.off_hint')}</div>
@@ -416,7 +424,14 @@ export function ScreenTimeBentoWidget({ data }) {
 
   const hours = Math.floor(d.active_min / 60)
   const mins = d.active_min % 60
-  const slice = (d.hours || []).slice(8, 20)
+  /* Окно часов — по данным, а не «с 8 до 20»: берём от первого активного часа до
+     последнего с запасом в час, чтобы ряд не обрезался. Если активности нет — 8..20. */
+  const allHours = d.hours || []
+  const firstActive = allHours.findIndex((v) => (v || 0) > 0)
+  const lastActive = allHours.length - 1 - [...allHours].reverse().findIndex((v) => (v || 0) > 0)
+  const hFrom = firstActive >= 0 ? Math.max(0, firstActive - 1) : 8
+  const hTo = firstActive >= 0 ? Math.min(23, lastActive + 1) : 19
+  const slice = allHours.slice(hFrom, hTo + 1)
   const maxH = Math.max(1, ...(d.hours || [1]))
   const sumH = Math.max(1, slice.reduce((s, v) => s + (v || 0), 0))
   const hourLabel = (h, v) => t('rc.hour_min', { h, m: v })
@@ -434,7 +449,7 @@ export function ScreenTimeBentoWidget({ data }) {
 
   return (
     <div>
-      <div className="num font-medium leading-none tracking-[-0.03em]" style={{ fontSize: 'var(--hero-fs-2)' }}>
+      <div className="num font-medium leading-none tracking-[-0.03em]" style={{ fontSize: big }}>
         {fmt.nb(`${fmt.int(hours)} ${t('unit.hour')} ${fmt.int(mins)} ${t('unit.min')}`)}
       </div>
 
@@ -463,13 +478,13 @@ export function ScreenTimeBentoWidget({ data }) {
           })}
         </div>
         <div className="mono mt-1 flex justify-between px-1 text-[length:var(--fs-xs)] text-[var(--ink-3)]">
-          <span>08:00</span>
-          <span>14:00</span>
-          <span>20:00</span>
+          <span>{hFrom}:00</span>
+          <span>{Math.round((hFrom + hTo) / 2)}:00</span>
+          <span>{hTo + 1}:00</span>
         </div>
       </div>
       {tip.panel({
-        title: curH != null ? hourLabel(tip.active.i + 8, curH) : null,
+        title: curH != null ? hourLabel(tip.active.i + hFrom, curH) : null,
         rows: curH != null ? [t('tip.share_active', { p: Math.round((curH / sumH) * 100) })] : [],
       })}
 

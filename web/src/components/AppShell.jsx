@@ -149,6 +149,19 @@ function SideTimer({ min }) {
    Ниже две кликабельные строки (помодоро и статус) — это по сути кнопки, поэтому у них
    есть роль и работа с клавиатуры: обводка фокуса идёт от общих правил index.css. */
 function Sidebar({ live, busy, hiddenNav = [] }) {
+  /* Помодоро в сайдбаре: по клику открывается окошко управления прямо над пунктом. */
+  const [pomoOpen, setPomoOpen] = useState(false)
+  const [pomoT, setPomoT] = useState(null)
+  const [, setPomoTick] = useState(0)
+  const pomoLeft = pomoT?.active ? Math.max(0, Math.round((new Date(pomoT.ends_at) - Date.now()) / 1000)) : 0
+  const pomoTotal = (pomoT?.minutes || 25) * 60
+  const navOrders = useNavigate()
+  const pomoReload = useCallback(() => { api.timer().then(setPomoT).catch(() => {}) }, [])
+  useEffect(() => {
+    pomoReload()
+    const iv = setInterval(() => { setPomoTick((n) => n + 1); pomoReload() }, 20000)
+    return () => clearInterval(iv)
+  }, [pomoReload])
   const { t } = useI18n()
   const st = assistantState(live, busy)
   const { t: tmr, left } = useTimer()
@@ -204,21 +217,28 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
         </NavLink>
       </nav>
       <div className="sb">
-        <div className="pomo select-none" role="button" tabIndex={0}
-          onClick={() => nav('/orders')} onKeyDown={onEnter(() => nav('/orders'))}
-          style={{ cursor: 'pointer', outline: 'none' }}>
-          <svg className="pomo-gauge" viewBox="0 0 24 24" style={{ outline: 'none', border: 'none', boxShadow: 'none' }}>
-            <defs>
-              <linearGradient id="pomoSideGrad" x1="0" y1="0" x2="1" y2="1">
-                <stop offset="0%" stopColor="var(--acc)" />
-                <stop offset="100%" stopColor="#c04cff" />
-              </linearGradient>
-            </defs>
-            <circle className="bg" cx="12" cy="12" r="10" />
-            <circle className="fg" cx="12" cy="12" r="10" stroke="url(#pomoSideGrad)" />
-          </svg>
-          <span><b className="mono">{pomoTime}</b> {pomoLabel}</span>
-        </div>
+        <span className="pomo-slot block">
+            <button
+              type="button"
+              className={`pomo nav-row${pomoOpen ? ' is-open' : ''}`}
+              aria-expanded={pomoOpen}
+              aria-haspopup="dialog"
+              aria-label={t('side.pomodoro')}
+              onClick={() => setPomoOpen((v) => !v)}
+              onKeyDown={(e) => { if (e.key === 'Escape') setPomoOpen(false) }}
+            >
+              <span className="pomo-gauge" aria-hidden><span style={{ transform: `rotate(${(pomoT?.active ? pomoLeft / (pomoTotal || 1) : 0) * 360}deg)` }} /></span>
+              <span className="pomo-t num">{pomoT?.active ? mmss(pomoLeft) : t('side.pomodoro')}</span>
+            </button>
+            {pomoOpen && (
+              <PomodoroPanel
+                timer={pomoT}
+                left={pomoLeft}
+                onClose={() => setPomoOpen(false)}
+                onChanged={pomoReload}
+              />
+            )}
+            </span>
         <div className="relative">
           <div className="st" role="button" tabIndex={0} aria-expanded={pop}
             onClick={() => setPop((v) => !v)} onKeyDown={onEnter(() => setPop((v) => !v))}
@@ -325,6 +345,68 @@ export function PageTransition({ children, pathKey }) {
 }
 
 /* ---------- оболочка ---------- */
+/* ---------- помодоро: окошко управления над пунктом сайдбара ---------- */
+
+function PomodoroPanel({ timer, left, onClose, onChanged }) {
+  const { t } = useI18n()
+  const [mins, setMins] = useState(25)
+  const [busy, setBusy] = useState(false)
+  const ref = useRef(null)
+
+  useEffect(() => {
+    api.pomodoro().then((p) => { if (p?.focus_min) setMins(p.focus_min) }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    const h = (e) => { if (e.key === 'Escape') onClose() }
+    window.addEventListener('keydown', h)
+    const away = (e) => { if (ref.current && !ref.current.contains(e.target)) onClose() }
+    window.addEventListener('pointerdown', away, true)
+    return () => { window.removeEventListener('keydown', h); window.removeEventListener('pointerdown', away, true) }
+  }, [onClose])
+
+  const call = (fn) => {
+    setBusy(true)
+    Promise.resolve(fn())
+      .then(onChanged)
+      .catch(() => {})
+      .finally(() => setBusy(false))
+  }
+
+  const start = () => call(() => api.req('POST', '/api/orders/timer', { minutes: mins, kind: 'focus' }))
+  const stop = () => call(() => api.req('DELETE', '/api/orders/timer'))
+  const saveMins = (n) => {
+    const v = Math.max(5, Math.min(120, n))
+    setMins(v)
+    call(() => api.savePomodoro({ focus_min: v }))
+  }
+
+  return (
+    <div ref={ref} className="pomo-pop" role="dialog" aria-label={t('side.pomodoro')}>
+      <div className="pomo-pop-row">
+        <span className="num pomo-pop-time">{timer?.active ? mmss(left) : '—:—'}</span>
+        <span className="faint pomo-pop-hint">
+          {timer?.active ? (timer.kind === 'break' ? t('pomo.break') : t('pomo.focus')) : t('pomo.stopped')}
+        </span>
+      </div>
+      <div className="pomo-pop-row">
+        <button type="button" className="btn-icon" aria-label={t('common.decrease')} disabled={busy} onClick={() => saveMins(mins - 5)}>−</button>
+        <span className="num pomo-pop-mins">{mins} {t('pomo.min')}</span>
+        <button type="button" className="btn-icon" aria-label={t('common.increase')} disabled={busy} onClick={() => saveMins(mins + 5)}>+</button>
+      </div>
+      <div className="pomo-pop-actions">
+        {timer?.active
+          ? <button type="button" className="btn flex-1" disabled={busy} onClick={stop}>{t('pomo.pause')}</button>
+          : <button type="button" className="btn-primary flex-1" disabled={busy} onClick={start}>{t('pomo.start')}</button>}
+        <button type="button" className="btn-ghost" disabled={busy || !timer?.active} onClick={() => call(() => api.req('DELETE', '/api/orders/timer'))}>{t('pomo.reset')}</button>
+      </div>
+      <button type="button" className="pomo-pop-link" onClick={() => { onClose(); navOrders && navOrders() }}>
+        {t('pomo.to_orders')}
+      </button>
+    </div>
+  )
+}
+
 export default function AppShell({
   live, busy, health, inbox, inboxOpen, onInbox, pathKey, address, onSearch,
   chatOpen, chatSeed, onChat, onChatClose, palOpen, onPalClose, onPalChat, setTheme,

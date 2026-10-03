@@ -11,6 +11,10 @@ import ClientNextStep from '../components/ClientNextStep'
 import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageApi, ORDER_STAGE_LABEL, stageOf } from '../lib/crm'
 import { useI18n, SERVER, t as T } from '../lib/i18n'
 
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+
 // colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово.
 // Подписи типов — ключи словаря (см. lib/i18n.js)
 const KIND_RU = { person: 'people.k_person', family: 'people.k_family', friend: 'people.k_friend', client: 'people.k_client', company: 'people.k_company', colleague: 'people.k_colleague' }
@@ -18,6 +22,20 @@ const kindLabel = (p) => p.kind_label || (KIND_RU[p.kind] ? T(KIND_RU[p.kind]) :
 const initials = (name) => (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('')
 // стадия клиента осмысленна только у клиентов и компаний — у «своих» людей её нет
 const HAS_STAGE = new Set(['client', 'company'])
+
+/* Две раскладки — одна разметка. На десктопе (≥821px) человек это карточка в сетке
+   (.c: --sf, волосяная рамка --line, радиус --r-lg, отступы --card-pad). На телефоне (≤820px)
+   это тоже карточка, только легче: отступ 21px, радиус из токена (--r-lg), без тени и без
+   хайрлайна — разделение тоном (макет). Сетка на телефоне — одна колонка с зазором 12px
+   между карточками, а не поток строк вплотную: соседние карточки не должны слипаться. */
+const CARD_M = 'c !rounded-[var(--r-lg)] max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+const GRID_M = 'stagger mt-6 grid gap-[var(--bento-gap)] min-[821px]:grid-cols-2 min-[1061px]:grid-cols-3 max-[820px]:!grid-cols-1 max-[820px]:!gap-3'
+
+/* Ряд фильтров на телефоне: одна прокручиваемая строка вместо переноса */
+const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+
+/* Подписи мелким кеглем на узком телефоне (≤380px) уменьшаются на ступень */
+const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
 
 /* Стадия клиента и «следующий шаг» — две разные сущности, и берутся они из разных
    ответов: стадия — /api/crm/clients/{id}/stage (там авто-логика по оплатам), шаг — из
@@ -80,7 +98,7 @@ export default function People() {
   const ltvTotal = (list || []).reduce((s, p) => s + (p.paid || 0), 0)
 
   return (
-    <div className="pg on" id="p-ppl" style={pageAcc.style}>
+    <div className={`pg on ${FIELD_LABEL_M}`} id="p-ppl" style={pageAcc.style}>
       <PageHead title={T('nav.people')}
         sub={<StatRow items={[
           { key: 'debt', label: t('or.cc_debt'), value: money(unpaidTotal), tone: unpaidTotal ? 'warn' : '' },
@@ -91,19 +109,19 @@ export default function People() {
         right={<button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>{t('people.add')}</button>} />
 
       {/* Тип контакта — спокойные пилюли с переносом, не одна «таблетка» на семь пунктов */}
-      <div className="animate-rise flex flex-wrap items-center gap-1.5" role="group" aria-label={t('people.kind_label')}>
+      <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="group" aria-label={t('people.kind_label')}>
         {[['all', t('common.all')], ...Object.entries(KIND_RU).map(([k, label]) => [k, t(label)])].map(([k, l]) => (
-          <button key={k} type="button" className={`pill !min-h-[var(--tap)] ${tab === k ? 'on' : ''}`} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>
+          <button key={k} type="button" className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === k ? 'on' : ''}`} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>
         ))}
       </div>
 
       {/* Фильтр по стадии клиента — вторая, отдельная сущность (не стадия заказа) */}
       {withStages && (
-        <div className="animate-rise flex flex-wrap items-center gap-1.5" role="group" aria-label={t('cstage.title')}>
-          <span className="label mr-1">{t('cstage.title')}</span>
+        <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="group" aria-label={t('cstage.title')}>
+          <span className={`label mr-1 shrink-0 ${SMALL_M}`}>{t('cstage.title')}</span>
           {CLIENT_STAGES.map(([k, label]) => (
             <button key={k} type="button"
-              className={`pill !min-h-[var(--tap)] ${stageTab === k ? 'on' : ''}`}
+              className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${stageTab === k ? 'on' : ''}`}
               aria-pressed={stageTab === k}
               data-tip={t(CLIENT_STAGE_TONE[k] === 'pos' ? 'people.tip_money' : CLIENT_STAGE_TONE[k] === 'neg' ? 'people.tip_risk' : 'people.tip_manual')}
               title={t(CLIENT_STAGE_TONE[k] === 'pos' ? 'people.tip_money' : CLIENT_STAGE_TONE[k] === 'neg' ? 'people.tip_risk' : 'people.tip_manual')}
@@ -125,7 +143,8 @@ export default function People() {
         />
       </div>
 
-      {/* Список: строки с волосяными разделителями. Разметка <section class="c"> — по ней
+      {/* Сетка карточек человека: на десктопе — карточки в три (две) колонки, на телефоне —
+          те же секции, но плоские строки вплотную. Разметка <section class="c"> — по ней
           ходят проверки e2e (карточка человека = секция с именем и бейджем стадии). */}
       {list === null ? <ListSkeleton n={6} rowH={62} avatar={false} /> : !items.length ? (
         <Empty
@@ -134,7 +153,7 @@ export default function People() {
           sub={t(list?.length ? 'people.none_found_hint' : 'people.none_yet_hint')}
         />
       ) : (
-        <div className="stagger mt-6">
+        <div className={GRID_M}>
           {items.map((p) => (
             <PersonRow key={p.id} p={p} stage={stages[p.id]} next={steps[p.id]} onOpen={() => setSheet(p)}
               onStage={(v) => setStages((m) => ({ ...m, [p.id]: v }))}
@@ -148,10 +167,11 @@ export default function People() {
   )
 }
 
-/* Строка человека: имя и тип, ближайший шаг с датой, деньги вторично, справа — стадия
-   клиента (бейдж + список). Клик по строке открывает карточку человека шторкой.
-   Список стадии стоит в правой колонке шириной меньше половины строки: он не должен
-   попадать под клик в centre, который открывает карточку. */
+/* Человек: карточка в сетке на десктопе, плоская строка на телефоне — см. CARD_M/GRID_M.
+   Имя и тип, ближайший шаг с датой, деньги вторично. Клик открывает карточку человека шторкой.
+   Список стадии стоит в отдельной правой колонке шириной меньше половины строки (на телефоне):
+   он не должен попадать под клик в centre, который открывает карточку. На десктопе секция
+   становится блоком, и список стадии встаёт под содержимым во всю ширину карточки. */
 function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
   const { t } = useI18n()
   const tags = listOf(p.tags)
@@ -166,7 +186,7 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
   if (p.open) money2.push(<span key="o" className="faint">{t('people.open_in_work', { n: p.open })}</span>)
   return (
     <section
-      className="c !rounded-none !p-0 !bg-transparent !shadow-none !transform-none hover:!bg-[var(--fill)] border-b"
+      className={`${CARD_M} border-0`}
       style={{ borderColor: 'var(--line)', cursor: 'pointer' }}
       role="button" tabIndex={0} aria-label={t('people.open_card', { name: p.name })}
       onClick={onOpen}
@@ -175,13 +195,15 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
         if (e.target !== e.currentTarget && e.target.closest?.('select, input, textarea, button, a')) return
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() }
       }}>
-      <div className="grid items-start gap-x-4 gap-y-2 px-1 py-3.5 sm:grid-cols-[minmax(0,1fr)_auto]">
+      {/* Отступы отдаёт сама карточка (на десктопе --card-pad, на телефоне 21px),
+          поэтому у внутренней обёртки их нет ни в одной раскладке. */}
+      <div className="grid items-start gap-x-4 gap-y-2 !p-0 sm:grid-cols-[minmax(0,1fr)_auto] min-[821px]:!grid-cols-1">
         <div className="flex min-w-0 items-start gap-3">
           <span className="av2 shrink-0">{initials(p.name)}</span>
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
               <span className="truncate font-medium" style={{ fontSize: 'var(--fs-lg)' }}>{p.name}</span>
-              <span className="faint shrink-0" style={{ fontSize: 'var(--fs-xs)' }}>{kindLabel(p)}</span>
+              <span className={`faint shrink-0 ${SMALL_M}`} style={{ fontSize: 'var(--fs-xs)' }}>{kindLabel(p)}</span>
               {HAS_STAGE.has(p.kind) && <ClientStageBadge view={stage} className="shrink-0" />}
             </div>
             {alias && <div className="muted truncate text-[12.5px]" title={alias}>{alias}</div>}
@@ -200,8 +222,8 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
         {HAS_STAGE.has(p.kind) ? (
           /* Список стадии — в правой колонке шириной меньше половины строки: он не должен
              попадать под клик в центре строки, который открывает карточку человека. */
-          <div className="flex min-w-0 items-center gap-2 sm:justify-end" onClick={(e) => e.stopPropagation()}>
-            <select className="input !w-full min-w-0 !text-[12.5px] sm:!w-[176px]" value={stage?.stage || 'lead'} disabled={!stage}
+          <div className="flex min-w-0 items-center gap-2 max-[820px]:justify-end min-[821px]:absolute min-[821px]:right-4 min-[821px]:top-4 min-[821px]:mt-0" onClick={(e) => e.stopPropagation()}>
+            <select className="input !w-full min-w-0 !text-[12.5px] max-[820px]:sm:!w-[176px]" value={stage?.stage || 'lead'} disabled={!stage}
               aria-label={t('cstage.for', { name: p.name })} title={t('people.stage_tip')}
               onChange={async (e) => {
                 const v = e.target.value
@@ -210,7 +232,7 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
               {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}
             </select>
           </div>
-        ) : <div className="sm:justify-self-end" />}
+        ) : <div className="max-[820px]:hidden" />}
       </div>
     </section>
   )
@@ -279,7 +301,7 @@ function PersonSheet({ open, person, onClose, onDone, onDone2 }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={t(isNew ? 'people.new_title' : 'people.title')}
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t(isNew ? 'people.new_title' : 'people.title')}
       sub={isNew ? undefined : kindLabel({ kind: person?.kind })}>
       <form onSubmit={save} className="text-[13px]">
         {isNew ? (

@@ -47,6 +47,18 @@ export const DICT = {
   'state.offline_sync': { ru: 'Последняя синхронизация', en: 'Last sync' },
   'state.offline_available': { ru: 'Офлайн доступно: задачи, заметки и расписание. Новое не отправится, пока не появится сеть.', en: 'Available offline: tasks, notes and the schedule. New entries will not sync until the network is back.' },
   'state.success_done': { ru: 'Готово', en: 'Done' },
+    'fin.c_spent': { ru: 'потрачено', en: 'spent' },
+
+  // --- помодоро в сайдбаре: окошко управления над пунктом ---
+  'pomo.stopped': { ru: 'не запущен', en: 'not running' },
+  'pomo.pause': { ru: 'пауза', en: 'pause' },
+  'pomo.reset': { ru: 'сбросить', en: 'reset' },
+  'pomo.min': { ru: 'мин', en: 'min' },
+  'pomo.focus': { ru: 'работа', en: 'focus' },
+  'pomo.break': { ru: 'перерыв', en: 'break' },
+  'pomo.to_orders': { ru: 'открыть заказы', en: 'open orders' },
+  'common.decrease': { ru: 'меньше', en: 'decrease' },
+  'common.increase': { ru: 'больше', en: 'increase' },
 
   // --- пустые состояния: задачи и календарь (волна экранов) ---
   'tk.empty_none': { ru: 'Задач пока нет', en: 'No tasks yet' },

@@ -18,15 +18,42 @@ import CashChart from '../components/CashChart'
 import LifeRegime from '../components/LifeRegime'
 import { ImportButton } from '../components/Widgets'
 import { useRefresh } from '../App'
-import { Plus, Search, Trash2, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, EyeOff, Play, Pause } from 'lucide-react'
+import { Plus, Search, Trash2, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, EyeOff, Play, Pause, Settings2 } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
 import { useCardLayout, CardCtl } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
+import { usePhone } from '../lib/motion'
 
-/* Разделы-строки вкладки «обзор»: порядок и ширина хранятся общим модулем lib/layout.
-   Числа потока (доходы, регулярные, платежи по долгам, свободно) больше не отдельные
-   карточки — это строки внутри раздела «поток денег», поэтому в списке он один. */
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+
+/* Две раскладки — одна разметка. На десктопе (≥821px) раздел становится поверхностью-карточкой
+   (--sf, волосяная рамка --line, радиус --r-lg, отступы --card-pad). На телефоне (≤820px) это
+   тоже карточка, только легче: отступ 21px, радиус из токена (--r-lg), без тени и без хайрлайна —
+   разделение тоном (макет). Логика, данные и разметка строк общие, различается только обёртка. */
+const CARD_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+const CARD_M = `c !rounded-[var(--r-lg)] ${CARD_M_LIGHT}`
+
+/* Герой телефона: минимум 310px высотой, содержимое по центру. Лаймовый градиент
+   и его мягкий собственный свет остаются — это идентичность карточки. */
+const HERO_M = 'max-[820px]:!min-h-[310px] max-[820px]:!justify-center'
+
+/* Шапка телефона: подписи на узком экране мельче (≤380px) */
+const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
+
+/* Ряд чипов/фильтров на телефоне: одна прокручиваемая строка вместо трёх рядов */
+const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+
+/* Переключатель .sg на телефоне: базовое правило разрешает перенос (flex-wrap: wrap),
+   и на узком экране семь вкладок разъезжались на две строки. На телефоне — одна
+   прокручиваемая строка, на десктопе вид прежний. */
+const SEG_ROW_M = 'max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto'
+
+/* Разделы вкладки «обзор»: порядок и ширина хранятся общим модулем lib/layout.
+   Числа потока (доходы, регулярные, платежи по долгам, свободно) — это строки внутри раздела
+   «поток денег», поэтому в списке он один. */
 const FIN_CARDS = ['flow', 'budgets', 'upcoming']
 const FIN_CARD_WIDTHS = { flow: 12, budgets: 12, upcoming: 12 }
 const FIN_CARD_LABELS = { flow: 'fin.flow_month', budgets: 'fin.c_budgets', upcoming: 'fin.c_upcoming' }
@@ -45,15 +72,15 @@ function goalEta(need) {
 /* Знак суммы: минус — типографский, разряды неразрывные (форматы даёт useNumFormats) */
 const MINUS = '−'
 
-/* Раздел-строка: прозрачная секция с шапкой .hd и волосяными разделителями Rowi.
+/* Раздел с данными: карточка на десктопе, плоский раздел с шапкой .hd и волосяными
+   разделителями строк на телефоне (переключает CARD_M, логика одна).
    Объявлена на уровне модуля, чтобы React не пересоздавал поддерево на каждом рендере.
 
    Разметка <section class="c"> — по ней ходят проверки e2e (история операций = секция с этим
-   заголовком), поэтому класс .c остаётся, а карточная обёртка снимается теми же переопределениями,
-   что и у строки человека в People.jsx: секция плоская, без фона, тени и подъёма по наведению. */
+   заголовком), поэтому класс .c остаётся и на десктопе, и на телефоне. */
 function Block({ title, note, action, children, className = '' }) {
   return (
-    <section className={`c !rounded-none !p-0 !bg-transparent !shadow-none !transform-none !overflow-visible ${className}`} data-reveal>
+    <section className={`${CARD_M} ${className}`} data-reveal>
       <div className="hd flex-wrap">
         <div className="min-w-0"><h2 className="trunc" title={title}>{title}</h2></div>
         <div className="flex items-center gap-2">
@@ -122,6 +149,7 @@ export default function Finance() {
 
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
+  const phone = usePhone()          // ≤820px: телефонная раскладка по макету
 
   const load = async () => {
     try {
@@ -291,7 +319,7 @@ export default function Finance() {
               : t('tech.title')
 
   return (
-    <div className="pg on" id="p-fin" style={pageAcc.style} ref={reveal}>
+    <div className={`pg on ${FIELD_LABEL_M}`} id="p-fin" style={pageAcc.style} ref={reveal}>
       {/* Шапка экрана: заголовок, что показываем, и действия справа */}
       <header className="top" data-reveal>
         <div className="min-w-0">
@@ -302,23 +330,29 @@ export default function Finance() {
           {/* Переключатель периода — в шапке: период режет данные ВСЕХ вкладок (обзор, операции,
               счета, долги), а не только списка операций. Тот же сегмент .sg в .top, что на
               задачах и календаре — и по нему ходят проверки e2e (#p-fin .top .sg[title^="период"]). */}
-          <div className="sg" role="group" aria-label={t('fin.period_tip')} title={t('fin.period_tip')}>
+          <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('fin.period_tip')} title={t('fin.period_tip')}>
             {[[7, 'mem.d7'], [30, 'mem.d30'], [90, 'fin.d90'], [0, 'fin.d_all']].map(([v, key]) => (
               <button key={v} type="button" className={days === v ? 'on' : ''} aria-pressed={days === v} onClick={() => setDays(v)}>
                 {t(key)}
               </button>
             ))}
           </div>
+          {/* Настройка разделов — одна точка входа: на десктопе кнопка с подписью,
+              на телефоне та же кнопка иконкой (aria-label и тултип на месте). */}
           {tab === 'overview' && (
-            <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
+            <button type="button" className={`btn-soft btn-sm ${phone ? '!px-2.5' : ''}`} onClick={() => setCardsEdit((v) => !v)}
               title={t('tk.layout_tip')} aria-label={t('fin.configure_cards')}>
-              {t('tk.layout')}
+              {phone ? <Settings2 size={15} /> : t('tk.layout')}
             </button>
           )}
-          <button type="button" className="btn-soft btn-sm" onClick={exportCSV}
-            title={t('fin.csv_dl')} aria-label={t('fin.csv_dl')}>
-            {t('fin.statement')}
-          </button>
+          {/* Выписка — не в шапке: на телефоне она живёт рядом с фильтрами списка
+              операций (там, где выгрузка и нужна), поэтому в шапке остаётся одно действие. */}
+          {!phone && (
+            <button type="button" className="btn-soft btn-sm" onClick={exportCSV}
+              title={t('fin.csv_dl')} aria-label={t('fin.csv_dl')}>
+              {t('fin.statement')}
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-sm"
@@ -333,11 +367,11 @@ export default function Finance() {
 
       {/* Режим жизни: чип в шапке + переключатель «считать по режиму». По умолчанию выключен,
           тогда все цифры ниже считаются по всем данным, как раньше. */}
-      <LifeRegime info={regime} onChanged={(r) => { setRegime(r); load() }} />
+      <div className="min-[821px]:block max-[820px]:!hidden"><LifeRegime info={regime} onChanged={(r) => { setRegime(r); load() }} /></div>
 
       {/* Вкладки разделов — прямой ребёнок .pg (без обёртки): на них завязаны проверки e2e
           (#p-fin > .sg). Спокойный сегмент, активная вкладка читается заливкой. */}
-      <div className="sg mt-3" role="group" aria-label={t('nav.finance')}>
+      <div className={`sg mt-3 ${SEG_ROW_M}`} role="group" aria-label={t('nav.finance')}>
         {[['overview', 'fin.tab_overview'], ['txs', 'fin.tab_txs'], ['accounts', 'fin.tab_accounts'], ['debts', 'fin.tab_debts'],
           ['recurring', 'fin.tab_recurring'], ['goals', 'goals.title'], ['techniques', 'tech.title']].map(([k, key]) => (
             <button key={k} type="button" className={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>
@@ -349,14 +383,39 @@ export default function Finance() {
       {/* ---------------- ОБЗОР ---------------- */}
       {tab === 'overview' && (
         <>
+          {/* Обзор — бенто-сетка блоками, как в макете: герой 4 колонки, график 8,
+              дальше карточки по 4 в ряд. На телефоне всё в одну колонку. */}
+          <div className="bento mt-4">
           {/* Герой: баланс крупно и три строки мелким под ним — без карточек на каждое число */}
-          <section className="c hero mt-4" data-reveal>
+            {/* Телефон — по макету владельца: мятная карточка «свободно в месяц» с полосой
+                и строкой баланс/потрачено. На десктопе остаётся акцентный герой с балансом. */}
+            <div className="min-[821px]:!hidden">
+              <div className="mint-card" style={{ padding: 'var(--card-pad-m)' }}>
+                <div className="label" style={{ color: 'var(--pos-ink)' }}>{`${t('fin.c_free')} ${t('td.per_month').toLowerCase()}`}</div>
+                <div className="mt-1" style={{ fontSize: 'clamp(30px, 9vw, 44px)', fontWeight: 500, letterSpacing: '-0.03em', lineHeight: 1.05, color: 'var(--pos-ink)' }}>
+                  {fmt.money(cf.free || 0)}
+                </div>
+                <div className="mt-3" style={{ height: 6, borderRadius: 999, background: 'color-mix(in srgb, var(--pos-ink) 14%, transparent)', overflow: 'hidden' }}>
+                  <div style={{
+                    height: '100%',
+                    width: `${Math.max(4, Math.min(100, Math.round(((cf.free || 0) / Math.max(1, Math.abs(balance || 1))) * 100)))}%`,
+                    background: 'var(--pos-ink)',
+                    opacity: 0.75,
+                  }} />
+                </div>
+                <div className="mt-3 flex items-baseline justify-between gap-3" style={{ fontSize: 'var(--fs-sm)' }}>
+                  <span className="muted">{t('fin.c_balance')}: <b className="num" style={{ color: 'var(--pos-ink)' }}>{money(balance)}</b></span>
+                  <span className="muted">{t('fin.c_spent')}: <b className="num" style={{ color: 'var(--pos-ink)' }}>{money(spent)}</b></span>
+                </div>
+              </div>
+            </div>
+          <section className={`c hero max-[820px]:!hidden min-[821px]:col-span-4 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.c_balance')}</h2></div>
-              <small className="trunc">{t('fin.all_accounts')}</small>
+              <small className={`trunc ${SMALL_M}`}>{t('fin.all_accounts')}</small>
             </div>
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-              <BigMoney value={balance} format={fmt.int} label={money(balance)} fs="clamp(38px, 7vw, 68px)" />
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2 max-[821px]:flex-nowrap">
+              <BigMoney value={balance} format={fmt.int} label={money(balance)} fs="clamp(30px, 3.4vw, 46px)" />
               <span className="tag" style={{ marginTop: 0 }}>{t('fin.for_days', { n: days || t('common.all'), m: money(spent) })}</span>
             </div>
             {regCounted && (
@@ -377,7 +436,7 @@ export default function Finance() {
           </section>
 
           {/* Один график на экран: касса на N дней, интерактивный, с подсказками ChartTip */}
-          <section className="c chart mt-4" data-reveal>
+          <section className={`c chart mt-4 ${CARD_M_LIGHT} min-[821px]:col-span-8`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0">
                 <h2 className="trunc">{t('fin.cash_on', { n: days || t('common.all'), days: t('run.days_n', { count: days }) })}</h2>
@@ -412,7 +471,7 @@ export default function Finance() {
           </section>
 
           {/* Дальше — разделы-строки. Порядок и состав — кнопкой «настроить» */}
-          <div className="stack mt-5 !gap-6">
+          <div className="contents">
             {cardOrder.map((id) => {
               const ctl = (
                 <CardCtl id={id} order={cardOrder} edit={cardsEdit}
@@ -423,7 +482,7 @@ export default function Finance() {
               /* Поток денег: четыре строки-числа и полоса долей */
               if (id === 'flow') {
                 return (
-                  <section key="flow" data-reveal className="relative">
+                  <section key="flow" data-reveal className={`relative min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.flow_month')}</h2></div>
@@ -458,7 +517,7 @@ export default function Finance() {
               /* Лимиты по категориям: строки с полосками */
               if (id === 'budgets') {
                 return (
-                  <section key="budgets" data-reveal className="relative">
+                  <section key="budgets" data-reveal className={`relative min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.budgets_month')}</h2></div>
@@ -514,7 +573,7 @@ export default function Finance() {
 
               /* Ближайшие платежи: строки с датой и суммой */
               return (
-                <section key="upcoming" data-reveal className="relative">
+                <section key="upcoming" data-reveal className={`relative min-[821px]:col-span-4 ${CARD_M}`}>
                   {ctl}
                   <div className="hd flex-wrap">
                     <div className="min-w-0"><h2 className="trunc">{t('fin.c_upcoming')}</h2></div>
@@ -542,7 +601,7 @@ export default function Finance() {
             })}
 
             {cardsEdit && (
-              <section className="c" data-reveal>
+              <section className={`c ${CARD_M_LIGHT}`} data-reveal>
                 <div className="hd flex-wrap">
                   <div className="min-w-0"><h2 className="trunc">{t('fin.cards_setup')}</h2></div>
                 </div>
@@ -556,13 +615,14 @@ export default function Finance() {
               </section>
             )}
           </div>
-        </>
+        </div>
+          </>
       )}
 
       {/* ---------------- ОПЕРАЦИИ ---------------- */}
       {tab === 'txs' && (
         <>
-          <section className="c mt-4" data-reveal>
+          <section className={`c mt-4 ${CARD_M_LIGHT}`} data-reveal>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <label className="input flex min-w-[220px] flex-1 items-center gap-2.5">
                 <Search size={16} className="faint shrink-0" aria-hidden="true" />
@@ -583,16 +643,24 @@ export default function Finance() {
                 }}
                 onErr={show.err}
               />
+              {phone && (
+                <button type="button" className="btn-soft btn-sm" onClick={exportCSV}
+                  title={t('fin.csv_dl')} aria-label={t('fin.csv_dl')}>
+                  {t('fin.statement')}
+                </button>
+              )}
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-1.5">
-              <button type="button" className={`chip ${txCategory === 'all' ? 'on' : ''}`} aria-pressed={txCategory === 'all'} onClick={() => setTxCategory('all')}>
+            {/* Категории на телефоне — одна прокручиваемая строка: пятнадцать чипов в три
+                ряда съедали пол-экрана и не давали добраться до списка операций. */}
+            <div className={`mt-3 flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`}>
+              <button type="button" className={`chip max-[820px]:!shrink-0 ${txCategory === 'all' ? 'on' : ''}`} aria-pressed={txCategory === 'all'} onClick={() => setTxCategory('all')}>
                 {t('common.all')}
               </button>
               {categories.map((c) => (
                 <button
                   type="button"
                   key={c.id || c.name}
-                  className={`chip ${txCategory === (c.name || c) ? 'on' : ''}`}
+                  className={`chip max-[820px]:!shrink-0 ${txCategory === (c.name || c) ? 'on' : ''}`}
                   aria-pressed={txCategory === (c.name || c)}
                   onClick={() => setTxCategory(c.name || c)}
                 >
@@ -602,9 +670,9 @@ export default function Finance() {
             </div>
             <div className="rule mt-3 flex flex-wrap items-center gap-2 pt-3">
               <span className="label">{t('graph.one_account')}</span>
-              <button type="button" className={`chip ${txAccount === 'all' ? 'on' : ''}`} aria-pressed={txAccount === 'all'} onClick={() => setTxAccount('all')}>{t('common.all')}</button>
+              <button type="button" className={`chip max-[820px]:!shrink-0 ${txAccount === 'all' ? 'on' : ''}`} aria-pressed={txAccount === 'all'} onClick={() => setTxAccount('all')}>{t('common.all')}</button>
               {accounts.map((a) => (
-                <button key={a.id || a.name} type="button" className={`chip ${txAccount === a.name ? 'on' : ''}`} aria-pressed={txAccount === a.name} onClick={() => setTxAccount(a.name)}>
+                <button key={a.id || a.name} type="button" className={`chip max-[820px]:!shrink-0 ${txAccount === a.name ? 'on' : ''}`} aria-pressed={txAccount === a.name} onClick={() => setTxAccount(a.name)}>
                   <span className="trunc">{a.name}</span>
                 </button>
               ))}
@@ -702,7 +770,7 @@ export default function Finance() {
       {/* ---------------- ДОЛГИ ---------------- */}
       {tab === 'debts' && (
         <>
-          <section className="c hero mt-4" data-reveal>
+          <section className={`c hero mt-4 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.total_debt')}</h2></div>
             </div>
@@ -869,7 +937,7 @@ export default function Finance() {
 
       {/* ---------------- ТЕХНИКИ ---------------- */}
       {tab === 'techniques' && (
-        <section className="c mt-4" data-reveal>
+        <section className={`c mt-4 ${CARD_M_LIGHT}`} data-reveal>
           {techniquesData ? (
             <Techniques
               t={techniquesData}
@@ -1042,7 +1110,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? t('fin.add_tx') : t('fin.edit_tx')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={isNew ? t('fin.add_tx') : t('fin.edit_tx')}>
       <form onSubmit={submit} className="space-y-4">
         <div className="seg">
           <button type="button" className={kind === 'expense' ? 'on' : ''} aria-pressed={kind === 'expense'} onClick={() => setKind('expense')}>{t('fin.expense')}</button>
@@ -1132,7 +1200,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? t('fin.add_account') : t('fin.edit_account')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={isNew ? t('fin.add_account') : t('fin.edit_account')}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('acc.name')}>
           <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('acc.name_ph')} />
@@ -1197,7 +1265,7 @@ function DebtSheet({ open, debt, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? t('fin.add_debt') : t('fin.edit_debt')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={isNew ? t('fin.add_debt') : t('fin.edit_debt')}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('common.title')}>
           <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('fin.debt_ph')} />
@@ -1248,7 +1316,7 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={t('fin.pay_debt_title', { name: debt?.name || debt?.title || '' })}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t('fin.pay_debt_title', { name: debt?.name || debt?.title || '' })}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('fin.pay_amount')}>
           <Money value={amount} onChange={setAmount} min={0} placeholder="5000" autoFocus required />
@@ -1315,7 +1383,7 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
 
   const isIncome = kind === 'income'
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? t('fin.add_pay') : t('fin.edit_pay2')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={isNew ? t('fin.add_pay') : t('fin.edit_pay2')}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('fin.kind')} hint={t('fin.outflow_hint')}>
           <div className="seg">
@@ -1381,7 +1449,7 @@ function GoalSheet({ open, goal, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={isNew ? t('fin.add_goal') : t('fin.edit_goal')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={isNew ? t('fin.add_goal') : t('fin.edit_goal')}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('gl.goal_name')}>
           <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('gl.goal_ph2')} />
@@ -1429,7 +1497,7 @@ function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={t('fin.top_up_title', { name: goal?.title || goal?.name || '' })}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t('fin.top_up_title', { name: goal?.title || goal?.name || '' })}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('fin.top_amount')}>
           <Money value={amount} onChange={setAmount} min={0} placeholder="2000" autoFocus required />
@@ -1490,7 +1558,7 @@ function BudgetSheet({ open, item, categories = [], onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={t('fin.limit_month')} sub={t('fin.limit_optional')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t('fin.limit_month')} sub={t('fin.limit_optional')}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('common.category')}>
           <select className="input" value={cid} onChange={(e) => pick(e.target.value)} autoFocus>

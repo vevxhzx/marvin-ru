@@ -345,14 +345,16 @@ export function Sheet({ open, onClose, title, sub, hint, children, wide, snaps: 
      по max-height, и её scrollHeight всегда равен текущей высоте */
   useLayoutEffect(() => {
     const el = bodyRef.current
-    if (!open || !el) return undefined
+    /* shown в зависимостях: содержимое появляется после useSheetPresence, и без этого
+       замер высоты происходит по пустому блоку — шторка раскрывается во весь экран */
+    if (!open || !shown || !el) return undefined
     const read = () => setContentH(el.scrollHeight)
     read()
     if (typeof ResizeObserver === 'undefined') return undefined
     const ro = new ResizeObserver(read)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [open])
+  }, [open, shown])
 
   /* при открытии берём минимальный снап, в который влезает содержимое (один раз за открытие) */
   const pickRef = useRef(false)
@@ -360,7 +362,10 @@ export function Sheet({ open, onClose, title, sub, hint, children, wide, snaps: 
   useEffect(() => {
     if (!open || !pickRef.current || !snaps.length || !contentH) return
     pickRef.current = false
-    setSnap(fits(contentH) ? 0 : contentH <= snaps[1] ? 1 : last)
+    // Открываемся на свёрнутом или половине — НЕ прыгаем на «во всю высоту»:
+    // иначе шторка с длинным содержимым висит от верха экрана и читается как новая
+    // страница. На всю высоту её растягивает пользователь — потянул ручку вверх.
+    setSnap(fits(contentH) ? 0 : 1)
   }, [open, contentH, snaps]) // eslint-disable-line
 
   /* Высота = минимум из «снапа» и «контента»: пустого места снизу не появляется,

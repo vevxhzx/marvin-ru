@@ -2,11 +2,15 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
 import { Sheet, Field, DateTimeField, Empty, useToast, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
-import { Plus, Check, ChevronLeft } from 'lucide-react'
+import { Plus, Check, ChevronLeft, Settings2 } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
 import { usePhone } from '../lib/motion'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
+
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
 
 /* pages/Calendar.jsx — «Календарь» as an editorial hierarchy:
 
@@ -20,6 +24,19 @@ import { useI18n, localeOf, t as T } from '../lib/i18n'
    Grid columns keep their deliberately uneven widths (month card wide, day panel
    narrow) — the user can still cycle them in the «настроить» mode, and the layout
    lives under the same localStorage key as before. */
+
+/* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
+   отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
+   На десктопе (≥821px) эти классы не действуют — бенто-сетка остаётся прежней. */
+const CARD_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+
+/* Подписи мелким кеглем на узком телефоне (≤380px) уменьшаются на ступень */
+const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
+
+/* Переключатель .sg на телефоне: базовое правило разрешает перенос (flex-wrap: wrap),
+   и на узком экране семь вкладок разъезжались на две строки. На телефоне — одна
+   прокручиваемая строка, на десктопе вид прежний. */
+const SEG_ROW_M = 'max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto'
 
 /* Карточки сетки календаря: порядок и ширина меняются в режиме «настроить» */
 const CAL_CARDS = ['month', 'day', 'week', 'upcoming']
@@ -115,7 +132,7 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
 
   if (synthetic) {
     return (
-      <Sheet open={open} onClose={onClose} title={t(ev?.kind === 'order' ? 'cal.deliver' : 'cal.task_from_cal')}>
+      <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t(ev?.kind === 'order' ? 'cal.deliver' : 'cal.task_from_cal')}>
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             {kindChip && <span className={`chip ${kindChip.cls}`}>{kindChip.txt}</span>}
@@ -140,7 +157,7 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
   }
 
   return (
-    <Sheet open={open} onClose={onClose} title={t(isNew ? 'cal.new_event' : ev.done ? 'cal.event_done' : 'cal.edit_event')}>
+    <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t(isNew ? 'cal.new_event' : ev.done ? 'cal.event_done' : 'cal.edit_event')}>
       <form onSubmit={save} className="space-y-4">
         <Field label={t('cal.title')}>
           <input
@@ -470,7 +487,7 @@ export default function Calendar() {
   }, [weekDays])
 
   return (
-    <div className="pg on" id="p-cal" style={pageAcc.style}>
+    <div className={`pg on ${FIELD_LABEL_M}`} id="p-cal" style={pageAcc.style}>
       {/* Header: headline + primary action, and a calm control bar under it.
           The bar keeps .sg groups inside .top — e2e walks them («‹» / «сегодня» / «›»). */}
       <header className="top">
@@ -479,15 +496,18 @@ export default function Calendar() {
           <p className="sub r" style={{ '--i': 1 }}>{view === 'week' ? weekRange : cursor.getFullYear()}</p>
         </div>
         <div className="hr head-actions r" style={{ '--i': 1 }}>
+          {/* Настройка карточек — одна точка входа: на десктопе кнопка с подписью,
+              на телефоне та же кнопка иконкой (подпись и тултип остаются в aria). */}
           {shown.length > 1 && (
             <button
               type="button"
-              className="btn-ghost btn-sm"
+              className={`btn-ghost btn-sm ${phone ? '!px-2.5' : ''}`}
               onClick={() => setCardsEdit((v) => !v)}
               title={t('tk.layout_tip')}
+              aria-label={t('tk.layout')}
               aria-pressed={cardsEdit}
             >
-              {t('tk.layout')}
+              {phone ? <Settings2 size={15} /> : t('tk.layout')}
             </button>
           )}
           <button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>
@@ -495,7 +515,7 @@ export default function Calendar() {
           </button>
         </div>
         <div className="flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
-          <div className="sg" role="group" aria-label={t('nav.calendar')}>
+          <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
             <button
               type="button"
               className={view === 'month' ? 'on' : ''}
@@ -515,7 +535,7 @@ export default function Calendar() {
               {t('cal.week')}
             </button>
           </div>
-          <div className="sg" role="group" aria-label={t('cal.week_plan')}>
+          <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('cal.week_plan')}>
             <button type="button" onClick={() => shiftTime(-1)} aria-label={shiftLabel(-1)} title={shiftLabel(-1)} style={NAV_BTN}>
               <span aria-hidden="true">‹</span>
             </button>
@@ -534,11 +554,11 @@ export default function Calendar() {
         {/* Вид «Месяц» */}
         {view === 'month' && (
           <>
-            <section className="c s8 r flex flex-col" style={{ '--i': 3, minHeight: '560px', ...cardSt('month') }}>
+            <section className={`c s8 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 3, minHeight: '560px', ...cardSt('month') }}>
               {cardCtl('month')}
               <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2 className="h3">{MONTHS_GEN[cursor.getMonth()]} {cursor.getFullYear()}</h2>
-                <small>{t('cal.events_n', { count: monthCount })}</small>
+                <small className={SMALL_M}>{t('cal.events_n', { count: monthCount })}</small>
               </div>
               {/* Сетка едет вбок внутри карточки: страница не прокручивается по горизонтали,
                   колонки остаются читаемыми (minWidth), а резина гасится контейнером. */}
@@ -610,11 +630,11 @@ export default function Calendar() {
               </div>
             </section>
 
-            <section className="c s4 r flex flex-col" style={{ '--i': 4, minHeight: '560px', ...cardSt('day') }}>
+            <section className={`c s4 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 4, minHeight: '560px', ...cardSt('day') }}>
               {cardCtl('day')}
               <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2>{isSameDay(selected, today) ? t('common.today') : dayLabel(selected)}</h2>
-                <small>{shortDate(selected)} · {t('cal.events_n', { count: dayEvents.length })}</small>
+                <small className={SMALL_M}>{shortDate(selected)} · {t('cal.events_n', { count: dayEvents.length })}</small>
               </div>
               <div className="flex-1 overflow-y-auto" style={{ overscrollBehavior: 'contain', paddingRight: 2 }}>
                 {!loaded ? (
@@ -657,11 +677,11 @@ export default function Calendar() {
 
         {/* Вид «Неделя» */}
         {view === 'week' && (
-          <section className="c s12 r" style={{ '--i': 3, ...cardSt('week') }}>
+          <section className={`c s12 r ${CARD_M_LIGHT}`} style={{ '--i': 3, ...cardSt('week') }}>
             {cardCtl('week')}
             <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
               <h2 className="h3">{t('cal.week_plan')}</h2>
-              <small>{t('cal.week_hint')}</small>
+              <small className={SMALL_M}>{t('cal.week_hint')}</small>
             </div>
             {/* На телефоне неделя листается вбок внутри карточки (снап, без резины),
                 на ПК — семь равных колонок. */}
@@ -751,11 +771,11 @@ export default function Calendar() {
         )}
 
         {/* Карточка: Ближайшие события (s12) */}
-        <section className="c s12 r" style={{ '--i': 5, ...cardSt('upcoming') }}>
+        <section className={`c s12 r ${CARD_M_LIGHT}`} style={{ '--i': 5, ...cardSt('upcoming') }}>
           {cardCtl('upcoming')}
           <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
             <h2 className="h3">{t('nextup.title')}</h2>
-            <small>{t('cal.upcoming_note', { all: upcomingAll.length, shown: upcoming.length })}</small>
+            <small className={SMALL_M}>{t('cal.upcoming_note', { all: upcomingAll.length, shown: upcoming.length })}</small>
           </div>
           {!loaded ? (
             <ListSkeleton n={3} rowH={58} />

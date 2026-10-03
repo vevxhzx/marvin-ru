@@ -1,6 +1,6 @@
-/* Главная: редакционная иерархия вместо сетки одинаковых коробок.
+/* Главная: две раскладки по ширине окна.
 
-   Порядок экрана (сверху вниз):
+   Телефон (≤820px) — редакционная лента:
      1. строка-статус — приветствие крупно, контекст дня мельче (h1 нужен и TitleHeader:
         он по нему считает, когда сворачивать шапку телефона);
      2. композер фразы под ним и быстрые слова чипами;
@@ -10,9 +10,13 @@
         остаются только там, где содержимое требует поверхности (календарь, помодоро,
         время за ПК, быстрое дело).
 
-   Раскладка остаётся настраиваемой (lib/layout): «настроить главную» включает/выключает
-   блоки, двигает их и меняет ширину — ширина по-прежнему идёт в grid-column.
-   Логика, запросы и API не тронуты: те же пять ответов, что и раньше. */
+   Десктоп (≥821px) — бенто-сетка: у каждого блока своя поверхность, ширина по настройке.
+   Различие только в ширине окна, разметка блоков общая: класс .wsec и переменная --wspan
+   (index.css, блок «БЛОК ГЛАВНОЙ»). Логика, запросы и API не тронуты: те же пять ответов,
+   что и раньше.
+
+   Раскладка настраиваемая в обоих режимах (lib/layout): «настроить главную» включает и
+   выключает блоки, двигает их (стрелки и перетаскивание) и меняет ширину. */
 
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
@@ -33,6 +37,25 @@ import { QuickAddWidget, SpendTodayWidget, GoalsWidget, HabitsWidget, NextUpWidg
 import CashChart from '../components/CashChart'
 import { TipBars } from '../components/ChartTip'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
+import { usePhone } from '../lib/motion'
+
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+
+/* Лёгкая карточка телефона (≤820px): поверхность остаётся, но блок становится легче —
+   отступ 21px и радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), без тени и без рамки-хайрлайна:
+   карточки на телефоне разделяет тон, а не обводка. На десктопе (≥821px) эти классы
+   не действуют — там бенто-сетка с тенью и волосяной линией, её не трогаем. */
+const CARD_LIGHT_M = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+
+/* Герой телефона: минимум 310px высотой (макет) и содержимое по центру — иначе
+   простор уходит в пустоту под полосой дней. Лаймовый градиент и его мягкая тень
+   остаются: это идентичность карточки, а не «лишняя» тень поверхности. */
+const HERO_M = 'max-[820px]:!min-h-[310px] max-[820px]:!justify-center'
+
+/* Быстрые слова — одна прокручиваемая строка (макет), а не три ряда кнопок */
+const CHIPS_M = 'no-scrollbar max-[820px]:!mx-0 max-[820px]:!mt-3 max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 const GREETS = { morning: 'td.greet_morning', day: 'td.greet_day', evening: 'td.greet_evening', night: 'td.greet_night' }
 const part = (h) => (h < 5 ? 'night' : h < 12 ? 'morning' : h < 18 ? 'day' : 'evening')
@@ -64,15 +87,25 @@ const ALL_WIDGET_DEFS = {
 
 /* По умолчанию деньги идут первыми: герой-карточка с ключевым числом, потом график кассы,
    потом день и дела, потом остальное. Дальше пользователь переставляет сам. */
-const DEFAULT_ORDER = ['balance', 'chart', 'summary', 'today', 'expenses', 'free', 'debts', 'screen', 'calendar', 'brain']
-const DEFAULT_WIDTHS = { balance: 12, chart: 12, summary: 12, orders: 12, missed: 12, goals: 12, habits: 12, quick: 12, expenses: 12, free: 12, debts: 12, today: 12, brain: 12, next: 12, spend: 12, screen: 6, calendar: 6, pomo: 6 }
+const DEFAULT_ORDER = ['balance', 'chart', 'summary', 'today', 'expenses', 'free', 'debts',
+  'screen', 'calendar', 'brain', 'pomo', 'orders', 'missed', 'quick', 'spend', 'goals',
+  'habits', 'next']
+/* Ширина по умолчанию — та же бенто-сетка, что была до редакционной ленты: герой и график
+   во всю ширину (им нужен простор), остальное блоками по половине, парами. Всё это только
+   стартовые значения: дальше ширину ведёт lib/layout (localStorage) и переключатель «ширина»
+   в режиме правки — сетка не должна быть декорацией, она настраиваемая. */
+const DEFAULT_WIDTHS = {
+  // первый ряд: герой с балансом и касса — поровну; второй ряд: четыре карточки по 4
+  balance: 6, chart: 6,
+  summary: 4, today: 4, expenses: 4, free: 4,
+  debts: 6, screen: 6, calendar: 6, brain: 6,
+  pomo: 4, orders: 4, missed: 4, quick: 4, spend: 4, goals: 4, habits: 4, next: 4,
+}
 
-/* Блоки, которым нужна поверхность: календарь, помодоро, время за ПК, быстрое дело.
-   Остальные — списки на волосяных разделителях без своей коробки. */
+/* Поверхность нужна блоку только на ТЕЛЕФОНЕ: герой с ключевым числом, график (нужна ширина),
+   календарь, помодоро, время за ПК, быстрое дело (поле ввода). Остальные блоки там — списки
+   на волосяных разделителях без своей коробки. На десктопе поверхность получают все (CSS). */
 const PANELS = new Set(['balance', 'chart', 'screen', 'calendar', 'pomo', 'quick'])
-/* Половина колонки — только там, где панели лучше видно рядом (календарь, помодоро,
-   время за ПК). Всё остальное — на всю ширину: длинные списки в две колонки читаются хуже. */
-const HALF = new Set(['screen', 'calendar', 'pomo'])
 
 /* Вселенная карточек — все известные виджеты: иначе добавленная карточка (pomo/orders/missed
    и новые) после перезагрузки отфильтровывалась бы из сохранённой раскладки. */
@@ -81,7 +114,7 @@ const ALL_WIDGET_IDS = Object.keys(ALL_WIDGET_DEFS)
 // Первый заход: фиксируем прежний набор карточек как стартовую раскладку, чтобы новые/редкие
 // виджеты не появлялись сами. Дальше раскладку ведёт lib/layout в localStorage.
 try {
-  const LAYOUT_KEY = 'marvin.layout.today'
+  const LAYOUT_KEY = 'marvin.layout.today2'
   if (typeof localStorage !== 'undefined' && !localStorage.getItem(LAYOUT_KEY)) {
     localStorage.setItem(LAYOUT_KEY, JSON.stringify({ order: [...DEFAULT_ORDER], widths: { ...DEFAULT_WIDTHS } }))
   }
@@ -98,7 +131,7 @@ function BlockHead({ title, note }) {
       <div className="min-w-0">
         <h2 className="trunc" title={title}>{title}</h2>
       </div>
-      {note && <small className="trunc">{note}</small>}
+      {note && <small className="trunc max-[380px]:text-[length:var(--fs-xs)]">{note}</small>}
     </div>
   )
 }
@@ -121,8 +154,12 @@ export default function Today({ openChat, address = '' }) {
 
   // Режим настройки главной: порядок и ширина блоков
   const [editMode, setEditMode] = useState(false)
-  const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth } = useCardLayout('today', ALL_WIDGET_IDS, DEFAULT_WIDTHS)
+  const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth } = /* Порядок берём из DEFAULT_ORDER (герой с балансом → касса → списки), а не из порядка
+   объявления виджетов: иначе первыми оказывались сводка дня и время за ПК.
+   Ключ хранения новый — старые сохранённые порядки игнорируются. */
+  useCardLayout('today2', DEFAULT_ORDER, DEFAULT_WIDTHS)
   const wide = useWide()
+  const phone = usePhone()          // ≤820px: телефонная раскладка по макету
   const pageAcc = usePageAccent('today')
   const [addSheetOpen, setAddSheetOpen] = useState(false)
   const [draggedWidget, setDraggedWidget] = useState(null)
@@ -323,18 +360,26 @@ export default function Today({ openChat, address = '' }) {
       Icon={ArrowLeft} HideIcon={EyeOff} />
   )
 
-  /* Общая оболочка блока: панель (поверхность) или прозрачная секция со строками.
-     Ширина по настройке идёт в grid-column — блок остаётся переставляемым. */
+  /* Общая оболочка блока: одна разметка на две раскладки, различие только в ширине окна
+     (index.css, блок «БЛОК ГЛАВНОЙ»):
+       — телефон (≤820px): PANELS остаются карточками, остальные — прозрачные секции со
+         строками на волосяных разделителях (новая компактная лента);
+       — десктоп (≥821px): .wsec даёт поверхность КАЖДОМУ блоку, и это снова бенто-сетка.
+     Ширина из настроек едет в grid-column через CSS-переменную --wspan (а не инлайном):
+     инлайн перебил бы медиазапрос и на телефоне растянул бы блок, хотя там всё в одну колонку.
+
+     На телефоне блок — тоже карточка (макет): одна колонка, отступ 21px, радиус из токена, без
+     тени и без хайрлайна; разделение тоном. На десктопе вид остаётся прежним. */
   const blockProps = (id) => {
     const span = widgetWidths[id] || DEFAULT_WIDTHS[id] || 6
     const surface = PANELS.has(id)
-    const cls = surface ? (id === 'balance' ? 'c hero' : id === 'chart' ? 'c chart' : 'c') : 'relative'
-    // в режиме правки у секций справа освобождаем место под стрелки/ширину/глаз
-    const pad = editMode && !surface ? 'pr-28' : ''
+    const cls = surface ? (id === 'balance' ? `c hero ${HERO_M}` : id === 'chart' ? 'c chart' : 'c') : ''
+    // в режиме правки у секций справа освобождаем место под стрелки/ширину/глаз (CSS .wsec-edit)
+    const pad = editMode && !surface ? 'wsec-edit' : ''
     return {
       'data-reveal': '',
-      className: `${editMode ? 'wig ' : ''}${cls} ${HALF.has(id) ? 's6' : 's12'} ${pad}`,
-      style: wide ? { gridColumn: `span ${span}` } : undefined,
+      className: `${editMode ? 'wig ' : ''}wsec ${cls} ${pad} ${CARD_LIGHT_M}`,
+      style: { '--wspan': span },
       draggable: editMode || undefined,
       onDragStart: editMode ? (e) => handleDragStart(e, id) : undefined,
       onDragOver: editMode ? handleDragOver : undefined,
@@ -473,7 +518,7 @@ export default function Today({ openChat, address = '' }) {
             <TipBars
               kind="weekday"
               values={d?.finance?.weekday}
-              labels={WD_SHORT.slice(1).concat(WD_SHORT[0])}
+              labels={phone ? [] : WD_SHORT.slice(1).concat(WD_SHORT[0])}
               barClass="bars !text-[var(--ink-2)]"
               labelClass="bl mono !opacity-100 text-[var(--ink-2)]"
             />
@@ -492,7 +537,7 @@ export default function Today({ openChat, address = '' }) {
             <TipBars
               kind="month"
               values={d?.finance?.month_days}
-              labels={['1', '5', '10', '15', '20', '25', '30']}
+              labels={phone ? [] : ['1', '5', '10', '15', '20', '25', '30']}
               barClass="bars !text-[var(--pos)]"
               labelClass="bl mono !opacity-100 text-[var(--ink-2)]"
             />
@@ -749,17 +794,17 @@ export default function Today({ openChat, address = '' }) {
   const hiddenWidgets = Object.keys(ALL_WIDGET_DEFS).filter((id) => !widgetOrder.includes(id))
 
   return (
-    <div className="pg on" id="p-today" style={pageAcc.style} ref={reveal}>
+    <div className={`pg on ${FIELD_LABEL_M}`} id="p-today" style={pageAcc.style} ref={reveal}>
       {/* 1. Строка-статус: день мельче, имя крупно. h1 нужен и TitleHeader телефона */}
       <header className="top" data-reveal>
         <div className="min-w-0">
-          <div className="text-[length:var(--fs-md)] text-[var(--ink3)]">{daySubtitle}</div>
+          <div className="text-[length:var(--fs-md)] text-[var(--ink3)] max-[380px]:text-[length:var(--fs-xs)]">{daySubtitle}</div>
           <h1 className="trunc" title={`${greeting}, ${ownerName}`}>{greeting}, {ownerName}</h1>
         </div>
       </header>
 
       {/* 2. Композер фразы под строкой статуса */}
-      <div className="comp composer-hero" data-reveal>
+      <div className="comp composer-hero max-[380px]:!pl-4" data-reveal>
         <i></i>
         {isTypingManual ? (
           <input
@@ -782,15 +827,16 @@ export default function Today({ openChat, address = '' }) {
         </button>
       </div>
 
-      {/* Быстрые слова — чипы под композером */}
-      <div className="chips" data-reveal>
-        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_task') + ': ') }}>{t('graph.one_task')}</button>
-        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_expense') + ': ') }}>{t('qa.expense')}</button>
-        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('ev_seed') + ': ') }}>{t('graph.one_event')}</button>
-        <button type="button" onClick={() => { setIsTypingManual(true); setInputVal(T('nt_seed') + ': ') }}>{t('graph.one_note')}</button>
-        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_digest'), send: true } }))}>☀️ {t('rc.morning_digest')}</button>
-        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_week'), send: true } }))}>📊 {t('rc.week_summary')}</button>
-        <button type="button" onClick={() => window.open('/api/snapshot/month.png', '_blank')}>🗓 {t('td.month_snapshot')}</button>
+      {/* Быстрые слова — чипы под композером. На телефоне это ОДНА прокручиваемая строка
+          (макет): чипы не сжимаются и не переносятся, три ряда кнопок телефон не читает. */}
+      <div className={`chips ${CHIPS_M}`} data-reveal>
+        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_task') + ': ') }}>{t('graph.one_task')}</button>
+        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_expense') + ': ') }}>{t('qa.expense')}</button>
+        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('ev_seed') + ': ') }}>{t('graph.one_event')}</button>
+        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('nt_seed') + ': ') }}>{t('graph.one_note')}</button>
+        <button type="button" className="max-[820px]:!shrink-0" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_digest'), send: true } }))}>☀️ {t('rc.morning_digest')}</button>
+        <button type="button" className="max-[820px]:!shrink-0" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_week'), send: true } }))}>📊 {t('rc.week_summary')}</button>
+        <button type="button" className="max-[820px]:!shrink-0" onClick={() => window.open('/api/snapshot/month.png', '_blank')}>🗓 {t('td.month_snapshot')}</button>
       </div>
 
       {/* Панель режима правки главной страницы */}
@@ -835,13 +881,16 @@ export default function Today({ openChat, address = '' }) {
         </div>
       )}
 
-      {/* 3–4. Блоки: ширина по настройке, появление каскадом (data-reveal) */}
-      <div className="bento">
+      {/* 3–4. Блоки: ширина по настройке, появление каскадом (data-reveal).
+          На телефоне это одна колонка (CSS даёт span 12), а вертикальный ритм между
+          блоками шире десктопных 16px — карточкам нужно воздуха, иначе лента слипается. */}
+      <div className="bento" style={phone ? { rowGap: 20 } : undefined}>
         {widgetOrder.map((id) => renderBlock(id))}
       </div>
 
-      {/* Кнопка «настроить главную» */}
-      <button type="button" className="cfg" onClick={() => setEditMode((v) => !v)}>
+      {/* Настройка главной — одна точка входа (и на телефоне тоже): полоса-подпись
+          в конце ленты, без рамки и без соседних кнопок. */}
+      <button type="button" className="cfg max-[820px]:!mt-4 max-[820px]:!text-center" onClick={() => setEditMode((v) => !v)}>
         {t(editMode ? 'td.finish_setup' : 'td.setup_home')}
       </button>
 

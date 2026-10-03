@@ -3,6 +3,11 @@ import { Plus, Trash2, Check, Pencil, ChevronDown, ChevronUp, ArrowUpRight, Arro
 import { api, money, toLocalISO } from '../lib/api'
 import { Section, Sheet, Field, Money, Pills, Empty, Confirm } from './ui'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
+import { useBigSize } from './Widgets'
+
+/* Переключатель на телефоне — одна прокручиваемая строка: четыре вкладки в два ряда
+   съедали место и ломали ритм карточки. */
+const SEG_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!max-w-full max-[820px]:!mb-4'
 
 const BUCKET = { need: 'bucket.need', want: 'bucket.want', save: 'bucket.save' }
 const BUCKET_TONE = { need: 'var(--ink)', want: 'var(--accent)', save: 'var(--pos)' }
@@ -145,7 +150,7 @@ export function Techniques({ t: data, onOpenCat }) {
           <button className="btn-ghost btn-sm" style={{ color: 'inherit', borderColor: 'currentColor' }} onClick={() => ask(T('tech.ask_enough'))}>{t('common.details')}</button>
         </div>
       )}
-      <div className="seg mb-4" role="group" aria-label={t('tech.title')}>
+      <div className={`seg ${SEG_ROW_M}`} role="group" aria-label={t('tech.title')}>
         {tabs.map(([k, l]) => (
           <button key={k} type="button" className={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>
         ))}
@@ -243,13 +248,14 @@ function Compare({ c }) {
 
 function Runway({ r, p }) {
   const { t } = useI18n()
+  const big = useBigSize()
   if (!r) return null
   const days = r.runway_days
   return (
     <div>
       <div className="rule row">
         <span className="label min-w-0 flex-1 trunc">{t('run.will_last')}</span>
-        <span className={`num shrink-0 text-[length:var(--fs-2xl)] font-medium tracking-[-0.03em] ${days == null ? 'muted' : r.ok ? 'accent' : 'neg'}`}>{days == null ? '—' : t('run.days_n', { count: days })}</span>
+        <span className={`num shrink-0 font-medium tracking-[-0.03em] ${days == null ? 'muted' : r.ok ? 'accent' : 'neg'}`} style={{ fontSize: big }}>{days == null ? '—' : t('run.days_n', { count: days })}</span>
       </div>
       <div className="row">
         <span className="label min-w-0 flex-1 trunc">{t('run.free')}</span>

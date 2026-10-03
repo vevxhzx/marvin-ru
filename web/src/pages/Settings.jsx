@@ -16,6 +16,18 @@ import { pushState, enablePush, disablePush } from '../lib/push'
 import pkg from '../../package.json'
 import { useI18n, t as T } from '../lib/i18n'
 
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+
+/* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
+   отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
+   На десктопе (≥821px) класс не действует — вид раздела прежний. */
+const CARD_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+/* Плотная карточка (переключатель, строка настройки): на телефоне тоже без тени и
+   хайрлайна, но собственный отпуск не растягиваем до 21px — здесь важна плотность. */
+const CARD_M_FLAT = 'max-[820px]:!shadow-none max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!transform-none'
+
 /* Подстрока в серверном значении GPU (данные, не интерфейс) — i18n-raw */
 const SERVER_VRAM = 'целиком' // i18n-raw
 
@@ -270,7 +282,7 @@ export default function Settings({ health }) {
     ),
     data: (
       <Section key="data" title={t('st.data')} hint={t('st.d_data')}>
-        <Card className="flex flex-wrap items-center gap-2">
+        <Card className={`${CARD_M_LIGHT} flex flex-wrap items-center gap-2`}>
           <button className="btn-ghost" onClick={() => api.backupNow().then((r) => show(r.ok ? `${t('st.copy_colon')} ${r.name || t('common.done')}` : t('st.no_db'))).catch(show.err)}><HardDriveDownload size={15} /> {t('st.backup_now')}</button>
           <a className="btn-ghost" href="/api/export/transactions.csv" download><Download size={15} /> {t('st.f_txs')}</a>
           <a className="btn-ghost" href="/api/export/events.csv" download><Download size={15} /> {t('st.f_cal')}</a>
@@ -323,7 +335,7 @@ export default function Settings({ health }) {
   )
 
   return (
-    <div className="pg on" id="p-set">
+    <div className={`pg on ${FIELD_LABEL_M}`} id="p-set">
       <div className="top">
         <div>
           <h1 className="r" style={{ '--i': 0 }}>{t('st.settings')}</h1>
@@ -427,7 +439,9 @@ function SectionSheet({ open, onClose, title, sub, children }) {
   const { t } = useI18n()
   const [shown, closing] = useSheetPresence(open)
   const snaps = useSnaps()
-  const [snap, setSnap] = useState(2)
+  /* Раздел настроек открывается на половине экрана: на всю высоту он «висит» от самого
+     верха и выглядит как отдельная страница. На полную высоту растягивает сам пользователь. */
+  const [snap, setSnap] = useState(1)
   const [contentH, setContentH] = useState(0)
   const bodyRef = useRef(null)
   const last = Math.max(0, snaps.length - 1)
@@ -435,14 +449,16 @@ function SectionSheet({ open, onClose, title, sub, children }) {
   /* высоту меряем по внутреннему блоку: сама шторка обрезана по max-height */
   useLayoutEffect(() => {
     const el = bodyRef.current
-    if (!open || !el) return undefined
+    /* shown в зависимостях обязателен: useSheetPresence откладывает появление содержимого,
+       и без него высота меряется, когда внутри ещё пусто — шторка раскрывается во весь экран */
+    if (!open || !shown || !el) return undefined
     const read = () => setContentH(el.scrollHeight)
     read()
     if (typeof ResizeObserver === 'undefined') return undefined
     const ro = new ResizeObserver(read)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [open])
+  }, [open, shown])
 
   /* при открытии — самая высокая точка, в которую влезает содержимое (один раз за открытие) */
   const picked = useRef(false)
@@ -450,7 +466,8 @@ function SectionSheet({ open, onClose, title, sub, children }) {
   useEffect(() => {
     if (!open || !picked.current || !snaps.length || !contentH) return
     picked.current = false
-    setSnap(contentH <= snaps[0] ? 0 : contentH <= (snaps[1] || snaps[0]) ? 1 : last)
+    // содержимое высокое — открываем на половине, а не на всю высоту
+    setSnap(contentH <= snaps[0] ? 0 : 1)
   }, [open, contentH, snaps, last])
 
   /* пустого места снизу не появляется: короткий раздел не растягивается */
@@ -572,7 +589,7 @@ function Appearance() {
 
   return (
     <>
-      <section className="c r" style={{ '--i': 3 }}>
+      <section className={`c r ${CARD_M_LIGHT}`} style={{ '--i': 3 }}>
         <div className="hd"><h2>{t('st.theme_colour')}</h2><small></small></div>
         <p style={{ color: 'var(--ink2)' }}>{t('st.theme_colour_desc2')}</p>
         <div className="lbl">{t('st.theme')}</div>
@@ -591,7 +608,7 @@ function Appearance() {
         </div>
       </section>
 
-      <section className="c r" style={{ '--i': 3 }}>
+      <section className={`c r ${CARD_M_LIGHT}`} style={{ '--i': 3 }}>
         <div className="hd" style={{ marginBottom: colorsOpen ? undefined : 0 }}>
           <button type="button" className="flex min-w-0 items-center gap-1.5"
             style={{ background: 'transparent', border: 0, padding: 0, cursor: 'pointer' }}
@@ -619,7 +636,7 @@ function Appearance() {
         )}
       </section>
 
-      <section className="c r" style={{ '--i': 4 }}>
+      <section className={`c r ${CARD_M_LIGHT}`} style={{ '--i': 4 }}>
         <div className="hd"><h2>{t('st.size_shape')}</h2><small></small></div>
         <div className="lbl">{t('st.scale')}</div>
         <div className="sg">
@@ -804,7 +821,7 @@ function VoicePicker({ show }) {
       {data.voices.map((v) => {
         const cur = isCur(v)
         return (
-          <Card key={v.engine + v.id} className={`!p-3 flex items-center gap-3 ${cur ? 'ring-1 ring-[var(--accent)]' : ''}`}>
+          <Card key={v.engine + v.id} className={`${CARD_M_FLAT} !p-3 flex items-center gap-3 ${cur ? 'ring-1 ring-[var(--accent)]' : ''}`}>
             <button className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${playing === v.id ? 'bg-accent text-accent-ink' : 'btn-ghost !p-0'}`} onClick={() => play(v)} title={t('st.listen2')}>
               {playing === v.id ? '■' : '▶'}
             </button>
@@ -850,7 +867,7 @@ function GoogleConnect({ show, dirty }) {
   }
   const ok = st.connected && st.enabled && !st.last_error
   return (
-    <Card className="mb-4 flex flex-wrap items-center justify-between gap-4">
+    <Card className={`${CARD_M_LIGHT} mb-4 flex flex-wrap items-center justify-between gap-4`}>
       <div className="flex items-center gap-3">
         <span className={`inline-block h-2.5 w-2.5 rounded-full ${ok ? 'bg-emerald-500' : st.connected ? 'bg-amber-500' : 'bg-neutral-400'}`} />
         <div>
@@ -892,7 +909,7 @@ function PhoneAccess() {
   return (
     <div className="space-y-3">
       {!info.tailscale && (
-        <Card className="text-[14px]">
+        <Card className={`${CARD_M_LIGHT} text-[14px]`}>
           <div className="h4">{t('st.no_tailscale2')}</div>
           <div className="muted mt-1 leading-relaxed">
             {t('st.step1')} <a className="text-accent underline" href="https://tailscale.com/download/windows" target="_blank" rel="noreferrer">tailscale.com/download</a> {t('st.step2b')}<br />
@@ -904,7 +921,7 @@ function PhoneAccess() {
       {Array.isArray(info?.items) && info.items.length > 0 && (
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
           {info.items.map((it) => (
-            <Card key={it.kind} className="flex items-center gap-4">
+            <Card key={it.kind} className={`${CARD_M_LIGHT} flex items-center gap-4`}>
               {it.qr ? <img src={it.qr} alt="QR" width={112} height={112} className="shrink-0 rounded-lg bg-white p-1" /> : null}
               <div className="min-w-0">
                 <div className="label">{it.title}</div>
@@ -946,7 +963,7 @@ function MiniApp({ current, onUse }) {
   const matches = url && current && url.replace(/\/$/, '') === current.replace(/\/$/, '')
   const ok = !!current && (matches || !st.local)
   return (
-    <Card className="mb-3 flex flex-wrap items-center justify-between gap-4">
+    <Card className={`${CARD_M_LIGHT} mb-3 flex flex-wrap items-center justify-between gap-4`}>
       <div className="flex items-center gap-3">
         <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: ok ? 'var(--pos)' : current ? 'var(--warn)' : 'var(--ink-3)' }} />
         <div>
@@ -984,7 +1001,7 @@ function BackupRestore({ show }) {
   }
   const fmtSize = (n) => (n >= 1e6 ? t('st.mb', { v: (n / 1e6).toFixed(1) }) : t('st.kb', { v: Math.max(1, Math.round(n / 1024)) }))
   return (
-    <Card className="mt-3 space-y-3">
+    <Card className={`${CARD_M_LIGHT} mt-3 space-y-3`}>
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="h4">{t('st.restore_from2')}</div>
@@ -1095,7 +1112,7 @@ function CloudBackups({ show }) {
     <Section title={t('st.cloud_backups')} hint={t('st.d_cloud_backup2')}
       action={<button className="btn-icon outlined" data-tip={t('common.retry')} onClick={load} disabled={!!busy} aria-label={t('st.refresh')}><RefreshCw size={14} /></button>}>
       <Why lines={[t('st.cloud_off_hint'), t('st.d_backups')]} />
-      <Card className="space-y-4">
+      <Card className={`${CARD_M_LIGHT} space-y-4`}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <Switch on={f.enabled} onChange={(v) => set('enabled', v)} label={t('st.cloud_backups2')} />
@@ -1211,7 +1228,7 @@ function FileOrganizer({ show }) {
   }
   return (
     <Section title={t('st.organise')} hint={t('st.mnt_path_desc2')}>
-      <Card className="space-y-4">
+      <Card className={`${CARD_M_LIGHT} space-y-4`}>
         <div className="flex flex-col gap-2 sm:flex-row">
           <input className="input flex-1" value={path} onChange={(e) => setPath(e.target.value)} placeholder={t('st.mnt_path_ph4')} />
           <button className="btn-primary" onClick={run}>{t('st.show_plan')}</button>
@@ -1247,7 +1264,7 @@ function FileOrganizer({ show }) {
 function StatusCard({ ok, warn, title, line1, line2, action }) {
   const color = ok ? 'var(--pos)' : warn ? 'var(--warn)' : 'var(--neg)'
   return (
-    <Card className="!p-4">
+    <Card className={`${CARD_M_FLAT} !p-4`}>
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-2"><span className="inline-block h-2 w-2 rounded-full" style={{ background: color, boxShadow: `0 0 0 3px color-mix(in srgb, ${color} 18%, transparent)` }} /><span className="label">{title}</span></div>
         {action}
@@ -1402,7 +1419,7 @@ function DesktopClientSection() {
   }
 
   return (
-    <Card className="space-y-6">
+    <Card className={`${CARD_M_LIGHT} space-y-6`}>
       <div className="flex items-start justify-between gap-4">
         <div>
           <div className="h4 flex items-center gap-2">
@@ -1638,17 +1655,17 @@ function Diagnostics({ status, diag, onRefresh }) {
 
           {/* состояния систем */}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <Card className="!p-4">
+            <Card className={`${CARD_M_FLAT} !p-4`}>
               <div className="label">{t('st.ollama2')}</div>
               <div className="h4 mt-1.5 truncate">{status.ollama.ok ? (status.ollama.model || t('st.model_ok')) : t('st.not_responding')}</div>
               <div className="faint mt-0.5 line-clamp-3 text-[12px]">{status.ollama.ok ? (status.ollama.gpu || status.ollama.url || '') : (status.ollama.diag || t('st.start_ollama'))}</div>
             </Card>
-            <Card className="!p-4">
+            <Card className={`${CARD_M_FLAT} !p-4`}>
               <div className="label">telegram</div>
               <div className="h4 mt-1.5">{!status.telegram.configured ? t('st.not_configured') : status.telegram.running ? t('st.bot_ok') : t('st.cfg_not_run')}</div>
               <div className="faint mt-0.5 line-clamp-3 text-[12px]">{status.telegram.last_message ? t('st.last_message', { when: relTime(status.telegram.last_message) }) : t('st.no_messages')}</div>
             </Card>
-            <Card className="!p-4">
+            <Card className={`${CARD_M_FLAT} !p-4`}>
               <div className="label">{t('st.cloud_colon4')} {status.gemini.title || status.gemini.provider}</div>
               <div className="h4 mt-1.5 truncate">{!status.gemini.enabled ? t('st.disabled2') : status.gemini.last_error ? t('st.error') : t('st.connected')}</div>
               <div className="faint mt-0.5 line-clamp-3 text-[12px]">
@@ -1786,7 +1803,7 @@ function English() {
     <Section title={t('st.english')} hint={t('st.d_en2')}
       action={<button className="btn-icon outlined" data-tip={t('common.retry')} aria-label={t('st.refresh')} disabled={!!busy} onClick={() => load().catch(() => {})}><RefreshCw size={14} /></button>}>
       <Why lines={[t('st.gen_off_desc2')]} />
-      <Card className="space-y-5">
+      <Card className={`${CARD_M_LIGHT} space-y-5`}>
         <div>
           <div className="mb-2 flex items-baseline justify-between gap-3">
             <span className="label">{t('st.direction')}</span>
@@ -1966,7 +1983,7 @@ function InstallApp() {
     } finally { setBusy(false) }
   }
   return (
-    <Card className="flex flex-wrap items-center justify-between gap-4">
+    <Card className={`${CARD_M_LIGHT} flex flex-wrap items-center justify-between gap-4`}>
       <div className="flex items-center gap-3">
         <Smartphone size={20} className={avail ? 'text-accent' : 'faint'} />
         <div>

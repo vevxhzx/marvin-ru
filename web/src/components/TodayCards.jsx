@@ -12,7 +12,7 @@ import { useState } from 'react'
 import { ArrowUpRight, Flame, Plus, Target, Timer, Zap } from 'lucide-react'
 import { api, hhmm, isAllDay, money } from '../lib/api'
 import { useI18n, t as T } from '../lib/i18n'
-import { Streak, Heatmap, useNumFormats } from './Widgets'
+import { Streak, Heatmap, useNumFormats, useBigSize } from './Widgets'
 import { useTip } from './ChartTip'
 
 const dm = (s) => `${s.slice(8, 10)}.${s.slice(5, 7)}`
@@ -84,6 +84,7 @@ export function QuickAddWidget({ onDone, onErr }) {
 export function SpendTodayWidget({ runway, payments }) {
   const { t } = useI18n()
   const fmt = useNumFormats()
+  const big = useBigSize('var(--hero-fs-2)')
   const rw = runway || {}
   const pay = payments || {}
   const list = (pay.payments || []).slice().sort((a, b) => new Date(a.date) - new Date(b.date))
@@ -97,7 +98,7 @@ export function SpendTodayWidget({ runway, payments }) {
   return (
     <div>
       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="big" style={{ fontSize: 'var(--hero-fs-2)' }}>
+        <span className="big" style={{ fontSize: big }}>
           <span className="num">{fmt.int(safe)}</span>
           <span style={{ fontSize: '0.55em', fontWeight: 400, opacity: 0.7, marginLeft: '0.12em' }}>₽</span>
         </span>
@@ -219,6 +220,7 @@ export function HabitsWidget({ streak }) {
 export function NextUpWidget({ events, tasks, onOpen }) {
   const { t } = useI18n()
   const now = new Date()
+  const big = useBigSize('var(--hero-fs-2)')
   const items = []
   for (const e of events || []) {
     if (e.done || isAllDay(e.start)) continue
@@ -242,7 +244,7 @@ export function NextUpWidget({ events, tasks, onOpen }) {
     <div>
       {next ? (
         <>
-          <div className="num" style={{ fontSize: 'var(--hero-fs-2)', fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1.1 }}>{hhmm(next.at)}</div>
+          <div className="num" style={{ fontSize: big, fontWeight: 500, letterSpacing: '-0.04em', lineHeight: 1.1 }}>{hhmm(next.at)}</div>
           <div className="clamp-2 mt-1 text-[length:var(--fs-base)] font-medium leading-snug">{next.title}</div>
           <div className="mt-2 inline-flex items-center gap-1.5 self-start rounded-full px-3 py-1 text-[length:var(--fs-xs)] font-medium"
             style={{ background: 'var(--accent-soft)', color: 'var(--acc)' }}>

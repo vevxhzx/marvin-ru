@@ -7,14 +7,32 @@ import { useToast, PageAccent, PageHead, Empty, ListSkeleton, Sheet, Field, Conf
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import { useI18n } from '../lib/i18n'
+import { usePhone } from '../lib/motion'
 
-/* Второй мозг: заметки, ссылки, фото и граф. Страница собрана как редакционная иерархия —
-   крупная шапка, спокойные вкладки, а лента мыслей идёт СПИСКОМ строк переменной высоты
-   (по содержимому), без сетки одинаковых коробок: короткая мысль занимает две строки,
-   длинная с картинкой — пол-экрана.
+/* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
+   вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
 
-   Кнопки AI-правки, история версий и удаление спрятаны не в меню, а в саму строку:
+/* Второй мозг: заметки, ссылки, фото и граф. Две раскладки, одна разметка:
+   на десктопе (≥821px) мысли снова идут карточками сеткой по контенту (.mas — колонки,
+   короткая мысль занимает две строки, длинная с картинкой — своя высота), фото — галерея,
+   ссылки и граф — как раньше;
+   на телефоне (≤820px) та же сетка становится плоским списком строк на фоне страницы.
+
+   Кнопки AI-правки, история версий и удаление спрятаны не в меню, а в саму карточку:
    на телефоне до них один тап, зоны нажатия — --tap. */
+
+/* Карточка мысли: на десктопе (≥821px) поверхность (.c + колонки .mas). На телефоне (≤820px)
+   это тоже карточка, только легче: отступ 21px, радиус из токена (--r-lg), без тени и без
+   хайрлайна — разделение тоном (макет). Разметка одна — переключают только классы max-[820px]. */
+const CARD_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
+const CARD_M = `c ${CARD_M_LIGHT}`
+/* Поиск: та же поверхность, но на десктопе поле и кнопка сами за неё отступают. */
+const FIELD_M = `c !px-3 !py-2 ${CARD_M_LIGHT}`
+
+/* Ряд вкладок на телефоне: одна прокручиваемая строка вместо переноса */
+const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+
 const URL_RE = /https?:\/\/[^\s]+/
 const TABS = [
   ['all', 'common.all'], ['note', 'mind.tab_notes'], ['photo', 'mind.tab_photos'], ['link', 'mind.tab_links'], ['graph', 'mind.tab_graph'],
@@ -61,6 +79,7 @@ export default function Mind() {
   const [histBusy, setHistBusy] = useState(false)
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
+  const phone = usePhone()          // ≤820px: телефонная раскладка по макету
   const [leavingCls, leave] = useLeave()
   const addRef = useRef(null)
 
@@ -266,25 +285,28 @@ export default function Mind() {
   )
 
   return (
-    <div className="pg on" id="p-brain" style={pageAcc.style}>
+    <div className={`pg on ${FIELD_LABEL_M}`} id="p-brain" style={pageAcc.style}>
       <PageHead kicker={t('mind.second_brain')} title={t('nav.mind')} idx={count}
         sub={count != null ? t('mind.entries_n', { count }) : undefined}
         right={<>
-          <PageAccent page="mind" />
+          {/* Цвет раздела — вторичное действие: на телефоне его точка входа одна,
+              и она уже есть в настройках вида, поэтому в шапке остаётся одно действие. */}
+          {!phone && <PageAccent page="mind" />}
           <button type="button" className="btn-primary head-primary" onClick={() => setAddOpen(true)}>
             <Plus size={15} /> {t('common.add')}
           </button>
         </>} />
 
       {/* вкладки — спокойные переключатели, а не «простыня кнопок» */}
-      <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label={t('nav.mind')}>
+      <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="tablist" aria-label={t('nav.mind')}>
         {TABS.map(([id, l]) => (
-          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>{t(l)}</button>
+          <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>{t(l)}</button>
         ))}
       </div>
 
-      {/* поиск по смыслу: одна строка, поле на всю ширину — на телефоне нечему горизонтально листаться */}
-      <div className="mt-3 flex items-center gap-2" style={{ minHeight: 'var(--tap)' }}>
+      {/* поиск по смыслу: на десктопе — своей карточкой, на телефоне просто строка поля
+          на всю ширину: нечему горизонтально листаться */}
+      <div className={`mt-3 flex items-center gap-2 ${FIELD_M}`} style={{ minHeight: 'var(--tap)' }}>
         <Search size={16} className="faint shrink-0" aria-hidden="true" />
         <input value={q} onChange={(e) => setQ(e.target.value)} className="input flex-1" placeholder={t('mind.search_ph')} aria-label={t('mind.search_ph')} />
         {q && <button className="btn-icon shrink-0" onClick={() => setQ('')} aria-label={t('tk.clear_search')} title={t('tk.clear_search')}><X size={15} /></button>}
@@ -299,7 +321,7 @@ export default function Mind() {
       ) : tab === 'photo' ? (
         /* Галерея: крупные превью в две колонки, кадр фиксированный (4:3) и картинка
            вписывается по object-fit — на телефоне фото не растягивается. */
-        <div className="stagger mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="stagger mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 max-[380px]:grid-cols-1">
           {items.map((it) => (
             <figure key={`${it._t}-${it.id}`} className={`c overflow-hidden !p-0 ${arrived(`${it._t}${it.id}`)} ${leavingCls(it._t + it.id)}`}>
               <button type="button" className="block w-full text-left" onClick={() => startEdit(it)}>
@@ -321,11 +343,12 @@ export default function Mind() {
           ))}
         </div>
       ) : (
-        /* Лента мыслей: строки переменной высоты, каскад появления 40 мс */
-        <div className="stagger mt-4 flex flex-col gap-3">
+        /* Лента мыслей: на десктопе карточки сеткой по контенту, на телефоне одна колонка
+           карточек с зазором 12px. Каскад появления общий — 40 мс. */
+        <div className={`stagger mas mt-4 ${phone ? '!columns-auto flex flex-col gap-3' : ''}`}>
           {items.map((it) => (
             <MindRow key={`${it._t}-${it.id}`} it={it} tag={q}
-              cls={`${arrived(`${it._t}${it.id}`)} ${leavingCls(it._t + it.id)}`}
+              cls={`${CARD_M} ${arrived(`${it._t}${it.id}`)} ${leavingCls(it._t + it.id)}`}
               polBusy={polBusy} onPolish={runPolish} onHistory={openHist} onEdit={startEdit}
               onAskDel={() => { setAskDel(it); setAskOpen(true) }} />
           ))}
@@ -334,7 +357,7 @@ export default function Mind() {
 
       {/* Добавление мысли: шторка (на телефоне — три снапа, ручка тянется, быстрый флик закрывает),
           поле крупное — 17px, чтобы iOS не зумил страницу. Ссылка в тексте сама уедет в «ссылки». */}
-      <Sheet open={addOpen} onClose={() => !busy && setAddOpen(false)} title={t('nav.mind')} sub={t('mind.composer_ph')} ariaLabel={t('nav.mind')}>
+      <Sheet bodyClass={FIELD_LABEL_M} open={addOpen} onClose={() => !busy && setAddOpen(false)} title={t('nav.mind')} sub={t('mind.composer_ph')} ariaLabel={t('nav.mind')}>
         <form onSubmit={submit} onKeyDown={(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) submit(e) }}>
           <textarea ref={addRef} autoFocus value={text} onChange={(e) => setText(e.target.value)}
             rows={7} className="input !text-[17px] leading-relaxed" placeholder={t('mind.composer_ph')} aria-label={t('mind.composer_ph')} />
@@ -346,7 +369,7 @@ export default function Mind() {
       </Sheet>
 
       {/* Правка записи: тот же Sheet + Field, что и на остальных страницах */}
-      <Sheet open={editOpen} onClose={() => setEditOpen(false)}
+      <Sheet bodyClass={FIELD_LABEL_M} open={editOpen} onClose={() => setEditOpen(false)}
         title={t(edit?._t === 'link' ? 'mind.edit_link' : 'mind.edit_note')}
         sub={edit?._t === 'link' ? edit.url : undefined}>
         <form onSubmit={saveEdit} className="space-y-4">
@@ -373,7 +396,7 @@ export default function Mind() {
       </Sheet>
 
       {/* Сравнение «было/стало»: две колонки, перенос строк сохранён, кнопки — во всю ширину тапа */}
-      <Sheet open={polOpen} onClose={() => !polBusy && setPolOpen(false)}
+      <Sheet bodyClass={FIELD_LABEL_M} open={polOpen} onClose={() => !polBusy && setPolOpen(false)}
         title={t(pol?.mode === 'expand' ? 'mind.pol_expand' : 'mind.pol_rewrite')}
         sub={pol?.note?.title || undefined}>
         {pol && (
@@ -406,7 +429,7 @@ export default function Mind() {
       </Sheet>
 
       {/* История версий заметки: клик — показать версию, «вернуть эту» — откат на неё */}
-      <Sheet open={histOpen} onClose={() => setHistOpen(false)} title={t('mind.version_history')}
+      <Sheet bodyClass={FIELD_LABEL_M} open={histOpen} onClose={() => setHistOpen(false)} title={t('mind.version_history')}
         sub={histNote?.title || undefined}>
         {histBusy ? (
           <ListSkeleton n={3} />
@@ -473,15 +496,15 @@ function Thumb({ src, alt, ratio = '16 / 9', badge, className = '' }) {
   )
 }
 
-/* Строка ленты: текст мысли или ссылки, теги чипами, время «20 ч назад»,
-   правка и удаление — на расстоянии одного тапа от текста. */
+/* Запись ленты: текст мысли или ссылки, теги чипами, время «20 ч назад»,
+   правка и удаление — на расстоянии одного тапа от текста. Вид задаёт класс cls. */
 function MindRow({ it, tag, cls, polBusy, onPolish, onHistory, onEdit, onAskDel }) {
   const { t } = useI18n()
   const tags = listOf(it.tags)
   const text = it.text || it.summary || it.body || it.url
   const shown = tag ? String(text || '').slice(0, 400) : text
   return (
-    <article className={`c ${cls}`}>
+    <article className={cls}>
         <Thumb className="mb-3" src={imgSrc(it.image)} alt={it.title || it.text || it.summary || it.url || ''}
           badge={it._t === 'link' ? it.domain : null} />
       {it.title && <h3 className="h3" style={{ overflowWrap: 'anywhere' }}>{it.title}</h3>}

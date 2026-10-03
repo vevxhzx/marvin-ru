@@ -44,7 +44,7 @@ function BoardList() {
           <button type="button" className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('bd.new_board')}</button>
         </div>} />
       {boards === null ? (
-        <div className="flex flex-col gap-3">{[0, 1, 2].map((i) => <Skeleton key={i} h={132} radius="var(--r-xl)" />)}</div>
+        <div className="grid gap-3 min-[821px]:grid-cols-2 min-[1180px]:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} h={132} radius="var(--r-xl)" />)}</div>
       ) : boards.length === 0 ? (
         /* пусто не «белым экраном»: что это, как начать и кнопка создания */
         <div className="panel p-5 sm:p-7">
@@ -53,8 +53,8 @@ function BoardList() {
             action={archived ? undefined : <button type="button" className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('bd.new_board')}</button>} />
         </div>
       ) : (
-        /* доска — строка-карточка: превью сцены слева (на телефоне — сверху), рядом название и состав */
-        <div className="stagger flex flex-col gap-3">
+        /* доска — карточка с превью: сетка на десктопе, те же карточки в одну колонку на телефоне */
+        <div className="stagger grid gap-3 min-[821px]:grid-cols-2 min-[1180px]:grid-cols-3">
           {boards.map((b) => <BoardRow key={b.id} b={b} archived={archived} onRestore={restore} />)}
         </div>
       )}
@@ -63,8 +63,9 @@ function BoardList() {
   )
 }
 
-/* Строка доски: превью не растягивается (object-fit в кадре 16:9), длинное название переносится,
-   а «вернуть» в архиве — соседняя кнопка, а не вложенная в кнопку перехода. */
+/* Карточка доски: превью сцены сверху (16:9, не растягивается), под ним название и состав.
+   На узком экране и в сетке десктопа раскладка одна; «вернуть» в архиве — соседняя кнопка,
+   а не вложенная в кнопку перехода. */
 function BoardRow({ b, archived, onRestore }) {
   const { t } = useI18n()
   const nav = useNavigate()
@@ -72,8 +73,8 @@ function BoardRow({ b, archived, onRestore }) {
   const count = Array.isArray(b.items) ? b.items.length : (typeof b.items === 'number' ? b.items : 0)
   return (
     <div className="panel relative overflow-hidden">
-      <button type="button" className="flex w-full flex-col text-left sm:flex-row" onClick={() => nav(`/board/${b.id}`)}>
-        <span className="relative block w-full shrink-0 sm:w-[210px]" style={{ aspectRatio: '16 / 9', background: 'var(--fill)' }}>
+      <button type="button" className="flex w-full flex-col text-left sm:flex-row min-[821px]:flex-col" onClick={() => nav(`/board/${b.id}`)}>
+        <span className="relative block w-full shrink-0 sm:w-[210px] min-[821px]:!w-full" style={{ aspectRatio: '16 / 9', background: 'var(--fill)' }}>
           {b.cover && !coverBad
             ? <img src={`/media/${b.cover}`} alt="" loading="lazy" onError={() => setCoverBad(true)} className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
             : <span className="absolute inset-0"><BoardGlyph kind={b.kind} /></span>}
