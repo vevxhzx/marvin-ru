@@ -1,31 +1,188 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ChevronLeft, ChevronRight, EyeOff } from 'lucide-react'
+import { Plus, Search as SearchIcon, X, ChevronRight, ChevronLeft, EyeOff, Pencil, Check } from 'lucide-react'
 import { api, hhmm, isSameDay, isAllDay } from '../lib/api'
-import { Num, useToast, useLeave, useArrived, PageAccent, ListSkeleton } from '../components/ui'
+import { Num, Empty, Swipe, PRIORITY, useToast, useLeave, useArrived, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
 import { usePrefs, prefs as PREFS } from '../lib/prefs'
 import { usePageAccent } from '../lib/prefs'
-import { useCardLayout, CardCtl, useWide } from '../lib/layout'
+import { useCardLayout, CardCtl } from '../lib/layout'
 import { useI18n } from '../lib/i18n'
 
-/* Подписи скрытых карточек в списке настроек — ключи словаря */
-const CARD_TITLES = { done: 'tk.done', list: 'nav.tasks', empty: 'tk.list_empty', sort: 'tk.sort' }
+/* pages/Tasks.jsx — «Задачи» as an editorial hierarchy:
+
+     headline + the one primary action           (.top)
+     a calm counter strip — it is also the view switcher, active state readable
+     quick add (one line, your own words)        (.comp)
+     search + project filter                     (local, no requests)
+     the list itself: rows with hairline rules, a big checkbox, a priority dot,
+     and a swipe (right — close, left — edit)
+
+   No hero card: on this screen the hero is only money/success (DESIGN.md), so the
+   counters stay a quiet one-line strip instead of a lime block. The list sits on the
+   page background — hairlines instead of a card, and the swipe foreground of .swipe
+   (.swipe-fg is painted with var(--bg)) matches the page exactly.
+
+   Rows keep the markup e2e relies on: #p-tasks .rowi with the task title, the checkbox
+   input[aria-label="закрыть задачу"], the view switcher inside .top .sg («выполнено»)
+   and the primary action «+ задача». */
+
+/* Blocks of the page in the «настроить» mode. Stored under a fresh key (tasks2):
+   the old layout (done/list/empty/sort cards of the bento grid) has no blocks to
+   reuse, and a stale order would hide the counters from an existing user. */
+const BLOCKS = ['stats', 'tools', 'list']
+const BLOCK_TITLES = { stats: 'tk.open', tools: 'common.search', list: 'nav.tasks' }
+
+/* Заголовок списка для каждого вида */
+const VIEW_TITLE = { open: 'tk.open', today: 'common.today_caps', done: 'tk.done', aims: 'goals.title' }
+/* Порядок внутри групп задач */
+const SORTS = [['priority', 'tk.by_priority'], ['due', 'tk.by_due'], ['new', 'tk.by_new']]
 
 const dueTs = (t) => (t.due ? new Date(t.due).getTime() : 9e15)
-/* пилюля фильтра (как в People): выбрана — тёмная, нет — светлая */
-const pill = (on) => ({ background: on ? 'var(--ink)' : 'var(--sf)', color: on ? 'var(--bg)' : 'var(--ink2)' })
 const SORT_FN = {
   priority: (a, b) => a.priority - b.priority || dueTs(a) - dueTs(b),
   due: (a, b) => dueTs(a) - dueTs(b) || a.priority - b.priority,
   new: (a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0),
 }
 
-/* Карточки этой страницы: порядок и ширина хранятся общим модулем lib/layout */
-const CARDS = ['done', 'list', 'empty', 'sort']
-const CARD_WIDTHS = { done: 4, list: 8, empty: 6, sort: 6 }
+/* Общие размеры: зоны нажатия — из токенов, без «сырых» чисел */
+const PILL = { minHeight: 'var(--tap)', padding: '0 16px' }
+const SEG_BTN = { minHeight: 'var(--tap)', padding: '0 16px' }
+
+/* Точка приоритета в строке: крупная зона нажатия (--tap) и меню через портал в body —
+   строка лежит внутри .swipe с overflow:hidden, обычный absolute-попап там обрезался бы. */
+function PriorityCell({ value, onChange }) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const btn = useRef(null)
+
+  const toggle = () => {
+    if (open) return setOpen(false)
+    const el = btn.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const left = Math.max(8, Math.min(r.right - 168, window.innerWidth - 168))
+    const below = r.bottom + 8 + 150 < window.innerHeight
+    setPos({ left, top: below ? r.bottom + 8 : undefined, bottom: below ? undefined : Math.max(8, r.top - 158) })
+    setOpen(true)
+  }
+
+  useEffect(() => {
+    if (!open) return
+    const away = (e) => { if (!btn.current?.contains(e.target) && !e.target.closest?.('[data-pr-menu]')) setOpen(false) }
+    const key = (e) => { if (e.key === 'Escape') setOpen(false) }
+    const scroll = () => setOpen(false)
+    document.addEventListener('mousedown', away)
+    document.addEventListener('touchstart', away, { passive: true })
+    document.addEventListener('keydown', key)
+    window.addEventListener('scroll', scroll, true)
+    return () => {
+      document.removeEventListener('mousedown', away)
+      document.removeEventListener('touchstart', away)
+      document.removeEventListener('keydown', key)
+      window.removeEventListener('scroll', scroll, true)
+    }
+  }, [open])
+
+  const label = t(PRIORITY[value]?.label || 'task.prio_normal')
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        className="btn-icon shrink-0"
+        style={{ width: 'var(--tap)', height: 'var(--tap)' }}
+        onClick={toggle}
+        aria-label={t('common.priority')}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        title={label}
+        data-tip={open ? undefined : label}
+      >
+        <span className={`h-2.5 w-2.5 rounded-full ${PRIORITY[value]?.dot}`} aria-hidden="true" />
+      </button>
+      {open && pos && createPortal(
+        <div
+          data-pr-menu
+          role="menu"
+          className="elevated fixed z-[130] w-[168px] !p-1"
+          style={{ left: pos.left, top: pos.top, bottom: pos.bottom, animation: 'rise .16s var(--ease-out)' }}
+        >
+          <div className="label px-2.5 pb-1 pt-1.5">{t('common.importance')}</div>
+          {[1, 2, 3].map((p) => (
+            <button
+              key={p}
+              type="button"
+              role="menuitemradio"
+              aria-checked={p === value}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5"
+              style={{ minHeight: 'var(--tap)', fontSize: 'var(--fs-base)' }}
+              onClick={() => { setOpen(false); if (p !== value) onChange(p) }}
+            >
+              <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${PRIORITY[p].dot}`} aria-hidden="true" />
+              <span className="min-w-0 flex-1 trunc">{t(PRIORITY[p].label)}</span>
+              {p === value && <Check size={15} strokeWidth={2.4} className="shrink-0" style={{ color: 'var(--acc)' }} aria-hidden="true" />}
+            </button>
+          ))}
+        </div>,
+        document.body,
+      )}
+    </>
+  )
+}
+
+/* Полоса счётчиков: плоская, с волосяными разделителями, без капсулы-героя.
+   Это и есть переключатель вида, поэтому второго сегмента на странице нет.
+   Разметка .sg остаётся (единый сегмент системы), вид задаётся токенами. */
+function Counters({ items, view, onChange, label }) {
+  const { t } = useI18n()
+  return (
+    <div
+      className="sg w-full"
+      role="group"
+      aria-label={label}
+      style={{ padding: 0, gap: 0, background: 'transparent', borderRadius: 0, borderTop: '1px solid var(--line)', borderBottom: '1px solid var(--line)', maxWidth: '760px' }}
+    >
+      {items.map((c, i) => {
+        const on = c.id === view
+        return (
+          <button
+            key={c.id}
+            type="button"
+            className={on ? 'on' : ''}
+            aria-pressed={on}
+            onClick={() => onChange(c.id)}
+            style={{
+              flex: '1 1 0',
+              minWidth: 0,
+              minHeight: 'var(--tap-lg)',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: 3,
+              padding: 'var(--s-2) var(--s-2)',
+              lineHeight: 1.1,
+              borderRadius: 0,
+              borderLeft: i ? '1px solid var(--line)' : 'none',
+              background: on ? 'var(--fill)' : 'transparent',
+              color: on ? 'var(--ink)' : 'var(--ink-2)',
+            }}
+          >
+            <span className="num" style={{ fontSize: 'var(--fs-xl)', fontWeight: 600, letterSpacing: '-0.03em', color: on ? 'var(--acc)' : 'var(--ink)' }}>
+              <Num value={c.n} />
+            </span>
+            <span style={{ fontSize: 'var(--fs-xs)', whiteSpace: 'nowrap' }}>{t(c.label)}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 export default function Tasks() {
   const { t } = useI18n()
@@ -34,24 +191,30 @@ export default function Tasks() {
   const view = params.get('view') || 'open'
   const setView = (v) => setParams(v === 'open' ? {} : { view: v }, { replace: true })
   const [quick, setQuick] = useState('')
-  const [q, setQ] = useState('')        // поиск по заголовку/проекту — локально, по уже загруженным задачам
-  const [proj, setProj] = useState('')  // фильтр по проекту ('' — все)
+  const [q, setQ] = useState('')        // search by title/project — local, over the loaded tasks
+  const [proj, setProj] = useState('')  // project filter ('' — all)
+  const [aims, setAims] = useState(0)    // goals count for the counter strip
   const nav = useNavigate()
-  const [sheet, setSheet] = useState(null) // null | 'new' | задача
+  const [sheet, setSheet] = useState(null) // null | 'new' | task
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
   const [{ tasksSort = 'priority' }] = usePrefs()
   const sortFn = SORT_FN[tasksSort] || SORT_FN.priority
   const [cardsEdit, setCardsEdit] = useState(false)
-  const { order: cardOrder, setOrder: setCardOrder, widths: cardWidths, move, cycleWidth, reset: resetCards } = useCardLayout('tasks', CARDS, CARD_WIDTHS)
-  const wide = useWide()
+  const { order: blockOrder, setOrder: setBlockOrder, move, reset: resetBlocks } = useCardLayout('tasks2', BLOCKS)
   const pageAcc = usePageAccent('tasks')
-  /* плашка задачи: уезжает с анимацией при закрытии и вспыхивает при появлении новой */
+  /* row flashes on arrival and leaves nicely when closed */
   const [leaveCls, leave] = useLeave()
   const arriveCls = useArrived((tasks || []).map((t) => t.id))
 
   const load = () => api.tasks(true, true).then(setTasks).catch(() => {})
   useEffect(() => { load() }, [tick])
+  // goals for the counter strip: the same endpoint the «цели» tab renders
+  useEffect(() => {
+    let alive = true
+    api.get('/api/aims').then((l) => { if (alive) setAims(Array.isArray(l) ? l.length : 0) }).catch(() => {})
+    return () => { alive = false }
+  }, [tick])
 
   const now = new Date()
   const all = (tasks || []).filter((t) => t.kind !== 'event')
@@ -59,15 +222,14 @@ export default function Tasks() {
   const open = all.filter((t) => !t.done).sort(sortFn)
   const done = all.filter((t) => t.done).sort((a, b) => new Date(b.done_at || 0) - new Date(a.done_at || 0))
   const todayTasks = open.filter((t) => t.due && isSameDay(t.due, now))
-  /* «сегодня»: дела на сегодня + встречи из календаря (одна картина, как в утреннем дайджесте) */
+  /* «сегодня»: due today + meetings from the calendar (one picture, as in the morning digest) */
   const todayList = useMemo(() => {
     const at = (x) => new Date(x.due || x.start || 0).getTime()
     return [...todayTasks, ...agenda].sort((a, b) => (Number(!!a.done) - Number(!!b.done)) || at(a) - at(b))
   }, [tasks, tasksSort])
 
-  /* Поиск и фильтр по проекту — всё локально, без запросов к серверу.
-     Списки ниже считаются из тех же данных, поэтому фильтр применяется и к «сегодня»,
-     и к встречам из календаря (у встреч проекта нет — под фильтр проекта они не попадают). */
+  /* Search and project filter are local, no server requests. Lists are derived from the
+     same data, so the filter applies to «сегодня» too; meetings have no project. */
   const filtering = !!q.trim() || !!proj
   const projects = useMemo(() => [...new Set((tasks || [])
     .filter((t) => t.kind !== 'event' && t.project).map((t) => t.project))]
@@ -80,11 +242,13 @@ export default function Tasks() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tasks, q, proj, tasksSort])
 
+  const resetFilters = () => { setQ(''); setProj('') }
+
   const addQuick = async (e) => {
     if (e && e.preventDefault) e.preventDefault()
     if (!quick.trim()) return
     try {
-      await api.chat(`задача: ${quick.trim()}`)   // фраза уходит в ядро — всегда по-русски   // i18n-raw   // фраза уходит в ядро — всегда по-русски   // i18n-raw
+      await api.chat(`задача: ${quick.trim()}`)   // фраза уходит в ядро — всегда по-русски   // i18n-raw
       setQuick('')
       load()
       bump()
@@ -95,7 +259,7 @@ export default function Tasks() {
 
   const addQuickDirect = async (title) => {
     try {
-      await api.chat(`задача: ${title}`)   // фраза уходит в ядро — всегда по-русски   // i18n-raw   // фраза уходит в ядро — всегда по-русски   // i18n-raw
+      await api.chat(`задача: ${title}`)   // фраза уходит в ядро — всегда по-русски   // i18n-raw
       load()
       bump()
     } catch (err) {
@@ -104,7 +268,7 @@ export default function Tasks() {
   }
 
   const toggle = async (task) => {
-    if (task.kind === 'event') {   // встреча из календаря: галочка закрывает её и в календаре
+    if (task.kind === 'event') {   // meeting from the calendar: the tick closes it there too
       try {
         await api.doneEvent(task.id, !task.done)
         show(t(task.done ? 'tk.back_to_cal' : 'tk.event_done'), '', task.title)
@@ -116,7 +280,7 @@ export default function Tasks() {
       try { await api.undoneTask(task.id); load(); bump() } catch (e) { show.err(e) }
       return
     }
-    // строка сначала красиво уезжает (зелёная вспышка), и только потом задача закрывается
+    // the row leaves first (a green flash), and only then the task is closed
     await leave(task.id, 'done', async () => {
       try {
         await api.doneTask(task.id)
@@ -127,197 +291,340 @@ export default function Tasks() {
     })
   }
 
+  const setPriority = async (task, priority) => {
+    try { await api.patchTask(task.id, { priority }); load() } catch (e) { show.err(e) }
+  }
+
+  const openTask = (task) => (task.kind === 'event' ? nav('/calendar') : setSheet(task))
+
   const currentList = filtering
     ? (view === 'today' ? shown.today : view === 'done' ? shown.done : shown.open)
     : (view === 'today' ? todayList : view === 'done' ? done : open)
   const kicker = filtering
     ? t('tk.found_n', { n: currentList.length })
     : open.length ? t('tk.open_n', { n: open.length }) : t('tk.all_done')
-  /* декоративная карточка «список пуст» — только когда реально пусто:
-     ни открытых задач, ни невыполненных встреч (и данные уже загружены);
-     при активном поиске/фильтре её не показываем — там будет «ничего не нашлось» */
-  const nothingToDo = tasks !== null && !filtering && open.length === 0 && !agenda.some((e) => !e.done)
-  /* текст пустого списка зависит от вкладки: если в «сегодня» пусто, а задачи в работе есть —
-     не пишем «список пуст», иначе выглядит так, будто задач нет совсем */
-  const emptyListText = nothingToDo
-    ? t('tk.list_empty')
-    : view === 'today'
-      ? t('tk.today_empty') + (open.length ? ` · ${t('tk.open_n', { n: open.length })}` : '')
-      : view === 'done'
-        ? t('tk.done_empty')
-        : t('tk.open_empty') + (agenda.some((e) => !e.done) ? t('tk.cal_hint') : '')
+
+  const counters = [
+    { id: 'open', label: 'tk.open', n: open.length },
+    { id: 'today', label: 'common.today', n: todayList.length },
+    { id: 'done', label: 'tk.done', n: done.length },
+    { id: 'aims', label: 'goals.title', n: aims },
+  ]
+
+  /* Пустое состояние: с характером и подсказкой, а не пустая полоса.
+     Под фильтром — одно «ничего не нашлось», без «списка пуст» (иначе кажется, что задач нет). */
+  const empty = (() => {
+    if (filtering) {
+      return {
+        glyph: 'search',
+        text: t('common.no_results'),
+        sub: t('tk.filter_local', { n: currentList.length }) + (q.trim() ? t('tk.for_query', { q: q.trim() }) : '') + (proj ? t('tk.in_project', { p: proj }) : ''),
+        action: <button type="button" className="btn-soft btn-sm" onClick={resetFilters}>{t('tk.reset_search')}</button>,
+      }
+    }
+    if (view === 'today') return { glyph: 'calendar', text: t('tk.today_empty'), sub: t('tk.empty_today_sub') }
+    if (view === 'done') return { glyph: 'tasks', text: t('tk.done_empty'), sub: t('tk.empty_done_sub') }
+    return {
+      glyph: 'tasks',
+      text: t('tk.empty_none'),
+      sub: t('tk.empty_none_sub'),
+      hint: t('tk.buy_milk'),
+      onHint: () => addQuickDirect(t('tk.buy_milk')),
+      action: <button type="button" className="btn-primary" onClick={() => setSheet('new')}>{t('task.new')}</button>,
+    }
+  })()
+
+  const ctl = (id) => (cardsEdit ? (
+    <CardCtl
+      key={`${id}-ctl`}
+      id={id}
+      order={blockOrder}
+      edit
+      onMove={move}
+      onHide={(x) => setBlockOrder((o) => o.filter((w) => w !== x))}
+      HideIcon={EyeOff}
+      Icon={ChevronLeft}
+    />
+  ) : null)
 
   return (
     <div className="pg on" id="p-tasks" style={pageAcc.style}>
-      {/* Шапка */}
-      <div className="top">
-        <div>
+      {/* Header: headline + the one primary action. The counter strip lives inside .top —
+          it is the view switcher (e2e looks for «выполнено» inside .top .sg). */}
+      <header className="top">
+        <div className="min-w-0 flex-1">
           <h1 className="r" style={{ '--i': 0 }}>{t(view === 'aims' ? 'goals.title' : 'nav.tasks')}</h1>
-          <p className="sub r" style={{ '--i': 1 }}>{kicker}</p>
+          <p className="sub r" style={{ '--i': 1 }}>
+            {view === 'aims' ? t('goals.active_n', { count: aims }) : kicker}
+          </p>
         </div>
-        <div className="hr r" style={{ '--i': 1 }}>
-          <div className="sg">
-            <button type="button" className={view === 'open' ? 'on' : ''} onClick={() => setView('open')}>{t('tk.open')}</button>
-            <button type="button" className={view === 'today' ? 'on' : ''} onClick={() => setView('today')}>{t('common.today')}</button>
-            <button type="button" className={view === 'done' ? 'on' : ''} onClick={() => setView('done')}>{t('tk.done')}</button>
-            <button type="button" className={view === 'aims' ? 'on' : ''} onClick={() => setView('aims')}>{t('goals.title')}</button>
+        {view !== 'aims' && (
+          <div className="hr head-actions r" style={{ '--i': 1 }}>
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={() => setCardsEdit((v) => !v)}
+              title={t('tk.layout_tip')}
+              aria-pressed={cardsEdit}
+            >
+              {t('tk.layout')}
+            </button>
+            <button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>
+              + {t('tk.task')}
+            </button>
           </div>
-          {view !== 'aims' && (
-            <>
-              <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)} title={t('tk.layout_tip')}>{t('tk.layout')}</button>
-              <button type="button" className="btn" onClick={() => setSheet('new')}>+ {t('tk.task')}</button>
-            </>
-          )}
-        </div>
-      </div>
+        )}
+        {blockOrder.includes('stats') && (
+          <div className="r w-full" style={{ '--i': 2 }}>
+            <Counters items={counters} view={view} onChange={setView} label={t('nav.tasks')} />
+          </div>
+        )}
+      </header>
 
       {view === 'aims' ? (
-        <div className="mt-8">
+        <div className="mt-6">
           <Aims tick={tick} bump={() => { load(); bump() }} />
         </div>
       ) : (
         <>
-          {/* Композер задач */}
-          <div className="comp r" style={{ '--i': 2 }}>
-            <i></i>
-            <input
-              className="ph0"
-              style={{ background: 'transparent', border: 0, outline: 'none', width: '100%', color: 'inherit' }}
-              value={quick}
-              onChange={(e) => setQuick(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && addQuick(e)}
-              placeholder={t('tk.quick_ph')}
-            />
-            <span className="send" style={{ fontSize: '24px', cursor: 'pointer' }} onClick={addQuick}>+</span>
-          </div>
-
-          {/* Поиск и фильтр по проекту — локально, по уже загруженным задачам */}
-          <div className="r" style={{ '--i': 2, marginTop: '14px' }}>
-            <div className="search" style={{ width: '100%', height: '48px' }}>
-              <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                <circle cx="9" cy="9" r="6" />
-                <path d="m14 14 3.5 3.5" />
-              </svg>
-              <input value={q} onChange={(e) => setQ(e.target.value)}
-                style={{ background: 'transparent', border: 0, outline: 'none', width: '100%', color: 'inherit', font: 'inherit', marginLeft: '8px' }}
-                placeholder={t('tk.search_ph')} />
-              {q && <button type="button" className="faint shrink-0 px-1" onClick={() => setQ('')} aria-label={t('tk.clear_search')} title={t('tk.clear_search')}>✕</button>}
-            </div>
-            {projects.length > 0 && (
-              <div className="flex flex-wrap items-center gap-2" style={{ marginTop: '10px' }}>
-                <span className="label">{t('task.project')}</span>
-                <button type="button" style={pill(!proj)} className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition" onClick={() => setProj('')}>{t('common.all')}</button>
-                {projects.map((p) => (
-                  <button type="button" key={p} style={pill(proj === p)} className="rounded-full px-3 py-1.5 text-[12.5px] font-medium transition"
-                    onClick={() => setProj(proj === p ? '' : p)}>{p}</button>
-                ))}
-              </div>
-            )}
-            {filtering && (
-              <div className="flex flex-wrap items-center gap-2" style={{ marginTop: '8px' }}>
-                <span className="faint text-[12px]">{t('tk.filter_local', { n: currentList.length })}</span>
-                <button type="button" className="btn-ghost btn-sm" onClick={() => { setQ(''); setProj('') }}>{t('common.reset')}</button>
-              </div>
-            )}
-          </div>
-
-          {/* Bento сетка задач: порядок и ширина настраиваются кнопкой «настроить» */}
-          <div className="bento">
-            {cardOrder.map((id, i) => {
-              const st = { '--i': 3 + i, ...(wide ? { gridColumn: `span ${cardWidths[id] || CARD_WIDTHS[id]}` } : {}) }
-              const ctl = (
-                <CardCtl id={id} order={cardOrder} edit={cardsEdit} wide={wide}
-                  onMove={move} onHide={(x) => setCardOrder((o) => o.filter((w) => w !== x))}
-                  onWidth={cycleWidth} width={cardWidths[id] || CARD_WIDTHS[id]}
-                  Icon={ChevronLeft} HideIcon={EyeOff} />
-              )
-              if (id === 'done') return (
-                <section key="done" className="c hero s4 r" style={st}>{ctl}
-                  <div className="hd"><h2>{t('tk.done')}</h2><small>{t('common.total')}</small></div>
-                  <div className="big"><Num value={done.length} /></div>
-                  <span className="tag">{t(open.length === 0 ? 'tk.all_done' : 'tk.open_n', { n: open.length })}</span>
-                  <div className="hm">
-                    <div><small>{t('tk.today_cal')}</small><b>{agenda.length}</b></div>
-                    <div><small>{t('goals.title')}</small><b>0</b></div>
-                  </div>
-                </section>
-              )
-              if (id === 'list') return (
-                <section key="list" className="c s8 r" style={st}>{ctl}
-                  <div className="hd">
-                    <h2>{t(view === 'today' ? 'tk.today_cal' : view === 'done' ? 'tk.done' : 'tk.open_n', { n: open.length })}</h2>
-                    <small>{currentList.length}</small>
-                  </div>
-                  {tasks === null ? (
-                    <ListSkeleton n={5} />
-                  ) : currentList.length === 0 && filtering ? (
-                    <div className="space-y-2" style={{ paddingTop: '12px' }}>
-                      <p style={{ color: 'var(--ink3)' }}>
-                        {t('common.no_results')}{q.trim() ? t('tk.for_query', { q: q.trim() }) : ''}{proj ? t('tk.in_project', { p: proj }) : ''}.
-                      </p>
-                      <button type="button" className="btn-soft btn-sm" onClick={() => { setQ(''); setProj('') }}>{t('tk.reset_search')}</button>
-                    </div>
-                  ) : currentList.length === 0 ? (
-                    <p style={{ color: 'var(--ink3)', paddingTop: '12px' }}>{emptyListText}</p>
-                  ) : (
-                    <>
-                      <p className="label" style={{ marginTop: '-6px', marginBottom: '10px', textTransform: 'none', letterSpacing: 0 }}>
-                        {t('tk.hint')}
-                      </p>
-                      {currentList.map((task) => (
-                        <div className={`rowi ck ${leaveCls(task.id)} ${arriveCls(task.id)}`} key={task.id}>
-                          <input type="checkbox" checked={!!task.done} onChange={() => toggle(task)} aria-label={task.done ? t('od.back_to_work') : t('tk.close_task')} />
-                          <span className="t" style={{ cursor: 'pointer' }} onClick={() => (task.kind === 'event' ? nav('/calendar') : setSheet(task))} title={t(task.kind === 'event' ? 'tk.open_cal' : 'tk.open_task')}>
-                            {task.title}
-                            {task.kind === 'event' ? <small>{t('tk.event')}</small> : (task.sub || task.category ? <small>{task.sub || task.category}</small> : null)}
-                          </span>
-                          {task.due && !isAllDay(task.due) && <time>{hhmm(task.due)}</time>}
-                          <button className="row-open" onClick={() => (task.kind === 'event' ? nav('/calendar') : setSheet(task))} aria-label={t(task.kind === 'event' ? 'tk.open_cal' : 'tk.open_task')} title={t(task.kind === 'event' ? 'tk.in_cal' : 'tk.edit_task')}><ChevronRight size={16} /></button>
-                        </div>
-                      ))}
-                    </>
-                  )}
-                </section>
-              )
-              /* карточка скрыта, пока есть открытые задачи или встречи — не показываем её и в «спрятанных» */
-              if (id === 'empty') {
-                if (!nothingToDo) return null
-                return (
-                  <section key="empty" className="c p2 s6 r" style={st}>{ctl}
-                    <div className="hd"><h2>{t('tk.list_empty')}</h2><small></small></div>
-                    <p className="emp">{t('tk.rest_hint')}</p>
-                    <button type="button" className="chip" onClick={() => addQuickDirect(t('tk.buy_milk'))}>{t('tk.buy_milk_hint')} ↗</button>
-                  </section>
-                )
-              }
-              return (
-                <section key="sort" className="c p1 s4 r" style={st}>{ctl}
-                  <div className="hd"><h2>{t('tk.sort')}</h2><small></small></div>
-                  <div className="sg">
-                    <button type="button" className={tasksSort === 'priority' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'priority' })}>{t('tk.by_priority')}</button>
-                    <button type="button" className={tasksSort === 'due' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'due' })}>{t('tk.by_due')}</button>
-                    <button type="button" className={tasksSort === 'new' ? 'on' : ''} onClick={() => PREFS.set({ tasksSort: 'new' })}>{t('tk.by_new')}</button>
-                  </div>
-                </section>
-              )
-            })}
-            {cardsEdit && cardOrder.length < CARDS.length && (
-              <section className="c s12 r" style={{ '--i': 8 }}>
-                <div className="hd"><h2>{t('tk.hidden_cards')}</h2><small>{CARDS.length - cardOrder.length}</small></div>
-                <div className="flex flex-wrap gap-2">
-                  {CARDS.filter((x) => !cardOrder.includes(x)).map((x) => (
-                    <button key={x} className="btn-soft btn-sm" onClick={() => setCardOrder((o) => [...o, x])}>+ {t(CARD_TITLES[x])}</button>
-                  ))}
-                  <button className="btn-ghost btn-sm" onClick={resetCards}>{t('tk.restore_all')}</button>
+          {/* Quick add — one line, your own words */}
+          {blockOrder.includes('tools') && (
+            <section className="relative">
+              {ctl('tools')}
+              <div className={cardsEdit ? 'pt-8' : ''}>
+                <div className="comp">
+                  <i aria-hidden="true" />
+                  <input
+                    className="ph0"
+                    aria-label={t('tk.quick_ph')}
+                    value={quick}
+                    onChange={(e) => setQuick(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && addQuick(e)}
+                    placeholder={t('tk.quick_ph')}
+                    style={{ background: 'transparent', border: 0, outline: 'none', flex: '1 1 auto', minWidth: 0, color: 'var(--ink)' }}
+                  />
+                  <button
+                    type="button"
+                    className="send"
+                    onClick={addQuick}
+                    aria-label={`${t('common.add')} ${t('tk.task')}`}
+                    title={`${t('common.add')} ${t('tk.task')}`}
+                    data-tip={`${t('common.add')} ${t('tk.task')}`}
+                  >
+                    <Plus size={20} strokeWidth={2.4} aria-hidden="true" />
+                  </button>
                 </div>
-              </section>
-            )}
-          </div>
+
+                {/* Search: a calm input, not a toolbar */}
+                <div
+                  className="input mt-3 flex items-center gap-2.5 focus-within:!border-[var(--accent)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
+                  style={{ paddingLeft: 14, paddingRight: 6 }}
+                >
+                  <SearchIcon size={16} className="faint shrink-0" aria-hidden="true" />
+                  <input
+                    className="min-w-0 flex-1"
+                    aria-label={t('common.search')}
+                    value={q}
+                    onChange={(e) => setQ(e.target.value)}
+                    placeholder={t('tk.search_ph')}
+                    style={{ background: 'transparent', border: 0, outline: 'none', font: 'inherit', color: 'var(--ink)' }}
+                  />
+                  {q && (
+                    <button
+                      type="button"
+                      className="btn-icon shrink-0"
+                      onClick={() => setQ('')}
+                      aria-label={t('tk.clear_search')}
+                      title={t('tk.clear_search')}
+                    >
+                      <X size={15} />
+                    </button>
+                  )}
+                </div>
+
+                {projects.length > 0 && (
+                  <div className="cluster mt-3" role="group" aria-label={t('task.project')}>
+                    <span className="label">{t('task.project')}</span>
+                    <button
+                      type="button"
+                      className={`pill ${!proj ? 'on' : ''}`}
+                      aria-pressed={!proj}
+                      style={PILL}
+                      onClick={() => setProj('')}
+                    >
+                      {t('common.all')}
+                    </button>
+                    {projects.map((p) => (
+                      <button
+                        key={p}
+                        type="button"
+                        className={`pill ${proj === p ? 'on' : ''}`}
+                        aria-pressed={proj === p}
+                        style={{ ...PILL, maxWidth: '46vw' }}
+                        title={p}
+                        onClick={() => setProj(proj === p ? '' : p)}
+                      >
+                        <span className="trunc">{p}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {filtering && (
+                  <div className="cluster mt-3">
+                    <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('tk.filter_local', { n: currentList.length })}</span>
+                    <button type="button" className="btn-ghost btn-sm" onClick={resetFilters}>{t('tk.reset_search')}</button>
+                  </div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* The list: rows on the page background, hairline rules, cascade on arrival */}
+          {blockOrder.includes('list') && (
+            <section className="relative mt-7">
+              {ctl('list')}
+              <div
+                className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"
+                style={cardsEdit ? { paddingRight: 128 } : undefined}
+              >
+                <div className="min-w-0">
+                  <h2 className="h3">{t(VIEW_TITLE[view] || 'tk.open')}</h2>
+                  <p className="muted" style={{ fontSize: 'var(--fs-xs)', marginTop: 2 }}>{t('tk.hint')}</p>
+                </div>
+                <div className="seg" role="group" aria-label={t('tk.sort')}>
+                  {SORTS.map(([v, key]) => (
+                    <button
+                      key={v}
+                      type="button"
+                      className={tasksSort === v ? 'on' : ''}
+                      aria-pressed={tasksSort === v}
+                      style={SEG_BTN}
+                      onClick={() => PREFS.set({ tasksSort: v })}
+                    >
+                      {t(key)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="rule" style={{ marginTop: 'var(--s-3)' }} />
+
+              {tasks === null ? (
+                <ListSkeleton n={6} rowH={66} className="mt-2" />
+              ) : currentList.length === 0 ? (
+                <Empty glyph={empty.glyph} text={empty.text} sub={empty.sub} hint={empty.hint} onHint={empty.onHint} action={empty.action} />
+              ) : (
+                <div className="stagger">
+                  {currentList.map((task) => (
+                    <Swipe
+                      key={task.id}
+                      onRight={task.done ? undefined : () => toggle(task)}
+                      onLeft={() => openTask(task)}
+                      leftLabel={t('common.edit')}
+                      rightLabel={t('common.done')}
+                      leftIcon={<Pencil size={18} strokeWidth={2.2} aria-hidden="true" />}
+                    >
+                      <div
+                        className={`rowi ck ${leaveCls(task.id)} ${arriveCls(task.id)} ${task.done ? 'is-done' : ''}`}
+                        style={{ alignItems: 'flex-start' }}
+                      >
+                        {/* big checkbox: the label is the touch target, the circle is 22–26px */}
+                        <label className="ck shrink-0" style={{ display: 'grid', placeItems: 'center', width: 'var(--tap)', height: 'var(--tap)', marginLeft: -10 }}>
+                          <input
+                            type="checkbox"
+                            checked={!!task.done}
+                            onChange={() => toggle(task)}
+                            aria-label={task.done ? t('od.back_to_work') : t('tk.close_task')}
+                          />
+                        </label>
+
+                        {/* The title takes the whole middle column and wraps freely; the meta
+                            (priority, time, project) goes under it — on a narrow screen a
+                            long name must not squeeze the row into a tall narrow column. */}
+                        <div className="min-w-0 flex-1">
+                          <button
+                            type="button"
+                            className="t"
+                            onClick={() => openTask(task)}
+                            title={task.title}
+                            style={{
+                              display: 'block',
+                              width: '100%',
+                              minHeight: 'var(--tap)',
+                              padding: '2px 0',
+                              textAlign: 'left',
+                              overflowWrap: 'anywhere',
+                              background: 'transparent',
+                              border: 0,
+                              font: 'inherit',
+                              color: 'inherit',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {task.title}
+                            {task.kind === 'event' ? (
+                              <small>{t('tk.event')}</small>
+                            ) : (task.sub || task.category) ? (
+                              <small>{task.sub || task.category}</small>
+                            ) : null}
+                          </button>
+
+                          <div className="cluster" style={{ marginTop: 4, gap: 6 }}>
+                            {task.kind === 'event'
+                              ? <span className="badge shrink-0">{t('tk.event')}</span>
+                              : <PriorityCell value={task.priority} onChange={(p) => setPriority(task, p)} />}
+
+                            {task.due && !isAllDay(task.due) && <time className="shrink-0">{hhmm(task.due)}</time>}
+
+                            {task.project && (
+                              <span className="badge shrink-0" style={{ maxWidth: '42vw' }} title={task.project}>
+                                <span className="trunc">{task.project}</span>
+                              </span>
+                            )}
+                          </div>
+                        </div>
+
+                        <button
+                          type="button"
+                          className="row-open"
+                          onClick={() => openTask(task)}
+                          aria-label={task.kind === 'event' ? t('tk.open_cal') : t('tk.edit_task')}
+                          title={task.kind === 'event' ? t('tk.in_cal') : t('tk.edit_task')}
+                        >
+                          <ChevronRight size={16} aria-hidden="true" />
+                        </button>
+                      </div>
+                    </Swipe>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {cardsEdit && blockOrder.length < BLOCKS.length && (
+            <section className="relative mt-7">
+              <h2 className="h4">{t('tk.hidden_cards')}</h2>
+              <div className="cluster mt-2">
+                {BLOCKS.filter((x) => !blockOrder.includes(x)).map((x) => (
+                  <button key={x} type="button" className="btn-soft btn-sm" onClick={() => setBlockOrder((o) => [...o, x])}>
+                    + {t(BLOCK_TITLES[x])}
+                  </button>
+                ))}
+                <button type="button" className="btn-ghost btn-sm" onClick={resetBlocks}>{t('tk.restore_all')}</button>
+              </div>
+            </section>
+          )}
         </>
       )}
 
-      <TaskSheet open={!!sheet} task={sheet === 'new' ? null : sheet} onClose={() => setSheet(null)}
-        onDone={(msg) => { setSheet(null); load(); bump(); if (msg) show(msg) }} onErr={show.err} />
+      <TaskSheet
+        open={!!sheet}
+        task={sheet === 'new' ? null : sheet}
+        onClose={() => setSheet(null)}
+        onDone={(msg) => { setSheet(null); load(); bump(); if (msg) show(msg) }}
+        onErr={show.err}
+      />
     </div>
   )
 }

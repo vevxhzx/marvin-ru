@@ -1,17 +1,34 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
-import { Sheet, Field, DateTimeField, useToast, PageAccent, ListSkeleton } from '../components/ui'
+import { Sheet, Field, DateTimeField, Empty, useToast, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
-import { Plus, Check, ChevronLeft, ChevronRight, Calendar as CalIcon } from 'lucide-react'
+import { Plus, Check, ChevronLeft } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
+import { usePhone } from '../lib/motion'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 
-/* Короткие и полные дни недели — из Intl (lib/api.js WD_SHORT_MON, dayLabel) */
+/* pages/Calendar.jsx — «Календарь» as an editorial hierarchy:
+
+     big headline + the one primary action (.top)
+     a calm control bar under it: месяц/неделя · ‹ сегодня ›   (--tap targets)
+     month: the grid on the page background — it scrolls horizontally INSIDE its card,
+            never the page; the selected day stays in the card footer
+     week: seven day columns, events as readable rows, today softly lime («ок»)
+     day + upcoming: rows with date, time and what the event is tied to
+
+   Grid columns keep their deliberately uneven widths (month card wide, day panel
+   narrow) — the user can still cycle them in the «настроить» mode, and the layout
+   lives under the same localStorage key as before. */
 
 /* Карточки сетки календаря: порядок и ширина меняются в режиме «настроить» */
 const CAL_CARDS = ['month', 'day', 'week', 'upcoming']
 const CAL_WIDTHS = { month: 8, day: 4, week: 12, upcoming: 12 }
+
+/* Зоны нажатия и ширины — из токенов */
+const SEG_BTN = { minHeight: 'var(--tap)', padding: '0 16px' }
+const NAV_BTN = { minHeight: 'var(--tap)', minWidth: 'var(--tap)', padding: '0 14px' }
+const MONTH_MIN_W = 420          // клетки месяца не сжимаются ниже ~56px — листается бок
 
 export function EventSheet({ open, ev, day, onClose, onDone }) {
   const { t } = useI18n()
@@ -102,20 +119,18 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             {kindChip && <span className={`chip ${kindChip.cls}`}>{kindChip.txt}</span>}
-            {ev.done && <span className="chip !bg-[var(--pos)] !text-white">{t('tk.done')}</span>}
+            {ev.done && <span className="badge pos">{t('tk.done')}</span>}
           </div>
-          <div className="text-[18px] font-semibold">{ev?.title}</div>
-          <div className="text-sm text-[var(--ink2)] num">
+          <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 600, letterSpacing: '-0.03em', overflowWrap: 'anywhere' }}>{ev?.title}</div>
+          <div className="muted num" style={{ fontSize: 'var(--fs-md)' }}>
             {fullDate(ev?.start)} {ev?.start ? hhmm(ev.start) : ''}
           </div>
-          <p className="text-sm text-[var(--ink3)]">
-            {ev?.kind === 'order'
-              ? t('cal.order_help')
-              : t('cal.task_help')}
+          <p className="faint" style={{ fontSize: 'var(--fs-md)', lineHeight: 'var(--lh-body)' }}>
+            {ev?.kind === 'order' ? t('cal.order_help') : t('cal.task_help')}
           </p>
-          <div className="flex justify-end gap-2 pt-2">
-            <button type="button" className="btn g" onClick={onClose}>{t('common.close')}</button>
-            <button type="button" className="btn" disabled={saving} onClick={toggleDone}>
+          <div className="flex flex-wrap justify-end gap-2 pt-1">
+            <button type="button" className="btn-ghost" onClick={onClose}>{t('common.close')}</button>
+            <button type="button" className="btn-primary" disabled={saving} onClick={toggleDone}>
               {t(ev.done ? 'od.back_to_work' : ev?.kind === 'order' ? 'cal.order_done' : 'cal.task_done')}
             </button>
           </div>
@@ -128,19 +143,27 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
     <Sheet open={open} onClose={onClose} title={t(isNew ? 'cal.new_event' : ev.done ? 'cal.event_done' : 'cal.edit_event')}>
       <form onSubmit={save} className="space-y-4">
         <Field label={t('cal.title')}>
-          <input className="input" autoFocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('cal.title_ph')} />
+          <input
+            className="input"
+            autoFocus
+            required
+            style={{ minHeight: 'var(--tap-lg)', fontSize: 'var(--fs-lg)', fontWeight: 500 }}
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            placeholder={t('cal.title_ph')}
+          />
         </Field>
         <Field label={t('cal.date_time')}>
-          <DateTimeField value={start} onChange={setStart} />
+          <DateTimeField value={start} onChange={setStart} className="!min-h-[var(--tap-lg)]" />
         </Field>
         <Field label={t('cal.place')}>
           <input className="input" value={location} onChange={(e) => setLocation(e.target.value)} placeholder={t('cal.place_ph')} />
         </Field>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <Field label={t('cal.link_task')} hint={t('cal.link_task_hint')}>
             <select className="input" value={taskId} onChange={(e) => setTaskId(e.target.value)}>
               <option value="">{t('cal.not_link')}</option>
-              {tasks.map((t) => <option key={t.id} value={t.id}>{t.done ? '✓ ' : ''}{t.title}</option>)}
+              {tasks.map((tk) => <option key={tk.id} value={tk.id}>{tk.done ? '✓ ' : ''}{tk.title}</option>)}
             </select>
           </Field>
           <Field label={t('cal.link_order')} hint={t('cal.link_order_hint')}>
@@ -150,18 +173,18 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
             </select>
           </Field>
         </div>
-        <div className="flex items-center justify-between gap-2 pt-4">
+        <div className="flex flex-wrap items-center justify-between gap-2 pt-3">
           {!isNew ? (
-            <button type="button" className="btn g !text-[var(--neg)]" onClick={remove}>{t('common.delete')}</button>
+            <button type="button" className="btn-ghost" style={{ color: 'var(--neg)' }} onClick={remove}>{t('common.delete')}</button>
           ) : <span />}
           <div className="flex gap-2">
             {!isNew && (
-              <button type="button" className={`btn ${ev.done ? 'g' : ''}`} disabled={saving} onClick={toggleDone}>
+              <button type="button" className="btn-ghost" disabled={saving} onClick={toggleDone}>
                 {t(ev.done ? 'cal.reopen' : 'cal.finish')}
               </button>
             )}
-            <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
-            <button type="submit" className="btn" disabled={saving || !title.trim()}>{t(saving ? 'people.saving' : 'common.save')}</button>
+            <button type="button" className="btn-soft" onClick={onClose}>{t('common.cancel')}</button>
+            <button type="submit" className="btn-primary" disabled={saving || !title.trim()}>{t(saving ? 'people.saving' : 'common.save')}</button>
           </div>
         </div>
       </form>
@@ -180,7 +203,7 @@ export function EvCheck({ ev, onToggle, small }) {
       aria-label={t(ev.done ? 'od.back_to_work' : 'cal.finish')}
       title={t(ev.done ? 'od.back_to_work' : 'cal.finish')}
     >
-      <Check size={small ? 9 : 12} strokeWidth={3} />
+      <Check size={small ? 9 : 12} strokeWidth={3} aria-hidden="true" />
     </button>
   )
 }
@@ -219,6 +242,9 @@ export default function Calendar() {
   const { tick, bump } = useRefresh()
   const [, show] = useToast()
 
+  /* телефонная раскладка: колонки недели по высоте содержимого, на ПК — одной высоты */
+  const phone = usePhone()
+
   const range = useMemo(() => {
     const start = new Date(cursor)
     start.setDate(1 - ((cursor.getDay() + 6) % 7) - 14)
@@ -231,7 +257,7 @@ export default function Calendar() {
   useEffect(() => { load() }, [range, tick])
   // справочники для привязок «встреча → задача/заказ»: тянем один раз
   useEffect(() => {
-    api.tasks(true, false).then((l) => setLinkTasks((l || []).filter((t) => t.kind !== 'event'))).catch(() => {})
+    api.tasks(true, false).then((l) => setLinkTasks((l || []).filter((tk) => tk.kind !== 'event'))).catch(() => {})
     api.orders(true).then((l) => setLinkOrders(l || [])).catch(() => {})
   }, [])
 
@@ -337,6 +363,10 @@ export default function Calendar() {
   const dayEvents = (events || []).filter((e) => isSameDay(new Date(e.start), selected)).sort((a, b) => new Date(a.start) - new Date(b.start))
   const upcomingAll = (events || []).filter((e) => new Date(e.start) > today)
   const upcoming = [...upcomingAll].sort((a, b) => new Date(a.start) - new Date(b.start)).slice(0, 6)
+  const monthCount = (events || []).filter((e) => {
+    const d = new Date(e.start)
+    return d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear()
+  }).length
 
   /** Ячейки, которые реально нарисованы в сетке месяца (35 или 42 дня) */
   const gridCells = cells.slice(0, cells[35]?.isOut ? 35 : 42)
@@ -380,6 +410,18 @@ export default function Calendar() {
     }
   }
 
+  /* Один день вперёд/назад: двигаем выбранный день и, если месяц сменился, курсор —
+     тогда же перезагрузится диапазон событий. */
+  const shiftDay = (n) => {
+    const d = new Date(selected)
+    d.setDate(d.getDate() + n)
+    setSelected(d)
+    const c = new Date(d)
+    c.setDate(1)
+    c.setHours(0, 0, 0, 0)
+    setCursor(c)
+  }
+
   const goToday = () => {
     const d = new Date()
     setSelected(d)
@@ -389,125 +431,218 @@ export default function Calendar() {
     setCursor(c)
   }
 
+  /* Клавиатура страницы: T — сегодня, ←/→ — день. Внутри сетки стрелки шагают по дням
+     (обработчик дня вызывает preventDefault), в полях и шторках — не мешаем. */
+  useEffect(() => {
+    const onKey = (e) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey) return
+      const el = e.target
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      if (document.querySelector('.sheet-backdrop')) return
+      if (el?.closest?.('[data-day]')) return
+      if (e.key === 'ArrowLeft') { e.preventDefault(); shiftDay(-1); return }
+      if (e.key === 'ArrowRight') { e.preventDefault(); shiftDay(1); return }
+      // 't' и та же клавиша в русской раскладке — это про раскладку, не текст   // i18n-raw
+      const k = String(e.key).toLowerCase()
+      if (k === 't' || k === 'е') { e.preventDefault(); goToday() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [selected]) // eslint-disable-line
+
+  /* Подписи «‹» и «›»: месяц или неделя, к которым они ведут, — без новых ключей */
+  const shiftLabel = (n) => {
+    if (view === 'week') return t('cal.week')
+    const d = new Date(cursor)
+    d.setMonth(d.getMonth() + n)
+    return `${MONTHS_GEN[d.getMonth()]} ${d.getFullYear()}`
+  }
+
+  const headTitle = view === 'week'
+    ? t('cal.week_of', { d: selected.getDate(), m: MONTHS_GEN[selected.getMonth()] })
+    : MONTHS_NOM[cursor.getMonth()].toLowerCase()
+  const weekRange = useMemo(() => {
+    const a = weekDays[0]?.date
+    const b = weekDays[6]?.date
+    if (!a || !b) return ''
+    return `${a.getDate()}–${b.getDate()} ${MONTHS_GEN[b.getMonth()]} ${b.getFullYear()}`
+  }, [weekDays])
+
   return (
     <div className="pg on" id="p-cal" style={pageAcc.style}>
-      {/* Шапка календаря */}
-      <div className="top">
-        <div>
-          <h1 className="r" style={{ '--i': 0 }}>
-            {view === 'week' ? t('cal.week_of', { d: selected.getDate(), m: MONTHS_GEN[selected.getMonth()] }) : MONTHS_NOM[cursor.getMonth()].toLowerCase()}
-          </h1>
-          <p className="sub r" style={{ '--i': 1 }}>{cursor.getFullYear()}</p>
+      {/* Header: headline + primary action, and a calm control bar under it.
+          The bar keeps .sg groups inside .top — e2e walks them («‹» / «сегодня» / «›»). */}
+      <header className="top">
+        <div className="min-w-0 flex-1">
+          <h1 className="r" style={{ '--i': 0 }}>{headTitle}</h1>
+          <p className="sub r" style={{ '--i': 1 }}>{view === 'week' ? weekRange : cursor.getFullYear()}</p>
         </div>
-        <div className="hr r" style={{ '--i': 1 }}>
-          <div className="sg">
-            <button type="button" className={view === 'month' ? 'on' : ''} onClick={() => setView('month')}>{t('cal.month')}</button>
-            <button type="button" className={view === 'week' ? 'on' : ''} onClick={() => setView('week')}>{t('cal.week')}</button>
-          </div>
-          <div className="sg">
-            <span onClick={() => shiftTime(-1)}>‹</span>
-            <span onClick={goToday}>{t('common.today')}</span>
-            <span onClick={() => shiftTime(1)}>›</span>
-          </div>
-          <button type="button" className="btn" onClick={() => setSheet('new')}>+ {t('cal.event')}</button>
+        <div className="hr head-actions r" style={{ '--i': 1 }}>
           {shown.length > 1 && (
-            <button type="button" className="btn-soft btn-sm" onClick={() => setCardsEdit((v) => !v)}
-              title={t('tk.layout_tip')}>{t('tk.layout')}</button>
+            <button
+              type="button"
+              className="btn-ghost btn-sm"
+              onClick={() => setCardsEdit((v) => !v)}
+              title={t('tk.layout_tip')}
+              aria-pressed={cardsEdit}
+            >
+              {t('tk.layout')}
+            </button>
           )}
+          <button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>
+            + {t('cal.event')}
+          </button>
         </div>
-      </div>
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
+          <div className="sg" role="group" aria-label={t('nav.calendar')}>
+            <button
+              type="button"
+              className={view === 'month' ? 'on' : ''}
+              aria-pressed={view === 'month'}
+              style={SEG_BTN}
+              onClick={() => setView('month')}
+            >
+              {t('cal.month')}
+            </button>
+            <button
+              type="button"
+              className={view === 'week' ? 'on' : ''}
+              aria-pressed={view === 'week'}
+              style={SEG_BTN}
+              onClick={() => setView('week')}
+            >
+              {t('cal.week')}
+            </button>
+          </div>
+          <div className="sg" role="group" aria-label={t('cal.week_plan')}>
+            <button type="button" onClick={() => shiftTime(-1)} aria-label={shiftLabel(-1)} title={shiftLabel(-1)} style={NAV_BTN}>
+              <span aria-hidden="true">‹</span>
+            </button>
+            <button type="button" onClick={goToday} aria-label={t('common.today')} title={t('common.today')} style={{ ...NAV_BTN, paddingInline: 16 }}>
+              <span>{t('common.today')}</span>
+            </button>
+            <button type="button" onClick={() => shiftTime(1)} aria-label={shiftLabel(1)} title={shiftLabel(1)} style={NAV_BTN}>
+              <span aria-hidden="true">›</span>
+            </button>
+          </div>
+        </div>
+      </header>
 
       {/* Bento сетка календаря */}
       <div className="bento">
         {/* Вид «Месяц» */}
         {view === 'month' && (
           <>
-            <section className="c s8 r flex flex-col" style={{ '--i': 2, minHeight: '560px', ...cardSt('month') }}>
+            <section className="c s8 r flex flex-col" style={{ '--i': 3, minHeight: '560px', ...cardSt('month') }}>
               {cardCtl('month')}
-              <div className="cal2" id="cal2">
-                <div className="cal2-head">
-                  {WD_SHORT.slice(1).concat(WD_SHORT[0]).join(' ').split(' ').map((w) => (
-                    <span className="mono font-semibold" key={w}>{w}</span>
-                  ))}
-                </div>
-                <div className="cal2-grid">
-                  {gridCells.map((c, i) => (
-                    <b
-                      key={c.key}
-                      data-day={i}
-                      tabIndex={0}
-                      role="button"
-                      aria-current={c.isToday ? 'date' : undefined}
-                      aria-label={`${c.num}, ${c.events.length ? c.events.map((e) => e.title).join(', ') : t('cal.no_events')}`}
-                      className={`${c.isOut ? 'o' : ''} ${c.isToday ? 't' : ''} ${c.isSel && !c.isToday ? 'is-sel' : ''}`}
-                      style={{ '--k': c.key }}
-                      onClick={() => setSelected(c.date)}
-                      onKeyDown={(e) => dayKeyDown(e, i)}
-                    >
-                      <div className="flex items-center justify-between w-full">
-                        <span className="day-num">{c.num}</span>
-                        {c.dotsCount > 0 && !c.isToday && (
-                          <span className="w-1.5 h-1.5 rounded-full bg-[var(--acc)]"></span>
-                        )}
-                      </div>
-                      {c.events && c.events.length > 0 && (
-                        <div className="day-evs">
-                          {c.events.slice(0, 2).map((ev, evIdx) => (
-                            <span key={ev.id || evIdx} className={`ev-pill ${ev.kind === 'order' ? 'y' : ''} ${ev.done ? 'done' : ''}`}>
-                              {ev.done ? '✓ ' : ''}{ev.title}
-                            </span>
-                          ))}
-                          {c.events.length > 2 && (
-                            <span className="text-[10px] text-[var(--ink3)] font-medium pl-1">
-                              +{c.events.length - 2} ещё
-                            </span>
+              <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
+                <h2 className="h3">{MONTHS_GEN[cursor.getMonth()]} {cursor.getFullYear()}</h2>
+                <small>{t('cal.events_n', { count: monthCount })}</small>
+              </div>
+              {/* Сетка едет вбок внутри карточки: страница не прокручивается по горизонтали,
+                  колонки остаются читаемыми (minWidth), а резина гасится контейнером. */}
+              <div
+                style={{
+                  overflowX: 'auto',
+                  overscrollBehaviorX: 'contain',
+                  WebkitOverflowScrolling: 'touch',
+                  marginInline: -6,
+                  paddingInline: 6,
+                  paddingBottom: 4,
+                }}
+              >
+                <div className="cal2" id="cal2" style={{ minWidth: MONTH_MIN_W }}>
+                  <div className="cal2-head">
+                    {WD_SHORT.slice(1).concat(WD_SHORT[0]).map((w, i) => (
+                      <span className="mono" key={`${w}-${i}`} style={{ minWidth: 0 }}>{w}</span>
+                    ))}
+                  </div>
+                  <div className="cal2-grid">
+                    {gridCells.map((c, i) => (
+                      <b
+                        key={c.key}
+                        data-day={i}
+                        tabIndex={0}
+                        role="button"
+                        aria-current={c.isToday ? 'date' : undefined}
+                        aria-label={`${c.num}, ${c.events.length ? c.events.map((e) => e.title).join(', ') : t('cal.no_events')}`}
+                        className={`${c.isOut ? 'o' : ''} ${c.isToday ? 't' : ''} ${c.isSel && !c.isToday ? 'is-sel' : ''}`}
+                        style={{ '--k': c.key, minWidth: 0 }}
+                        onClick={() => setSelected(c.date)}
+                        onKeyDown={(e) => dayKeyDown(e, i)}
+                      >
+                        <div className="flex w-full items-center justify-between">
+                          <span className="day-num">{c.num}</span>
+                          {c.dotsCount > 0 && !c.isToday && (
+                            <em aria-hidden="true">
+                              {c.events.slice(0, 3).map((ev, k) => (
+                                <i key={k} className={ev.kind === 'order' ? 'y' : ''} />
+                              ))}
+                            </em>
                           )}
                         </div>
-                      )}
-                    </b>
-                  ))}
+                        {c.events.length > 0 && (
+                          <div className="day-evs">
+                            {c.events.slice(0, 2).map((ev, evIdx) => (
+                              <span key={ev.id || evIdx} className={`ev-pill ${ev.kind === 'order' ? 'y' : ''} ${ev.done ? 'done' : ''}`}>
+                                {ev.done ? '✓ ' : ''}{ev.title}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </b>
+                    ))}
+                  </div>
                 </div>
               </div>
-              <div className="mt-auto pt-3.5 border-t border-[var(--line)] flex items-center justify-between text-xs text-[var(--ink2)]">
-                <div className="flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[var(--acc)] shadow-[0_0_8px_var(--acc)]"></span>
-                  <span>{t('cal.selected')}: <strong className="text-[var(--ink)] font-semibold">{dayLabel(selected)}, {selected.getDate()} {MONTHS_GEN[selected.getMonth()]}</strong></span>
+              {/* Выбранный день и его счётчик — в подвале карточки */}
+              <div className="rule mt-auto flex flex-wrap items-center justify-between gap-3" style={{ marginTop: 'var(--s-3)', paddingTop: 'var(--s-3)' }}>
+                <div className="min-w-0">
+                  <div className="trunc" style={{ fontSize: 'var(--fs-base)' }}>
+                    {dayLabel(selected)}, {selected.getDate()} {MONTHS_GEN[selected.getMonth()]}
+                  </div>
+                  <div className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('cal.events_n', { count: dayEvents.length })}</div>
                 </div>
-                <div className="flex items-center gap-3">
-                  <span className="mono text-[var(--ink3)]">{t('cal.events_n', { count: dayEvents.length })}</span>
-                  <button type="button" className="btn g !h-7 !px-3 !text-xs" onClick={() => setSheet('new')}>
-                    <Plus size={12} /> {t('common.add')}
-                  </button>
-                </div>
+                <button type="button" className="btn-soft btn-sm shrink-0" onClick={() => setSheet('new')}>
+                  <Plus size={14} strokeWidth={2.4} aria-hidden="true" /> {t('cal.add_event')}
+                </button>
               </div>
             </section>
 
-            <section className="c s4 r flex flex-col" style={{ '--i': 3, minHeight: '560px', ...cardSt('day') }}>
+            <section className="c s4 r flex flex-col" style={{ '--i': 4, minHeight: '560px', ...cardSt('day') }}>
               {cardCtl('day')}
-              <div className="hd">
+              <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2>{isSameDay(selected, today) ? t('common.today') : dayLabel(selected)}</h2>
                 <small>{shortDate(selected)} · {t('cal.events_n', { count: dayEvents.length })}</small>
               </div>
-              <div className="flex-1 overflow-y-auto pr-1 space-y-1">
+              <div className="flex-1 overflow-y-auto" style={{ overscrollBehavior: 'contain', paddingRight: 2 }}>
                 {!loaded ? (
-                  <ListSkeleton n={4} />
+                  <ListSkeleton n={4} rowH={58} />
                 ) : dayEvents.length === 0 ? (
-                  <div className="py-12 text-center text-sm text-[var(--ink3)] flex flex-col items-center justify-center gap-2">
-                    <span>{t('cal.day_empty')}</span>
-                    <button type="button" className="btn g !h-8 !px-3.5 !text-xs mt-2" onClick={() => setSheet('new')}>
-                      <Plus size={13} /> {t('cal.add_event')}
-                    </button>
-                  </div>
+                  <Empty
+                    compact
+                    glyph="calendar"
+                    text={t('cal.e_day')}
+                    sub={t('cal.e_day_sub')}
+                    action={<button type="button" className="btn-soft btn-sm" onClick={() => setSheet('new')}>{t('cal.add_event')}</button>}
+                  />
                 ) : (
                   dayEvents.map((e) => (
                     <div
-                      className={`rowi hover:bg-[var(--sf2)] !rounded-xl !px-2.5 transition ${e.done ? 'is-done' : ''}`}
+                      className={`rowi ${e.done ? 'is-done' : ''}`}
                       key={e.id}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => setSheet(e)}
-                      style={{ cursor: 'pointer' }}
+                      onKeyDown={(k) => {
+                        if (k.target !== k.currentTarget) return   // EvCheck handles itself
+                        if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); setSheet(e) }
+                      }}
+                      style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}
                     >
                       <EvCheck ev={e} onToggle={toggleDone} />
-                      <time className="text-[var(--acc)] font-medium">{hhmm(e.start)}</time>
+                      <time style={{ color: 'var(--acc)', fontWeight: 500 }}>{hhmm(e.start)}</time>
                       <span className="t">
                         {e.title}
                         {(evSub(e, linkTasks, linkOrders) || e.sub) && <small>{evSub(e, linkTasks, linkOrders) || e.sub}</small>}
@@ -522,94 +657,136 @@ export default function Calendar() {
 
         {/* Вид «Неделя» */}
         {view === 'week' && (
-          <section className="c s12 r" style={{ '--i': 2, ...cardSt('week') }}>
+          <section className="c s12 r" style={{ '--i': 3, ...cardSt('week') }}>
             {cardCtl('week')}
-            <div className="hd">
-              <h2>{t('cal.week_plan')}</h2>
+            <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
+              <h2 className="h3">{t('cal.week_plan')}</h2>
               <small>{t('cal.week_hint')}</small>
             </div>
-            {/* на телефоне неделя листается вбок (7 колонок в ряд), на ПК — как обычно */}
-            <div className="flex gap-3 mt-4 overflow-x-auto -mx-1 px-1 pb-1 md:mx-0 md:px-0 md:pb-0 md:overflow-visible md:grid md:grid-cols-7">
-              {weekDays.map((dayItem) => {
-                const isCurrent = dayItem.isToday
-                const isPicked = dayItem.isSel
-                return (
-                  <div
-                    key={dayItem.key}
-                    onClick={() => setSelected(dayItem.date)}
-                    className={`w-[200px] shrink-0 md:w-auto md:shrink rounded-2xl p-3 border transition cursor-pointer flex flex-col min-h-[140px] ${
-                      isPicked
-                        ? 'border-[var(--acc)] bg-[var(--sf2)] shadow-sm'
-                        : isCurrent
-                        ? 'border-[var(--acc)]/40 bg-[var(--sf)]'
-                        : 'border-[var(--line)] bg-[var(--sf)] hover:border-[var(--ink3)]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-xs uppercase font-medium text-[var(--ink2)]">{dayItem.name}</span>
-                      <span
-                        className={`text-sm font-semibold rounded-full w-6 h-6 flex items-center justify-center ${
-                          isCurrent ? 'bg-[var(--acc)] text-white' : ''
-                        }`}
-                      >
-                        {dayItem.num}
-                      </span>
-                    </div>
-
-                    <div className="flex-1 space-y-1.5 mt-1 overflow-hidden">
-                      {dayItem.events.length === 0 ? (
-                        <span className="text-[11px] text-[var(--ink3)] italic opacity-60">{t('run.free')}</span>
-                      ) : (
-                        dayItem.events.map((ev) => (
-                          <div
-                            key={ev.id}
-                            onClick={(e) => { e.stopPropagation(); setSheet(ev) }}
-                            className={`p-1.5 rounded-lg text-xs border hover:scale-[1.02] transition ${
-                              ev.done ? 'border-[var(--pos)]/50 bg-[var(--sf2)] opacity-70' : 'border-[var(--line)] bg-[var(--sf2)]'
-                            }`}
-                            title={ev.title}
-                          >
-                            <div className="flex items-start gap-1.5">
-                              <EvCheck small ev={ev} onToggle={toggleDone} />
-                              <div className="min-w-0 flex-1">
-                                <span className="mono text-[10px] text-[var(--ink3)] block">{hhmm(ev.start)}</span>
-                                <span className={`font-medium truncate block ${ev.done ? 'line-through' : ''}`}>{ev.title}</span>
-                              </div>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
+            {/* На телефоне неделя листается вбок внутри карточки (снап, без резины),
+                на ПК — семь равных колонок. */}
+            <div
+              className="mt-4 flex gap-3 md:grid md:grid-cols-7 md:gap-3"
+              style={{
+                overflowX: 'auto',
+                overscrollBehaviorX: 'contain',
+                WebkitOverflowScrolling: 'touch',
+                scrollSnapType: 'x proximity',
+                paddingBottom: 4,
+                /* колонки по высоте contents: пустой день не растягивается под соседний */
+                alignItems: phone ? 'flex-start' : 'stretch',
+              }}
+            >
+              {weekDays.map((dayItem) => (
+                <div
+                  key={dayItem.key}
+                  onClick={() => setSelected(dayItem.date)}
+                  role="button"
+                  tabIndex={0}
+                  aria-pressed={dayItem.isSel}
+                  onKeyDown={(k) => { if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); setSelected(dayItem.date) } }}
+                  className={`flex shrink-0 flex-col rounded-2xl p-3 md:shrink ${dayItem.isToday ? 'tint-ok' : ''}`}
+                  style={{
+                    /* на телефоне колонка фиксированной ширины и листается; на ПК её задаёт сетка */
+                    width: phone ? 176 : undefined,
+                    minWidth: phone ? 176 : 0,
+                    minHeight: '148px',
+                    scrollSnapAlign: 'start',
+                    background: dayItem.isToday ? undefined : 'var(--sf)',
+                    border: dayItem.isToday ? undefined : '1px solid var(--line)',
+                    boxShadow: dayItem.isSel ? 'inset 0 0 0 1.5px var(--acc)' : undefined,
+                  }}
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <span className="mono" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{dayItem.name}</span>
+                    <span
+                      className="num grid h-7 w-7 shrink-0 place-items-center rounded-full"
+                      style={{
+                        fontSize: 'var(--fs-md)',
+                        fontWeight: 600,
+                        background: dayItem.isToday ? 'var(--pos)' : 'var(--fill)',
+                        color: dayItem.isToday ? 'var(--bg)' : 'var(--ink)',
+                      }}
+                    >
+                      {dayItem.num}
+                    </span>
                   </div>
-                )
-              })}
+
+                  <div className="mt-1 flex flex-col gap-1.5">
+                    {dayItem.events.length === 0 ? (
+                      <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('run.free')}</span>
+                    ) : (
+                      dayItem.events.map((ev) => (
+                        <div
+                          key={ev.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); setSheet(ev) }}
+                          onKeyDown={(k) => {
+                            if (k.target !== k.currentTarget) return   // EvCheck handles itself
+                            if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); setSheet(ev) }
+                          }}
+                          title={ev.title}
+                          className={`flex items-start gap-2 rounded-xl px-2 py-1.5 ${ev.done ? 'is-done' : ''}`}
+                          style={{
+                            minHeight: 'var(--tap)',
+                            background: 'var(--sf2)',
+                            cursor: 'pointer',
+                            opacity: ev.done ? 0.72 : 1,
+                          }}
+                        >
+                          <EvCheck small ev={ev} onToggle={toggleDone} />
+                          <span className="min-w-0 flex-1">
+                            <span className="mono block" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-3)' }}>{hhmm(ev.start)}</span>
+                            <span className="clamp-2 block" style={{ fontSize: 'var(--fs-md)', fontWeight: 500, overflowWrap: 'anywhere', textDecoration: ev.done ? 'line-through' : undefined }}>{ev.title}</span>
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </section>
         )}
 
         {/* Карточка: Ближайшие события (s12) */}
-        <section className="c s12 r" style={{ '--i': 4, ...cardSt('upcoming') }}>
+        <section className="c s12 r" style={{ '--i': 5, ...cardSt('upcoming') }}>
           {cardCtl('upcoming')}
-          <div className="hd">
-            <h2>{t('nextup.title')}</h2>
+          <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
+            <h2 className="h3">{t('nextup.title')}</h2>
             <small>{t('cal.upcoming_note', { all: upcomingAll.length, shown: upcoming.length })}</small>
           </div>
-          {upcoming.length === 0 ? (
-            <p className="py-4 text-center text-sm text-[var(--ink3)]">{t('cal.no_upcoming')}</p>
+          {!loaded ? (
+            <ListSkeleton n={3} rowH={58} />
+          ) : upcoming.length === 0 ? (
+            <Empty
+              compact
+              glyph="calendar"
+              text={t('cal.no_upcoming')}
+              sub={t('cal.e_upcoming_sub')}
+              action={<button type="button" className="btn-soft btn-sm" onClick={() => setSheet('new')}>{t('cal.add_event')}</button>}
+            />
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6">
+            <div className="grid grid-cols-1 gap-x-6 md:grid-cols-2">
               {upcoming.map((e) => {
                 const d = new Date(e.start)
                 const sub = evSub(e, linkTasks, linkOrders)
                 return (
-                  <div className={`rowi ${e.done ? 'is-done' : ''}`} key={e.id} onClick={() => setSheet(e)} style={{ cursor: 'pointer' }}>
+                  <div className={`rowi ${e.done ? 'is-done' : ''}`} key={e.id} role="button" tabIndex={0}
+                    onClick={() => setSheet(e)}
+                    onKeyDown={(k) => {
+                      if (k.target !== k.currentTarget) return   // EvCheck handles itself
+                      if (k.key === 'Enter' || k.key === ' ') { k.preventDefault(); setSheet(e) }
+                    }}
+                    style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}>
                     <EvCheck ev={e} onToggle={toggleDone} />
                     <time>{WD_SHORT[d.getDay()]} {hhmm(e.start)}</time>
                     <span className="t">
                       {e.title}
-                      <small>{sub || shortDate(e.start)}</small>
+                      <small>{[shortDate(e.start), sub].filter(Boolean).join(' · ')}</small>
                     </span>
-                    <span className="chip">{t(e.kind === 'task' ? 'graph.one_task' : e.kind === 'order' ? 'graph.one_order' : 'graph.one_event')}</span>
+                    <span className="chip shrink-0">{t(e.kind === 'task' ? 'graph.one_task' : e.kind === 'order' ? 'graph.one_order' : 'graph.one_event')}</span>
                   </div>
                 )
               })}
