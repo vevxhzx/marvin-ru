@@ -413,12 +413,19 @@ export default function AppShell({
   mode, onTheme, helpOpen, onHelp, onHelpClose, hotkeys, tabs, more, compact,
   hiddenNav, onRefresh, children,
 }) {
-  const { t } = useI18n()
+  const { t, fmtDate, fmtWeekday } = useI18n()
   const phone = usePhone()
   const head = headOf(pathKey)
   const contentRef = useRef(null)
   const headRef = useRef(null)
   const [headH, setHeadH] = useState(0)
+
+  /* Строка-статус телефона: слева дата («суббота · 3 октября»), справа иконки —
+     как в свежем макете владельца. Дата живёт здесь, а не в шапке страницы. */
+  const dateLine = (() => {
+    const now = new Date()
+    return `${fmtWeekday(now, 'long')} · ${fmtDate(now, { day: 'numeric', month: 'long' })}`
+  })()
 
   /* высота липкой шапки: индикатор «потянуть-обновить» встаёт ровно под ней */
   useLayoutEffect(() => {
@@ -440,6 +447,7 @@ export default function AppShell({
 
         <main>
           <div className="gt r" ref={headRef}>
+            {phone && <div className="th-date trunc" title={dateLine}>{dateLine}</div>}
             <TopTimer />
             {phone && (
               <TitleHeader

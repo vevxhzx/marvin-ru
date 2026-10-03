@@ -373,7 +373,7 @@ export default function Today({ openChat, address = '' }) {
   const blockProps = (id) => {
     const span = widgetWidths[id] || DEFAULT_WIDTHS[id] || 6
     const surface = PANELS.has(id)
-    const cls = surface ? (id === 'balance' ? `c hero ${HERO_M}` : id === 'chart' ? 'c chart' : 'c') : ''
+    const cls = surface ? (id === 'balance' ? `c hero hero-ink ${HERO_M}` : id === 'chart' ? 'c chart' : 'c') : ''
     // в режиме правки у секций справа освобождаем место под стрелки/ширину/глаз (CSS .wsec-edit)
     const pad = editMode && !surface ? 'wsec-edit' : ''
     return {
@@ -795,10 +795,11 @@ export default function Today({ openChat, address = '' }) {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-today" style={pageAcc.style} ref={reveal}>
-      {/* 1. Строка-статус: день мельче, имя крупно. h1 нужен и TitleHeader телефона */}
+      {/* 1. Строка-статус: день мельче, имя крупно. h1 нужен и TitleHeader телефона.
+          На телефоне дата живёт в строке-статусе шапки (AppShell) — здесь только имя. */}
       <header className="top" data-reveal>
         <div className="min-w-0">
-          <div className="text-[length:var(--fs-md)] text-[var(--ink3)] max-[380px]:text-[length:var(--fs-xs)]">{daySubtitle}</div>
+          <div className="text-[length:var(--fs-md)] text-[var(--ink3)] max-[820px]:!hidden max-[380px]:text-[length:var(--fs-xs)]">{daySubtitle}</div>
           <h1 className="trunc" title={`${greeting}, ${ownerName}`}>{greeting}, {ownerName}</h1>
         </div>
       </header>
