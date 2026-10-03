@@ -11,6 +11,10 @@ import { RATIOS, STICKY, DEFAULT_SIZE, MIN_K, MAX_K, uid, fontSize, fontFamily, 
    ответ сервера подменяет временные id. Undo/Redo — снимки в памяти, применяются тем же путём. */
 
 const HANDLE = 7
+/* Подписи, которые рисует Canvas, должны совпадать с подписями HTML-слоя (правило
+   «текст на холсте — тот же шрифт, что на сайте»). Список — тот же, что --font-ui в
+   index.css: сначала Onest, дальше Inter и системный. */
+const UI_FONT = '"Onest", "Inter Variable", Inter, system-ui, sans-serif'
 const isDark = () => document.documentElement.classList.contains('dark')
 const byIdOf = (items) => new Map(items.map((i) => [i.id, i]))
 const clone = (items) => JSON.parse(JSON.stringify(items))
@@ -397,7 +401,7 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
             g.strokeStyle = dark ? 'rgba(236,236,233,.15)' : 'rgba(14,14,14,.12)'; g.lineWidth = 1 / v.k
             g.setLineDash([5 / v.k, 4 / v.k]); rr(it.x + pad, it.y + pad, it.w - pad * 2, ih - pad * 2, Math.max(4, 6 * it.w / 320)); g.stroke(); g.setLineDash([])
             const ts = Math.max(9, Math.min(13, 12 * it.w / 320))
-            g.font = `500 ${ts}px "Inter Tight", "Inter", sans-serif`
+            g.font = `500 ${ts}px ${UI_FONT}`
             g.fillStyle = dark ? 'rgba(236,236,233,.4)' : 'rgba(14,14,14,.38)'
             g.textAlign = 'center'; g.textBaseline = 'middle'
             g.fillText(T('board.img_none'), it.x + it.w / 2, it.y + ih / 2)
@@ -406,8 +410,8 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
           g.strokeStyle = line; g.lineWidth = 1 / v.k; rr(it.x, it.y, it.w, ih, 10 * it.w / 320); g.stroke(); rr(it.x, it.y, it.w, b.h, 10 * it.w / 320); g.stroke()
           // номер и длительность — в масштабе кадра, читаются на любом зуме
           const fs = Math.max(11, 13 * it.w / 320)
-          if (it.data.n) { g.font = `600 ${fs}px "Inter Tight", "Inter", sans-serif`; const tw = g.measureText(String(it.data.n)).width + fs; g.fillStyle = dark ? 'rgba(0,0,0,.65)' : 'rgba(255,255,255,.9)'; rr(it.x + fs * .6, it.y + fs * .6, tw, fs * 1.6, fs * .4); g.fill(); g.fillStyle = ink; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillText(String(it.data.n), it.x + fs * 1.1, it.y + fs * 1.4) }
-          if (it.data.seconds) { const s = fmtSec(it.data.seconds); g.font = `500 ${fs * .9}px "Inter Tight", "Inter", sans-serif`; const tw = g.measureText(s).width + fs; g.fillStyle = dark ? 'rgba(0,0,0,.65)' : 'rgba(255,255,255,.9)'; rr(it.x + it.w - tw - fs * .6, it.y + fs * .6, tw, fs * 1.5, fs * .4); g.fill(); g.fillStyle = ink; g.textBaseline = 'middle'; g.fillText(s, it.x + it.w - tw - fs * .1, it.y + fs * 1.35) }
+          if (it.data.n) { g.font = `600 ${fs}px ${UI_FONT}`; const tw = g.measureText(String(it.data.n)).width + fs; g.fillStyle = dark ? 'rgba(0,0,0,.65)' : 'rgba(255,255,255,.9)'; rr(it.x + fs * .6, it.y + fs * .6, tw, fs * 1.6, fs * .4); g.fill(); g.fillStyle = ink; g.textBaseline = 'middle'; g.textAlign = 'left'; g.fillText(String(it.data.n), it.x + fs * 1.1, it.y + fs * 1.4) }
+          if (it.data.seconds) { const s = fmtSec(it.data.seconds); g.font = `500 ${fs * .9}px ${UI_FONT}`; const tw = g.measureText(s).width + fs; g.fillStyle = dark ? 'rgba(0,0,0,.65)' : 'rgba(255,255,255,.9)'; rr(it.x + it.w - tw - fs * .6, it.y + fs * .6, tw, fs * 1.5, fs * .4); g.fill(); g.fillStyle = ink; g.textBaseline = 'middle'; g.fillText(s, it.x + it.w - tw - fs * .1, it.y + fs * 1.35) }
         })
       } else if (it.type === 'image') {
         const b = itemBox(it), im = getImg(it.data.src)
@@ -681,8 +685,8 @@ export default function BoardCanvas({ board, tool, setTool, style, onDirty, onSe
         g.fillStyle = dark ? '#0b0b0d' : '#f3f3f1'; rr(it.x, it.y, it.w, ih, 8); g.fill()
         const im = imgCache.current.get(it.data.image); if (im?.complete && im.naturalWidth) { g.save(); rr(it.x, it.y, it.w, ih, 8); g.clip(); const s = Math.max(it.w / im.width, ih / im.height); g.drawImage(im, it.x + (it.w - im.width * s) / 2, it.y + (ih - im.height * s) / 2, im.width * s, im.height * s); g.restore() }
         g.strokeStyle = dark ? 'rgba(236,236,233,.3)' : 'rgba(14,14,14,.22)'; g.lineWidth = 1; rr(it.x, it.y, it.w, ih, 8); g.stroke()
-        g.fillStyle = ink; g.font = `600 ${fs}px "Inter Tight", "Inter", sans-serif`; g.textBaseline = 'top'; g.textAlign = 'left'; g.fillText(String(it.data.n || ''), it.x + fs * .4, it.y + ih + fs * .6)
-        if (it.data.seconds) { const s = fmtSec(it.data.seconds); g.font = `500 ${fs * .9}px "Inter Tight", "Inter", sans-serif`; g.fillText(s, it.x + it.w - g.measureText(s).width - fs * .4, it.y + ih + fs * .65) }
+        g.fillStyle = ink; g.font = `600 ${fs}px ${UI_FONT}`; g.textBaseline = 'top'; g.textAlign = 'left'; g.fillText(String(it.data.n || ''), it.x + fs * .4, it.y + ih + fs * .6)
+        if (it.data.seconds) { const s = fmtSec(it.data.seconds); g.font = `500 ${fs * .9}px ${UI_FONT}`; g.fillText(s, it.x + it.w - g.measureText(s).width - fs * .4, it.y + ih + fs * .65) }
         wrapText(g, it.data.label || '', it.x + fs * 2, it.y + ih + fs * .5, it.w - fs * 5, fontSize(it) * it.w / 320, ink, fontFamily(it), captionHeight(it.w, it.data) - fs)
       })
       else if (it.type === 'image') rot(it, bx, () => { const im = imgCache.current.get(it.data.src); if (im?.complete && im.naturalWidth) { g.save(); rr(it.x, it.y, it.w, it.h, 6); g.clip(); g.drawImage(im, it.x, it.y, it.w, it.h); g.restore() } })

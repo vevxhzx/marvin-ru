@@ -1,19 +1,19 @@
 // Стадия КЛИЕНТА в интерфейсе: бейдж + выпадающий список для ручной смены.
 // Это НЕ стадия заказа (см. lib/crm.js): стадия клиента обновляется автоматически по оплатам,
-// а ручное значение авто-логика не перетирает — поэтому показываем метку «вручную» и кнопку «вернуть авто».
+// а ручное значение авто-логики не перетирает — поэтому показываем метку «вручную» и кнопку «вернуть авто».
 import { useCallback, useEffect, useState } from 'react'
 import { PencilLine, Undo2 } from 'lucide-react'
 import { CLIENT_STAGES, CLIENT_STAGE_LABEL, CLIENT_STAGE_HINT, CLIENT_STAGE_TONE, clientStageApi, clientStageLabel, clientStageHint } from '../lib/crm'
 import { useI18n } from '../lib/i18n'
 
-/** Бейдж стадии клиента. `view` — ответ /api/crm/clients/{id}/stage. */
+/** Бейдж стадии клиента. `view` — ответ /api/crm/clients/{id}/stage (или карточка CRM, поле stage). */
 export function ClientStageBadge({ view, className = '' }) {
   const { t } = useI18n()
   if (!view?.stage) return null
   return (
     <span className={`badge ${CLIENT_STAGE_TONE[view.stage] || ''} ${className}`}>
       {view.label || clientStageLabel(view.stage) || view.stage}
-      {view.manual && <span className="faint text-[10px]" title={t('cstage.manual_title')}>{t('cstage.manual')}</span>}
+      {view.manual && <span className="faint" style={{ fontSize: 'var(--fs-xs)' }} title={t('cstage.manual_title')}>{t('cstage.manual')}</span>}
     </span>
   )
 }
@@ -23,7 +23,7 @@ export function ClientStageNote({ view }) {
   const { t } = useI18n()
   if (!view) return null
   return (
-    <div className="faint mt-1 text-[11.5px]">
+    <div className="faint mt-1 text-[12px] leading-snug">
       {view.manual
         ? t('cstage.manual_note')
         : view.auto ? t('cstage.auto_by_orders', { label: view.auto_label || clientStageLabel(view.auto) }) : t('cstage.no_signal')}
@@ -50,12 +50,13 @@ export function ClientStageSelect({ view, onView, onErr, className = '', label }
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>
       <PencilLine size={13} className="faint shrink-0" aria-hidden />
-      <select className="input !h-8 !w-auto min-w-[150px] text-[13px]" value={cur} onChange={pick} disabled={busy} aria-label={label || t('cstage.title')}
+      {/* Ширину поля задаём с ! — .input объявляет width:100% ниже по файлу, чем утилиты Tailwind. */}
+      <select className="input !w-[236px] min-w-0" value={cur} onChange={pick} disabled={busy} aria-label={label || t('cstage.title')}
         title={clientStageHint(cur)}>
         {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{t(l)} — {clientStageHint(k)}</option>)}
       </select>
       {view?.manual && (
-        <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={toAuto} data-tip={t('cstage.back_to_auto_tip')}>
+        <button type="button" className="btn-ghost btn-sm" disabled={busy} onClick={toAuto} data-tip={t('cstage.back_to_auto_tip')} title={t('cstage.back_to_auto_tip')}>
           <Undo2 size={13} /> {t('cstage.back_to_auto')}
         </button>
       )}
@@ -63,7 +64,7 @@ export function ClientStageSelect({ view, onView, onErr, className = '', label }
   )
 }
 
-/** Стадия одного клиента: загрузка + смена. Возвращает [view, setView]. */
+/** Стадия одного клиента: загрузка + смена. Возвращает [view, setView, load]. */
 export function useClientStage(cid, onErr) {
   const [view, setView] = useState(null)
   const load = useCallback(() => {

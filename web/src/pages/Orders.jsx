@@ -1,27 +1,24 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Plus, Check, Play, Square, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins, List, RefreshCw, Bell, User, HelpCircle } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+﻿import { useEffect, useMemo, useState } from 'react'
+import { Plus, Check, Play, Square, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins, RefreshCw, Bell, User, HelpCircle } from 'lucide-react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, money, moneyShort, dayLabel, shortDate, hhmm, toLocalISO } from '../lib/api'
-import { Section, Empty, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm, Num, PageAccent } from '../components/ui'
+import { Section, Empty, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import StageStepper from '../components/StageStepper'
 import OrderDrawer from '../components/OrderDrawer'
 import HowToOrders from '../components/HowToOrders'
 import MenuButton from '../components/RowMenu'
-import { ClientStageBadge, ClientStageSelect, ClientStageNote } from '../components/ClientStage'
-import {
-  ORDER_STAGES, ORDER_STAGE_LABEL, ORDER_STAGE_TONE, stageOf, NEXT_STEP, STAGE_TO_STATUS,
-} from '../lib/crm'
+import { ClientStageSelect, ClientStageNote } from '../components/ClientStage'
+import { ORDER_STAGES, ORDER_STAGE_LABEL, ORDER_STAGE_TONE, stageOf, NEXT_STEP, STAGE_TO_STATUS } from '../lib/crm'
 import { useI18n, t as T } from '../lib/i18n'
 
+/* Срезы списка. Названия — ключи словаря (см. lib/i18n.js). */
 const VIEWS = [['open', 'or.v_open'], ['unpaid', 'or.v_unpaid'], ['all', 'common.all']]
-const STATUS_DOT = { new: 'var(--accent)', work: 'var(--accent)', review: 'var(--warn)', done: 'var(--pos)', paid: 'var(--pos)', cancelled: 'var(--ink-3)' }
+/* Цвет точки стадии: смысловой тон из DESIGN.md, иначе — акцент. */
+const STAGE_VAR = { warn: 'var(--warn)', pos: 'var(--pos)', neg: 'var(--neg)' }
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
 const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ${T('unit.hour')}` : h > 0 ? `${Math.round(h * 60)} ${T('unit.min')}` : '—')
-
-/* Мягкая карточка строки: нейтральная тень, на hover — чуть сильнее (и подъём через hover:-translate-y-px) */
-const CARD_SHADOW = 'shadow-[inset_0_0_0_1px_var(--line),0_16px_34px_-24px_rgba(16,17,20,0.35)] hover:shadow-[inset_0_0_0_1px_var(--line),0_22px_42px_-24px_rgba(16,17,20,0.5)]'
 
 /* Таймер помодоро: одна активная сессия на всю систему (сайт + Telegram + голос). Тикает локально, сверяется по SSE. */
 export function useTimer() {
@@ -47,10 +44,11 @@ export default function Orders() {
   const [stats, setStats] = useState(null)
   const [pulse, setPulse] = useState(null)   // задержки оплат + налог за месяц (режим фрилансера)
   const [view, setView] = useState('open')
+  const [stageTab, setStageTab] = useState('all')   // фильтр по стадии заказа (воронка)
   const [layout, setLayout] = useState(() => (typeof localStorage !== 'undefined' && localStorage.getItem('orders.layout')) || 'list')
   const [quick, setQuick] = useState('')
   const [sheet, setSheet] = useState(null)      // null | 'new' | order (форма заказа)
-  const [drawerId, setDrawerId] = useState(null) // боковая панель заказа — открывается кликом по строке
+  const [drawerId, setDrawerId] = useState(null) // панель заказа — открывается кликом по строке
   const [personCard, setPersonCard] = useState(null)  // CRM-карточка клиента
   const [pay, setPay] = useState(null)          // order
   const [del, setDel] = useState(null)
@@ -61,20 +59,42 @@ export default function Orders() {
   const [, show] = useToast()
   const { tick, bump } = useRefresh()
   const { t: timer, left } = useTimer()
+  /* Глубокая ссылка на заказ: /orders?order=12 открывает панель заказа. Так из карточки
+     человека можно попасть прямо в заказ, а не «вернуться и искать его в списке». */
+  const [params] = useSearchParams()
+  const deepId = params.get('order')
 
   const load = () => Promise.all([
     api.orders(true).then(setOrders), api.orderStats(6).then(setStats), api.pulse().then(setPulse).catch(() => {}),
     api.crmFollowups().then(setFollowups).catch(() => {}), api.crmAnalytics(6).then(setAnalytics).catch(() => {}),
   ]).catch(() => {})
   useEffect(() => { load() }, [tick])
-  useEffect(() => { try { localStorage.setItem('orders.layout', layout) } catch { /* ignore */ } }, [layout])
+  useEffect(() => { try { localStorage.setItem('orders.layout', layout) } catch { /* приватный режим — не запоминаем */ } }, [layout])
+  useEffect(() => {
+    if (!deepId) return
+    const id = Number(deepId)
+    if (Number.isFinite(id) && id > 0) { setView('all'); setStageTab('all'); setDrawerId(id) }
+  }, [deepId])
 
   const all = orders || []
+  /* Сколько заказов в каждой стадии — для фильтра. Пустые стадии в фильтр не попадают:
+     девять плашек с нулём — шум, а не навигация. */
+  const stageCounts = useMemo(() => {
+    const m = {}
+    for (const o of all) { const k = stageOf(o); m[k] = (m[k] || 0) + 1 }
+    return m
+  }, [all])
+  const stageChips = useMemo(
+    () => ORDER_STAGES.filter(([k]) => stageCounts[k] > 0).map(([k, label]) => [k, t(label), stageCounts[k]]),
+    [stageCounts, t],
+  )
   const list = useMemo(() => {
-    if (view === 'open') return all.filter((o) => ['new', 'work', 'review'].includes(o.status))
-    if (view === 'unpaid') return all.filter((o) => o.status !== 'cancelled' && o.status !== 'paid' && o.left > 0 && o.status !== 'new')
-    return all
-  }, [orders, view])
+    let l = all
+    if (view === 'open') l = l.filter((o) => ['new', 'work', 'review'].includes(o.status))
+    else if (view === 'unpaid') l = l.filter((o) => o.status !== 'cancelled' && o.status !== 'paid' && o.left > 0 && o.status !== 'new')
+    if (stageTab !== 'all') l = l.filter((o) => stageOf(o) === stageTab)
+    return l
+  }, [all, view, stageTab])
   const openN = all.filter((o) => ['new', 'work', 'review'].includes(o.status)).length
   const unpaid = all.filter((o) => ['work', 'review', 'done'].includes(o.status)).reduce((s, o) => s + o.left, 0)
   const overdue = all.filter((o) => o.overdue).length
@@ -105,12 +125,22 @@ export default function Orders() {
   const kicker = overdue ? t('or.overdue_n', { count: overdue }) : openN ? t('or.open_n', { count: openN }) : t('or.free')
   const month = stats?.months?.at(-1)?.income || 0
   const prevMonth = stats?.months?.at(-2)
+  /* Счётчики воронки — одной строкой под заголовком, без тяжёлых карточек. */
+  const counters = [
+    { key: 'open', label: t('or.v_open'), value: openN, hint: overdue ? t('or.overdue_n', { count: overdue }) : t('or.all_ok') },
+    unpaid
+      ? { key: 'unpaid', label: t('or.v_unpaid'), value: money(unpaid), tone: 'warn', onClick: () => setView('unpaid'), tip: t('or.find_debtors') }
+      : { key: 'unpaid', label: t('or.v_unpaid'), value: money(0), hint: t('or.all_settled') },
+    month ? { key: 'month', label: t('or.this_month'), value: money(month), tone: 'ok', hint: prevMonth ? t('or.prev_month', { m: money(prevMonth.income) }) : t('or.first_month') } : null,
+    stats?.rate ? { key: 'rate', label: t('or.rate_hour'), value: money(stats.rate), hint: stats.total_hours ? `${hours(stats.total_hours)} ${t('or.by_timer')}` : t('or.by_timer') } : null,
+    stats?.avg_check ? { key: 'check', label: t('or.avg_check'), value: money(stats.avg_check), hint: stats.avg_lead_days ? t('or.lead_days', { n: stats.avg_lead_days }) : t('or.by_closed') } : null,
+  ].filter(Boolean)
+
   return (
-    <div className="bento-page space-y-8 pt-4" style={{ ...pageAcc.style, '--acc2': 'color-mix(in srgb, var(--acc) 55%, #8a5cff)' }}>
-      <PageHead kicker={kicker} title={t('nav.orders')} idx={openN}
+    <div className="bento-page pg space-y-6 pt-4" style={pageAcc.style}>
+      <PageHead kicker={kicker} title={t('nav.orders')}
+        sub={<StatRow items={counters} />}
         right={<>
-          <Seg value={layout} onChange={setLayout} options={[['list', t('or.layout_list')], ['board', t('or.layout_board')]]} />
-          <Seg value={view} onChange={setView} options={VIEWS.map(([v, k]) => [v, t(k)])} />
           <button type="button" className="btn-icon outlined" aria-label={t('howto.toggle_aria')} data-tip={t('howto.title')}
             onClick={() => window.dispatchEvent(new CustomEvent('orders:howto', { detail: 'toggle' }))}><HelpCircle size={16} /></button>
           <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
@@ -120,34 +150,47 @@ export default function Orders() {
 
       <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 pl-4 pr-1.5">
         <Plus size={16} className="faint shrink-0" />
-        <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('or.quick_ph')} />
-        <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label={t('common.add')} data-tip={t('or.quick_tip')}><Plus size={16} /></button>
+        <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('or.quick_ph')} aria-label={t('or.quick_ph')} />
+        <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label={t('common.add')} data-tip={t('or.quick_tip')}>
+          <span className="sr-only">{t('common.add')}</span><Plus size={16} />
+        </button>
       </form>
 
-      {/* сводка: смысловые плитки (лайм — деньги, янтарь — ожидание); пустые не показываем.
-          Помодоро живёт в сайдбаре и в шапке-таймере — на странице заказов не дублируем. */}
-      <div className="bento" style={{ marginTop: 26 }}>
-        <Tile span="s4" icon={<Play size={16} />}
-          label={t('or.v_open')} value={<Num value={openN} />}
-          sub={overdue ? t('or.overdue_n', { count: overdue }) : t('or.all_ok')} />
-        <Tile span="s4" tone="warn" icon={<Wallet size={16} />}
-          label={t('or.v_unpaid')} value={<Num value={unpaid} fmt={money} />} onClick={() => setView('unpaid')} tip={unpaid ? t('or.show_debtors') : undefined}
-          sub={unpaid ? t('or.find_debtors') : t('or.all_settled')} />
-        {stats && <Tile span="s4" tone="ok" icon={<TrendingUp size={16} />}
-          label={t('or.this_month')} value={<Num value={month} fmt={money} />}
-          sub={prevMonth ? t('or.prev_month', { m: money(prevMonth.income) }) : t('or.first_month')} />}
-        {stats?.rate ? <Tile span="s4" icon={<Clock size={16} />}
-          label={t('or.rate_hour')} value={money(stats.rate)}
-          sub={stats.total_hours ? `${hours(stats.total_hours)} ${t('or.by_timer')}` : t('or.by_timer')} /> : null}
-        {stats?.avg_check ? <Tile span="s4" icon={<Coins size={16} />}
-          label={t('or.avg_check')} value={money(stats.avg_check)}
-          sub={stats.avg_lead_days ? t('or.lead_days', { n: stats.avg_lead_days }) : t('or.by_closed')} /> : null}
+      {/* Панель заказов идёт ПЕРВОЙ из модалок: всё, что открывают из неё (оплата, форма,
+          карточка клиента), должно оказываться поверх — порядок DOM определяет стек. */}
+      <OrderDrawer oid={drawerId} reloadKey={payTick} onClose={() => setDrawerId(null)} onChanged={() => { load(); bump() }} onErr={show.err} onMsg={(msg) => show(msg)}
+        onClient={(cid) => { setDrawerId(null); setPersonCard(cid) }} onEdit={(o) => setSheet(o)} onPay={(o) => setPay(o)}
+        onAsk={(o) => ask(T('or.ask_seed', { title: o.title }))} timer={timer} onStartTimer={start} onStopTimer={stop} mmss={mmss} />
+
+      <OrderSheet open={!!sheet} order={sheet && sheet !== 'new' ? sheet : null} onClose={() => setSheet(null)} onDone={(msg) => { setSheet(null); show(msg); load(); bump() }} onErr={show.err} />
+      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show(t('or.closed'), t('or.no_income'), o.title); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(t(r.order.status === 'paid' ? 'or.closed_paid' : 'or.pay_to_income'), '', r.order.title); setPayTick((x) => x + 1); load(); bump() }} onErr={show.err} />
+      <Confirm open={!!del} title={t('or.del_q')} text={del ? t('or.del_text', { title: del.title }) : ''} danger onOk={() => { remove(del); setDel(null) }} onClose={() => setDel(null)} />
+      <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show(t('od.lost_marked'), '', lost.title); setLost(null); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} />
+      <ClientCardSheet cid={personCard} onClose={() => setPersonCard(null)} onOrder={(oid) => { setPersonCard(null); setDrawerId(oid) }} />
+
+      {/* Переключатель вида и фильтры: спокойные сегменты и пилюли, активное состояние видно сразу. */}
+      <div className="animate-rise flex flex-wrap items-center gap-x-3 gap-y-2">
+        <Seg value={layout} onChange={setLayout} options={[['list', t('or.layout_list')], ['board', t('or.layout_board')]]} />
+        <Seg value={view} onChange={setView} options={VIEWS.map(([v, k]) => [v, t(k)])} />
       </div>
 
+      {stageChips.length > 0 && (
+        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 animate-rise" role="group" aria-label={t('stage.block')}>
+          {stageChips.map(([k, label, n]) => (
+            <button key={k} type="button"
+              className={`pill shrink-0 !min-h-[var(--tap)] ${stageTab === k ? 'on' : ''}`}
+              aria-pressed={stageTab === k}
+              onClick={() => setStageTab(stageTab === k ? 'all' : k)}>
+              {label}<span className="num ml-1.5 opacity-60">{n}</span>
+            </button>
+          ))}
+        </div>
+      )}
+
       {pulse?.enabled && (pulse.late?.length > 0 || pulse.tax?.tax_total > 0) && (
-        <div className="animate-rise -mt-4 flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
+        <div className="animate-rise flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
           {pulse.late.map((x) => (
-            <button key={x.order_id} type="button" className="flex items-center gap-1.5 text-left" onClick={() => setView('unpaid')}>
+            <button key={x.order_id} type="button" className="max-[820px]:min-h-[var(--tap)] flex items-center gap-1.5 text-left" onClick={() => setView('unpaid')}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--warn)' }} />
               <span><b className="font-medium">{x.client || x.title}</b><span className="muted"> {t('or.delays', { m: money(x.left), count: x.days }) + (x.typical_days != null ? t('or.typically', { n: x.typical_days }) : '')}</span></span>
             </button>
@@ -157,10 +200,10 @@ export default function Orders() {
       )}
 
       {followups.length > 0 && (
-        <div className="animate-rise -mt-4 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px]">
+        <div className="animate-rise flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px]">
           <span className="muted flex items-center gap-1.5"><Bell size={13} /> follow-up:</span>
           {followups.slice(0, 5).map((f) => (
-            <button key={f.id} type="button" className="flex items-center gap-1.5 text-left" onClick={() => f.order_id && setDrawerId(f.order_id)}>
+            <button key={f.id} type="button" className="max-[820px]:min-h-[var(--tap)] flex items-center gap-1.5 text-left" onClick={() => f.order_id && setDrawerId(f.order_id)}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: f.kind === 'overdue' ? 'var(--neg)' : 'var(--warn)' }} />
               <span className="truncate max-w-[280px]">{f.text}</span>
             </button>
@@ -169,68 +212,74 @@ export default function Orders() {
         </div>
       )}
 
-      {!orders ? <ListSkeleton n={4} /> : layout === 'board' ? (
-        <Section title={t('or.layout_board')} idx={list.length}
-          hint={t('or.board_hint')}>
-          <Board orders={list} onOpen={openDrawer} onStage={setStage} />
-        </Section>
-      ) : (
-        <Section title={t(VIEWS.find((v) => v[0] === view)[1])} idx={list.length}
-          hint={t('or.list_hint')}>
-          <div className="stagger space-y-2.5">
-            {list.length === 0 && (
-              view === 'open' ? <Empty glyph="tasks" text={t('or.empty_open')} sub={t('or.empty_open_sub')} hint={t('or.empty_open_hint')} />
-                : view === 'unpaid' ? <Empty glyph="money" text={t('or.empty_unpaid')} sub={t('or.empty_unpaid_sub')} />
-                  : <Empty glyph="tasks" text={t('or.empty_all')} hint={t('or.empty_all_hint')} />
+      {orders === null
+        ? <ListSkeleton n={5} rowH={78} avatar={false} />
+        : layout === 'board' ? (
+          <Section title={t('or.layout_board')} idx={list.length} hint={t('or.board_hint')}>
+            <Board orders={list} onOpen={openDrawer} onStage={setStage} />
+          </Section>
+        ) : (
+          <Section title={t(VIEWS.find((v) => v[0] === view)[1])} idx={list.length}>
+            {list.length === 0 ? (
+              <div className="animate-rise">
+                {view === 'open' ? <Empty glyph="tasks" text={t('or.empty_open')} sub={t('or.empty_open_sub')} hint={t('or.empty_open_hint')} />
+                  : view === 'unpaid' ? <Empty glyph="money" text={t('or.empty_unpaid')} sub={t('or.empty_unpaid_sub')} />
+                    : <Empty glyph="tasks" text={t('or.empty_all')} hint={t('or.empty_all_hint')} />}
+              </div>
+            ) : (
+              <div className="rule stagger">
+                  {list.map((o) => <Row key={o.id} o={o} onOpen={() => openDrawer(o)} onEdit={() => setSheet(o)} onPay={() => setPay(o)}
+                    onDel={() => setDel(o)} onStatus={setStatus} onStart={() => start(o)} onStage={(k) => setStage(o, k)} timer={timer} extra={leaveCls(o.id)} />)}
+              </div>
             )}
-            {list.map((o) => <Row key={o.id} o={o} onOpen={() => openDrawer(o)} onEdit={() => setSheet(o)} onPay={() => setPay(o)}
-              onDel={() => setDel(o)} onStatus={setStatus} onStart={() => start(o)} onStage={(k) => setStage(o, k)} timer={timer} extra={leaveCls(o.id)} />)}
-          </div>
-        </Section>
-      )}
+          </Section>
+        )}
 
       {stats && (stats.clients.length > 0 || stats.months.some((m) => m.income)) && <StatsBlock stats={stats} onUnpaid={() => { setView('unpaid'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
 
-      {/* Панель заказа идёт ПЕРВОЙ из модалок: всё, что открывают из неё (оплата, форма,
-          карточка клиента), должно оказываться поверх — порядок DOM определяет стек. */}
-      <OrderDrawer oid={drawerId} reloadKey={payTick} onClose={() => setDrawerId(null)} onChanged={() => { load(); bump() }} onErr={show.err} onMsg={(t) => show(t)}
-        onClient={(cid) => { setDrawerId(null); setPersonCard(cid) }} onEdit={(o) => setSheet(o)} onPay={(o) => setPay(o)}
-        onAsk={(o) => ask(T('or.ask_seed', { title: o.title }))} timer={timer} onStartTimer={start} onStopTimer={stop} mmss={mmss} />
-
-      <OrderSheet open={!!sheet} order={sheet && sheet !== 'new' ? sheet : null} onClose={() => setSheet(null)} onDone={(msg) => { setSheet(null); show(msg); load(); bump() }} onErr={show.err} />
-      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show(t('or.closed'), t('or.no_income'), o.title); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(t(r.order.status === 'paid' ? 'or.closed_paid' : 'or.pay_to_income'), '', r.order.title); setPayTick((x) => x + 1); load(); bump() }} onErr={show.err} />
-      <Confirm open={!!del} title={t('or.del_q')} text={del ? t('or.del_text', { title: del.title }) : ''} danger onOk={() => { remove(del); setDel(null) }} onClose={() => setDel(null)} />
-
-      <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show(t('od.lost_marked'), '', lost.title); setLost(null); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} />
-      <ClientCardSheet cid={personCard} onClose={() => setPersonCard(null)} onOrder={(oid) => { setPersonCard(null); setDrawerId(oid) }} />
       {analytics && analytics.clients?.length > 0 && <AnalyticsBlock a={analytics} />}
     </div>
   )
 }
 
-/* Плитка сводки. tone — смысловой тинт (.tint-ok/.tint-warn/…); без него — нейтральная
-   поверхность. Старый градиентный вид оставлен на случай явного gradient. */
-function Tile({ span = 's4', gradient, ink = '#ffffff', glow = 'rgba(16,17,20,0.5)', tone, icon, label, value, sub, onClick, tip }) {
-  const inner = (
-    <>
-      {icon && <span className="pointer-events-none absolute right-5 top-5 opacity-70" aria-hidden>{icon}</span>}
-      <div className="label" style={{ color: 'inherit', opacity: 0.72 }}>{label}</div>
-      <div className="num mt-3 text-[32px] font-medium leading-none tracking-[-0.045em] sm:text-[38px]">{value}</div>
-      {sub && <div className="mt-2 max-w-[94%] text-[12.5px] leading-snug" style={{ opacity: 0.82 }}>{sub}</div>}
-    </>
+/* Счётчики одной строкой: подпись мелкая и приглушённая, число — табличное.
+   Без карточек и градиентов — просто строка цифр под заголовком (DESIGN.md: плоско, тихо).
+   Элементы — <span>, а не <div>: строка подставляется в <p class="sub"> внутри PageHead.
+   Используется и на странице «люди» (счётчики там свои). */
+export function StatRow({ items }) {
+  if (!items?.length) return null
+  const toneColor = { warn: 'var(--warn)', neg: 'var(--neg)', ok: 'var(--pos)' }
+  return (
+    /* на телефоне счётчики в две колонки, а не «метка число подсказка» в три строки:
+       иначе строка разъезжается, а сиротская точка висит сама по себе */
+    <span
+      className="grid w-full grid-cols-2 items-baseline gap-x-4 gap-y-3 max-[820px]:grid-cols-2 min-[821px]:!flex min-[821px]:!w-auto min-[821px]:flex-wrap min-[821px]:items-baseline min-[821px]:gap-x-5"
+      style={{ color: 'var(--ink-2)' }}
+    >
+      {items.map((it, i) => {
+        const body = (
+          <>
+            <span className="faint leading-tight" style={{ fontSize: 'var(--fs-xs)' }}>{it.label}</span>
+            <span className="num font-medium" style={{ fontSize: 'var(--fs-lg)', color: toneColor[it.tone] || 'var(--ink)' }}>{it.value}</span>
+            {it.hint && <span className="faint trunc" style={{ fontSize: 'var(--fs-xs)', maxWidth: '22ch' }} title={it.hint}>{it.hint}</span>}
+          </>
+        )
+        return (
+          <span key={it.key} className="flex min-w-0 flex-col gap-0.5 min-[821px]:flex-row min-[821px]:items-baseline min-[821px]:gap-2">
+            {i > 0 && <span aria-hidden="true" className="faint -ml-3 hidden self-center min-[821px]:inline">·</span>}
+            {it.onClick
+              ? <button type="button" onClick={it.onClick} data-tip={it.tip} className="max-[820px]:!min-h-[var(--tap)] flex min-w-0 flex-col items-start gap-0.5 rounded-lg px-2 py-1 text-left transition-colors duration-200 hover:bg-[var(--fill)] min-[821px]:flex-row min-[821px]:items-baseline min-[821px]:gap-2 min-[821px]:rounded-full" style={{ font: 'inherit' }}>{body}</button>
+              : <span className="flex min-w-0 flex-col items-start gap-0.5 min-[821px]:flex-row min-[821px]:items-baseline min-[821px]:gap-2">{body}</span>}
+          </span>
+        )
+      })}
+    </span>
   )
-  const style = gradient
-    ? { background: gradient, color: ink, borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.35), 0 18px 40px -22px ${glow}` }
-    : { borderRadius: 26, padding: '22px 24px', minHeight: 132, overflow: 'visible' }
-  const cls = `c ${span} relative block ${tone ? `tint-${tone}` : ''}`
-  return onClick
-    ? <button type="button" onClick={onClick} data-tip={tip} className={`${cls} w-full text-left transition duration-300 hover:-translate-y-0.5`} style={style}>{inner}</button>
-    : <section className={cls} style={style}>{inner}</section>
 }
 
-/* Строка заказа: кликабельна целиком (открывает панель), одна главная кнопка «следующий шаг»
-   с понятным текстом по текущей стадии. Остальные действия — в меню «⋯» с текстовыми подписями.
-   Кнопка «карточка» убрана: панель заказа и есть карточка. */
+/* Строка заказа: плоская, с волосяным разделителем. Клик открывает панель заказа,
+    одна главная кнопка «следующий шаг» с понятным текстом по текущей стадии, остальные
+    действия — в меню «⋯». Долг, срок и часы — вторичными подписями, а не отдельными коробками. */
 function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, timer, extra = '' }) {
   const { t } = useI18n()
   const nav = useNavigate()
@@ -257,48 +306,42 @@ function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, time
     !closed && { key: 'cancel', text: t('or.m_cancel'), icon: <Square size={13} />, onClick: () => onStatus(o, 'cancelled') },
     !closed && { key: 'del', text: t('or.m_del'), icon: <Trash2 size={13} />, onClick: onDel, danger: true },
   ]
+  const dlTone = o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'faint'
   return (
     <Swipe onLeft={!closed ? onDel : undefined} onRight={next ? () => onStage(next.stage) : undefined} rightLabel={next ? t(next.text) : t('common.done')}>
-      <div className={`row-slide ${extra} ${closed ? 'opacity-55' : ''}`}>
+      <div className={`row-slide ${extra} ${closed ? 'opacity-60' : ''}`}>
         <div role="button" tabIndex={0} aria-label={t('or.open_order', { title: o.title })} onClick={onOpen}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
-          className={`group relative cursor-pointer px-4 py-3.5 transition duration-300 hover:-translate-y-px ${CARD_SHADOW}`}
-          style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', borderRadius: 22, ...(o.overdue ? { boxShadow: 'inset 0 0 0 1.5px var(--neg)' } : null) }}>
-          <div className="relative flex flex-wrap items-center gap-x-3 gap-y-2 pl-1">
-            <span className="absolute -left-4 bottom-1 top-1 w-1 rounded-full" style={{ background: o.overdue ? 'var(--neg)' : STATUS_DOT[o.status] }} aria-hidden />
-            <div className="min-w-[200px] flex-1">
-              <div className="flex flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-2">
-                <div className="min-w-0 truncate text-[15px] font-medium">{o.title}</div>
-                {o.client && <div className="muted min-w-0 truncate text-[12.5px] sm:shrink-0 sm:text-[13px]">{o.client}</div>}
-              </div>
-              <div className={`mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] ${o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'muted'}`}>
-                {dl && <span className="flex items-center gap-1"><Clock size={11} /> {dl}</span>}
-                {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'muted'}>{o.hours}{o.pulse?.estimate_h ? ` ${t('od.of', { h: hours(o.pulse.estimate_h) })}` : ''}{o.rate ? ` · ${money(o.rate)}/${T('unit.hour')}` : ''}</span>}
-                {running && <span className="accent flex items-center gap-1">{t('or.timer_running')}</span>}
-              </div>
-              <StageStepper compact stage={stage} onStage={onStage} revisions={o.revisions} className="mt-1.5" />
-              {o.price > 0 && (
-                <div className="mt-1.5 flex items-center gap-2">
-                  <div className="h-1.5 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-                    <div className="h-full rounded-full transition-all duration-500" style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
-                  </div>
-                  <span className="num faint shrink-0 text-[10.5px]">{t('or.paid_pct', { pct })}</span>
-                </div>
-              )}
+          className="row wide-row cursor-pointer"
+          style={o.overdue ? { background: 'var(--neg-soft)' } : undefined}>
+          <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: o.overdue ? 'var(--neg)' : (STAGE_VAR[ORDER_STAGE_TONE[stage]] || 'var(--acc)') }} />
+          <div className="min-w-0 flex-[1_1_220px]">
+            <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5">
+              <span className="clamp-2 min-w-0 font-medium" style={{ fontSize: 'var(--fs-lg)' }} title={o.title}>{o.title}</span>
+              {o.client && <span className="muted min-w-0 truncate" style={{ fontSize: 'var(--fs-sm)' }}>{o.client}</span>}
             </div>
-            <div className="num shrink-0 text-right">
-              <div className="text-[15px] font-medium">{o.price ? money(o.price) : <span className="faint">{t('or.no_amount')}</span>}</div>
-              {o.price > 0 && o.paid > 0 && o.left > 0 && <div className="muted text-[11.5px]">{t('or.left', { m: money(o.left) })}</div>}
-              {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint text-[11.5px]">{t('status_unpaid')}</div>}
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1" style={{ fontSize: 'var(--fs-xs)' }}>
+              {dl && <span className={`flex items-center gap-1 ${dlTone}`}><Clock size={11} /> {dl}</span>}
+              {o.price > 0 && o.left > 0 && <span className="muted">{t('or.left', { m: money(o.left) })}</span>}
+              {o.price > 0 && o.paid > 0 && <span className="faint num">{t('or.paid_pct', { pct })}</span>}
+              {o.hours > 0 && <span className={o.pulse?.warn ? 'warn' : 'faint'}>{o.hours}{o.rate ? ` · ${money(o.rate)}/${T('unit.hour')}` : ''}</span>}
+              {running && <span className="accent">{t('or.timer_running')}</span>}
             </div>
-            <div className="flex shrink-0 items-center gap-1.5">
-              {next ? (
-                <button type="button" className="btn-primary btn-sm !h-8" data-tip={next.tip} onClick={stop(() => onStage(next.stage))}>
-                  <Check size={13} /> {t(next.text)}
-                </button>
-              ) : <span className="badge pos shrink-0">{t('common.done')}</span>}
-              <MenuButton items={menu} ariaLabel={t('or.more_aria', { title: o.title })} />
-            </div>
+          </div>
+          {/* Колонка суммы фиксированной ширины: иначе «сдан»/«оплачен» прыгают по горизонтали. */}
+          <div className="num shrink-0 text-right sm:w-[132px]" style={{ fontSize: 'var(--fs-lg)' }}>
+            <div className="font-medium">{o.price ? money(o.price) : <span className="faint" style={{ fontSize: 'var(--fs-sm)' }}>{t('or.no_amount')}</span>}</div>
+            {o.price > 0 && o.paid === 0 && !closed && o.status !== 'new' && <div className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('status_unpaid')}</div>}
+          </div>
+          <StageStepper compact stage={stage} onStage={onStage} revisions={o.revisions} className="max-w-full shrink-0 overflow-x-auto no-scrollbar sm:w-[136px]" />
+          <div className="flex shrink-0 items-center gap-1.5">
+            {next ? (
+              <button type="button" className="btn-primary btn-sm" data-tip={next.tip} onClick={stop(() => onStage(next.stage))}>
+                <Check size={13} /> {t(next.text)}
+              </button>
+            ) : <span className="badge pos shrink-0">{t('common.done')}</span>}
+            {/* Меню «⋯» в RowMenu по умолчанию 28px; на тач-экране поднимаем до зоны нажатия. */}
+            <MenuButton items={menu} ariaLabel={t('or.more_aria', { title: o.title })} className="max-[820px]:!h-11 max-[820px]:!w-11" />
           </div>
         </div>
       </div>
@@ -308,7 +351,7 @@ function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, time
 
 /* ------------------------------------------------------- канбан и закрытые стадии
    Закрытые стадии («сдан», «оплачен», «потерян») растут без ограничений: год работы — это
-   сотни карточек, и доска от этого только тяжелеет. Поэтому в них по умолчанию видны
+   сотни карточек, и доска от этого только тяжелее. Поэтому в них по умолчанию видны
    BOARD_LIMIT самых свежих заказов, дальше — кнопка «показать ещё» по BOARD_PAGE за нажатие
    (порциями, а не всё сразу: 200+ карточек за одно нажатие подвешивают страницу).
    Активные стадии показываются целиком — их всегда мало, и они должны быть видны. */
@@ -402,7 +445,7 @@ function Board({ orders, onOpen, onStage }) {
           const shown = shownOf(k, col.length)
           const rest = col.length - shown
           return (
-            <div key={k} className="w-[258px] shrink-0"
+            <div key={k} className="w-[262px] shrink-0"
               onDragOver={(e) => { e.preventDefault(); setOver(k) }}
               onDragLeave={() => setOver((x) => (x === k ? null : x))}
               onDrop={(e) => { e.preventDefault(); const d = drag; setOver(null); setDrag(null); if (d) onStage(d, k) }}>
@@ -410,10 +453,10 @@ function Board({ orders, onOpen, onStage }) {
                 label: t(label), n: col.length, sum: sum > 0 ? t('or.column_sum', { m: money(sum) }) : '',
               })}
                 style={{ background: 'var(--sf2)', boxShadow: 'inset 0 0 0 1px var(--line)', outline: over === k ? '2px solid var(--acc)' : 'none' }}>
-                <div className="h-[3px]" style={{ background: tone === 'pos' ? 'var(--pos)' : tone === 'warn' ? 'var(--warn)' : tone === 'neg' ? 'var(--neg)' : 'var(--acc)' }} aria-hidden />
-                <div className="flex items-center justify-between gap-2 px-3 py-2">
-                  <span className="truncate text-[12.5px] font-medium">{t(label)}</span>
-                  <span className="num shrink-0 text-[11px]">
+                <div className="h-[3px]" style={{ background: STAGE_VAR[tone] || 'var(--acc)' }} aria-hidden />
+                <div className="flex items-center justify-between gap-2 px-3 py-2.5">
+                  <span className="truncate text-[13px] font-medium">{t(label)}</span>
+                  <span className="num shrink-0 text-[12px]">
                     <span className={col.length ? 'text-[var(--ink-2)]' : 'faint'}>{col.length}</span>
                     {sum > 0 && <span className="faint"> · {moneyShort(sum)}</span>}
                   </span>
@@ -421,31 +464,35 @@ function Board({ orders, onOpen, onStage }) {
               </div>
               <div className="space-y-2" style={{ minHeight: 56 }}>
                 {col.slice(0, shown).map((o) => (
-                  <div key={o.id} draggable
+                  <div key={o.id} role="button" tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(o) } }}
+                    draggable
                     onDragStart={(e) => { try { e.dataTransfer.setData('text/plain', String(o.id)) } catch { /* ignore */ } e.dataTransfer.effectAllowed = 'move'; setDrag(o) }}
                     onDragEnd={() => { setDrag(null); setOver(null) }}
                     onClick={() => onOpen(o)}
-                    className={`cursor-grab rounded-2xl px-3 py-2.5 transition active:cursor-grabbing ${drag?.id === o.id ? 'opacity-50' : ''}`}
-                    style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', boxShadow: o.overdue ? 'inset 0 0 0 1.5px var(--neg)' : 'inset 0 0 0 1px var(--line)', borderRadius: 18 }}>
+                    aria-label={t('or.open_order', { title: o.title })}
+                    title={o.title}
+                    className={`cursor-grab rounded-xl px-3 py-2.5 transition-opacity active:cursor-grabbing ${drag?.id === o.id ? 'opacity-50' : ''}`}
+                    style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', boxShadow: 'inset 0 0 0 1px var(--line)' }}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="truncate text-[13.5px] font-medium">{o.title}</div>
                         {o.client && <div className="muted truncate text-[12px]">{o.client}</div>}
                       </div>
-                      {o.deadline && <span className={`shrink-0 text-[10.5px] ${o.overdue ? 'neg' : 'faint'}`}>{shortDate(o.deadline)}</span>}
+                      {o.deadline && <span className={`num shrink-0 text-[12px] ${o.overdue ? 'neg' : 'faint'}`}>{shortDate(o.deadline)}</span>}
                     </div>
-                    <div className="mt-1.5 flex items-center justify-between gap-2 text-[11.5px]">
+                    <div className="mt-1.5 flex items-center justify-between gap-2 text-[12px]">
                       <span className="muted num">{o.price ? money(o.price) : '—'}</span>
                       {o.left > 0 && o.status !== 'new' && <span className="faint num">{t('or.debt', { m: money(o.left) })}</span>}
                       {o.revisions > 0 && <span className="warn">{t('or.rev', { n: o.revisions })}</span>}
                     </div>
                     {o.price > 0 && (
                       <div className="mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-                        <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((o.paid / o.price) * 100))}%`, background: 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
+                        <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((o.paid / o.price) * 100))}%`, background: 'var(--acc)' }} />
                       </div>
                     )}
                     <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <select className="input !h-7 flex-1 !text-[12px]" value={stageOf(o)} onChange={(e) => onStage(o, e.target.value)}
+                      <select className="input !h-8 min-w-0 flex-1 !text-[12.5px]" value={stageOf(o)} onChange={(e) => onStage(o, e.target.value)}
                         aria-label={t('or.stage_aria', { title: o.title })} data-tip={t('stage.aria')}>
                         {ORDER_STAGES.map(([sk, sl]) => <option key={sk} value={sk}>{t(sl)}</option>)}
                       </select>
@@ -453,20 +500,20 @@ function Board({ orders, onOpen, onStage }) {
                   </div>
                 ))}
                 {col.length === 0 && (
-                  <div className="rounded-xl px-3 py-4 text-center text-[11.5px] faint" style={{ border: '1px dashed var(--line)' }}>
+                  <div className="rounded-xl px-3 py-4 text-center text-[12px] faint" style={{ border: '1px dashed var(--line)' }}>
                     {t('or.drop_here')}
                   </div>
                 )}
                 {/* крупная кнопка во всю ширину колонки: на телефоне зона нажатия ≥44px (см. index.css, .btn) */}
                 {rest > 0 && (
-                  <button type="button" className="btn-soft w-full !h-9 text-[12.5px]" data-tip={t('or.board_more_tip')}
+                  <button type="button" className="btn-soft w-full" data-tip={t('or.board_more_tip')}
                     aria-label={t('or.board_more_aria', { count: rest, label: t(label) })}
                     onClick={() => setShown(k, Math.min(shown + BOARD_PAGE, col.length))}>
                     <ChevronDown size={13} /> {t('or.board_more', { n: rest })}
                   </button>
                 )}
                 {rest === 0 && shown > BOARD_LIMIT && (
-                  <button type="button" className="btn-ghost w-full !h-9 text-[12.5px]"
+                  <button type="button" className="btn-ghost w-full"
                     aria-label={t('or.board_collapse_aria', { label: t(label) })} onClick={() => setShown(k, BOARD_LIMIT)}>
                     <ChevronUp size={13} /> {t('or.board_collapse')}
                   </button>
@@ -490,7 +537,7 @@ function LostSheet({ order, onClose, onDone }) {
       <form className="space-y-4" onSubmit={(e) => { e.preventDefault(); if (reason.trim()) onDone(reason.trim()) }}>
         <Field label={t('or.why_lost')} hint={t('or.why_lost_hint')}>
           <input autoFocus className="input" value={reason} onChange={(e) => setReason(e.target.value)}
-            placeholder={t('or.why_lost_ph')} />
+            placeholder={t('or.why_lost_ph')} aria-label={t('or.why_lost')} />
         </Field>
         <div className="muted text-[12.5px]">{t('or.lost_note')}</div>
         <div className="flex gap-2">
@@ -503,7 +550,7 @@ function LostSheet({ order, onClose, onDone }) {
 }
 
 /* Карточка клиента CRM: стадия клиента (отдельная сущность!), LTV, средний чек, долг,
-   источник, теги, контакт, следующий шаг с датой, история заказов. */
+    источник, теги, контакт, следующий шаг с датой, история заказов. */
 export function ClientCardSheet({ cid, onClose, onOrder }) {
   const { t } = useI18n()
   const [d, setD] = useState(null)
@@ -526,49 +573,52 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
   }
   return (
     <Sheet open={!!cid} onClose={onClose} wide title={d?.client?.name || t('graph.one_client')} sub={d?.source ? t('mem.source', { what: d.source }) : ''}>
-      {!d ? <div className="muted text-[13px]">{t('common.loading')}</div> : (
-        <div className="space-y-4 text-[13px]">
-          <div>
+      {!d ? <ListSkeleton n={3} rowH={40} avatar={false} /> : (
+        <div className="space-y-5 text-[13px]">
+          <section>
             <div className="label mb-1.5">{t('or.cc_stage_note')}</div>
             <ClientStageSelect view={d.stage} onView={(v) => setD({ ...d, stage: v })} onErr={show.err} label={t('cstage.for', { name: d.client?.name || '' })} />
             <ClientStageNote view={d.stage} />
-          </div>
-          <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
+          </section>
+          <section className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
             <div><div className="label">LTV</div><div className="num mt-0.5 pos">{money(d.ltv)}</div></div>
             <div><div className="label">{t('or.avg_check')}</div><div className="num mt-0.5">{d.avg_check ? money(d.avg_check) : '—'}</div></div>
             <div><div className="label">{t('or.cc_debt')}</div><div className={`num mt-0.5 ${d.debt > 0 ? 'warn' : ''}`}>{money(d.debt)}</div></div>
             <div><div className="label">{t('or.cc_orders')}</div><div className="num mt-0.5">{d.orders_count}</div></div>
-          </div>
-          <div className="grid gap-2 sm:grid-cols-2">
+          </section>
+          <section className="grid gap-2 sm:grid-cols-2">
             <div><div className="label mb-1">{t('or.cc_source')}</div>
-              <input className="input !h-8" defaultValue={d.source} placeholder={t('or.cc_source_ph')} onBlur={(e) => e.target.value !== d.source && save({ source: e.target.value })} /></div>
-            <div><div className="label mb-1">{t('or.cc_last')}</div><div className="mt-1.5">{d.last_contact_at ? dayLabel(d.last_contact_at) : '—'}</div></div>
-          </div>
-          {d.tags?.length > 0 && <div className="flex flex-wrap gap-1.5">{d.tags.map((t) => <span key={t} className="chip on">{t}</span>)}</div>}
-          <div>
+              <input className="input" defaultValue={d.source} placeholder={t('or.cc_source_ph')} aria-label={t('or.cc_source')} onBlur={(e) => e.target.value !== d.source && save({ source: e.target.value })} /></div>
+            <div><div className="label mb-1">{t('or.cc_last')}</div>
+              <div className="mt-2">{d.last_contact_at ? dayLabel(d.last_contact_at) : '—'}</div></div>
+          </section>
+          {d.tags?.length > 0 && <div className="flex flex-wrap gap-1.5">{d.tags.map((x) => <span key={x} className="chip on">{x}</span>)}</div>}
+          <section>
             <div className="label mb-1">{t('next_step.title')}</div>
             <div className="flex flex-wrap items-center gap-2">
-              <input className="input !h-8 min-w-[180px] flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder={t('next_step.ph')} aria-label={t('next_step.aria')} />
-              <input type="date" className="input !h-8 !w-[150px]" value={stepAt} onChange={(e) => setStepAt(e.target.value)} aria-label={t('next_step.date')} />
-              <button className="btn-soft btn-sm" disabled={step === (d.next_step || '') && stepAt === (d.next_step_at ? toLocalISO(new Date(d.next_step_at)).slice(0, 10) : '')} onClick={saveStep}>{t('common.save')}</button>
+              <input className="input min-w-[180px] flex-1" value={step} onChange={(e) => setStep(e.target.value)} placeholder={t('next_step.ph')} aria-label={t('next_step.aria')} />
+              <input type="date" className="input !w-[160px]" value={stepAt} onChange={(e) => setStepAt(e.target.value)} aria-label={t('next_step.date')} />
+              <button className="btn-soft" disabled={step === (d.next_step || '') && stepAt === (d.next_step_at ? toLocalISO(new Date(d.next_step_at)).slice(0, 10) : '')} onClick={saveStep} aria-label={t('next_step.save')}>{t('common.save')}</button>
             </div>
             {err && <div className="neg mt-1 text-[12px]">{err}</div>}
             <div className="faint mt-1 text-[12px]">{d.next_step_at ? t('or.cc_was', { when: dayLabel(d.next_step_at) }) : t('or.cc_date_hint')}</div>
-          </div>
-          <div>
+          </section>
+          <section>
             <div className="label mb-1.5">{t('or.cc_history')}</div>
-            {d.orders.map((o) => (
-              <button key={o.id} type="button" className="flex w-full items-center justify-between gap-3 py-0.5 text-left" onClick={() => onOrder?.(o.id)}>
-                <span className="min-w-0 truncate">{o.title} <span className="faint">· {t(ORDER_STAGE_LABEL[stageOf(o)])}</span></span>
-                <span className="num shrink-0">{o.price ? money(o.price) : '—'}{o.left > 0 ? <span className="faint"> · {t('or.debt', { m: money(o.left) })}</span> : ''}</span>
-              </button>
-            ))}
+            <div className="rule">
+              {d.orders.map((o) => (
+                <button key={o.id} type="button" className="row w-full !py-1.5 text-left" onClick={() => onOrder?.(o.id)}>
+                  <span className="min-w-0 truncate">{o.title} <span className="faint">· {t(ORDER_STAGE_LABEL[stageOf(o)])}</span></span>
+                  <span className="num shrink-0">{o.price ? money(o.price) : '—'}{o.left > 0 ? <span className="faint"> · {t('or.debt', { m: money(o.left) })}</span> : ''}</span>
+                </button>
+              ))}
+            </div>
             {!d.orders.length && <div className="faint text-[12px]">{t('or.cc_no_orders')}</div>}
-          </div>
-          {d.activity?.length > 0 && <div>
+          </section>
+          {d.activity?.length > 0 && <section>
             <div className="label mb-1.5">{t('mem.t_timeline')}</div>
             <div className="max-h-[180px] space-y-1 overflow-y-auto">{d.activity.map((a) => <div key={a.id} className="muted text-[12.5px]"><span className="faint num">{dayLabel(a.created_at).toLowerCase()}</span> {a.text}</div>)}</div>
-          </div>}
+          </section>}
         </div>
       )}
     </Sheet>
@@ -586,7 +636,7 @@ function AnalyticsBlock({ a }) {
           <div key={f.stage} className="flex items-center gap-3 text-[12.5px]">
             <span className="w-[110px] shrink-0 muted">{t.sv(f.label) || f.label}</span>
             <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-              <div className="h-full rounded-full" style={{ width: `${Math.round((f.count / max) * 100)}%`, background: f.stage === 'paid' ? 'var(--pos)' : f.stage === 'lost' ? 'var(--neg)' : 'linear-gradient(90deg, var(--acc), var(--acc2))' }} />
+              <div className="h-full rounded-full" style={{ width: `${Math.round((f.count / max) * 100)}%`, background: f.stage === 'paid' ? 'var(--pos)' : f.stage === 'lost' ? 'var(--neg)' : 'var(--acc)' }} />
             </div>
             <span className="num w-8 shrink-0 text-right">{f.count}</span>
           </div>
@@ -609,53 +659,53 @@ function StatsBlock({ stats, onUnpaid }) {
   return (
     <Section title={t('or.st_title')} hint={t('or.st_hint')}>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        <div className="c" style={{ borderRadius: 26 }}>
-          <div className="label mb-5">{t('or.st_income')}</div>
-          <div className="flex h-[132px] items-end gap-2">
+        <div>
+          <div className="label mb-4">{t('or.st_income')}</div>
+          <div className="flex h-[120px] items-end gap-2">
             {stats.months.map((m) => {
               const cur = m.month === lastMonth
               return (
                 <div key={m.month} className="group flex flex-1 flex-col items-center gap-1.5">
-                  <div className="num text-[11px] opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
-                  <div className="w-full rounded-t-lg transition-all duration-700" style={{
-                    height: `${Math.max(3, (m.income / max) * 96)}px`,
-                    background: cur ? 'linear-gradient(180deg, var(--acc2) 0%, var(--acc) 100%)' : m.income ? 'linear-gradient(180deg, color-mix(in srgb, var(--acc) 55%, transparent), color-mix(in srgb, var(--acc) 32%, transparent))' : 'var(--fill-2)',
-                    boxShadow: cur ? '0 12px 26px -12px color-mix(in srgb, var(--acc) 60%, transparent)' : 'none',
+                  <div className="num text-[12px] opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
+                  <div className="w-full rounded-t-md transition-all duration-700" style={{
+                    height: `${Math.max(3, (m.income / max) * 92)}px`,
+                    background: m.income ? (cur ? 'var(--acc)' : 'color-mix(in srgb, var(--acc) 38%, transparent)') : 'var(--fill-2)',
                   }} />
-                  <div className="faint mono text-[10px]">{m.month.slice(5)}</div>
+                  <div className="faint num text-[12px]">{m.month.slice(5)}</div>
                 </div>
               )
             })}
           </div>
         </div>
-        <div className="c" style={{ borderRadius: 26 }}>
-          <div className="mb-5 flex items-baseline justify-between"><div className="label">{t('or.st_focus')}</div><span className="muted text-[12px]">{stats.week_load_h ? t('or.st_week', { h: hours(stats.week_load_h) }) : t('or.st_no_timer')}</span></div>
-          <div className="flex h-[132px] items-end gap-1">
+        <div>
+          <div className="mb-4 flex items-baseline justify-between gap-3">
+            <div className="label">{t('or.st_focus')}</div>
+            <span className="muted text-[12px]">{stats.week_load_h ? t('or.st_week', { h: hours(stats.week_load_h) }) : t('or.st_no_timer')}</span>
+          </div>
+          <div className="flex h-[120px] items-end gap-1">
             {stats.focus_days.map((d) => (
               <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5" title={t('or.st_day', { date: `${d.date.slice(8)}.${d.date.slice(5, 7)}`, min: d.min })}>
-                <div className="w-full rounded-t-md" style={{
-                  height: `${Math.max(3, (d.min / maxF) * 96)}px`,
-                  background: d.min ? 'linear-gradient(180deg,#19b34a 0%,#10b3a3 100%)' : 'var(--fill-2)',
-                  opacity: d.min ? 0.92 : 1,
-                  boxShadow: d.min ? '0 10px 22px -12px rgba(16,179,163,0.6)' : 'none',
-                }} />
-                <div className="faint mono text-[9px]">{d.date.slice(8)}</div>
+                <div className="w-full rounded-t-md" style={{ height: `${Math.max(3, (d.min / maxF) * 92)}px`, background: d.min ? 'var(--pos)' : 'var(--fill-2)', opacity: d.min ? 0.9 : 1 }} />
+                <div className="faint num text-[12px]">{d.date.slice(8)}</div>
               </div>
             ))}
           </div>
         </div>
       </div>
       {stats.clients.length > 0 && (
-        <div className="c mt-5" style={{ borderRadius: 26 }}>
-          <button className="flex items-center gap-2 text-left" onClick={() => setMore((v) => !v)}><span className="label">{t('or.st_clients', { n: stats.clients.length })}</span>{more ? <ChevronUp size={13} className="faint" /> : <ChevronDown size={13} className="faint" />}</button>
+        <div className="mt-5">
+          <button className="max-[820px]:min-h-[var(--tap)] cluster text-left" onClick={() => setMore((v) => !v)}>
+            <span className="label">{t('or.st_clients', { n: stats.clients.length })}</span>
+            {more ? <ChevronUp size={13} className="faint" /> : <ChevronDown size={13} className="faint" />}
+          </button>
           {more && (
-            <div className="mt-3 animate-rise">
+            <div className="rule mt-2 animate-rise">
               {stats.clients.map((c) => (
                 <div key={c.client} className="row">
                   <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-[12px]">{t('or.cc_orders_n', { count: c.orders }) + (c.total ? ` ${t('or.on', { m: money(c.total) })}` : '') + (c.open ? ` · ${t('tk.open_n', { n: c.open })}` : '') + (c.hours ? ` · ${hours(c.hours)}` : '') + (c.rate ? ` · ${money(c.rate)}/${T('unit.hour')}` : '')}</div></div>
                   <div className="num text-right">
-                    {c.paid > 0 ? <div className="text-[14px] font-medium">{money(c.paid)} <span className="faint text-[11px] font-normal">{t('or.st_received')}</span></div> : <div className="faint text-[12.5px]">{t('or.st_no_pays')}</div>}
-                    {c.unpaid > 0 && <button type="button" className="warn text-[11.5px]" onClick={onUnpaid}>{t('or.st_awaiting', { m: money(c.unpaid) })}</button>}
+                    {c.paid > 0 ? <div className="text-[14px] font-medium">{money(c.paid)} <span className="faint text-[12px] font-normal">{t('or.st_received')}</span></div> : <div className="faint text-[12.5px]">{t('or.st_no_pays')}</div>}
+                    {c.unpaid > 0 && <button type="button" className="warn text-[12px]" onClick={onUnpaid}>{t('or.st_awaiting', { m: money(c.unpaid) })}</button>}
                   </div>
                 </div>
               ))}
@@ -688,11 +738,11 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   // Подсказка цены/часов по похожим прошлым заказам (только для нового заказа, с задержкой ввода)
   useEffect(() => {
     if (!open || order) { setHint(null); return }
-    const t = f.title.trim()
-    if (t.length < 4) { setHint(null); return }
+    const q = f.title.trim()
+    if (q.length < 4) { setHint(null); return }
     let on = true
     const id = setTimeout(() => {
-      api.ordersSuggest(t).then((s) => { if (on) setHint(s && s.count ? s : null) }).catch(() => {})
+      api.ordersSuggest(q).then((s) => { if (on) setHint(s && s.count ? s : null) }).catch(() => {})
     }, 450)
     return () => { on = false; clearTimeout(id) }
   }, [f.title, open, order])
@@ -719,13 +769,13 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
   return (
     <Sheet open={open} onClose={onClose} title={t(order ? 'od.order' : 'or.new_order')} sub={order ? undefined : t('or.new_order_sub')}>
       <form onSubmit={submit} className="space-y-4">
-        <Field label={t('or.what_do')}><input autoFocus className="input !text-[17px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder={t('or.what_do_ph')} /></Field>
+        <Field label={t('or.what_do')}><input autoFocus className="input !text-[19px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder={t('or.what_do_ph')} /></Field>
         {hint && (
           <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: 'var(--sf2)' }}>
             <span className="muted">{t('or.similar', { what: hint.sample?.slice(0, 2).join(', ') })}</span>
             {hint.price ? <span>{t('or.usually', { m: money(hint.price) })}</span> : null}
             {hint.hours ? <span className="muted">≈{hint.hours} {t('unit.hour')}{hint.rate ? ` · ${money(hint.rate)}/${T('unit.hour')}` : ''}</span> : null}
-            <button type="button" className="btn-ghost btn-sm !h-6 ml-auto" onClick={() => setF((x) => ({ ...x, ...(hint.price ? { price: String(hint.price) } : {}), ...(hint.hours ? { estimate_h: String(hint.hours) } : {}) }))}>{t('or.apply')}</button>
+            <button type="button" className="btn-ghost btn-sm ml-auto" onClick={() => setF((x) => ({ ...x, ...(hint.price ? { price: String(hint.price) } : {}), ...(hint.hours ? { estimate_h: String(hint.hours) } : {}) }))}>{t('or.apply')}</button>
           </div>
         )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -736,8 +786,8 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
         </div>
 
         {/* чекбокс вместо непонятной подсказки про «старый заказ»: ставит «сдан» и открывает поле оплаты */}
-        <label className="flex cursor-pointer items-center gap-2.5 text-[13.5px]">
-          <input type="checkbox" className="h-4 w-4 accent-[var(--acc)]" checked={f.done} onChange={(e) => toggleDone(e.target.checked)} />
+        <label className="flex min-h-[var(--tap)] cursor-pointer items-center gap-2.5 text-[13.5px]">
+          <input type="checkbox" className="h-5 w-5 shrink-0 accent-[var(--acc)]" checked={f.done} onChange={(e) => toggleDone(e.target.checked)} />
           <span>{t('or.already_done')}</span>
         </label>
         {f.done && (
@@ -751,7 +801,7 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
             <Pills value={f.stage} onChange={(s) => setF({ ...f, stage: s })} options={NEW_STAGES.map(([k, l]) => [k, t(l)])} />
           </Field>
         )}
-        <Field label={t('od.notes_spec')}><textarea className="input min-h-[72px]" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder={t('or.notes_ph')} /></Field>
+        <Field label={t('od.notes_spec')}><textarea className="input min-h-[84px]" value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })} placeholder={t('or.notes_ph')} /></Field>
         <button className="btn-primary btn-lg w-full">{t(order ? 'common.save' : 'common.add')}</button>
       </form>
     </Sheet>
@@ -762,7 +812,6 @@ function newPaymentKey() {
   try { if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID() } catch { /* старый браузер — ниже запасной вариант */ }
   return `pay-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
 }
-
 
 function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
   const { t } = useI18n()
@@ -796,7 +845,7 @@ function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
         </div>
         <div className="muted text-[12.5px]">{t('or.pay_note')}</div>
         <button className="btn-primary btn-lg w-full">{t('or.record')}</button>
-        {onJustClose && <button type="button" className="btn-ghost btn-sm w-full" onClick={() => onJustClose(order)}>{t('or.pay_already')}</button>}
+        {onJustClose && <button type="button" className="btn-ghost w-full" onClick={() => onJustClose(order)}>{t('or.pay_already')}</button>}
       </form>
     </Sheet>
   )
