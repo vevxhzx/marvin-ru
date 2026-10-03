@@ -56,6 +56,13 @@ export const DICT = {
   'cal.e_day': { ru: 'В этот день пусто', en: 'Nothing on this day' },
   'cal.e_day_sub': { ru: 'Свободный день. Можно записать встречу — или оставить как есть.', en: 'A free day. Add a meeting — or leave it alone.' },
   'cal.e_upcoming_sub': { ru: 'В календаре пока тихо. Встречи появятся здесь сами.', en: 'The calendar is quiet for now. Meetings will show up here.' },
+
+  // --- мозг, память, доска: подписи действий (волна экранов) ---
+  'mind.add': { ru: 'мысль', en: 'thought' },
+  'mind.confidence': { ru: 'уверенность', en: 'confidence' },
+  'bd.frame_move_left': { ru: 'влевее', en: 'move left' },
+  'bd.frame_move_right': { ru: 'правее', en: 'move right' },
+  'bd.frames_sheet_hint': { ru: 'тап — перейти к кадру', en: 'tap to jump to the frame' },
   'common.cancel': { ru: 'Отмена', en: 'Cancel' },
   'common.yes': { ru: 'Да', en: 'Yes' },
   'common.no': { ru: 'Нет', en: 'No' },
