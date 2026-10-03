@@ -201,7 +201,7 @@ export default function Orders() {
 
       {followups.length > 0 && (
         <div className="animate-rise flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px]">
-          <span className="muted flex items-center gap-1.5"><Bell size={13} /> follow-up:</span>
+          <span className="muted flex items-center gap-1.5"><Bell size={13} /> {t('or.followups')}:</span>
           {followups.slice(0, 5).map((f) => (
             <button key={f.id} type="button" className="max-[820px]:min-h-[var(--tap)] flex items-center gap-1.5 text-left" onClick={() => f.order_id && setDrawerId(f.order_id)}>
               <span className="h-1.5 w-1.5 rounded-full" style={{ background: f.kind === 'overdue' ? 'var(--neg)' : 'var(--warn)' }} />

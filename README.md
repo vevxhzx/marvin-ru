@@ -9,7 +9,41 @@
 </p>
 
 <p align="center">
-  <img src="docs/img/home-light.png" alt="Главная в светлой теме: приветствие, поле ввода, задачи и события дня" width="880">
+  <img src="docs/img/home-light.png" alt="Главная в светлой теме: приветствие, поле ввода и карточка баланса" width="880">
+</p>
+
+<p align="center">
+  <img src="docs/img/home-dark.png" alt="Главная в тёмной теме" width="880">
+</p>
+
+<p align="center">
+  <img src="docs/img/finance.png" alt="Финансы: баланс, касса на 30 дней и поток в месяц" width="620">
+  <img src="docs/img/orders.png" alt="Заказы: воронка из девяти стадий и подсказка на первом заходе" width="620">
+</p>
+<p align="center">
+  <img src="docs/img/tasks.png" alt="Задачи: плоский список с крупными чекбоксами" width="620">
+  <img src="docs/img/calendar.png" alt="Календарь: месяц и неделя" width="620">
+</p>
+<p align="center">
+  <img src="docs/img/mind.png" alt="Мозг: мысли списком" width="430">
+  <img src="docs/img/memory.png" alt="Память: факты, которые Marvin о вас помнит" width="430">
+  <img src="docs/img/people.png" alt="Люди: клиенты и их ближайшие шаги" width="430">
+</p>
+<p align="center">
+  <img src="docs/img/board.png" alt="Доска проекта" width="430">
+  <img src="docs/img/chat.png" alt="Чат: одна история с Telegram" width="430">
+  <img src="docs/img/palette.png" alt="Палитра команд Ctrl+K" width="430">
+</p>
+<p align="center">
+  <img src="docs/img/settings.png" alt="Настройки: разделы открываются шторкой" width="430">
+</p>
+<p align="center">
+  <img src="docs/img/mobile-home.png" alt="Телефон: главная" width="210">
+  <img src="docs/img/mobile-finance.png" alt="Телефон: финансы" width="210">
+  <img src="docs/img/mobile-tasks.png" alt="Телефон: задачи" width="210">
+  <img src="docs/img/mobile-orders.png" alt="Телефон: заказы" width="210">
+  <img src="docs/img/mobile-mind.png" alt="Телефон: мозг" width="210">
+  <img src="docs/img/mobile-settings.png" alt="Телефон: настройки" width="210">
 </p>
 
 ---

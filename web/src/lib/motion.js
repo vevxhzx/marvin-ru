@@ -403,6 +403,11 @@ export function viewTransition(update, { } = {}) {
   }
   try {
     const t = vt.call(document, run)
+    // все три промиса браузер отклоняет, если переход сорвали (поворот экрана, второй
+    // переход подряд) — без catch это всплывает как pageerror в консоль
+    for (const key of ['ready', 'finished', 'updateCallbackDone']) {
+      if (t && t[key] && typeof t[key].catch === 'function') t[key].catch(() => {})
+    }
     return { used: true, done: Promise.resolve(t.finished).catch(() => {}) }
   } catch {
     return { used: false, done: Promise.resolve().then(() => run()) }
