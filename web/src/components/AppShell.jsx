@@ -39,6 +39,7 @@ const ADD_EVENT = {
   '/mind': 'mind:add',
   '/people': 'people:add',
   '/memory': 'memory:add',
+  '/board': 'board:add',
 }
 
 /* ---------- состояние ассистента для шапки и сайдбара ---------- */

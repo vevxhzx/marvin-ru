@@ -35,13 +35,19 @@ function BoardList() {
   const [, show] = useToast()
   const load = useCallback(() => api.get(`/api/boards${archived ? '?archived=true' : ''}`).then(setBoards).catch(() => setBoards([])), [archived])
   useEffect(() => { load() }, [load])
+  // «+» дока на «Доске» открывает форму новой доски (AppShell шлёт board:add)
+  useEffect(() => {
+    const on = () => setSheet(true)
+    window.addEventListener('board:add', on)
+    return () => window.removeEventListener('board:add', on)
+  }, [])
   const restore = async (b) => { try { await api.put(`/api/boards/${b.id}`, { archived: false }); load() } catch (er) { show.err(er) } }
   return (
     <div className="pg">
       <PageHead kicker={t('bd.kicker')} title={t('nav.board')} idx={boards?.length}
         right={<div className="flex items-center gap-2">
           <Seg className="min-h-[var(--tap)] [&>button]:!min-h-[var(--tap)]" value={archived ? 'arch' : 'live'} onChange={(v) => setArchived(v === 'arch')} options={[['live', t('bd.live')], ['arch', t('bd.arch')]]} />
-          <button type="button" className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('bd.new_board')}</button>
+          <button type="button" className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet(true)}><Plus size={15} /> {t('bd.new_board')}</button>
         </div>} />
       {boards === null ? (
         <div className="grid gap-3 min-[821px]:grid-cols-2 min-[1180px]:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} h={132} radius="var(--r-xl)" />)}</div>
