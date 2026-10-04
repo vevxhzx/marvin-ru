@@ -820,9 +820,11 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     border-radius: 999px;
     background: var(--sf);
   }
-  .cal2 { min-height: 420px; }
+  .cal2 { min-height: 0; flex: none; }
   .cal2-grid {
-    grid-template-rows: repeat(6, minmax(48px, 1fr));
+    /* Ряды по контенту: явные 6 рядов снимаем, пустой ряд не резервируется (месяц = 5 недель) */
+    grid-template-rows: none;
+    grid-auto-rows: 48px;
     gap: 4px;
   }
   .cal2 b {
@@ -2396,6 +2398,11 @@ select.input option { background: var(--surface); color: var(--ink); }
     padding-inline: 20px;
     overflow: hidden;
   }
+  /* Календарь на телефоне: карточка по контенту, без растяжения и зарезервированной высоты */
+  #p-cal .c { min-height: 0 !important; display: block !important; }
+  #p-cal .cal2 { min-height: 0 !important; flex: none !important; }
+  #p-cal .cal2-grid { flex: none !important; }
+  #p-cal .c .mt-auto { margin-top: var(--s-4) !important; }
   /* клик по строке списка — крупная зона, но текст остаётся читаемым */
   .rowi { min-height: var(--tap); padding: var(--s-3) var(--s-2); }
   .note { padding: 14px var(--s-2); }

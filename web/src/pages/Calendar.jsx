@@ -501,8 +501,10 @@ export default function Calendar() {
           <h1 className="r" style={{ '--i': 0 }}>{headTitle}</h1>
           <p className="sub r" style={{ '--i': 1 }}>{view === 'week' ? weekRange : cursor.getFullYear()}</p>
         </div>
-        <div className="flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
-          <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
+        <div className="r mt-3 flex w-full items-center gap-2" style={{ '--i': 2 }}>
+          {/* вид и навигация — в одну строку (скролл с затуханием), настройка справа */}
+          <div className="fade-x flex min-w-0 flex-1 items-center gap-2">
+            <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
             <button
               type="button"
               className={view === 'month' ? 'on' : ''}
@@ -533,6 +535,7 @@ export default function Calendar() {
               <span aria-hidden="true">›</span>
             </button>
           </div>
+          </div>
           {shown.length > 1 && (
             <button
               type="button"
@@ -557,7 +560,7 @@ export default function Calendar() {
         {/* Вид «Месяц» */}
         {view === 'month' && (
           <>
-            <section className={`c s8 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 3, minHeight: '560px', ...cardSt('month') }}>
+            <section className={`c s8 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 3, minHeight: phone ? undefined : '560px', ...cardSt('month') }}>
               {cardCtl('month')}
               <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2 className="h3">{MONTHS_GEN[cursor.getMonth()]} {cursor.getFullYear()}</h2>
@@ -575,13 +578,13 @@ export default function Calendar() {
                   paddingBottom: 4,
                 }}
               >
-                <div className="cal2" id="cal2" style={{ minWidth: MONTH_MIN_W }}>
+                <div className="cal2" id="cal2" style={{ minWidth: phone ? 0 : MONTH_MIN_W }}>
                   <div className="cal2-head">
                     {WD_SHORT.slice(1).concat(WD_SHORT[0]).map((w, i) => (
                       <span className="mono" key={`${w}-${i}`} style={{ minWidth: 0 }}>{w}</span>
                     ))}
                   </div>
-                  <div className="cal2-grid">
+                  <div className="cal2-grid" style={{ gridTemplateRows: `repeat(${Math.ceil(gridCells.length / 7)}, minmax(48px, 1fr))` }}>
                     {gridCells.map((c, i) => (
                       <b
                         key={c.key}
