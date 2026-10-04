@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search, CalendarDays, CheckSquare, Wallet, FileText, Link2, MessageCircle, Cpu, ArrowUpRight, X, Pencil, Check, Star, RotateCcw, Plus, Monitor, Target, Bot } from 'lucide-react'
 import { api, hhmm, dayLabel, shortDate } from '../lib/api'
-import { Empty, Seg, PageHead, ListSkeleton, Pills, toast } from '../components/ui'
+import { Empty, ErrorState, Seg, PageHead, ListSkeleton, Pills, toast } from '../components/ui'
 import { useRefresh } from '../App'
 import { name as aName } from '../lib/name'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
@@ -50,9 +50,10 @@ export default function Memory() {
   const { t } = useI18n()
   const [tab, setTab] = useState('long')
   const [data, setData] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   const { tick } = useRefresh()
   const phone = usePhone()          // ≤820px: телефонная раскладка по макету
-  const load = () => api.facts().then(setData).catch(() => setData({ items: [], stats: {}, enabled: false, categories: [] }))
+  const load = () => { setLoadErr(false); return api.facts().then(setData).catch(() => setLoadErr(true)) }
   useEffect(() => { load() }, [tick])
   const st = data?.stats || {}
   const counts = { short: st.short, long: st.long, archive: st.archive }
@@ -69,7 +70,7 @@ export default function Memory() {
           </button>
         ))}
       </div>
-      {tab === 'journal' ? <Journal /> : tab === 'timeline' ? <Timeline /> : <Facts layer={tab} data={data} reload={load} />}
+      {tab === 'journal' ? <Journal /> : tab === 'timeline' ? <Timeline /> : (loadErr && !data ? <ErrorState onRetry={load} /> : <Facts layer={tab} data={data} reload={load} />)}
     </div>
   )
 }
@@ -340,11 +341,13 @@ function Journal() {
   const [days, setDays] = useState(30)
   const [q, setQ] = useState('')
   const [items, setItems] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   const [openId, setOpenId] = useState(null)
   const { tick } = useRefresh()
 
+  const loadJ = () => { setLoadErr(false); return api.memory(days, kind || undefined, q || undefined).then(setItems).catch(() => setLoadErr(true)) }
   useEffect(() => {
-    const t = setTimeout(() => api.memory(days, kind || undefined, q || undefined).then(setItems).catch(() => setItems([])), q ? 250 : 0)
+    const t = setTimeout(() => loadJ(), q ? 250 : 0)
     return () => clearTimeout(t)
   }, [kind, days, q, tick])
 
@@ -379,7 +382,7 @@ function Journal() {
         </div>
       </div>
 
-      {!items ? <ListSkeleton n={6} /> : groups.length === 0 ? (
+      {!items && !loadErr ? <ListSkeleton n={6} /> : loadErr && !(items || []).length ? <ErrorState onRetry={loadJ} /> : groups.length === 0 ? (
         <div className={listCls(phone)}><Empty glyph="memory" text={t(q ? 'common.no_results' : 'mem.empty')} sub={t(q ? 'mem.try_words' : 'mem.everything_here')} hint={q ? undefined : t('mem.hint_example')} /></div>
       ) : (
         <div className="space-y-7">
@@ -436,11 +439,16 @@ function Timeline() {
   const [day, setDay] = useState(0)   // 0 сегодня, 1 вчера…
   const [q, setQ] = useState('')
   const [items, setItems] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   const { tick } = useRefresh()
   const date = useMemo(() => { const d = new Date(); d.setDate(d.getDate() - day); return d }, [day])
-  useEffect(() => {
+  const loadT = () => {
     const iso = `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-    api.get(`/api/timeline?day=${iso}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`).then(setItems).catch(() => setItems([]))
+    setLoadErr(false)
+    return api.get(`/api/timeline?day=${iso}${q.trim() ? `&q=${encodeURIComponent(q.trim())}` : ''}`).then(setItems).catch(() => setLoadErr(true))
+  }
+  useEffect(() => {
+    loadT()
   }, [day, q, tick])
   return (
     <div className="space-y-5">
@@ -452,7 +460,7 @@ function Timeline() {
           <input value={q} onChange={(e) => setQ(e.target.value)} className="input !pl-9" placeholder={t('mem.timeline_search_ph')} aria-label={t('mem.timeline_search_ph')} />
         </label>
       </div>
-      {!items ? <ListSkeleton n={6} /> : items.length === 0 ? (
+      {!items && !loadErr ? <ListSkeleton n={6} /> : loadErr && !(items || []).length ? <ErrorState onRetry={loadT} /> : items.length === 0 ? (
         <div className={listCls(phone)}><Empty glyph="memory" text={t(q ? 'mem.timeline_none' : 'mem.timeline_empty')} sub={t(q ? 'mem.timeline_other' : 'mem.timeline_hint')} /></div>
       ) : (
         <div className={listCls(phone)}>

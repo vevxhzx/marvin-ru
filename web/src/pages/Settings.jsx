@@ -12,7 +12,6 @@ import { SwatchRow } from '../components/ColorSwatches'
 import { useTheme, NAV_GROUPS, useRefresh } from '../App'
 import { RotateCcw } from 'lucide-react'
 import { canInstall, installPwa } from '../lib/sw'
-import { pushState, enablePush, disablePush } from '../lib/push'
 import pkg from '../../package.json'
 import { useI18n, t as T } from '../lib/i18n'
 
@@ -276,7 +275,6 @@ export default function Settings({ health }) {
               <Switch on={notifyEnabled()} onChange={toggleNotif} label={notifyEnabled() ? t('st.on') : t('st.enable')} />
             </div>
           </RowLine>
-          <PushToggle />
         </div>
       </Section>
     ),
@@ -1463,24 +1461,6 @@ function DesktopClientSection() {
             </button>
           </div>
         </div>
-
-        <div className="rule pt-3 flex flex-wrap items-center gap-2 text-[12.5px]">
-          <span className="faint">{t('st.download_builds2')}</span>
-          <a
-            href="/api/download/jarvis.zip"
-            download="jarvis-complete.zip"
-            className="btn-soft !h-7 !px-3 !text-[12px]"
-          >
-            {t('st.z_zip_jarvis2')}
-          </a>
-          <a
-            href="/api/download/marvin.zip"
-            download="github-marvin.zip"
-            className="btn-soft !h-7 !px-3 !text-[12px]"
-          >
-            {t('st.z_zip_marvin2')}
-          </a>
-        </div>
       </div>
 
       <div className="rule pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-[13px]">
@@ -1679,64 +1659,6 @@ function Diagnostics({ status, diag, onRefresh }) {
         </div>
       )}
     </Section>
-  )
-}
-
-/* ---------- web push: тумблер подписки (секция «уведомления в браузере») ----------
-
-   Логика — в lib/push.js (WebCrypto, PushManager, POST /api/push/subscribe).
-   Здесь — только честные состояния: браузер не умеет / нет https / dev-режим /
-   серверной части ещё нет («появится позже») — без ошибок и без падений. */
-const PUSH_TEXT = {
-  idle: [T('st.checking'), T('st.push_look')],
-  on: [T('st.push_on'), T('st.push_on_desc')],
-  off: [T('st.push_none'), T('st.push_desc')],
-  pending: [T('st.push_later'), T('st.push_noep')],
-  denied: [T('st.push_blocked'), T('st.allow_browser')],
-  unsupported: [T('st.not_supported'), T('st.need_push_browser')],
-  insecure: [T('st.https_only'), T('st.secure_ctx')],
-  dev: [T('st.dev_only'), T('st.sw_prod_only')],
-}
-function PushToggle() {
-  const { t } = useI18n()
-  const [state, setState] = useState('idle')
-  const [busy, setBusy] = useState(false)
-  const [, show] = useToast()
-  useEffect(() => { pushState().then(setState).catch(() => setState('unsupported')) }, [])
-
-  const locked = state === 'unsupported' || state === 'insecure' || state === 'dev'
-  const toggle = async () => {
-    if (busy || locked) return
-    setBusy(true)
-    try {
-      if (state === 'on') {
-        const r = await disablePush()
-        if (r.ok) { setState('off'); show(t('st.push_off')) }
-        else show(r.message || t('st.push_off_fail'), 'err')
-        return
-      }
-      const r = await enablePush()
-      if (r.ok) { setState('on'); show(t('st.push_enabled'), '', t('st.push_sent')) }
-      else if (r.reason === 'no-endpoint') { setState('pending'); show(t('st.push_later2'), '', t('st.push_no_endpoint')) }
-      else if (r.reason === 'permission') setState('denied')
-      else if (r.reason === 'insecure') setState('insecure')
-      else if (r.reason === 'dev') setState('dev')
-      else if (r.reason === 'unsupported') setState('unsupported')
-      else { setState('off'); show(r.message || t('st.push_subscribe_fail'), 'err') }
-    } finally { setBusy(false) }
-  }
-
-  const [title, hint] = PUSH_TEXT[state] || PUSH_TEXT.off
-  return (
-    <RowLine
-      icon={state === 'on' ? <Bell size={19} className="shrink-0 text-accent" /> : <BellOff size={19} className="faint shrink-0" />}
-      title={busy ? t('st.subscribing') : title}
-      sub={hint}>
-      <div className="flex items-center gap-3">
-        {state === 'pending' && <span className="faint text-[12px]">{t('st.push_404')}</span>}
-        <Switch on={state === 'on'} onChange={toggle} label={t('st.push_sub')} />
-      </div>
-    </RowLine>
   )
 }
 

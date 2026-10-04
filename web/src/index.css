@@ -1613,7 +1613,7 @@ body {
 ::selection { background: var(--accent); color: var(--accent-ink); }
 button, input, select, textarea { font: inherit; letter-spacing: inherit; }
 :focus-visible { outline: var(--focus-ring) solid var(--accent); outline-offset: var(--focus-offset); border-radius: 6px; }
-input:focus-visible, textarea:focus-visible, .composer:focus-within *:focus-visible { outline: none; }
+.composer:focus-within *:focus-visible { outline: none; }
 button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: none; }
 
 /* ---------- типографика ---------- */

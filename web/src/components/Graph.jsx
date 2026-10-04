@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../lib/api'
 import { useI18n } from '../lib/i18n'
-import { Empty, Skeleton } from '../components/ui'
+import { Empty, ErrorState, Skeleton } from '../components/ui'
 
 /* Граф «второго мозга»: люди · заказы · мысли · ссылки · теги. Связи выводятся сами (имена, теги,
    [[скобки]], смысл). Простой force-layout на canvas без библиотек.
@@ -39,6 +39,7 @@ function fitLabel(ctx, text, maxW) {
 export default function Graph({ height, focus: initialFocus = null, compact = false }) {
   const { t, fmtNumber } = useI18n()
   const [data, setData] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   const [focus, setFocus] = useState(initialFocus)
   const [hover, setHover] = useState(null)
   const hoverRef = useRef(null)          // наведение читаем из ref, а не из зависимостей эффекта — иначе физика стартовала бы с нуля на каждое движение мыши
@@ -55,7 +56,11 @@ export default function Graph({ height, focus: initialFocus = null, compact = fa
   const viewRef = useRef({ x: 0, y: 0, k: 1, user: false })   // user=true — человек сам двигал/масштабировал, авто-подгонку выключаем
   const nav = useNavigate()
 
-  useEffect(() => { api.get(`/api/graph${focus ? `?focus=${encodeURIComponent(focus)}` : ''}`).then(setData).catch(() => setData({ nodes: [], edges: [], stats: {} })) }, [focus])
+  const loadGraph = useCallback(() => {
+    setLoadErr(false)
+    return api.get(`/api/graph${focus ? `?focus=${encodeURIComponent(focus)}` : ''}`).then(setData).catch(() => setLoadErr(true))
+  }, [focus])
+  useEffect(() => { loadGraph() }, [loadGraph])
 
   // раскладка: узлы с позициями сохраняются между перерисовками по id
   const layout = useMemo(() => {
@@ -249,7 +254,12 @@ export default function Graph({ height, focus: initialFocus = null, compact = fa
         role="img" aria-label={`${t('graph.stats', { people: st.people || 0, notes: st.notes || 0, links: st.links || 0, edges: st.edges || 0 })}. ${t('graph.nav_hint')}`}
         onPointerDown={onDown} onPointerMove={onMove} onPointerUp={onUp} onPointerLeave={() => { if (!touchRef.current) setHover(null) }} onDoubleClick={onDbl} />
 
-      {!data && <div className="absolute inset-0 p-4" aria-hidden="true"><Skeleton h={28} w="60%" /><Skeleton h={220} className="mt-4" radius="var(--r-lg)" /></div>}
+      {!data && !loadErr && <div className="absolute inset-0 p-4" aria-hidden="true"><Skeleton h={28} w="60%" /><Skeleton h={220} className="mt-4" radius="var(--r-lg)" /></div>}
+      {loadErr && (!data || data.nodes.length === 0) && (
+        <div className="absolute inset-0 grid place-items-center p-4" style={{ background: 'var(--fill)' }}>
+          <ErrorState onRetry={loadGraph} />
+        </div>
+      )}
 
       {/* легенда — одна прокручиваемая строка, чтобы не съедать угол холста на телефоне */}
       {!compact && data && !empty && (
@@ -273,7 +283,7 @@ export default function Graph({ height, focus: initialFocus = null, compact = fa
         </div>
       )}
 
-      {empty && (
+      {empty && !loadErr && (
         <div className="absolute inset-0 grid place-items-center p-4">
           <Empty compact glyph="mind" text={t('graph.empty_title')} sub={t('graph.empty_hint')} />
         </div>

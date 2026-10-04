@@ -2,7 +2,7 @@
 import { Plus, Check, Play, Square, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins, RefreshCw, Bell, User, HelpCircle } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, money, moneyShort, dayLabel, shortDate, hhmm, toLocalISO } from '../lib/api'
-import { Section, Empty, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm } from '../components/ui'
+import { Section, Empty, ErrorState, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import StageStepper from '../components/StageStepper'
@@ -55,6 +55,7 @@ export const mmss = (s) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${Str
 export default function Orders() {
   const { t } = useI18n()
   const [orders, setOrders] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   const pageAcc = usePageAccent('orders')
   const [stats, setStats] = useState(null)
   const [pulse, setPulse] = useState(null)   // задержки оплат + налог за месяц (режим фрилансера)
@@ -80,10 +81,15 @@ export default function Orders() {
   const [params] = useSearchParams()
   const deepId = params.get('order')
 
-  const load = () => Promise.all([
-    api.orders(true).then(setOrders), api.orderStats(6).then(setStats), api.pulse().then(setPulse).catch(() => {}),
-    api.crmFollowups().then(setFollowups).catch(() => {}), api.crmAnalytics(6).then(setAnalytics).catch(() => {}),
-  ]).catch(() => {})
+  const load = () => {
+    setLoadErr(false)
+    return Promise.all([
+      api.orders(true).then(setOrders).catch(() => setLoadErr(true)),
+      api.orderStats(6).then(setStats),
+      api.pulse().then(setPulse).catch(() => {}),
+      api.crmFollowups().then(setFollowups).catch(() => {}), api.crmAnalytics(6).then(setAnalytics).catch(() => {}),
+    ]).catch(() => {})
+  }
   useEffect(() => { load() }, [tick])
   // «+» дока на заказах открывает форму нового заказа (AppShell шлёт orders:add)
   useEffect(() => {
@@ -244,7 +250,7 @@ export default function Orders() {
       )}
 
       {orders === null
-        ? <ListSkeleton n={5} rowH={78} avatar={false} />
+        ? (loadErr ? <ErrorState onRetry={load} /> : <ListSkeleton n={5} rowH={78} avatar={false} />)
         : layout === 'board' ? (
           <Section className={sectionCls(phone)} title={t('or.layout_board')} idx={list.length} hint={t('or.board_hint')}>
             <Board orders={list} onOpen={openDrawer} onStage={setStage} />

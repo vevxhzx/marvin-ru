@@ -109,12 +109,17 @@ export default function Chat({ open, onClose, seed }) {
     setSg(null)
     if (!s) return
     try {
-      await fetch(yes ? '/api/memory/confirm' : '/api/memory/dismiss', {
+      const r = await fetch(yes ? '/api/memory/confirm' : '/api/memory/dismiss', {
         method: 'POST', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ text: s.text, category: s.category, fact_id: s.fact_id }),
+        signal: AbortSignal.timeout(10000),
       })
+      if (!r.ok) throw new Error(`memory ${r.status}`)
       if (yes) bump()                 // факт подтверждён — страницы «память» и сводки перечитываем
-    } catch {}
+    } catch {
+      setSg(s)   // не ушло — возвращаем вопрос, чтобы можно было повторить
+      setMsgs((m) => [...m, { role: 'bot', via: 'none', channel: 'web', at: new Date().toISOString(), text: t('mem.failed') }])
+    }
   }
 
   const send = async (text) => {

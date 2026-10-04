@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { Plus, MousePointer2, Hand, StickyNote, Type, Film, ArrowUpRight, Pencil, Eraser, Image as ImageIcon, Undo2, Redo2, Trash2, Copy, Maximize2, Minus, Download, ChevronLeft, LayoutGrid, Clock, MessageCircle, Archive, MoreHorizontal, X, Briefcase, Target, Bold, Italic, AlignLeft, AlignCenter, AlignRight, Keyboard, RefreshCw, Focus, ArrowLeft, ArrowRight } from 'lucide-react'
 import { api } from '../lib/api'
-import { PageHead, Empty, Sheet, Field, Seg, Pills, useToast, Confirm, Skeleton } from '../components/ui'
+import { PageHead, Empty, ErrorState, Sheet, Field, Seg, Pills, useToast, Confirm, Skeleton } from '../components/ui'
 import BoardCanvas from '../components/BoardCanvas'
 import { STICKY, RATIOS, FONTS, FONT_LABEL, FONT_SIZES, TEXT_COLORS, INK_COLORS, fmtSec, fontSize, themeColor } from '../lib/board'
 import { useRefresh } from '../App'
@@ -29,11 +29,12 @@ export default function BoardPage() { const { id } = useParams(); return id ? <B
 function BoardList() {
   const { t } = useI18n()
   const [boards, setBoards] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   const [archived, setArchived] = useState(false)
   const [sheet, setSheet] = useState(false)
   const nav = useNavigate()
   const [, show] = useToast()
-  const load = useCallback(() => api.get(`/api/boards${archived ? '?archived=true' : ''}`).then(setBoards).catch(() => setBoards([])), [archived])
+  const load = useCallback(() => { setLoadErr(false); return api.get(`/api/boards${archived ? '?archived=true' : ''}`).then(setBoards).catch(() => setLoadErr(true)) }, [archived])
   useEffect(() => { load() }, [load])
   // «+» дока на «Доске» открывает форму новой доски (AppShell шлёт board:add)
   useEffect(() => {
@@ -49,8 +50,12 @@ function BoardList() {
           <Seg className="min-h-[var(--tap)] [&>button]:!min-h-[var(--tap)]" value={archived ? 'arch' : 'live'} onChange={(v) => setArchived(v === 'arch')} options={[['live', t('bd.live')], ['arch', t('bd.arch')]]} />
           <button type="button" className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet(true)}><Plus size={15} /> {t('bd.new_board')}</button>
         </div>} />
-      {boards === null ? (
-        <div className="grid gap-3 min-[821px]:grid-cols-2 min-[1180px]:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} h={132} radius="var(--r-xl)" />)}</div>
+      {boards === null || (loadErr && boards.length === 0) ? (
+        loadErr ? (
+          <div className="panel p-5 sm:p-7"><ErrorState onRetry={load} /></div>
+        ) : (
+          <div className="grid gap-3 min-[821px]:grid-cols-2 min-[1180px]:grid-cols-3">{[0, 1, 2].map((i) => <Skeleton key={i} h={132} radius="var(--r-xl)" />)}</div>
+        )
       ) : boards.length === 0 ? (
         /* пусто не «белым экраном»: что это, как начать и кнопка создания */
         <div className="panel p-5 sm:p-7">

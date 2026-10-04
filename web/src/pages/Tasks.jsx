@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus, Search as SearchIcon, X, ChevronRight, ChevronLeft, EyeOff, Pencil, Check, Settings2 } from 'lucide-react'
 import { api, hhmm, isSameDay, isAllDay, shortDate } from '../lib/api'
-import { Num, Empty, Swipe, PRIORITY, useToast, useLeave, useArrived, ListSkeleton } from '../components/ui'
+import { Num, Empty, ErrorState, Swipe, PRIORITY, useToast, useLeave, useArrived, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
@@ -198,7 +198,8 @@ export default function Tasks() {
   const [leaveCls, leave] = useLeave()
   const arriveCls = useArrived((tasks || []).map((t) => t.id))
 
-  const load = () => api.tasks(true, true).then(setTasks).catch(() => {})
+  const [loadErr, setLoadErr] = useState(false)
+  const load = () => { setLoadErr(false); return api.tasks(true, true).then(setTasks).catch(() => setLoadErr(true)) }
   useEffect(() => { load() }, [tick])
   // «+» дока на этом разделе открывает форму новой задачи (AppShell шлёт tasks:add)
   useEffect(() => {
@@ -423,7 +424,7 @@ export default function Tasks() {
               <div className="rule" style={{ marginTop: 'var(--s-3)' }} />
 
               {tasks === null ? (
-                <ListSkeleton n={6} rowH={66} className="mt-2" />
+                loadErr ? <ErrorState onRetry={load} /> : <ListSkeleton n={6} rowH={66} className="mt-2" />
               ) : currentList.length === 0 ? (
                 <Empty glyph={empty.glyph} text={empty.text} sub={empty.sub} hint={empty.hint} onHint={empty.onHint} action={empty.action} />
               ) : (

@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom'
 import { Pencil, Trash2, Plus, Search, X, Sparkles } from 'lucide-react'
 import Graph from '../components/Graph'
 import { api, relTime, listOf } from '../lib/api'
-import { useToast, PageAccent, PageHead, Empty, ListSkeleton, Sheet, Field, Confirm, useLeave, useArrived } from '../components/ui'
+import { useToast, PageAccent, PageHead, Empty, ErrorState, ListSkeleton, Sheet, Field, Confirm, useLeave, useArrived } from '../components/ui'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import { useI18n } from '../lib/i18n'
@@ -56,6 +56,7 @@ export default function Mind() {
   const [links, setLinks] = useState([])
   const [busy, setBusy] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [loadErr, setLoadErr] = useState(false)
   // правка и удаление записи (сами записи храним, пока шторка закрывается — иначе заголовок мигает)
   const [edit, setEdit] = useState(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -84,12 +85,13 @@ export default function Mind() {
   const addRef = useRef(null)
 
   const load = () => {
+    setLoadErr(false)
     const p = q.trim().length >= 3
       ? api.semantic(q, 30).then((r) => {
           setNotes(r.items.filter((x) => x.kind === 'note'))
           setLinks(r.items.filter((x) => x.kind === 'link'))
-        }).catch(() => Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => {}))
-      : Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => {})
+        }).catch(() => Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => { setLoadErr(true) }))
+      : Promise.all([api.notes(q), api.links(q)]).then(([n, l]) => { setNotes(n || []); setLinks(l || []) }).catch(() => { setLoadErr(true) })
     return p.finally(() => setLoaded(true))
   }
 
@@ -316,7 +318,7 @@ export default function Mind() {
       ) : !loaded ? (
         <div className="mt-4"><ListSkeleton n={5} /></div>
       ) : !items.length ? (
-        <div className="mt-4">{emptyNode}</div>
+        loadErr ? <div className="mt-4"><ErrorState onRetry={load} /></div> : <div className="mt-4">{emptyNode}</div>
       ) : tab === 'photo' ? (
         /* Галерея: крупные превью в две колонки, кадр фиксированный (4:3) и картинка
            вписывается по object-fit — на телефоне фото не растягивается. */
