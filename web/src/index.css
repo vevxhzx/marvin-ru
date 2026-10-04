@@ -790,8 +790,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
-    order: -1;
-    margin-bottom: var(--s-3);
+    margin-top: var(--s-3);
     padding-bottom: 2px;
   }
   .hr::-webkit-scrollbar { display: none; }
