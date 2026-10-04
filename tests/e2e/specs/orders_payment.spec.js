@@ -10,7 +10,10 @@ const uniq = (p) => `${p}-${Date.now().toString(36)}${Math.floor(Math.random() *
 const apiGet = (page, url) => page.evaluate((u) => fetch(u).then((r) => r.json()), url)
 
 async function createOrder(page, TITLE) {
-  await page.getByRole('button', { name: 'заказ', exact: true }).first().click()
+  // На телефоне добавление — кнопкой «+» дока, на ПК — кнопкой «заказ» в шапке
+  const w = page.viewportSize()?.width ?? 1440
+  if (w < 820) await page.locator('.dock-fab').click()
+  else await page.getByRole('button', { name: 'заказ', exact: true }).first().click()
   const form = await expectSheet(page)
   await expect(form.getByRole('heading', { name: 'новый заказ' })).toBeVisible()
   await form.getByPlaceholder('Монтаж ролика').fill(TITLE)

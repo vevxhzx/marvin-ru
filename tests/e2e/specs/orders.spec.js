@@ -86,7 +86,8 @@ test.describe('заказы: понятный интерфейс', () => {
     await shot(page, 'orders-5sec-before', { testInfo })
 
     /* 1. создать заказ */
-    await page.getByRole('button', { name: 'заказ', exact: true }).first().click()
+    if (testInfo.project.name === 'mobile') await page.locator('.dock-fab').click()
+    else await page.getByRole('button', { name: 'заказ', exact: true }).first().click()
     const form = await expectSheet(page)
     await expect(form.getByRole('heading', { name: 'новый заказ' })).toBeVisible()
     await form.getByPlaceholder('Монтаж ролика').fill(TITLE)
