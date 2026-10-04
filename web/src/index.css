@@ -1930,7 +1930,7 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 }
 
 /* канбан заказов на телефоне: колонки листаются по одному экрану, а не «как попалось» */
-.kanban-scroll { overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; padding-bottom: 6px; }
+.kanban-scroll { overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; overscroll-behavior-y: auto; -webkit-overflow-scrolling: touch; scroll-snap-type: x proximity; padding-bottom: 6px; }
 .kanban-scroll > * { scroll-snap-align: start; }
 .kanban-scroll::-webkit-scrollbar { height: 4px; }
 .kanban-scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 99px; }
