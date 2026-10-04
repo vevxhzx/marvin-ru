@@ -251,6 +251,143 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .hero-card .hc-row b { font-weight: 600; }
 .hero-card .hc-bar { height: 6px; border-radius: 999px; background: rgba(255, 255, 255, 0.22); margin-top: var(--s-3); overflow: hidden; }
 .hero-card .hc-bar i { display: block; height: 100%; border-radius: 999px; background: #fff; }
+
+/* =====================================================================
+   LIQUID-GLASS ENTITY CARDS (.glass-card + .gc-*) — вариант B
+   База + пять смысловых оттенков + hero-число + карусель + титулы.
+   Все заливки — из существующих токенов (--acc/--ai/--neg/--pos/--glass-*):
+   параллельных палитр не заводим. Тинты ≤ 22 % поверх --sf — текст читается.
+   Применение: class="glass-card gc-subs" (+ .gc-num для крупного числа,
+   .gc-title для заголовка; карусель: .car > .car-active + .dots + .car-count).
+   Классы только стилевые: переключение .car-active/.dots i.on — за JS.
+   ===================================================================== */
+.glass-card {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-xl);
+  color: var(--ink);
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--acc) 16%, transparent) 0%, transparent 52%),
+    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--acc) 12%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--glass-bg), transparent 160%),
+    var(--sf);
+  border: 1px solid var(--glass-ring);
+  -webkit-backdrop-filter: blur(14px) saturate(150%);
+  backdrop-filter: blur(14px) saturate(150%);
+  box-shadow:
+    inset 0 0 0 1px var(--glass-ring),
+    var(--shadow-1);
+  transition: transform var(--t-base) var(--e), box-shadow var(--t-base) var(--e), border-color var(--t-fast) var(--e);
+}
+.glass-card:hover { transform: translateY(-2px); box-shadow: inset 0 0 0 1px var(--glass-ring), var(--shadow-2); }
+/* верхний внутренний блик: 1px белого 16 % по центру верхней кромки */
+.glass-card::before {
+  content: ''; position: absolute; top: 0; left: 6%; right: 6%; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+  pointer-events: none;
+}
+/* тинтовая кромка слева — общая геометрия, цвет задаёт вариант ниже */
+.glass-card::after {
+  content: ''; position: absolute; left: 0; top: 12px; bottom: 12px; width: 4px; border-radius: 99px;
+  background: color-mix(in srgb, var(--acc) 65%, transparent);
+  box-shadow: 0 0 12px 0 color-mix(in srgb, var(--acc) 45%, transparent);
+  opacity: 0.95; pointer-events: none;
+}
+/* --- варианты по смыслу: свой тинт + свой цвет кромки (gc = glass-card) --- */
+.gc-subs {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--ai) 34%, transparent) 0%, transparent 58%),
+    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--ai) 26%, transparent), transparent 62%),
+    radial-gradient(70% 55% at 10% 100%, color-mix(in srgb, var(--ai) 16%, transparent), transparent 65%),
+    linear-gradient(180deg, var(--glass-bg), transparent 160%),
+    var(--sf);
+}
+.gc-subs::after { background: color-mix(in srgb, var(--ai) 80%, transparent); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--ai) 55%, transparent); }
+.gc-debts {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--neg) 32%, transparent) 0%, transparent 58%),
+    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--warn) 18%, transparent), transparent 62%),
+    radial-gradient(70% 55% at 10% 100%, color-mix(in srgb, var(--neg) 15%, transparent), transparent 65%),
+    linear-gradient(180deg, var(--glass-bg), transparent 160%),
+    var(--sf);
+}
+.gc-debts::after { background: color-mix(in srgb, var(--neg) 80%, transparent); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--neg) 55%, transparent); }
+.gc-goals {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--pos) 32%, transparent) 0%, transparent 58%),
+    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--pos) 26%, transparent), transparent 62%),
+    radial-gradient(70% 55% at 10% 100%, color-mix(in srgb, var(--pos) 15%, transparent), transparent 65%),
+    linear-gradient(180deg, var(--glass-bg), transparent 160%),
+    var(--sf);
+}
+.gc-goals::after { background: color-mix(in srgb, var(--pos) 80%, transparent); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--pos) 55%, transparent); }
+.gc-orders {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--acc) 22%, transparent) 0%, transparent 55%),
+    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--acc) 14%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--glass-bg), transparent 160%),
+    var(--sf);
+}
+.gc-orders::after { background: color-mix(in srgb, var(--acc) 70%, transparent); }
+.gc-people {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--acc) 12%, var(--ai) 10%) 0%, transparent 55%),
+    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--ai) 12%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--glass-bg), transparent 160%),
+    var(--sf);
+}
+.gc-people::after { background: color-mix(in srgb, var(--acc) 40%, var(--ai) 45%); }
+/* заголовок карточки-сущности */
+.gc-title { font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.02em; color: var(--ink); }
+/* hero-число на стекле: в светлой — акцент (--acc = #3458f5, ~7:1 на белом),
+   в тёмной — белый (--hero-ink) поверх тинта */
+.gc-num {
+  font-weight: 700; letter-spacing: -0.02em; line-height: 1.05;
+  font-variant-numeric: tabular-nums; font-feature-settings: 'tnum', 'cv11', 'ss01';
+  color: var(--acc);
+}
+:root[data-theme="dark"] .gc-num, .dark .gc-num {
+  color: var(--hero-ink);
+  text-shadow: 0 1px 14px rgba(4, 6, 20, 0.35);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .gc-num {
+    color: var(--hero-ink);
+    text-shadow: 0 1px 14px rgba(4, 6, 20, 0.35);
+  }
+}
+/* --- карусель: только вид (переключение — за JS) --- */
+.dots { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.dots i {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--ink-3); opacity: 0.45;
+  transition: width var(--t-base) var(--e), background-color var(--t-fast), opacity var(--t-fast);
+}
+.dots i.on { width: 18px; border-radius: 99px; background: var(--acc); opacity: 1; }
+.car-count {
+  display: inline-flex; align-items: center;
+  padding: 3px 10px; border-radius: 99px;
+  background: var(--glass-bg); border: 1px solid var(--glass-ring);
+  color: var(--ink-2); font-size: var(--fs-xs); font-variant-numeric: tabular-nums;
+  -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+}
+.car { transform: scale(0.97); opacity: 0.85; transition: transform var(--t-base) var(--e), opacity var(--t-base) var(--e), box-shadow var(--t-base) var(--e); }
+.car-active {
+  transform: scale(1); opacity: 1;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--acc) 45%, transparent),
+    var(--shadow-2);
+}
+/* заголовки секций в тёмной теме: чуть крупнее и белее */
+:root[data-theme="dark"] .card h3, :root[data-theme="dark"] .gc-title,
+.dark .card h3, .dark .gc-title {
+  color: #fff; font-size: calc(var(--fs-lg) + 1px); letter-spacing: -0.02em;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .card h3, :root:not([data-theme="light"]) .gc-title {
+    color: #fff; font-size: calc(var(--fs-lg) + 1px); letter-spacing: -0.02em;
+  }
+}
 /* Строгие строки «подпись — значение» в две колонки под премиум-карточкой */
 .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s-5); }
 @media (max-width: 820px) {
@@ -1395,12 +1532,12 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
    чёрном давал бы 3.3:1, а поднятый #5f83ff — 5.3:1 на карточке. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #0d1248;
-    --sf: #141a54;
-    --sf2: #1d2470;
+    --bg: #0a0e3c;
+    --sf: #111749;
+    --sf2: #191f60;
     --ink: #ffffff;
-    --ink2: #b4bbe6;
-    --ink3: #8e97c9;   /* 6:1 на фоне страницы — тихие метки ≥ 4.5:1 */
+    --ink2: #c2c8ef;
+    --ink3: #9da6d8;   /* 6:1 на фоне страницы — тихие метки ≥ 4.5:1 */
     --ink-2: var(--ink2);
     --ink-3: var(--ink3);
     --line: rgba(255, 255, 255, 0.09);
@@ -1438,9 +1575,9 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     --g2: color-mix(in srgb, var(--ai) 22%, transparent);
     --p1i: #cfcaff;
     --p2i: #a6ecc0;
-    --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #0d1248);
-    --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #141a54);
-    --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1d2470);
+    --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #0a0e3c);
+    --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #111749);
+    --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #191f60);
     --accent: var(--acc);
     --surface: var(--sf);
     --surface-2: var(--sf2);
@@ -1456,12 +1593,12 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 }
 
 :root[data-theme="dark"], .dark {
-  --bg: #0d1248;
-  --sf: #141a54;
-  --sf2: #1d2470;
+  --bg: #0a0e3c;
+  --sf: #111749;
+  --sf2: #191f60;
   --ink: #ffffff;
-  --ink2: #b4bbe6;
-  --ink3: #8e97c9;
+  --ink2: #c2c8ef;
+  --ink3: #9da6d8;
   --ink-2: var(--ink2);
   --ink-3: var(--ink3);
   --line: rgba(255, 255, 255, 0.09);
@@ -1499,9 +1636,9 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --g2: color-mix(in srgb, var(--ai) 22%, transparent);
   --p1i: #cfcaff;
   --p2i: #a6ecc0;
-  --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #0d1248);
-  --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #141a54);
-  --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #1d2470);
+  --bg: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #0a0e3c);
+  --sf: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2), #111749);
+  --sf2: color-mix(in srgb, var(--tint-c-dark) calc(var(--tint-s-dark) * 2.4), #191f60);
   --accent: var(--acc);
   --surface: var(--sf);
   --surface-2: var(--sf2);
@@ -2131,13 +2268,13 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 .bar-cell { transition: opacity .25s, fill .25s; cursor: pointer; }
 
 /* ---------- тёмная тема: «вариант B» владельца — глубокий синий градиент с лаймом ----------
-   Страница градиентная (радиальный блик #2a2f9a справа сверху → #0a0f35/#0d1248/#161a63),
+   Страница градиентная (радиальный блик #2a2f9a справа сверху → #070b28/#0a0e3c/#121756),
    карточки почти не нужны: списки идут по фону с волосяными линиями. */
 .dark body {
   background-color: var(--bg);
   background-image:
     radial-gradient(120% 60% at 90% 0%, #2a2f9a 0%, rgba(42, 47, 154, 0) 60%),
-    linear-gradient(175deg, #0a0f35 0%, #0d1248 55%, #161a63 100%);
+    linear-gradient(175deg, #070b28 0%, #0a0e3c 55%, #121756 100%);
   background-attachment: fixed;
 }
 .dark #root { position: relative; z-index: 1; }

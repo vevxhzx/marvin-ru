@@ -722,6 +722,7 @@ export const DICT = {
   'people.awaiting': { ru: 'ждём {m}', en: 'awaiting {m}' },
   'people.no_orders': { ru: 'без заказов', en: 'no orders' },
   'people.stage_tip': { ru: 'стадия клиента — ставится вручную или сама по оплатам', en: 'client stage — set by hand or derived from payments' },
+  'people.change_stage': { ru: 'сменить стадию — откроется карточка', en: 'change stage — opens the card' },
   'people.new_title': { ru: 'новый контакт', en: 'New contact' },
   'people.title': { ru: 'контакт', en: 'Contact' },
   'people.name_ph': { ru: 'Иван Васильев', en: 'Ivan Vasiliev' },

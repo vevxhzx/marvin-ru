@@ -8,7 +8,7 @@ import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import { ClientStageBadge, ClientStageSelect, ClientStageNote } from '../components/ClientStage'
 import ClientNextStep from '../components/ClientNextStep'
-import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageApi, ORDER_STAGE_LABEL, stageOf } from '../lib/crm'
+import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageApi, clientStageLabel, ORDER_STAGE_LABEL, stageOf } from '../lib/crm'
 import { useI18n, SERVER, t as T } from '../lib/i18n'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
@@ -22,6 +22,9 @@ const kindLabel = (p) => p.kind_label || (KIND_RU[p.kind] ? T(KIND_RU[p.kind]) :
 const initials = (name) => (name || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('')
 // стадия клиента осмысленна только у клиентов и компаний — у «своих» людей её нет
 const HAS_STAGE = new Set(['client', 'company'])
+// точка компактного статуса: тон стадии → цвет (тот же смысл, что у бейджа)
+const STAGE_DOT = { pos: 'var(--pos)', neg: 'var(--neg)', accent: 'var(--accent)' }
+const stageDot = (s) => STAGE_DOT[CLIENT_STAGE_TONE[s] || ''] || 'var(--ink-3)'
 
 /* Две раскладки — одна разметка. На десктопе (≥821px) человек это карточка в сетке
    (.c: --sf, волосяная рамка --line, радиус --r-lg, отступы --card-pad). На телефоне (≤820px)
@@ -66,7 +69,6 @@ export default function People() {
   const [stages, setStages] = useState({})             // id → стадия клиента (/stage)
   const [steps, setSteps] = useState({})               // id → «следующий шаг» (из карточки CRM)
   const [sheet, setSheet] = useState(null)
-  const [, show] = useToast()
   const { tick, bump } = useRefresh()
 
   const load = () => api.people().then(setList).catch(() => setList([]))
@@ -108,8 +110,13 @@ export default function People() {
       <PageHead title={T('nav.people')}
         right={<button type="button" className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}>{t('people.add')}</button>} />
 
+      {/* Тип контакта и стадия клиента — ОДНА группа фильтров (вид общий,
+          поведение прежнее). Вторая строка — не дубль per-card стадии: там фильтр
+          списка (stages[p.id]?.stage === stageTab), а в карточке — правка
+          (clientStageApi.set) — поэтому обе остаются. */}
+      <div className="animate-rise flex flex-col gap-1.5">
       {/* Тип контакта — спокойные пилюли с переносом, не одна «таблетка» на семь пунктов */}
-      <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('people.kind_label')}>
+      <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('people.kind_label')}>
         {[['all', t('common.all')], ...Object.entries(KIND_RU).map(([k, label]) => [k, t(label)])].map(([k, l]) => (
           <button key={k} type="button" className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === k ? 'on' : ''}`} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>
         ))}
@@ -117,7 +124,7 @@ export default function People() {
 
       {/* Фильтр по стадии клиента — вторая, отдельная сущность (не стадия заказа) */}
       {withStages && (
-        <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('cstage.title')}>
+        <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('cstage.title')}>
           <span className={`label mr-1 shrink-0 ${SMALL_M}`}>{t('cstage.title')}</span>
           {CLIENT_STAGES.map(([k, label]) => (
             <button key={k} type="button"
@@ -129,6 +136,7 @@ export default function People() {
           ))}
         </div>
       )}
+      </div>
 
       {/* Сетка карточек человека: на десктопе — карточки в три (две) колонки, на телефоне —
           те же секции, но плоские строки вплотную. Разметка <section class="c"> — по ней
@@ -142,9 +150,7 @@ export default function People() {
       ) : (
         <div className={GRID_M}>
           {items.map((p) => (
-            <PersonRow key={p.id} p={p} stage={stages[p.id]} next={steps[p.id]} onOpen={() => setSheet(p)}
-              onStage={(v) => setStages((m) => ({ ...m, [p.id]: v }))}
-              onErr={show.err} bump={bump} />
+            <PersonRow key={p.id} p={p} stage={stages[p.id]} next={steps[p.id]} onOpen={() => setSheet(p)} />
           ))}
         </div>
       )}
@@ -159,7 +165,7 @@ export default function People() {
    Список стадии стоит в отдельной правой колонке шириной меньше половины строки (на телефоне):
    он не должен попадать под клик в centre, который открывает карточку. На десктопе секция
    становится блоком, и список стадии встаёт под содержимым во всю ширину карточки. */
-function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
+function PersonRow({ p, stage, next, onOpen }) {
   const { t } = useI18n()
   const tags = listOf(p.tags)
   const alias = p.aliases
@@ -171,15 +177,20 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
   const money2 = []
   if (isWork && p.unpaid) money2.push(<span key="d" className="warn num">{t('people.awaiting', { m: money(p.unpaid) })}</span>)
   if (isWork && p.paid) money2.push(<span key="l" className="faint num">LTV {money(p.paid)}</span>)
-  if (isWork && p.open) money2.push(<span key="o" className="faint">{t('people.open_in_work', { n: p.open })}</span>)
+  if (isWork && p.open) money2.push(<span key="o" className="faint num">{t('people.open_in_work', { n: p.open })}</span>)
+  // компактный статус вместо большого <select>: точка + подпись, тап открывает
+  // шторку карточки (там ClientStageSelect тем же clientStageApi.set правит стадию)
+  const stageKey = stage?.stage || 'lead'
+  const stageTone = CLIENT_STAGE_TONE[stageKey] || ''
+  const stageName = stage?.label || clientStageLabel(stageKey)
   return (
     <section
-      className={`${CARD_M} border-0`}
+      className={`glass-card gc-people ${CARD_M} border-0`}
       style={{ borderColor: 'var(--line)', cursor: 'pointer' }}
       role="button" tabIndex={0} aria-label={t('people.open_card', { name: p.name })}
       onClick={onOpen}
       onKeyDown={(e) => {
-        // Enter/Пробел открывают карточку, но не когда фокус на встроенном списке стадии
+        // Enter/Пробел открывают карточку, но не когда фокус на кнопке статуса
         if (e.target !== e.currentTarget && e.target.closest?.('select, input, textarea, button, a')) return
         if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() }
       }}>
@@ -202,23 +213,22 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
                 {stepAt && <span className="faint num shrink-0">{shortDate(stepAt)}</span>}
               </div>
             )}
-            {money2.length > 0 && <div className="mt-1 flex flex-wrap items-center gap-x-3 text-[12px]">{money2}</div>}
+            {money2.length > 0 && <div className="mt-1 flex flex-wrap items-baseline gap-x-3 text-[12px] tabular-nums">{money2}</div>}
             {/* совсем пустая строка (новый контакт без заказов и без шага) — сказать об этом честно */}
             {!alias && !step && money2.length === 0 && <div className="muted mt-1 text-[12.5px]">{t('people.no_orders')}</div>}
           </div>
         </div>
         {HAS_STAGE.has(p.kind) ? (
-          /* Список стадии — в правой колонке шириной меньше половины строки: он не должен
-             попадать под клик в центре строки, который открывает карточку человека. */
-          <div className="flex min-w-0 items-center gap-2 max-[820px]:justify-end min-[821px]:absolute min-[821px]:right-4 min-[821px]:top-4 min-[821px]:mt-0" onClick={(e) => e.stopPropagation()}>
-            <select className="input !w-full min-w-0 !text-[12.5px] max-[820px]:sm:!w-[176px]" value={stage?.stage || 'lead'} disabled={!stage}
-              aria-label={t('cstage.for', { name: p.name })} title={t('people.stage_tip')}
-              onChange={async (e) => {
-                const v = e.target.value
-                try { onStage(await clientStageApi.set(p.id, v)); bump() } catch (err) { onErr(err) }
-              }}>
-              {CLIENT_STAGES.map(([k, l]) => <option key={k} value={k}>{t(l)}</option>)}
-            </select>
+          /* Компактный статус вместо большого <select> в каждой карточке: цветная
+             точка + подпись чипом, тап открывает шторку (стадия правится там).
+             Клик гасится — иначе сработает и onOpen секции-двойником. */
+          <div className="flex min-w-0 items-center max-[820px]:justify-end min-[821px]:absolute min-[821px]:right-4 min-[821px]:top-4 min-[821px]:mt-0" onClick={(e) => e.stopPropagation()}>
+            <button type="button" className={`badge min-h-[32px] max-w-full !gap-1.5 ${stageTone}`}
+              aria-label={t('cstage.for', { name: p.name })} title={t('people.change_stage')} data-tip={t('people.change_stage')}
+              onClick={(e) => { e.stopPropagation(); onOpen() }}>
+              <span aria-hidden className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: stageDot(stageKey) }} />
+              <span className="truncate">{stageName}</span>
+            </button>
           </div>
         ) : <div className="max-[820px]:hidden" />}
       </div>

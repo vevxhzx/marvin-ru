@@ -54,6 +54,28 @@ export default function Aims({ tick, bump }) {
   )
 }
 
+/* Кнопки-иконки строки цели — тот же вид, что у целей на «финансах»
+   (Finance.jsx: локальные RowActions/IconBtn, кросс-импорт невозможен — дублируем ~12 строк):
+   видны всегда, на тап-экранах не прячутся до наведения. */
+function RowActions({ children }) {
+  return <div className="flex shrink-0 items-center gap-1">{children}</div>
+}
+
+function IconBtn({ onClick, title, children, danger, label }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="btn-icon max-[820px]:!h-11 max-[820px]:!w-11"
+      style={danger ? { color: 'var(--neg)' } : { color: 'var(--ink-3)' }}
+      title={title}
+      aria-label={label || title}
+    >
+      {children}
+    </button>
+  )
+}
+
 function AimCard({ a, onPatch, onChange }) {
   const { t } = useI18n()
   const [v, setV] = useState(null)
@@ -70,25 +92,44 @@ function AimCard({ a, onPatch, onChange }) {
   }
   const msStatus = async (m, status) => { try { await api.post(`/api/milestones/${m.id}/${status}`); await loadView(); onChange() } catch (err) { show.err(err) } }
   const doneTask = async (t) => { try { await api.doneTask(t.id); await loadView(); onChange() } catch (err) { show.err(err) } }
+  /* Карточка цели — тем же строем, что цели на «финансах» (Finance.jsx, вкладка goals):
+     заголовок + крупный % → градиентная полоса → строка срока → ряд действий
+     (обсудить/главная/пауза/достигнута/снять). Контракт .glass-card/.gc-goals отсутствует —
+     стоим на .card (= .panel: стекло + углубление в тёмной теме) и .num. */
   return (
-    <div className="card !p-4 sm:!p-5">
+    <div className="card glass-card gc-goals !p-4 sm:!p-5">
       <div className="flex items-start gap-3">
-        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(!open)}>
+        <button type="button" className="min-w-0 flex-1 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
           <div className="flex items-baseline gap-2">
             <div className="truncate text-[16px] font-semibold">{a.title}</div>
-            {a.priority === 1 && <span className="label !text-accent">{t('aims.main')}</span>}
+            {a.priority === 1 && <span className="label shrink-0 !text-accent">{t('aims.main')}</span>}
           </div>
-          <div className="muted mt-0.5 text-[13px]">
-            {a.why ? <span>{a.why}</span> : <span className="faint">{t('aims.no_why')}</span>}
-            {a.due && <span> · {t('aims.by', { date: fmtDate(a.due) })}{a.days_left != null && a.days_left >= 0 ? t('aims.days_left', { n: a.days_left }) : ''}</span>}
-            {a.days_left != null && a.days_left < 0 && <span className="neg"> · {t('aims.overdue')}</span>}
+          <div className="muted mt-0.5 truncate text-[13px]">
+            {a.why || <span className="faint">{t('aims.no_why')}</span>}
           </div>
         </button>
-        <div className="num shrink-0 text-[15px] font-semibold tabular-nums">{pct}%</div>
-        <button className="btn-icon !h-7 !w-7" onClick={() => setOpen(!open)} aria-label={t(open ? 'aims.collapse' : 'aims.expand')}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
+        <div className="num shrink-0 text-[20px] font-semibold leading-none tracking-[-0.03em]">{pct}<span className="text-[0.65em] font-medium opacity-60"> %</span></div>
+        <button className="btn-icon shrink-0" onClick={() => setOpen(!open)} aria-label={t(open ? 'aims.collapse' : 'aims.expand')} aria-expanded={open}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
       </div>
-      <div className="progress mt-3"><div style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }} /></div>
-      {stale && !open && <div className="warn mt-2 text-[12px]">{t('aims.stale', { n: a.stale_days })}</div>}
+      <div className="progress mt-3 !h-[6px]"><div style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }} /></div>
+      {(a.due || a.days_left < 0 || stale) && (
+        <div className="muted mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
+          {a.due && <span className="num">{t('aims.by', { date: fmtDate(a.due) })}{a.days_left != null && a.days_left >= 0 ? t('aims.days_left', { n: a.days_left }) : ''}</span>}
+          {a.days_left != null && a.days_left < 0 && <span className="neg">{t('aims.overdue')}</span>}
+          {stale && <span className="warn">{t('aims.stale', { n: a.stale_days })}</span>}
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-center gap-1">
+        <button className="btn-ghost btn-sm" onClick={() => ask(T('aims.seed_about', { title: a.title }))}><MessageCircle size={12} /> {t('aims.discuss')}</button>
+        <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { priority: a.priority === 1 ? 2 : 1 })}>{t(a.priority === 1 ? 'aims.unmain' : 'aims.make_main')}</button>
+        <span className="ms-auto">
+          <RowActions>
+            <IconBtn onClick={() => onPatch(a.id, { status: 'paused' }, t('aims.paused'))} title={t('aims.pause')} label={t('aims.pause')}><Pause size={13} /></IconBtn>
+            <IconBtn onClick={() => onPatch(a.id, { status: 'done' }, t('aims.closed'))} title={t('aims.reached_btn')} label={t('aims.reached_btn')}><Check size={13} /></IconBtn>
+            <IconBtn danger onClick={() => onPatch(a.id, { status: 'dropped' }, t('aims.dropped_toast'))} title={t('aims.drop')} label={t('aims.drop')}><X size={13} /></IconBtn>
+          </RowActions>
+        </span>
+      </div>
       {open && (
         <div className="mt-4 space-y-4" style={{ animation: 'rise .2s var(--ease-out)' }}>
           {!v ? <div className="muted text-[13px]">…</div> : (
@@ -118,13 +159,6 @@ function AimCard({ a, onPatch, onChange }) {
                 <Plus size={14} className="faint shrink-0" />
                 <input value={msDraft} onChange={(e) => setMsDraft(e.target.value)} className="h-8 w-full bg-transparent text-[14px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('aims.new_ms')} />
               </form>
-              <div className="flex flex-wrap items-center gap-1 pt-1 text-[12px]">
-                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { priority: a.priority === 1 ? 2 : 1 })}>{t(a.priority === 1 ? 'aims.unmain' : 'aims.make_main')}</button>
-                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { status: 'paused' }, t('aims.paused'))}><Pause size={12} /> {t('aims.pause')}</button>
-                <button className="btn-ghost btn-sm" onClick={() => onPatch(a.id, { status: 'done' }, t('aims.closed'))}><Check size={12} /> {t('aims.reached_btn')}</button>
-                <button className="btn-ghost btn-sm !text-red" onClick={() => onPatch(a.id, { status: 'dropped' }, t('aims.dropped_toast'))}><X size={12} /> {t('aims.drop')}</button>
-                <button className="btn-ghost btn-sm ml-auto" onClick={() => ask(T('aims.seed_about', { title: a.title }))}><MessageCircle size={12} /> {t('aims.discuss')}</button>
-              </div>
             </>
           )}
         </div>

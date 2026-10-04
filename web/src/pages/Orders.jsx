@@ -164,6 +164,13 @@ export default function Orders() {
     stats?.avg_check ? { key: 'check', label: t('or.avg_check'), value: money(stats.avg_check), hint: stats.avg_lead_days ? t('or.lead_days', { n: stats.avg_lead_days }) : t('or.by_closed') } : null,
   ].filter(Boolean)
 
+  /* Плитки внутри героя: все метрики, кроме неоплаченного остатка (он — ключевое число).
+     Порядок фиксированный: в работе → за месяц → средний чек → ставка в час. */
+  const HERO_CELL_ORDER = { open: 0, month: 1, check: 2, rate: 3 }
+  const heroCells = counters
+    .filter((c) => c.key !== 'unpaid')
+    .sort((a, b) => (HERO_CELL_ORDER[a.key] ?? 9) - (HERO_CELL_ORDER[b.key] ?? 9))
+
   return (
     <div className={`bento-page pg space-y-6 pt-4 ${FIELD_LABEL_M}`} style={pageAcc.style}>
       <PageHead kicker={kicker} title={t('nav.orders')}
@@ -173,19 +180,21 @@ export default function Orders() {
           <button className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
         </>} />
 
-      {/* Ключевое число — премиум-карточка (градиент); остальные метрики — строго ниже */}
+      {/* Ключевое число — премиум-карточка: неоплаченный остаток крупно, остальные метрики —
+          стеклянными плитками внутри неё (.hm — штатный примитив «стекло внутри героя»),
+          а не строками, прижатыми к углам. Контракт .glass-card/.gc-orders/.gc-num
+          отсутствует — стоим на .hero-card/.hm/.num. */}
       <div className="hero-card" data-reveal>
         <div className="hc-label">{t('or.v_unpaid')}</div>
-        <div className="hc-big">{money(unpaid || 0)}</div>
-        <div className="hc-row">
-          <span>{t('or.v_open')}: <b className="num">{openN}</b></span>
-          {month ? <span>{t('or.this_month')}: <b className="num">{money(month)}</b></span> : null}
+        <div className="hc-big num">{money(unpaid || 0)}</div>
+        <div className="hm">
+          {heroCells.map((c) => (
+            <div key={c.key} className="min-w-0" title={c.hint || undefined}>
+              <small className="trunc">{c.label}</small>
+              <b className="num block truncate">{c.value}</b>
+            </div>
+          ))}
         </div>
-      </div>
-      <div className="kv-grid mt-3">
-        {counters.filter((c) => c.key === 'rate' || c.key === 'check').map((c) => (
-          <div className="kv" key={c.key}><span className="trunc">{c.label}</span><b className="num">{c.value}</b></div>
-        ))}
       </div>
 
       {/* Подсказка «как это работает» на телефоне свёрнута (см. HowToOrders) и открывается

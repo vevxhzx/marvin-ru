@@ -365,6 +365,7 @@ export function PageTransition({ children, pathKey }) {
 
 function PomodoroPanel({ timer, left, onClose, onChanged }) {
   const { t } = useI18n()
+  const nav = useNavigate()
   const [mins, setMins] = useState(25)
   const [busy, setBusy] = useState(false)
   const ref = useRef(null)
@@ -417,7 +418,7 @@ function PomodoroPanel({ timer, left, onClose, onChanged }) {
           : <button type="button" className="btn-primary flex-1 min-w-0" disabled={busy} onClick={start}>{t('pomo.start_short')}</button>}
         <button type="button" className="btn-ghost min-w-0" disabled={busy || !timer?.active} onClick={reset}>{t('pomo.reset')}</button>
       </div>
-      <button type="button" className="pomo-pop-link" onClick={() => { onClose(); navOrders && navOrders() }}>
+      <button type="button" className="pomo-pop-link" onClick={() => { onClose(); nav('/orders') }}>
         {t('pomo.to_orders')}
       </button>
     </div>

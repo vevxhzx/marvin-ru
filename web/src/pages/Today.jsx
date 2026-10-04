@@ -34,7 +34,7 @@ import { useTimer, mmss } from './Orders'
 import { ScreenTimeBentoWidget } from '../components/ReportCards'
 // новые блоки главной: быстрое дело, лимит трат, цели, привычки, ближайшее дело
 import { QuickAddWidget, SpendTodayWidget, GoalsWidget, HabitsWidget, NextUpWidget } from '../components/TodayCards'
-import CashChart from '../components/CashChart'
+import CashChart, { cashFact } from '../components/CashChart'
 import { TipBars } from '../components/ChartTip'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 import { usePhone } from '../lib/motion'
@@ -108,6 +108,12 @@ const DEFAULT_WIDTHS = {
    календарь, помодоро, время за ПК, быстрое дело (поле ввода). Остальные блоки там — списки
    на волосяных разделителях без своей коробки. На десктопе поверхность получают все (CSS). */
 const PANELS = new Set(['balance', 'chart', 'screen', 'calendar', 'pomo', 'quick'])
+
+/* Сводка дня / сегодня / траты: вместо плоской серой поверхности — стекло .panel
+   (blur + углубление в тёмной теме из index.css, без захардкоженных цветов; контракт
+   .glass-card/.gc-home отсутствует — стоим на .panel). На телефоне CARD_LIGHT_M ниже
+   сводит её к лёгкой карточке (фон --sf, отступ 21px, радиус из токена). */
+const GLASS = new Set(['summary', 'today', 'expenses'])
 
 /* Вселенная карточек — все известные виджеты: иначе добавленная карточка (pomo/orders/missed
    и новые) после перезагрузки отфильтровывалась бы из сохранённой раскладки. */
@@ -197,6 +203,8 @@ export default function Today({ openChat, address = '' }) {
   useEffect(() => { load() }, [tick])
 
   const now = new Date()
+  const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+  const factStroke = cashFact(dark)   // тот же цвет серии «факт», что рисует CashChart
   const greeting = t(GREETS[part(now.getHours())])
   const ownerName = prefs.address || address || t('common.sir')
   const daySubtitle = now.toLocaleDateString(localeOf(), { weekday: 'long', day: 'numeric', month: 'long' })
@@ -375,7 +383,9 @@ export default function Today({ openChat, address = '' }) {
   const blockProps = (id) => {
     const span = widgetWidths[id] || DEFAULT_WIDTHS[id] || 6
     const surface = PANELS.has(id)
-    const cls = surface ? (id === 'balance' ? `c hero home-hero ${HERO_M}` : id === 'chart' ? 'c chart' : 'c') : ''
+    const cls = surface
+      ? (id === 'balance' ? `c hero home-hero ${HERO_M}` : id === 'chart' ? 'c chart' : 'c')
+      : (GLASS.has(id) ? 'panel' : '')
     // в режиме правки у секций справа освобождаем место под стрелки/ширину/глаз (CSS .wsec-edit)
     const pad = editMode && !surface ? 'wsec-edit' : ''
     return {
@@ -443,7 +453,7 @@ export default function Today({ openChat, address = '' }) {
               ? <CashChart f={fc} height={200} legend={false} />
               : <Skeleton h={200} radius="var(--r-md)" />}
             <div className="lg">
-              <span><i style={{ background: '#ff9f5c' }}></i>{t('chart.fact')}</span>
+              <span><i style={{ background: factStroke }}></i>{t('chart.fact')}</span>
               <span><i style={{ background: 'var(--accent)' }}></i>{t('chart.forecast')}</span>
               <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>{t('chart.zero')}</span>
               {fc?.runway_days != null && <span className="text-[var(--neg)]">{t('td.to_zero', { n: fc.runway_days })}</span>}

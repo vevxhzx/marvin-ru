@@ -10,7 +10,7 @@
    Остальные вкладки — то же правило: один блок с данными сверху и списки-строки ниже.
    Все формы остались в шторках Sheet — меняется только вид. */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef, Children, cloneElement } from 'react'
 import { api, money, shortDate, toLocalISO } from '../lib/api'
 import { Sheet, Field, Empty, Money, Rowi, Skeleton, useToast, Confirm } from '../components/ui'
 import { BigMoney, HeroLine, useNumFormats, useReveal } from '../components/Widgets'
@@ -18,7 +18,7 @@ import CashChart from '../components/CashChart'
 import LifeRegime from '../components/LifeRegime'
 import { ImportButton } from '../components/Widgets'
 import { useRefresh } from '../App'
-import { Plus, Search, Trash2, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, EyeOff, Play, Pause, Settings2 } from 'lucide-react'
+import { Plus, Search, Trash2, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, ChevronRight, EyeOff, Play, Pause, Settings2 } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
 import { useCardLayout, CardCtl } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
@@ -110,6 +110,127 @@ function IconBtn({ onClick, title, children, danger }) {
     >
       {children}
     </button>
+  )
+}
+
+/* КОНТРАКТ CSS-агента (.glass-card/.gc-subs/.gc-debts/.gc-goals/.gc-num/.dots/
+/.car-count/.car-active) в web/src/index.css ОТСУТСТВУЕТ (проверено grep):
+ниже — фолбэк на существующие .c/.num/.due-tag/.progress + инлайн-стили
+в том же токенном масштабе (var(--fs-*), var(--tap)). Тап-зоны отдельно не
+растим: на тач-экранах .btn-icon/.btn-sm уже дает --tap (@media pointer:coarse). */
+
+/* Полоса прогресса акцент → роза (фолбэк .gc-debts/.gc-goals). */
+const GRAD_BAR = 'linear-gradient(90deg, var(--acc), var(--neg))'
+
+/* Цель-копилка и цель задач — одна карточка. main/target — деньги (финансы),
+   для задач-целей опускаются, раскрытое тело едет children. */
+export function GoalGlassCard({
+  title, meta, pct = 0, main, target, sub, deadlineText, overdue = false,
+  eta, onOpen, openLabel, expandIcon, barStyle, actions, children, style, className = '',
+}) {
+  const safePct = Math.max(0, Math.min(100, Math.round(pct)))
+  return (
+    <section
+      className={`c glass-card gc-goals ${className}`}
+      data-reveal
+      data-car
+      style={{ scrollSnapAlign: 'start', ...style }}
+    >
+      <button
+        type="button"
+        onClick={onOpen}
+        aria-label={openLabel}
+        title={openLabel}
+        className="block w-full text-left"
+        style={{ background: 'transparent', border: 0, padding: 0, margin: 0, cursor: onOpen ? 'pointer' : 'default', font: 'inherit', color: 'inherit' }}
+      >
+        <div className="flex items-start gap-2">
+          <div className="min-w-0 flex-1">
+            <div className="clamp-2" style={{ fontSize: 'var(--fs-base)', fontWeight: 600, color: 'var(--ink)' }}>{title}</div>
+            {meta ? <div className="muted mt-0.5 trunc text-[length:var(--fs-xs)]">{meta}</div> : null}
+          </div>
+          <span className="num shrink-0" style={{ fontSize: 'var(--fs-xl)', fontWeight: 700 }}>{safePct}&nbsp;%</span>
+          {onOpen ? (expandIcon || <ChevronRight size={16} aria-hidden="true" className="mt-1 shrink-0" style={{ color: 'var(--ink-3)' }} />) : null}
+        </div>
+        {main ? (
+          <div className="num mt-2" style={{ fontSize: 'var(--fs-2xl)', fontWeight: 600, letterSpacing: '-0.03em' }}>
+            {main}
+            {target ? <span style={{ fontSize: 'var(--fs-md)', fontWeight: 500, letterSpacing: 0, color: 'var(--ink-3)' }}> / {target}</span> : null}
+          </div>
+        ) : null}
+      </button>
+      <div className="progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={safePct}>
+        <div style={{ width: `${Math.max(2, safePct)}%`, background: barStyle || GRAD_BAR }} />
+      </div>
+      {sub ? <div className="muted mt-2 text-[length:var(--fs-xs)]">{sub}</div> : null}
+      {deadlineText ? (
+        <div className="mt-1 text-[length:var(--fs-xs)]" style={overdue ? { color: 'var(--neg)', fontWeight: 600 } : undefined}>
+          {deadlineText}
+        </div>
+      ) : null}
+      {eta ? <div className="mt-1 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{eta}</div> : null}
+      {children}
+      {actions ? <div className="mt-3 flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </section>
+  )
+}
+
+/* Карусель на телефоне (390px first): ряд со снапом + точки/счётчик.
+   На десктопе (≥821px) обёртка — display:contents, карточки остаются
+   элементами сетки .bento; точки скрыты. Активная карточка подсвечена
+   рамкой (фолбэк отсутствующего .car-active; на телефоне рамок нет по
+   макету — там индикатор это точки/счётчик). */
+function useCarousel(n) {
+  const ref = useRef(null)
+  const [idx, setIdx] = useState(0)
+  const onScroll = () => {
+    const el = ref.current
+    if (!el) return
+    const card = el.querySelector('[data-car]')
+    const w = card ? card.offsetWidth + 12 : Math.max(1, el.clientWidth * 0.8)
+    setIdx(Math.min(Math.max(n - 1, 0), Math.round(el.scrollLeft / Math.max(1, w))))
+  }
+  return { ref, idx, onScroll }
+}
+
+function CarDots({ n, i }) {
+  return (
+    <div className="flex items-center justify-center gap-2 pt-2 min-[821px]:hidden">
+      <span className="flex items-center gap-1.5" aria-hidden="true">
+        {Array.from({ length: n }, (_, k) => (
+          <i
+            key={k}
+            style={k === i
+              ? { width: 18, height: 6, borderRadius: 999, background: 'var(--acc)' }
+              : { width: 6, height: 6, borderRadius: 999, background: 'var(--line-2)' }}
+          />
+        ))}
+      </span>
+      <span className="num" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-3)' }}>{i + 1} / {n}</span>
+    </div>
+  )
+}
+
+function CarRow({ count, label, children }) {
+  const { ref, idx, onScroll } = useCarousel(count)
+  return (
+    <>
+      <div
+        ref={ref}
+        onScroll={onScroll}
+        role="region"
+        aria-roledescription="carousel"
+        aria-label={label}
+        className="no-scrollbar fade-x flex gap-3 overflow-x-auto pb-1 min-[821px]:contents"
+        style={{ scrollSnapType: 'x mandatory' }}
+      >
+        {Children.map(children, (ch, i) => (ch ? cloneElement(ch, {
+          className: `${ch.props.className || ''} max-[820px]:w-[78vw] max-[820px]:shrink-0`,
+          style: { ...(ch.props.style || {}), scrollSnapAlign: 'start', ...(i === idx ? { borderColor: 'var(--acc)' } : null) },
+        }) : ch))}
+      </div>
+      {count > 1 ? <CarDots n={count} i={idx} /> : null}
+    </>
   )
 }
 
@@ -755,7 +876,7 @@ export default function Finance() {
       {/* ---------------- ДОЛГИ (бенто: карточки) ---------------- */}
       {tab === 'debts' && (
         <div className="bento mt-4">
-          <section className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+          <section className={`c s4 glass-card gc-debts ${CARD_M_LIGHT}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.total_debt')}</h2></div>
             </div>
@@ -767,25 +888,29 @@ export default function Finance() {
               <Empty glyph="debt" text={t('td.clean')} sub={t('td.nothing_missed')}
                 action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('debt') }}><Plus size={15} /> {t('fin.add_debt')}</button>} />
             </section>
-          ) : debts.map((d) => {
+          ) : (
+            <CarRow count={debts.length} label={t('fin.total_debt')}>
+              {debts.map((d) => {
               const total = d.total || 1
               const paid = d.paid || 0
               const left = Math.max(0, total - paid)
               const pct = Math.min(100, Math.round((paid / total) * 100))
               return (
-                <section key={d.id} className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+                <section key={d.id} data-car className={`c s4 glass-card gc-debts ${CARD_M_LIGHT}`} data-reveal>
                   <div className="hd flex-wrap">
-                    <div className="min-w-0"><h2 className="clamp-2">{d.name || d.title}</h2></div>
+                    <div className="min-w-0"><h2 className="clamp-2" style={{ fontWeight: 600, color: 'var(--ink)' }}>{d.name || d.title}</h2></div>
                     <small className="trunc">{d.creditor || t('fin.creditor')}</small>
                   </div>
                   <BigMoney value={left} format={fmt.int} label={money(left)} fs="clamp(22px, 2.4vw, 30px)" />
-                  <div className="progress mt-3"><div style={{ width: `${pct}%` }} /></div>
+                  <div className="progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+                    <div style={{ width: `${pct}%`, background: GRAD_BAR }} />
+                  </div>
                   <div className="muted mt-2 text-[length:var(--fs-xs)]">
-                    {t('fin.paid_out')} {fmt.money(paid)} ({fmt.int(pct)} %) · {t('fin.of')} {fmt.money(total)}
+                    {t('fin.paid_out')} <b className="num pos">{fmt.money(paid)}</b> (<b className="num">{fmt.int(pct)} %</b>) · {t('fin.of')} {fmt.money(total)}
                   </div>
                   <div className="mt-3">
                     <RowActions>
-                      <button type="button" className="btn-soft btn-sm" onClick={() => { setEditingItem(d); setSheet('payDebt') }}>{t('fin.make_payment')}</button>
+                      <button type="button" className="btn btn-sm" onClick={() => { setEditingItem(d); setSheet('payDebt') }}>{t('fin.make_payment')}</button>
                       <IconBtn onClick={() => { setEditingItem(d); setSheet('debt') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
                       <IconBtn
                         danger
@@ -804,13 +929,15 @@ export default function Finance() {
                 </section>
               )
             })}
+            </CarRow>
+          )}
         </div>
       )}
 
       {/* ---------------- РЕГУЛЯРНЫЕ ---------------- */}
       {tab === 'recurring' && (
         <div className="bento mt-4">
-          <section className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+          <section className={`c s4 glass-card gc-subs ${CARD_M_LIGHT}`} data-reveal>
             <div className="hd"><div className="min-w-0"><h2 className="trunc">{t('fin.c_recurring')}</h2></div></div>
             <div className="big num" style={{ fontSize: 'clamp(24px, 2.6vw, 34px)' }}>{fmt.money(recExpense)}</div>
             {recIncome > 0 && <div className="muted mt-1 text-[length:var(--fs-md)]">+{fmt.money(recIncome)}</div>}
@@ -824,19 +951,36 @@ export default function Finance() {
             <section className={`c s8 ${CARD_M_LIGHT}`} data-reveal>
               <div className="muted text-[length:var(--fs-md)]">{recurring.length > 0 ? t('fin.all_paused') : t('fin.no_recurring')}</div>
             </section>
-          ) : recShown.map((r) => (
-            <section key={r.id} className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+          ) : (
+            <CarRow count={recShown.length} label={t('fin.c_recurring')}>
+              {recShown.map((r) => (
+            <section
+              key={r.id}
+              data-car
+              className={`c s4 glass-card gc-subs ${CARD_M_LIGHT}`}
+              data-reveal
+              role="button"
+              tabIndex={0}
+              title={t('fin.edit_pay')}
+              aria-label={`${r.name || r.title} — ${t('fin.edit_pay')}`}
+              onClick={() => { setEditingItem(r); setSheet('recurring') }}
+              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingItem(r); setSheet('recurring') } }}
+              style={{ cursor: 'pointer' }}
+            >
               <div className="hd flex-wrap">
                 <span className="due-tag">{(r.day_of_month || r.day) ? t('fin.day_of_month', { d: r.day_of_month || r.day }) : t('fin.per_month_short')}</span>
-                <span className="num" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit', fontSize: 'var(--fs-lg)', fontWeight: 600 }}>
-                  {r.kind === 'income' ? '+' : MINUS}{fmt.money(r.amount)}
+                <span className="flex items-center gap-1">
+                  <span className="num" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit', fontSize: 'var(--fs-lg)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>
+                    {r.kind === 'income' ? '+' : MINUS}{fmt.money(r.amount)}
+                  </span>
+                  <ChevronRight size={15} aria-hidden="true" style={{ color: 'var(--ink-3)', flex: 'none' }} />
                 </span>
               </div>
-              <div className="clamp-2 font-medium" style={{ fontSize: 'var(--fs-base)' }}>{r.name || r.title}</div>
+              <div className="clamp-2" style={{ fontSize: 'var(--fs-base)', fontWeight: 600, color: 'var(--ink)' }}>{r.name || r.title}</div>
               <div className="muted mt-1 trunc text-[length:var(--fs-xs)]" title={[r.category, r.account].filter(Boolean).join(' · ')}>
                 {[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}
               </div>
-              <div className="mt-3">
+              <div className="mt-3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
                 <RowActions>
                   <IconBtn
                     title={r.active === false ? 'Включить: платёж снова пойдёт в прогноз' : t('fin.pause_tip')}
@@ -861,6 +1005,8 @@ export default function Finance() {
               </div>
             </section>
           ))}
+            </CarRow>
+          )}
         </div>
       )}
 
@@ -872,25 +1018,33 @@ export default function Finance() {
               <Empty glyph="mind" text={t('fin.no_goals')} sub={t('fin.no_goals_hint')}
                 action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('goal') }}><Target size={15} /> {t('gl.goal')}</button>} />
             </section>
-          ) : goals.map((g) => {
+          ) : (
+            <CarRow count={goals.length} label={t('goals.title')}>
+              {goals.map((g) => {
             const current = g.current || 0
             const target = g.target || 1
             const pct = Math.min(100, Math.round((current / target) * 100))
             const eta = target > current ? goalEta(target - current) : null
+            const day0 = new Date()
+            day0.setHours(0, 0, 0, 0)
+            const overdue = !!(g.deadline && current < target && new Date(g.deadline) < day0)
             return (
-              <section key={g.id} className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
-                <div className="hd flex-wrap">
-                  <div className="min-w-0"><h2 className="clamp-2">{g.title || g.name}</h2></div>
-                  <small className="num">{fmt.int(pct)} %</small>
-                </div>
-                <BigMoney value={current} format={fmt.int} label={fmt.money(current)} fs="clamp(22px, 2.4vw, 30px)" />
-                <div className="progress mt-3"><div style={{ width: `${Math.max(2, pct)}%` }} /></div>
-                <div className="muted mt-2 text-[length:var(--fs-xs)]">
-                  {t('fin.of')} {fmt.money(target)}{g.deadline ? ` · ${shortDate(g.deadline)}` : ''}
-                </div>
-                {eta && <div className="mt-1.5 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{t('gl.at_rate', { m: money(5000) })} {eta}</div>}
-                <div className="mt-3">
-                  <RowActions>
+              <GoalGlassCard
+                key={g.id}
+                className={`s4 ${CARD_M_LIGHT}`}
+                title={g.title || g.name}
+                pct={pct}
+                main={fmt.money(current)}
+                target={fmt.money(target)}
+                onOpen={() => { setEditingItem(g); setSheet('goal') }}
+                openLabel={t('common.edit')}
+                deadlineText={g.deadline
+                  ? (overdue ? `${shortDate(g.deadline)} · ${t('aims.overdue')}` : shortDate(g.deadline))
+                  : t('fin.forever')}
+                overdue={overdue}
+                eta={eta ? `${t('gl.at_rate', { m: money(5000) })} ${eta}` : null}
+                actions={(
+                  <>
                     <button type="button" className="btn btn-sm" onClick={() => { setEditingItem(g); setSheet('putGoal') }}>{t('fin.top_up')}</button>
                     <IconBtn onClick={() => { setEditingItem(g); setSheet('goal') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
                     <IconBtn
@@ -905,11 +1059,13 @@ export default function Finance() {
                     >
                       <Trash2 size={14} />
                     </IconBtn>
-                  </RowActions>
-                </div>
-              </section>
+                  </>
+                )}
+              />
             )
           })}
+            </CarRow>
+          )}
         </div>
       )}
 

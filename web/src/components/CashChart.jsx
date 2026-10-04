@@ -23,6 +23,12 @@ import { stagger } from '../lib/motion'
  * Движение: только transform/opacity — маркеры событий проявляются каскадом (lib/motion),
  * высоты графика зарезервированы заранее (скелетон), поэтому данные не «прыгают».
  */
+/* Серии в тёмной теме подсвечиваем: факт и маркер «сегодня» — светлее и насыщеннее,
+   иначе на тёмном фоне они глохнут. Светлая тема — как было.
+   (recharts в проекте нет: серии этого графика рисует SVG ниже, цвета задаются здесь
+   и в легенде Today.jsx — обе точки берут цвет из cashFact.) */
+const isDark = () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+export const cashFact = (dark) => (dark ? '#ffb37e' : '#ff9f5c')
 const W = 600, H = 200                       // система координат viewBox
 const dm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`   // без new Date(iso) — иначе минус день у клиента в UTC−
 // события прошедших дней: операции приходят отдельным запросом и в ряду их нет
@@ -171,7 +177,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
           {/* линия нуля — подписана, чтобы «точка выше пунктира» читалось однозначно */}
           <line x1="0" x2={W} y1={geo.zero} y2={geo.zero} stroke={geo.negative ? 'var(--neg)' : 'var(--ink3)'} strokeWidth="1" strokeDasharray="3 5" opacity="0.8" vectorEffect="non-scaling-stroke" />
           <path d={geo.fill} fill="url(#cc-fill)" />
-          <path d={geo.fact} fill="none" stroke="#ff9f5c" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+          <path d={geo.fact} fill="none" stroke={cashFact(isDark())} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
           <path d={geo.future} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
           {/* маркер «сегодня» — последняя точка факта, а не первый день прогноза */}
           <line x1={geo.X(todayIdx)} x2={geo.X(todayIdx)} y1="0" y2={H} stroke="var(--ink3)" strokeWidth="1" strokeDasharray="4 6" opacity="0.45" vectorEffect="non-scaling-stroke" />
@@ -191,7 +197,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
               style={{ left: `${xPct(i)}%`, top: yPx(p.balance), background: up ? 'var(--pos)' : 'var(--ink-3)' }} />
           })}
           <span className="absolute h-[7px] w-[7px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]"
-            style={{ left: `${xPct(todayIdx)}%`, top: yPx(pts[todayIdx].balance), background: '#ff9f5c' }} />
+            style={{ left: `${xPct(todayIdx)}%`, top: yPx(pts[todayIdx].balance), background: cashFact(isDark()) }} />
           {sel != null && (
             <span ref={dotRef} className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-[var(--bg)]"
               data-testid="cash-dot"
@@ -229,7 +235,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
 
       {legend && (
         <div className="lg">
-          <span><i style={{ background: '#ff9f5c' }}></i>{T('chart.fact')}</span>
+          <span><i style={{ background: cashFact(isDark()) }}></i>{T('chart.fact')}</span>
           <span><i style={{ background: 'var(--accent)' }}></i>{T('chart.forecast')}</span>
           <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>{T('chart.zero')}</span>
         </div>
