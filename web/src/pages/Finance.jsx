@@ -864,34 +864,30 @@ export default function Finance() {
 
       {/* ---------------- ЦЕЛИ ---------------- */}
       {tab === 'goals' && (
-        <Block className="mt-5" title={t('goals.title')} note={t('fin.n_goals', { count: goals.length })}>
+        <div className="bento mt-4">
           {!goals.length ? (
-            <Empty glyph="mind" text={t('fin.no_goals')} sub={t('fin.no_goals_hint')}
-              action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('goal') }}><Target size={15} /> {t('gl.goal')}</button>} />
+            <section className={`c s12 ${CARD_M_LIGHT}`} data-reveal>
+              <Empty glyph="mind" text={t('fin.no_goals')} sub={t('fin.no_goals_hint')}
+                action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('goal') }}><Target size={15} /> {t('gl.goal')}</button>} />
+            </section>
           ) : goals.map((g) => {
             const current = g.current || 0
             const target = g.target || 1
             const pct = Math.min(100, Math.round((current / target) * 100))
             const eta = target > current ? goalEta(target - current) : null
             return (
-              <div key={g.id} className="rule py-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                  <div className="min-w-0 flex-1">
-                    <div className="clamp-2 text-[length:var(--fs-base)] font-medium">{g.title || g.name}</div>
-                    <div className="muted mt-0.5 text-[length:var(--fs-md)]">
-                      {t('fin.saved_pct', { pct })}{g.deadline ? ` · ${shortDate(g.deadline)}` : ''}
-                    </div>
-                  </div>
-                  <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">
-                    {fmt.money(current)} <span className="text-[length:var(--fs-md)] text-[var(--ink3)]">/ {fmt.money(target)}</span>
-                  </span>
+              <section key={g.id} className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+                <div className="hd flex-wrap">
+                  <div className="min-w-0"><h2 className="clamp-2">{g.title || g.name}</h2></div>
+                  <small className="num">{fmt.int(pct)} %</small>
                 </div>
-                <div className="progress mt-2"><div style={{ width: `${Math.max(2, pct)}%` }} /></div>
-                {eta && (
-                  <div className="mt-1.5 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{t('gl.at_rate', { m: money(5000) })} {eta}</div>
-                )}
-                <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                  <span className="muted trunc text-[length:var(--fs-xs)]">{g.deadline ? shortDate(g.deadline) : t('fin.forever')}</span>
+                <BigMoney value={current} format={fmt.int} label={fmt.money(current)} fs="clamp(22px, 2.4vw, 30px)" />
+                <div className="progress mt-3"><div style={{ width: `${Math.max(2, pct)}%` }} /></div>
+                <div className="muted mt-2 text-[length:var(--fs-xs)]">
+                  {t('fin.of')} {fmt.money(target)}{g.deadline ? ` · ${shortDate(g.deadline)}` : ''}
+                </div>
+                {eta && <div className="mt-1.5 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{t('gl.at_rate', { m: money(5000) })} {eta}</div>}
+                <div className="mt-3">
                   <RowActions>
                     <button type="button" className="btn btn-sm" onClick={() => { setEditingItem(g); setSheet('putGoal') }}>{t('fin.top_up')}</button>
                     <IconBtn onClick={() => { setEditingItem(g); setSheet('goal') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
@@ -909,10 +905,10 @@ export default function Finance() {
                     </IconBtn>
                   </RowActions>
                 </div>
-              </div>
+              </section>
             )
           })}
-        </Block>
+        </div>
       )}
 
       {/* ---------------- ТЕХНИКИ ---------------- */}
