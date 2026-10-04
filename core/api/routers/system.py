@@ -242,6 +242,9 @@ async def status():
         counts = {"events": len(s.exec(select(Event)).all()), "tasks": len(s.exec(select(Task)).all()),
                   "notes": len(s.exec(select(Note)).all()), "links": len(s.exec(select(Link)).all()),
                   "transactions": len(s.exec(select(Transaction)).all())}
+        from ...db import ActionLog as _AL, Memory as _Mem  # F6: размеры retention-таблиц + last (retention выключен, только чтение)
+        from sqlalchemy import func as _f
+        ret = {"chatmessage": int(s.exec(select(_f.count()).select_from(ChatMessage)).one() or 0), "memory": int(s.exec(select(_f.count()).select_from(_Mem)).one() or 0), "actionlog": int(s.exec(select(_f.count()).select_from(_AL)).one() or 0), "last": get_setting("retention:last")}
     tg_enabled = bool(cfg.telegram.token and cfg.telegram.owner_id)
     from ... import VERSION
     from ..app import app  # тот же объект FastAPI (нужен для app.state)
@@ -269,6 +272,7 @@ async def status():
                      "last_message": last_tg.created_at.isoformat() if last_tg else None},
         "backup": last_backup(),
         "db": {"path": str(DB_PATH), "size": DB_PATH.stat().st_size if DB_PATH.exists() else 0, **counts},
+        "retention": ret,
         # ошибка миграций: ставит init_db при сбое, очищает после успешного старта
         "migration_error": get_setting("migration:error"),
         "errors": list(getattr(app.state, "errors", []))[-10:],

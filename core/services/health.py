@@ -62,6 +62,11 @@ async def diagnose() -> dict:
     tg = bool(cfg.telegram.token and cfg.telegram.owner_id)
     if not tg:
         add("warn", "Telegram не настроен", "telegram.token и telegram.owner_id в config.yaml")
+    try:  # F4-short: doctor/check-предупреждение (полный clock.now() рефактор вне скоупа)
+        from ..timezone import TZ_WARN, is_tz_mismatch
+        if is_tz_mismatch(getattr(getattr(cfg, "owner", None), "timezone", "") or ""):
+            add("warn", TZ_WARN, "системная зона и owner.timezone должны совпадать; перезапусти ядро")
+    except Exception as e: log.debug("tz check: %s", e)
 
     # ходы агента за сутки — одним флагом на строку, а не все колонки (текст хода тут не нужен)
     since = datetime.now() - timedelta(hours=24)

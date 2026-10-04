@@ -75,23 +75,68 @@ PAST_RX = re.compile(r"\b(вчера|позавчера|только\s+что|б
 HEALTH_RX = re.compile(r"\b(давлени\w*|температур\w*|сахар\b|пульс\w*|вес\s+\d|самочувстви\w*|болит|болел[аи]?|таблетк\w*|укол\w*|капл[иь])\b", re.I)
 CLARIFY_RX = re.compile(r"^\s*(в\s+)?(задач\w*|дел[оа]|календар\w*|событи\w*|напомина\w*|заметк\w*|мысл\w*|мозг|нет|отмена|не надо|забудь|ничего)\s*[.!]?\s*$", re.I)
 
-# ожидающие уточнения: channel -> (исходный текст, время)
+# ожидающие уточнения: channel -> "ts|qid|текст" (qid — короткий nonce вопроса).
+# «да» раньше цеплялось к любому висящему слоту: просроченный вопрос A, заданный
+# следом вопрос B — и «да» подтверждало уже B, а повторное «да» — дважды.
+# Теперь слот одноразовый (consume), с TTL, а привязка к вопросу — через qid:
+# set возвращает qid, consume(qid) принимает только свой. Путь чата («да» без
+# кода) идёт через consume() без qid — UX прежний, повтор уже невозможен.
 PENDING_TTL_SEC = 300
 
 
-def _pending_set(channel: str, text: str) -> None:
-    set_setting(f"pending:{channel}", f"{datetime.now().isoformat()}|{text}")
+def _new_qid() -> str:
+    import secrets
+    return secrets.token_hex(3)  # 6 hex — живёт только в слоте, в prompt не пишем
+
+
+def _pending_set(channel: str, text: str) -> str:
+    """Положить вопрос в слот. Возвращает qid вопроса (для программных проверок)."""
+    qid = _new_qid()
+    set_setting(f"pending:{channel}", f"{datetime.now().isoformat()}|{qid}|{text}")
+    return qid
+
+
+def _pending_parse(raw: str | None) -> tuple[str, datetime, str | None] | None:
+    """(текст, время, qid|None). Понимает и новый формат ts|qid|text, и legacy ts|text."""
+    if not raw or "|" not in raw:
+        return None
+    ts, rest = raw.split("|", 1)
+    qid: str | None = None
+    if "|" in rest:
+        maybe_qid, maybe_text = rest.split("|", 1)
+        if re.fullmatch(r"[0-9a-f]{6}", maybe_qid):
+            qid, rest = maybe_qid, maybe_text
+    try:
+        return rest, datetime.fromisoformat(ts), qid
+    except ValueError:
+        return None
 
 
 def _pending_get(channel: str) -> tuple[str, datetime] | None:
-    raw = get_setting(f"pending:{channel}")
-    if not raw or "|" not in raw:
+    p = _pending_parse(get_setting(f"pending:{channel}"))
+    return (p[0], p[1]) if p else None
+
+
+def _pending_consume(channel: str, qid: str | None = None,
+                     prefix: str | None = None) -> tuple[str, datetime] | None:
+    """Одноразовый забор вопроса: TTL + совпадение qid (если передан) + удаление.
+
+    prefix задан — чужой слот (другой вид вопроса) НЕ трогаем, возвращаем None.
+    Чужой qid — тоже не трогаем (вопрос ещё ждёт своего ответа). Просрочка —
+    чистим и возвращаем None. Успех — чистим и возвращаем (текст, время)."""
+    p = _pending_parse(get_setting(f"pending:{channel}"))
+    if not p:
         return None
-    ts, text = raw.split("|", 1)
-    try:
-        return text, datetime.fromisoformat(ts)
-    except ValueError:
+    text, ts, have_qid = p
+    if prefix is not None and not text.startswith(prefix):
         return None
+    if (datetime.now() - ts).total_seconds() > PENDING_TTL_SEC:
+        _pending_clear(channel)
+        return None
+    if qid is not None and have_qid is not None and qid != have_qid:
+        return None
+    _pending_clear(channel)
+    return text, ts
 
 
 def _pending_clear(channel: str) -> None:
@@ -1083,15 +1128,11 @@ def _bulk_rule(t: str, channel: str) -> Reply | None:
 
 
 def _resolve_bulk(text: str, channel: str) -> Reply | None:
-    p = _pending_get(channel)
-    if not p or not p[0].startswith("bulk|"):
+    p = _pending_consume(channel, prefix="bulk|")   # TTL + one-shot; чужой слот не трогаем
+    if not p:
         return None
-    orig, ts = p
-    if (datetime.now() - ts).total_seconds() > PENDING_TTL_SEC:
-        _pending_clear(channel)
-        return None
+    orig, _ = p
     if YES_RX.match(text):
-        _pending_clear(channel)
         d = json.loads(orig[5:])
         since = datetime.fromisoformat(d["since"]) if d["since"] else None
         until = datetime.fromisoformat(d["until"]) if d["until"] else None
@@ -1197,15 +1238,11 @@ async def _resolve_sorter_draft(text: str, channel: str) -> Reply | None:
 
 
 def _resolve_confirm(text: str, channel: str) -> Reply | None:
-    p = _pending_get(channel)
-    if not p or not p[0].startswith("confirm|"):
+    p = _pending_consume(channel, prefix="confirm|")   # TTL + one-shot; чужой слот не трогаем
+    if not p:
         return None
-    orig, ts = p
-    if (datetime.now() - ts).total_seconds() > PENDING_TTL_SEC:
-        _pending_clear(channel)
-        return None
+    orig, _ = p
     if YES_RX.match(text):
-        _pending_clear(channel)
         d = json.loads(orig[8:])
         if "pc" in d:
             cmd = pc.PcCommand("power", d["pc"], say="Выключаю компьютер через 30 секунд. «Отмена выключения» — если передумали." if d["pc"] == "shutdown" else "Перезагружаю через 30 секунд.")

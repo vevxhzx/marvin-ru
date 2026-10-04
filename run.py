@@ -117,6 +117,16 @@ def _banner() -> str:
 
 async def main(with_tg: bool) -> None:
     print(_banner())
+    try:  # F4-short: процесс в owner.timezone (полный clock.now() рефактор вне скоупа)
+        from core.timezone import apply_owner_timezone as _tz
+        _tz(getattr(getattr(cfg, "owner", None), "timezone", "") or "")
+    except Exception as e: log.debug("tzshort: %s", e)
+    from core import singleton as _singleton
+    _lock_err = _singleton.acquire()
+    if _lock_err is not None:
+        log.error("Ассистент УЖЕ ЗАПУЩЕН (%s) — второй экземпляр не стартую.", _lock_err)
+        log.error("Второе окно не нужно: закройте это. Если хотите перезапустить — закройте ВСЕ окна ассистента и запустите start.bat снова.")
+        sys.exit(3)
     init_db()
     from core import VERSION
     label = _instance_label()
@@ -253,6 +263,10 @@ async def main(with_tg: bool) -> None:
     try:
         await asyncio.gather(*tasks)
     finally:
+        try:
+            _singleton.release()   # сняли .db.lock — следующий запуск не сочтёт нас зависшими
+        except Exception as e:  # pragma: no cover
+            log.debug("singleton release: %s", e)
         # Аккуратная остановка (Ctrl+C, сигнал завершения, падение сервера):
         # 1) гасим планировщик — новые задачи больше не запускаются;
         # 2) отменяем текущие и ждём их (asyncio.to_thread не отменяется — поток доработает сам,

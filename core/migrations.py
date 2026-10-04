@@ -150,6 +150,70 @@ def _v6_lesson_applied(conn) -> None:
     add_column(conn, "lesson", "last_applied_at", "DATETIME")
 
 
+# F1: деньги в целых копейках. Перечень — все float-столбцы денег из core/db.py
+# (модели Account/Category/Transaction/Recurring/Debt/Order/Goal). НЕ деньги и НЕ покрыты:
+# Debt.rate (годовая ставка, %), Aim.progress (доля 0..1), Order.estimate_h (часы),
+# BoardItem.x/y/w/h/rot (геометрия холста), Relation.score/Fact.confidence (веса 0..1).
+_MONEY_CENTS_COLUMNS: tuple[tuple[str, str], ...] = (
+    ("account", "balance"),
+    ("category", "budget"),
+    ("transaction", "amount"),
+    ("recurring", "amount"),
+    ("debt", "total"),
+    ("debt", "remaining"),
+    ("debt", "payment"),
+    ("order", "price"),
+    ("goal", "target"),
+    ("goal", "saved"),
+)
+
+
+def _v8_money_cents(conn) -> None:
+    """Деньги в целых копейках: рядом с каждым float-столбцом денег — `<col>_cents INTEGER`
+    с бэкфиллом `CAST(ROUND(<col> * 100) AS INTEGER)`. Старый float-столбец НЕ удаляется
+    (откат без потерь; код пока читает float — перевод чтения на _cents отдельным таском).
+
+    Правило округления — SQLite ROUND = half away from zero, применённый к бинарному
+    произведению: 2.675 → 268 (2.675*100 в double ровно 267.5), а 1.005 → 100, т.к.
+    1.005*100 в double = 100.4999… (не дотягивает до половины). Это НЕ Python round()
+    (banker's) и НЕ Decimal(str(x)) HALF_UP из finance.money() (там 1.005 → 101):
+    на непредставимых в double значениях вида x.xx5 возможен рассинхрон в 1 копейку
+    между витриной и бэкфиллом — приемлемо, зафиксировано тестом test_migration_cents.py.
+    NULL остаётся NULL (строка с NULL деньгами не превращается в 0).
+
+    Идемпотентность: ADD COLUMN через add_column() (IF NOT EXISTS-стиль, как у v2–v6),
+    бэкфилл только по строкам с `<col>_cents IS NULL` — повторный прогон ничего не меняет.
+    Бэкап — штатный backup_before_migration() в apply() (как у всех предыдущих версий),
+    отдельного снимка внутри _vN нет ни у одной миграции."""
+    for table, col in _MONEY_CENTS_COLUMNS:
+        cents = f"{col}_cents"
+        add_column(conn, table, cents, "INTEGER")
+        if not table_exists(conn, table):
+            continue
+        have = column_names(conn, table)
+        if cents not in have or col not in have:
+            continue
+        conn.execute(text(
+            f'UPDATE "{table}" SET "{cents}" = CAST(ROUND("{col}" * 100) AS INTEGER) '
+            f'WHERE "{cents}" IS NULL AND "{col}" IS NOT NULL'
+        ))
+
+
+# F6: ретеншн-поддержка БЕЗ удаления данных — только date-индексы под будущие DELETE по created_at.
+# embedding пропущен: date-колонки нет (ref_table/ref_id/model/vector/text_hash) — индексировать нечего.
+_RETENTION_DATE_INDEXES: tuple[tuple[str, str, str], ...] = (
+    ("ix_chatmessage_created_at", "chatmessage", '"created_at"'),
+    ("ix_memory_created_at", "memory", '"created_at"'),
+    ("ix_actionlog_created_at", "actionlog", '"created_at"'),
+)
+
+
+def _v9_retention_dates(conn) -> None:
+    """Date-индексы растущих таблиц (retention support, данные не трогаем)."""
+    for _name, _table, _cols in _RETENTION_DATE_INDEXES:
+        create_index(conn, _name, _table, _cols)
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
@@ -158,6 +222,10 @@ MIGRATIONS: list[Migration] = [
     (4, "индексы: transaction/task/recurring/memory/action_log/embedding/chat_message/fact", _v4_indexes),
     (5, "память: fact.last_seen_at/confirmed_at/archived_at", _v5_fact_decay),
     (6, "уроки: lesson.applied/last_applied_at", _v6_lesson_applied),
+    # 7 занята динамической миграцией индексов из core/db.py (register_perf_indexes) —
+    # следующая свободная статическая версия 8.
+    (8, "деньги: <col>_cents INTEGER + бэкфилл CAST(ROUND(col*100)) (float-колонки оставлены)", _v8_money_cents),
+    (9, "ретеншн-поддержка: date-индексы chatmessage/memory/actionlog (без удаления данных)", _v9_retention_dates),
 ]
 
 
