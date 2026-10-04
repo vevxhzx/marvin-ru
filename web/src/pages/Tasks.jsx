@@ -41,8 +41,8 @@ const cardM = (pad = '!p-[var(--card-pad)]') =>
 /* Blocks of the page in the «настроить» mode. Stored under a fresh key (tasks2):
    the old layout (done/list/empty/sort cards of the bento grid) has no blocks to
    reuse, and a stale order would hide the counters from an existing user. */
-const BLOCKS = ['stats', 'tools', 'list']
-const BLOCK_TITLES = { stats: 'tk.open', tools: 'common.search', list: 'nav.tasks' }
+const BLOCKS = ['stats', 'list']
+const BLOCK_TITLES = { stats: 'tk.open', list: 'nav.tasks' }
 
 /* Заголовок списка для каждого вида */
 const VIEW_TITLE = { open: 'tk.open', today: 'common.today_caps', done: 'tk.done', aims: 'goals.title' }
@@ -392,52 +392,10 @@ export default function Tasks() {
           {/* Quick add — one line, your own words. На десктопе панель-карточка, на телефоне
               тот же блок без обёртки. */}
           <div className="bento mt-5">
-          {blockOrder.includes('tools') && (
-            <section className={`relative s4 ${cardM('!p-4')}`}>
-              {ctl('tools')}
-              <div className={cardsEdit ? 'pt-8' : ''}>
-                {projects.length > 0 && (
-                  <div className={`cluster mt-3 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('task.project')}>
-                    <span className="label">{t('task.project')}</span>
-                    <button
-                      type="button"
-                      className={`pill ${!proj ? 'on' : ''}`}
-                      aria-pressed={!proj}
-                      style={PILL}
-                      onClick={() => setProj('')}
-                    >
-                      {t('common.all')}
-                    </button>
-                    {projects.map((p) => (
-                      <button
-                        key={p}
-                        type="button"
-                        className={`pill max-[820px]:!shrink-0 ${proj === p ? 'on' : ''}`}
-                        aria-pressed={proj === p}
-                        style={{ ...PILL, maxWidth: '46vw' }}
-                        title={p}
-                        onClick={() => setProj(proj === p ? '' : p)}
-                      >
-                        <span className="trunc">{p}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-
-                {filtering && (
-                  <div className="cluster mt-3">
-                    <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('tk.filter_local', { n: currentList.length })}</span>
-                    <button type="button" className="btn-ghost btn-sm" onClick={resetFilters}>{t('tk.reset_search')}</button>
-                  </div>
-                )}
-              </div>
-            </section>
-          )}
-
           {/* The list: на десктопе панель-карточка с шапкой и волосяными разделителями,
               на телефоне плоский раздел на фоне страницы. Каскад появления общий. */}
           {blockOrder.includes('list') && (
-            <section className={`relative s8 ${cardM()}`}>
+            <section className={`relative s12 ${cardM()}`}>
               {ctl('list')}
               <div
                 className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"

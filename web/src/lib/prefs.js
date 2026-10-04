@@ -1,7 +1,7 @@
 // Оформление и поведение сайта. Один источник: prefs.get()/prefs.set(); изменения применяются к <html> мгновенно.
 // Хранится в localStorage (мгновенный старт) и зеркалится на сервер (/api/ui-prefs) — телефон и ПК выглядят одинаково.
 import { useEffect, useState } from 'react'
-import { rgbOf, lumOf, mixHex, fitAccentInk } from './color'
+import { rgbOf, lumOf, mixHex, fitAccentInk, fitAccentInkWhite } from './color'
 
 export { lumOf } // обратная совместимость: раньше lumOf жил здесь
 
@@ -141,7 +141,7 @@ export function apply(p = _cur) {
 
   /* Контраст текста на акценте ≥ 4.5:1 (WCAG AA): текст подбирается по яркости,
      при необходимости сам фон чуть подправляется (см. fitAccentInk). */
-  const fit = fitAccentInk(accentFor(accentHex, dark))
+  const fit = dark ? fitAccentInkWhite(accentFor(accentHex, dark)) : fitAccentInk(accentFor(accentHex, dark))
   const acc = fit.bg
   r.style.setProperty('--acc', acc)
   r.style.setProperty('--accent-light', accentFor(accentHex, false))
@@ -212,7 +212,7 @@ export function usePageAccent(page) {
   const hex = (p.pageAccents || {})[page]
   if (!hex) return { style: {}, hex: '' }
 
-  const fit = fitAccentInk(accentFor(hex, dark))
+  const fit = dark ? fitAccentInkWhite(accentFor(hex, dark)) : fitAccentInk(accentFor(hex, dark))
   const acc = fit.bg
   const [hue, sat] = hexHsl(acc)
   const nearGrey = sat < 14
