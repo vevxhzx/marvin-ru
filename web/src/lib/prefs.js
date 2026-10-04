@@ -123,8 +123,8 @@ export function accentFor(hex, dark) {
   const L = lumOf(base)
   /* синие варианты акцента (свотч «синий» и пара из ACCENTS.blue) — подмешиваем голубой */
   const lift = /^#(3458f5|0a3cff|0a2bff|3b5bff|5f83ff)$/i.test(base) ? '#7fb2ff' : '#ffffff'
-  if (dark && L < 0.16) return mixHex(base, lift, 0.5)
-  if (dark && L < 0.3) return mixHex(base, lift, 0.28)
+  if (dark && L < 0.16) return mixHex(base, lift, 0.34)
+  if (dark && L < 0.3) return mixHex(base, lift, 0.18)
   if (!dark && L > 0.62) return mixHex(base, '#17191f', 0.55)
   return base
 }
@@ -141,7 +141,7 @@ export function apply(p = _cur) {
 
   /* Контраст текста на акценте ≥ 4.5:1 (WCAG AA): текст подбирается по яркости,
      при необходимости сам фон чуть подправляется (см. fitAccentInk). */
-  const fit = dark ? fitAccentInkWhite(accentFor(accentHex, dark)) : fitAccentInk(accentFor(accentHex, dark))
+  const fit = fitAccentInkWhite(accentFor(accentHex, dark))
   const acc = fit.bg
   r.style.setProperty('--acc', acc)
   r.style.setProperty('--accent-light', accentFor(accentHex, false))
@@ -212,7 +212,7 @@ export function usePageAccent(page) {
   const hex = (p.pageAccents || {})[page]
   if (!hex) return { style: {}, hex: '' }
 
-  const fit = dark ? fitAccentInkWhite(accentFor(hex, dark)) : fitAccentInk(accentFor(hex, dark))
+  const fit = fitAccentInkWhite(accentFor(hex, dark))
   const acc = fit.bg
   const [hue, sat] = hexHsl(acc)
   const nearGrey = sat < 14

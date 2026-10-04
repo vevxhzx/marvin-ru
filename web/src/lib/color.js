@@ -48,7 +48,7 @@ export function fitAccentInk(bg, target = 4.5) {
 
 /* Текст поверх акцента — принудительно БЕЛЫЙ (тёмная тема: «на цвете всегда белое»).
    Если белый не дотягивает до AA, фон слегка притемняем в сторону чёрного, пока не наберём. */
-export function fitAccentInkWhite(bg, target = 4.5) {
+export function fitAccentInkWhite(bg, target = 3) {
   if (!/^#[0-9a-f]{6}$/i.test(String(bg))) return { bg, ink: INK_LIGHT }
   if (contrast(bg, INK_LIGHT) >= target) return { bg, ink: INK_LIGHT }
   for (let k = 0.02; k <= 0.7; k += 0.02) {
