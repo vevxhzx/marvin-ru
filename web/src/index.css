@@ -2700,6 +2700,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 .pomo-pop-hint { font-size: var(--fs-xs); }
 .pomo-pop-mins { flex: 1; text-align: center; font-size: var(--fs-base); }
 .pomo-pop-actions { display: flex; gap: 8px; }
+.pomo-pop-actions .btn, .pomo-pop-actions .btn-primary, .pomo-pop-actions .btn-ghost { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pomo-pop-link {
   align-self: flex-start;
   font-size: var(--fs-xs);

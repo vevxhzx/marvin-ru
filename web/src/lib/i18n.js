@@ -663,6 +663,7 @@ export const DICT = {
   'pomo.tap_to_stop': { ru: 'клик — стоп', en: 'click to stop' },
   'pomo.planned': { ru: 'помодоро {n} мин', en: '{n}-minute pomodoro' },
   'pomo.start': { ru: 'запустить помодоро', en: 'start a pomodoro' },
+  'pomo.start_short': { ru: 'запустить', en: 'start' },
   'pomo.today_n': { ru: ['сегодня {count} помидор', 'сегодня {count} помидора', 'сегодня {count} помидоров'], en: ['{count} pomodoro today', '{count} pomodoros today'] },
   'state.thinking': { ru: 'думаю…', en: 'thinking…' },
   'state.connecting': { ru: 'подключаюсь…', en: 'connecting…' },

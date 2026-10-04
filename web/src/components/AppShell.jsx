@@ -389,8 +389,9 @@ function PomodoroPanel({ timer, left, onClose, onChanged }) {
       .finally(() => setBusy(false))
   }
 
-  const start = () => call(() => api.req('POST', '/api/orders/timer', { minutes: mins, kind: 'focus' }))
-  const stop = () => call(() => api.req('DELETE', '/api/orders/timer'))
+  const start = () => call(() => api.startTimer(null, mins))
+  const stop = () => call(() => api.stopTimer())
+  const reset = () => call(() => api.stopTimer())
   const saveMins = (n) => {
     const v = Math.max(5, Math.min(120, n))
     setMins(v)
@@ -412,9 +413,9 @@ function PomodoroPanel({ timer, left, onClose, onChanged }) {
       </div>
       <div className="pomo-pop-actions">
         {timer?.active
-          ? <button type="button" className="btn flex-1" disabled={busy} onClick={stop}>{t('pomo.pause')}</button>
-          : <button type="button" className="btn-primary flex-1" disabled={busy} onClick={start}>{t('pomo.start')}</button>}
-        <button type="button" className="btn-ghost" disabled={busy || !timer?.active} onClick={() => call(() => api.req('DELETE', '/api/orders/timer'))}>{t('pomo.reset')}</button>
+          ? <button type="button" className="btn flex-1 min-w-0" disabled={busy} onClick={stop}>{t('pomo.pause')}</button>
+          : <button type="button" className="btn-primary flex-1 min-w-0" disabled={busy} onClick={start}>{t('pomo.start_short')}</button>}
+        <button type="button" className="btn-ghost min-w-0" disabled={busy || !timer?.active} onClick={reset}>{t('pomo.reset')}</button>
       </div>
       <button type="button" className="pomo-pop-link" onClick={() => { onClose(); navOrders && navOrders() }}>
         {t('pomo.to_orders')}
