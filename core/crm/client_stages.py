@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from typing import Iterable, Optional
+from typing import Iterable
 
 from sqlmodel import select
 

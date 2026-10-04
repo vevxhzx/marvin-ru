@@ -11,7 +11,7 @@
 ├─ data/assistant.db                        ← ВСЯ база; data/backups/, data/media/
 ├─ run.py                                   ← ядро: API + сайт + Telegram + планировщик
 ├─ voice_client.py                          ← голосовой клиент ПК
-├─ core/                                    ← мозг (brain/), инструменты (tools/), сервисы, API, Telegram, голос, setup_wizard.py
+├─ core/                                    ← мозг (brain/), инструменты (tools/), сервисы, API, Telegram, голос
 ├─ web/                                     ← сайт (React + Vite); собранный сайт — web/site/
 ├─ tests/                                   ← pytest
 └─ Dockerfile, docker-compose.yml

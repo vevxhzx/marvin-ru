@@ -4,8 +4,35 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from typing import Any
+import logging
 
 import yaml
+
+log = logging.getLogger("jarvis.config")
+
+# Старые имена JARVIS_* поддерживаются для совместимости, но устарели:
+# используйте ASSISTANT_* (удаление — через 2 релиза). Предупреждение — один раз за процесс.
+_JARVIS_DEPRECATED = (
+    "JARVIS_DATA_DIR",
+    "JARVIS_CONFIG",
+    "JARVIS_DB_PATH",
+    "JARVIS_TG_TOKEN",
+    "JARVIS_TG_OWNER",
+    "JARVIS_API_TOKEN",
+)
+_WARNED_JARVIS: set[str] = set()
+
+
+def _warn_jarvis_deprecated() -> None:
+    """Один раз за процесс предупредить о заданных JARVIS_* (ASSISTANT_* — предпочтительно)."""
+    hit = [n for n in _JARVIS_DEPRECATED if os.getenv(n) and n not in _WARNED_JARVIS]
+    if not hit:
+        return
+    _WARNED_JARVIS.update(hit)
+    log.warning(
+        "JARVIS_* устарели, используйте ASSISTANT_*, поддержка будет удалена: %s",
+        ", ".join(sorted(hit)),
+    )
 
 ROOT = Path(__file__).resolve().parent.parent
 # Тесты и внешние стенды (например e2e Playwright) уводят БД и настройки в свою папку:
@@ -66,6 +93,7 @@ def _load_env_file() -> None:
 
 
 def _load() -> _Node:
+    _warn_jarvis_deprecated()
     path = _config_src()
     with open(path, encoding="utf-8") as f:
         raw = yaml.safe_load(f) or {}
@@ -102,6 +130,19 @@ def _load() -> _Node:
     # явное `brain.gemini.anonymize: false` в файле остаётся в силе). Подробнее — core/brain/llm.py.
     raw.setdefault("brain", {}).setdefault("gemini", {}).setdefault("anonymize", True)
     return _Node(raw)
+
+
+def refresh() -> None:
+    """Перечитать config.yaml/.env в СУЩЕСТВУЮЩИЙ объект cfg (без подмены объекта).
+
+    Подмена (`config.cfg = _load()` или `importlib.reload(config)`) оставляла модули,
+    сделавшие `from config import cfg` (планировщик и др.), со старым конфигом:
+    настройки, сменённые с сайта, до них не доходили, а тесты, патчащие cfg,
+    начинали писать мимо временных путей."""
+    _load_env_file()
+    fresh = _load()
+    cfg.__dict__.clear()
+    cfg.__dict__.update(fresh.__dict__)
 
 
 _load_env_file()

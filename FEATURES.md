@@ -51,7 +51,7 @@
 ### 2.5 Данные и логика, написанные пользователем (сохранены в merge)
 - `config.yaml` — рабочий конфиг: имя хозяина `вовчик`, персона (юмор 9, ники «Вовчик, шеф, босс, чел»), гибридный режим мозга, Groq + Ollama `qwen3.5:4b`, голос (edge/Дмитрий, cuda-whisper), Google Календарь, бэкапы в `./data/backups`.
 - `data/jarvis.db` — реальная база: траты, события, задачи, заказы, люди, заметки, факты памяти, доски, экранное время (см. §2.8).
-- Вторая копия «для мамы»: `mama.bat`, `mama_setup.py`, `docs/ДЛЯ_МАМЫ.md`, `docs/second-copy.md`, `_instance_label()` в `run.py` (метка окна/лога для копии на другом порту).
+- Вторая копия «для мамы»: `mama.bat`, `mama_setup.py`, `docs/for-mom.md`, `docs/second-copy.md`, `_instance_label()` в `run.py` (метка окна/лога для копии на другом порту).
 - macOS-обёртка: `mac/`, `*.command`, `Install-Mac.command`.
 - Тест бэкапов: `tests/test_backup_restore.py`.
 - Диагностика/аудиты: `docs/AUDIT-2026-09-21-board.md`, `docs/AUDIT-2026-09-21-product.md`, `IMPROVEMENTS.md`, `PLAN.md`, `docs/site.md`, `docs/design-home.svg`.
@@ -81,7 +81,6 @@ Telegram (Mini App `tg_auth.py`, прокси, OAuth-вход `auth.py`), Google
 - Улучшенные сообщения об ошибках финансов («неправдоподобно мнение. Разбейте на части»).
 
 ### 3.3 Мастер первого запуска
-- `core/setup_wizard.py` (345 строк): детект железа (RAM/GPU/Ollama), рекомендация модели по VRAM, проверка Telegram-токена и владельца, проверка облачного ключа живым запросом, скачивание моделей Ollama с прогрессом.
 - `core/api/setup.html` — страница-мастер (5 шагов: имя → железо/модель → облако → Telegram → готово), редирект на `/setup`, пока мастер не пройден (`setup_done()` в `core/config.py`).
 - ⚠️ В исходнике Marvin **обработчики `/api/setup/*` отсутствуют** (есть только страница и логика) — при объединении мастер помечен пройденным (`setup.done: true`), чтобы не блокировать уже настроенный Marvin. Подробности в `REPORT.md`.
 
@@ -114,7 +113,7 @@ Telegram (Mini App `tg_auth.py`, прокси, OAuth-вход `auth.py`), Google
 | Аудиты 21.09 (board, product), `PLAN.md`, `IMPROVEMENTS.md`, `docs/site.md` | **только личное издание** | `docs/`, корень |
 | Редизайн UI, редактор главной (bento), новые виджеты | **только публичная версия** | `web/src/`, `docs/redesign-*` |
 | Каскад галочек задач/заказов, `/api/finance/forecast` | **только публичная версия** | `core/api/app.py`, `core/db.py` |
-| Мастер настройки, `identity.py`, `.env` | **только публичная версия** | `core/setup_wizard.py`, `core/identity.py`, `core/config.py` |
+| Мастер настройки, `identity.py`, `.env` | **только публичная версия** | `core/identity.py`, `core/config.py` |
 | Node-стенд + тесты контракта фронта | **только публичная версия** | `server.ts`, `src/`, `tests/server_api.test.mjs` |
 | Docker-сборка, issue templates, релизные заметки | **только публичная версия** | `Dockerfile`, `.github/`, `RELEASE-*.md` |
 

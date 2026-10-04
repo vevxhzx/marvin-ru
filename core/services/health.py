@@ -76,7 +76,6 @@ async def diagnose() -> dict:
 
     # календарь-очередь
     try:
-        from . import gcal
         q = get_setting("gcal.queue") or ""
         n = len([x for x in q.split("\n") if x.strip()]) if q else 0
         if n:

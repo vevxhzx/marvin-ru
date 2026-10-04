@@ -504,7 +504,7 @@ async def _maybe_send_card(m: Message, r) -> None:
 async def voice_msg(m: Message):
     """Голосовое → Whisper (локально) → agent.handle → ответ текстом и голосом.
     Если уверенность низкая — показываем расшифровку и спрашиваем: Верно / Повторить / Исправить."""
-    from core.voice import stt, tts
+    from core.voice import stt
     if not stt.available():
         await m.answer("Распознавание голосовых не установлено — запустите install_voice.bat, сэр.")
         return

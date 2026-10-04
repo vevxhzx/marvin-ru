@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from sqlmodel import select
 
-from ..db import Category, Goal, Recurring, Transaction, log_action, remember, session
+from ..db import Category, Goal, Transaction, log_action, remember, session
 from . import finance
 from .finance import money
 

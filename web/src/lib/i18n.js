@@ -316,17 +316,9 @@ export const DICT = {
   'graph.empty_title': { ru: 'Связей пока нет', en: 'No connections yet' },
   'graph.empty_hint': { ru: 'Заведите людей («человек: Лена, сестра»), ставьте #теги в мыслях и ссылайтесь на другие мысли через [[двойные скобки]] — граф соберётся сам.', en: 'Add people (“person: Lena, sister”), tag your notes with #hashtags and link notes to each other with [[double brackets]] — the graph builds itself.' },
 
-  // ---- фокус дня
+  // ---- фокус дня (ключи виджета Focus.jsx удалены вместе с ним; focus.title/done ещё используют TodayCards/Aims)
   'focus.title': { ru: 'фокус дня', en: "Today's focus" },
-  'focus.goals': { ru: 'цели', en: 'goals' },
-  'focus.all_done': { ru: 'По целям всё, что можно, сделано. Следующая веха — за вами.', en: 'Everything possible on the goals is done. The next milestone is yours to set.' },
-  'focus.tap_hint': { ru: 'нажмите, чтобы сказать ассистенту', en: 'tap to tell the assistant' },
   'focus.done': { ru: 'Сделано', en: 'Done' },
-  'focus.blocked_by': { ru: 'мешает: {what}', en: 'blocked by: {what}' },
-  'focus.why_goal': { ru: 'цель', en: 'goal' },
-  'focus.why_main': { ru: 'главная цель', en: 'main goal' },
-  'focus.seed_milestone': { ru: 'веха: ', en: 'milestone: ' },
-  'focus.seed_task': { ru: 'задача: … к вехе {why}', en: 'task: … for milestone {why}' },
 
   // ---- стадия заказа (степпер)
   'stage.aria': { ru: 'Стадия заказа', en: 'Order stage' },
@@ -335,9 +327,7 @@ export const DICT = {
   'stage.current': { ru: 'текущая стадия', en: 'current stage' },
   'stage.move_to': { ru: 'перевести в «{label}»', en: 'move to “{label}”' },
 
-  // ---- лента дня
-  'daystrip.aria': { ru: 'лента дня', en: 'day timeline' },
-  'daystrip.all_day': { ru: ['+ {count} дело на весь день', '+ {count} дела на весь день', '+ {count} дел на весь день'], en: ['+ {count} more all day'] },
+  // ---- лента дня (ключи виджета DayStrip.jsx удалены вместе с ним)
 
   // ---- экранное время
   'screen.title': { ru: 'время за пк', en: 'PC time' },

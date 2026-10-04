@@ -2,34 +2,22 @@
 from __future__ import annotations
 
 from collections import deque
-from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi.responses import JSONResponse, RedirectResponse
-import asyncio
 import logging
 import time
-from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, field_validator
-from sqlmodel import select
 from starlette.middleware.base import BaseHTTPMiddleware
 
 from ..brain import agent, persona
 from ..config import ROOT, cfg
-from ..db import session, Event, Task, Note, Link, Transaction, Debt, Recurring, Aim, Milestone, get_setting, set_setting
-from ..services import brain_notes, calendar, finance, goals, insights, orders, pc, people, pulse, relations, tasks, screen
-from ..services.scheduler import morning_digest_text
+from ..services import brain_notes, finance
 from .schemas import (  # ФАЗА 7 шаг 7.0: тела моделей вынесены в core/api/schemas.py, имена те же
-   ChatIn, PcPing, PcAck, PcLaunch, PcResult, PcClip, VisionIn, CloudPreviewIn, RelationIn, EventIn,
-   SkipIn, EventDoneIn, TaskIn, TaskPatch, AimIn, AimPatch, MilestoneIn, TxIn, TxPatch, CategoryIn,
-   CategoryPatch, BalanceIn, AccountIn, AccountPatch, DebtIn, PayIn, DebtPatch, RecurringIn, RecurringPatch,
-   ClientIn, OrderIn, OrderPatch, PaymentIn, TimerIn, ManualTimeIn, ScreenImportIn, PersonIn, PomoSettingsIn,
-   FreelanceIn, GoalIn, GoalPatch, GoalPut, NoteIn, LinkIn, BoardIn, BoardPatch, BoardItemIn, BoardItemPatch,
-   BoardBulk, BoardIds, BoardSync, NoteEdit, LinkEdit, FactIn, FactPatch, StyleIn, UiPrefsIn, EditionIn,
-   SettingsIn, TgLogin, VoicePick, GameBody, BackupRestoreIn,
+   ChatIn,
 )
 
 log = logging.getLogger("jarvis.api")
@@ -326,7 +314,6 @@ def manifest():
     (иконки, ярлыки, режим standalone) живут в одном месте.
     """
     from fastapi.responses import JSONResponse
-    from ..brain import persona
 
     static = ROOT / "web" / "site" / "manifest.webmanifest"
     data: dict = {}
@@ -339,7 +326,7 @@ def manifest():
     data["name"] = name
     data["short_name"] = name[:12]
     # цвета — из темы: фон страницы тёмной темы и светлой
-    dark, light = "#0f1530", "#e9ecf3"
+    dark = "#0f1530"
     data.setdefault("theme_color", dark)
     data.setdefault("background_color", dark)
     return JSONResponse(data, headers={"Cache-Control": "no-cache"})

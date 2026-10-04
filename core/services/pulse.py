@@ -116,7 +116,6 @@ def late_payments(now: datetime | None = None) -> list[dict]:
         c = clients.get(o.client_id or -1)
         if c and c.pay_mode in ("batch", "monthly"):
             # платит пачкой/по числам: пока не прошёл его день выплат — это не задержка
-            pd = next_payday(c, now)
             prev = _prev_payday(c, now)
             if not prev or prev < o.done_at or (now - prev).days < st["late_days"]:
                 continue

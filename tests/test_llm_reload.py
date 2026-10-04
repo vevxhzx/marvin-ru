@@ -10,14 +10,12 @@ import os
 
 os.environ.setdefault("ASSISTANT_TEST", "1")
 
-import importlib  # noqa: E402
-
 
 def test_reload_applies_gemini_key_and_model(monkeypatch):
     from core import config as _c
     from core.brain import llm
 
-    monkeypatch.setattr(importlib, "reload", lambda m: m)  # config уже в памяти — не перечитывать файл
+    monkeypatch.setattr(_c, "refresh", lambda: None)  # config уже в памяти — не перечитывать файл
     monkeypatch.setattr(_c.cfg.brain.gemini, "api_key", "NEW-KEY-123", raising=False)
     monkeypatch.setattr(_c.cfg.brain.gemini, "model", "models/gemini-2.5-flash", raising=False)
     monkeypatch.setattr(llm, "_RESOLVED_MODEL", "stale-model", raising=False)
@@ -35,7 +33,7 @@ def test_reload_normalizes_garbage_model_to_auto(monkeypatch):
     from core import config as _c
     from core.brain import llm
 
-    monkeypatch.setattr(importlib, "reload", lambda m: m)
+    monkeypatch.setattr(_c, "refresh", lambda: None)
     monkeypatch.setattr(_c.cfg.brain.gemini, "model", "авто", raising=False)
 
     llm.reload_cloud_settings()

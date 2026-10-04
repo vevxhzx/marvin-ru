@@ -21,11 +21,11 @@ from __future__ import annotations
 import json
 import logging
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from sqlmodel import select
 
-from ..db import ScreenSlot, get_setting, session, set_setting
+from ..db import get_setting, session, set_setting
 from . import events
 
 log = logging.getLogger("jarvis.state")

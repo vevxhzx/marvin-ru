@@ -601,9 +601,8 @@ _CLOUD_ROUTE_OK: tuple[str, str | None] | None = None   # маршрут, кот
 def reload_small_settings() -> None:
     """Малая модель меняется с сайта без перезапуска: перечитать имя и keep_alive, сбросить «нет в Ollama»."""
     global SMALL_MODEL, SMALL_KEEP_ALIVE, _AVAIL_CACHE
-    import importlib
     from .. import config as _c
-    importlib.reload(_c)
+    _c.refresh()
     SMALL_MODEL = str(getattr(_c.cfg.brain.ollama, "small_model", "") or "").strip()
     SMALL_KEEP_ALIVE = str(getattr(_c.cfg.brain.ollama, "small_keep_alive", "5m") or "5m")
     _SMALL_MISSING.clear(); _SMALL_SEEN.clear()
@@ -615,9 +614,8 @@ def reload_cloud_settings() -> str:
     global CLOUD_PROVIDER, CLOUD_KEY, CLOUD_MODEL, CLOUD_BASE_URL, CLOUD_PROXY, MODE, GEMINI_AUTO
     global _CLOUD_RESOLVED, _CLOUD_ROUTE_OK, LAST_CLOUD_ERROR
     global GEMINI_KEY, GEMINI_MODEL, GEMINI_PROXY, MARK_SOURCE, _RESOLVED_MODEL, LAST_GEMINI_ERROR
-    import importlib
     from .. import config as _c
-    importlib.reload(_c)
+    _c.refresh()
     cc = getattr(_c.cfg.brain, "cloud", None)
     CLOUD_PROVIDER = (str(getattr(cc, "provider", "") or "") or ("gemini" if (_c.cfg.brain.gemini.api_key or "").strip() else "")).strip().lower()
     CLOUD_KEY = (str(getattr(cc, "api_key", "") or "")).strip()

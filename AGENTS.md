@@ -13,7 +13,7 @@ build_web.bat      :: пересобрать сайт после правок в
 ```
 
 - без Telegram: `python run.py --no-tg`
-- тесты: `python -m pytest tests -q` (офлайн, ~320 шт.) · `npm test` (Node-стенд, порт 3999)
+- тесты: `python -m pytest tests -q` (офлайн, ~1580 шт. в 71 файле) · `npm test` (Node-стенд, порт 3999)
 - Python — из `.venv` (`.venv\Scripts\python.exe`).
 
 ## Где что лежит
@@ -21,7 +21,8 @@ build_web.bat      :: пересобрать сайт после правок в
 | Область | Путь | Комментарий |
 |---|---|---|
 | Точка входа ядра | `run.py` | миграции, uvicorn, Telegram, планировщик |
-| HTTP API + SSE | `core/api/app.py` | ~157 роутов, статика `web/site` |
+| HTTP API + SSE | `core/api/app.py` + `core/api/routers/` (10 модулей) | ~240 операций (~190 путей), статика `web/site` |
+| CRM | `core/crm/router.py` (`/api/crm/*`) | подключается в `app.py` отдельно от `routers/` |
 | Мозг | `core/brain/agent.py`, `llm.py`, `quick.py`, `persona.py`, `dates.py`, `sorter.py` | правила → Ollama → облако |
 | Инструменты LLM | `core/tools/registry.py` | единственная граница «LLM → данные» |
 | Предметная логика | `core/services/*` | finance, calendar, tasks, cards, scheduler… |
