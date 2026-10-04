@@ -398,17 +398,19 @@ export default function Today({ openChat, address = '' }) {
         return (
           <section key={id} {...bp}>
             {ctl}
-            <BlockHead title={t('td.w_balance')} note={t('td.lasts_for')} />
+            {/* Как в макете: в шапке карточки — 「баланс」 слева и пилюля срока справа,
+                крупная сумма по центру, полоса дней и три строки под ней. */}
+            <div className="hd flex-wrap">
+              <h2 className="trunc">{t('td.w_balance')}</h2>
+              <span className="tag" style={{ marginTop: 0 }}>{t('td.days_of_30', { count: daysLeft })}</span>
+            </div>
             {!d ? (
               loaded
                 ? <Empty compact glyph="money" text={t('td.no_summary')} sub={t('td.no_summary_hint')} />
                 : <Skeleton h={150} radius="var(--r-lg)" />
             ) : (
               <>
-                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-                  <BigMoney value={balance} format={fmt.int} label={money(balance)} />
-                  <span className="tag" style={{ marginTop: 0 }}>{t('td.days_of_30', { count: daysLeft })}</span>
-                </div>
+                <BigMoney value={balance} format={fmt.int} label={money(balance)} />
                 <div className="days !max-w-[440px]" id="days">
                   {Array.from({ length: 30 }, (_, i) => (
                     <i key={i} className={i < daysLeft ? 'on' : ''} style={{ '--k': i }} />
