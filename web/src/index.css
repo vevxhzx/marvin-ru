@@ -225,7 +225,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   backdrop-filter: blur(14px) saturate(160%);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 0 0 1px var(--glass-ring), 0 10px 24px -14px rgba(16, 20, 43, 0.35);
 }
-.glass-tiles small { display: block; margin-bottom: 3px; font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.2; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.glass-tiles small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; min-height: 2.5em; margin-bottom: 3px; font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.2; overflow: hidden; }
 .glass-tiles b { font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; }
 /* Внутри героя плитки — морозное белое стекло на акцентной заливке */
 .hero .glass-tiles > div { background: var(--hero-w-18); box-shadow: inset 0 1px 0 var(--hero-w-45), inset 0 0 0 1px var(--hero-w-18); }
