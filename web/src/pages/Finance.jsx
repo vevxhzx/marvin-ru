@@ -44,12 +44,12 @@ const HERO_M = 'max-[820px]:!min-h-[310px] max-[820px]:!justify-center'
 const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
 
 /* Ряд чипов/фильтров на телефоне: одна прокручиваемая строка вместо трёх рядов */
-const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+const CHIPS_ROW_M = 'no-scrollbar fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 /* Переключатель .sg на телефоне: базовое правило разрешает перенос (flex-wrap: wrap),
    и на узком экране семь вкладок разъезжались на две строки. На телефоне — одна
    прокручиваемая строка, на десктопе вид прежний. */
-const SEG_ROW_M = 'max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto'
+const SEG_ROW_M = 'fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto'
 
 /* Разделы вкладки «обзор»: порядок и ширина хранятся общим модулем lib/layout.
    Числа потока (доходы, регулярные, платежи по долгам, свободно) — это строки внутри раздела

@@ -36,7 +36,7 @@ const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
 /* Переключатель .sg на телефоне: базовое правило разрешает перенос (flex-wrap: wrap),
    и на узком экране семь вкладок разъезжались на две строки. На телефоне — одна
    прокручиваемая строка, на десктопе вид прежний. */
-const SEG_ROW_M = 'max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto'
+const SEG_ROW_M = 'fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto'
 
 /* Карточки сетки календаря: порядок и ширина меняются в режиме «настроить» */
 const CAL_CARDS = ['month', 'day', 'week', 'upcoming']

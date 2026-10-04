@@ -32,7 +32,7 @@ const CARD_M = 'c !rounded-[var(--r-lg)] max-[820px]:!bg-[var(--sf)] max-[820px]
 const GRID_M = 'stagger mt-6 grid gap-[var(--bento-gap)] min-[821px]:grid-cols-2 min-[1061px]:grid-cols-3 max-[820px]:!grid-cols-1 max-[820px]:!gap-3'
 
 /* Ряд фильтров на телефоне: одна прокручиваемая строка вместо переноса */
-const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+const CHIPS_ROW_M = 'no-scrollbar fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 /* Подписи мелким кеглем на узком телефоне (≤380px) уменьшаются на ступень */
 const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'

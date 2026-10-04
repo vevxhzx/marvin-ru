@@ -61,7 +61,7 @@ const PILL = { minHeight: 'var(--tap)', padding: '0 16px' }
 const SEG_BTN = { minHeight: 'var(--tap)', padding: '0 16px' }
 
 /* Ряд чипов на телефоне: одна прокручиваемая строка вместо переноса в несколько рядов */
-const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+const CHIPS_ROW_M = 'no-scrollbar fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 /* Точка приоритета в строке: крупная зона нажатия (--tap) и меню через портал в body —
    строка лежит внутри .swipe с overflow:hidden, обычный absolute-попап там обрезался бы. */

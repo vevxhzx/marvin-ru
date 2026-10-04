@@ -25,7 +25,7 @@ const PANEL_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[82
 const listCls = (phone) => (phone ? `c ${CARD_M_LIGHT}` : 'rule')
 
 /* Вкладки на телефоне — одна прокручиваемая строка */
-const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+const CHIPS_ROW_M = 'no-scrollbar fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 /* Память — пять вкладок одной редакционной иерархии: «сейчас» (свежее, живёт неделю),
    «о вас» (надолго + портрет и стиль общения), «лента» (день по минутам), «события»

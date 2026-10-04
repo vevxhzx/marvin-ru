@@ -31,7 +31,7 @@ const CARD_M = `c ${CARD_M_LIGHT}`
 const FIELD_M = `c !px-3 !py-2 ${CARD_M_LIGHT}`
 
 /* Ряд вкладок на телефоне: одна прокручиваемая строка вместо переноса */
-const CHIPS_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
+const CHIPS_ROW_M = 'no-scrollbar fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
 
 const URL_RE = /https?:\/\/[^\s]+/
 const TABS = [
