@@ -108,21 +108,6 @@ export default function People() {
       <PageHead title={T('nav.people')}
         right={<button type="button" className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}>{t('people.add')}</button>} />
 
-      {/* Ключевое число — премиум-карточка (градиент); остальное — строго ниже */}
-      <div className="hero-card" data-reveal>
-        <div className="hc-label">{t('or.cc_debt')}</div>
-        <div className="hc-big">{money(unpaidTotal || 0)}</div>
-        <div className="hc-row">
-          <span>{t('or.cc_orders')}: <b className="num">{ordersTotal}</b></span>
-          <span>{t('people.open_orders', { n: openCount })}</span>
-        </div>
-      </div>
-      {ltvTotal ? (
-        <div className="kv-grid mt-3">
-          <div className="kv"><span>LTV</span><b className="num">{money(ltvTotal)}</b></div>
-        </div>
-      ) : null}
-
       {/* Тип контакта — спокойные пилюли с переносом, не одна «таблетка» на семь пунктов */}
       <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('people.kind_label')}>
         {[['all', t('common.all')], ...Object.entries(KIND_RU).map(([k, label]) => [k, t(label)])].map(([k, l]) => (
@@ -182,10 +167,11 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
     : tags.map((x) => `#${x}`).join(' ')
   const step = next?.step || ''
   const stepAt = next?.at || null
+  const isWork = p.kind === 'client' || p.kind === 'company' || p.kind === 'colleague'
   const money2 = []
-  if (p.unpaid) money2.push(<span key="d" className="warn num">{t('people.awaiting', { m: money(p.unpaid) })}</span>)
-  if (p.paid) money2.push(<span key="l" className="faint num">LTV {money(p.paid)}</span>)
-  if (p.open) money2.push(<span key="o" className="faint">{t('people.open_in_work', { n: p.open })}</span>)
+  if (isWork && p.unpaid) money2.push(<span key="d" className="warn num">{t('people.awaiting', { m: money(p.unpaid) })}</span>)
+  if (isWork && p.paid) money2.push(<span key="l" className="faint num">LTV {money(p.paid)}</span>)
+  if (isWork && p.open) money2.push(<span key="o" className="faint">{t('people.open_in_work', { n: p.open })}</span>)
   return (
     <section
       className={`${CARD_M} border-0`}
@@ -358,7 +344,7 @@ function PersonSheet({ open, person, onClose, onDone, onDone2 }) {
               </Sec>
             )}
 
-            {card && (
+            {card && (kind === 'client' || kind === 'company' || kind === 'colleague') && (
               <Sec title={t('nav.g_money')}>
                 <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-4">
                   <div><div className="label">LTV</div><div className="num mt-0.5 pos" style={{ fontSize: 'var(--fs-lg)' }}>{money(card.ltv || 0)}</div></div>

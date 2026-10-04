@@ -351,7 +351,7 @@ export default function Tasks() {
           (.sg) остаётся внутри .top — на него ходят проверки e2e. */}
       <header className="top">
         <div className="min-w-0 flex-1">
-          <h1 className="r fade-r" style={{ '--i': 0 }}>{t(view === 'aims' ? 'goals.title' : 'nav.tasks')}</h1>
+          <h1 className="r trunc" style={{ '--i': 0 }}>{t(view === 'aims' ? 'goals.title' : 'nav.tasks')}</h1>
           <p className="sub r" style={{ '--i': 1 }}>
             {view === 'aims' ? t('goals.active_n', { count: aims }) : kicker}
           </p>

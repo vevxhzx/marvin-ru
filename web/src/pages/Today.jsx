@@ -805,7 +805,7 @@ export default function Today({ openChat, address = '' }) {
       <header className="top" data-reveal>
         <div className="min-w-0">
           <div className="text-[length:var(--fs-md)] text-[var(--ink3)] max-[380px]:text-[length:var(--fs-xs)]">{daySubtitle}</div>
-          <h1 className="fade-r" title={`${greeting}, ${ownerName}`}>{greeting}, {ownerName}</h1>
+          <h1 className="trunc" title={`${greeting}, ${ownerName}`}>{greeting}, {ownerName}</h1>
         </div>
       </header>
 

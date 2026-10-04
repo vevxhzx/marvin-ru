@@ -68,7 +68,7 @@ const CATS = [
   { id: 'freelance', label: T('st.g_freelance'), caps: ['st.i_am_freelancer', 'st.freelance_weekly'], groups: [], extra: ['freelance', 'pomodoro'] },
   { id: 'ai', label: T('st.g_brain'), caps: ['st.local_brain', 'st.g_cloud'], groups: ['brain', 'brain.cloud'] },
   { id: 'voice', label: T('st.g_voice2'), caps: ['st.g_voice3', 'st.organise'], groups: ['voice', 'cards'], extra: ['organizer'] },
-  { id: 'memory', label: T('st.g_data'), caps: ['st.cloud_backups2', 'st.english'], groups: ['backup'], extra: ['data', 'cloud', 'english'] },
+  { id: 'memory', label: T('st.g_data'), caps: ['st.cloud_backups2'], groups: ['backup'], extra: ['data', 'cloud'] },
   { id: 'integrations', label: T('st.g_integrations'), caps: ['st.tg_app5', 'st.g_gcal'], groups: ['telegram', 'google'] },
   { id: 'system', label: T('st.g_system'), caps: ['st.logs', 'st.status'], groups: ['server'], extra: ['status', 'diag'] },
 ]
@@ -304,7 +304,7 @@ export default function Settings({ health }) {
   }
 
   const current = CATS.find((c) => c.id === cat) || CATS[0]
-  const order = current.id === 'general' ? ['owner', 'assistant', 'persona', 'finance', 'browser-notif', 'notifications', 'phone'] : current.id === 'memory' ? ['backup', 'cloud', 'data', 'english'] : [...current.groups, ...(current.extra || [])]
+  const order = current.id === 'general' ? ['owner', 'assistant', 'persona', 'finance', 'browser-notif', 'notifications', 'phone'] : current.id === 'memory' ? ['backup', 'cloud', 'data'] : [...current.groups, ...(current.extra || [])]
   const section = (
     <div key={cat} className="st2 min-w-0">
       {order.map((k) => extras[k] || groupBlock(GROUPS.find((g) => g[0] === k)))}
