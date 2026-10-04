@@ -22,13 +22,10 @@ import { Plus, Grid3x3 } from 'lucide-react'
 import { useI18n, t as T } from '../lib/i18n'
 import { motionOff, press, usePhone } from '../lib/motion'
 import { isActiveRoute } from '../lib/nav'
-import SheetHost from './SheetHost'
-import CaptureSheet from './CaptureSheet'
 
-export default function Dock({ tabs, pathname, compact, onMore }) {
+export default function Dock({ tabs, pathname, compact, onMore, onAdd }) {
   const { t } = useI18n()
   const phone = usePhone()
-  const [captureOpen, setCaptureOpen] = useState(false)
 
   const rowRef = useRef(null)
   const items = useRef({})         // to → DOM-узел пункта
@@ -113,13 +110,13 @@ export default function Dock({ tabs, pathname, compact, onMore }) {
       >
         <div className="dock-row" ref={rowRef}>
           {head.map(slot)}
-          {/* центральная кнопка «+» — быстрый ввод (макет «вариант B») */}
+          {/* центральная кнопка «+» — контекстная: в задачах добавляет задачу,
+              в календаре — встречу, в финансах — трату (решает AppShell по маршруту) */}
           <button
             type="button"
             className="dock-fab"
-            onClick={() => setCaptureOpen(true)}
+            onClick={() => onAdd?.(pathname)}
             aria-label={T('cap.title')}
-            aria-haspopup="dialog"
             title={t('cap.title')}
           >
             <Plus size={24} strokeWidth={2.2} aria-hidden="true" />
@@ -141,10 +138,6 @@ export default function Dock({ tabs, pathname, compact, onMore }) {
           )}
         </div>
       </nav>
-
-      <SheetHost open={captureOpen} onClose={() => setCaptureOpen(false)} title={t('cap.title')} sub={t('cap.sub')}>
-        <CaptureSheet open={captureOpen} onClose={() => setCaptureOpen(false)} />
-      </SheetHost>
     </>
   )
 }

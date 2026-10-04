@@ -272,6 +272,12 @@ export default function Calendar() {
 
   const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([])).finally(() => setLoaded(true))
   useEffect(() => { load() }, [range, tick])
+  // «+» дока на календаре открывает форму новой встречи (AppShell шлёт calendar:add)
+  useEffect(() => {
+    const on = () => setSheet('new')
+    window.addEventListener('calendar:add', on)
+    return () => window.removeEventListener('calendar:add', on)
+  }, [])
   // справочники для привязок «встреча → задача/заказ»: тянем один раз
   useEffect(() => {
     api.tasks(true, false).then((l) => setLinkTasks((l || []).filter((tk) => tk.kind !== 'event'))).catch(() => {})
@@ -488,31 +494,12 @@ export default function Calendar() {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-cal" style={pageAcc.style}>
-      {/* Header: headline + primary action, and a calm control bar under it.
-          The bar keeps .sg groups inside .top — e2e walks them («‹» / «сегодня» / «›»). */}
+      {/* Header: заголовок + спокойная панель управления под ним. «+» — в доке.
+          Панель держит .sg внутри .top — на них ходят проверки e2e («‹»/«сегодня»/«›»). */}
       <header className="top">
         <div className="min-w-0 flex-1">
           <h1 className="r" style={{ '--i': 0 }}>{headTitle}</h1>
           <p className="sub r" style={{ '--i': 1 }}>{view === 'week' ? weekRange : cursor.getFullYear()}</p>
-        </div>
-        <div className="hr head-actions r" style={{ '--i': 1 }}>
-          {/* Настройка карточек — одна точка входа: на десктопе кнопка с подписью,
-              на телефоне та же кнопка иконкой (подпись и тултип остаются в aria). */}
-          {shown.length > 1 && (
-            <button
-              type="button"
-              className={`btn-ghost btn-sm ${phone ? '!px-2.5' : ''}`}
-              onClick={() => setCardsEdit((v) => !v)}
-              title={t('tk.layout_tip')}
-              aria-label={t('tk.layout')}
-              aria-pressed={cardsEdit}
-            >
-              {phone ? <Settings2 size={15} /> : t('tk.layout')}
-            </button>
-          )}
-          <button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>
-            + {t('cal.event')}
-          </button>
         </div>
         <div className="flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
           <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
@@ -546,6 +533,22 @@ export default function Calendar() {
               <span aria-hidden="true">›</span>
             </button>
           </div>
+          {shown.length > 1 && (
+            <button
+              type="button"
+              className="btn-icon outlined shrink-0"
+              onClick={() => setCardsEdit((v) => !v)}
+              title={t('tk.layout_tip')}
+              aria-label={t('tk.layout')}
+              aria-pressed={cardsEdit}
+            >
+              <Settings2 size={16} aria-hidden="true" />
+            </button>
+          )}
+          {/* На ПК добавление в шапке; на телефоне — «+» в доке */}
+          <button type="button" className="btn-primary btn-sm head-primary max-[820px]:!hidden shrink-0" onClick={() => setSheet('new')}>
+            + {t('cal.event')}
+          </button>
         </div>
       </header>
 

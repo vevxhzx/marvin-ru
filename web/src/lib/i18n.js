@@ -637,7 +637,7 @@ export const DICT = {
   'nav.settings': { ru: 'настройки', en: 'Settings' },
   'nav.g_plan': { ru: 'план', en: 'plan' },
   'nav.g_money': { ru: 'деньги', en: 'money' },
-  'nav.g_people': { ru: 'люди', en: 'people' },
+  'nav.g_people': { ru: 'клиенты', en: 'clients' },
   'nav.g_jarvis': { ru: 'марвин', en: 'marvin' },
   // нижняя навигация телефона и её «ещё»
   'nav.mobile_menu': { ru: 'Разделы приложения', en: 'App sections' },

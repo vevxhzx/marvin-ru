@@ -1,7 +1,7 @@
 // Review D: задачи — форма листа (pills приоритета/срока, «на день» → дата), чекбокс
 // и вкладка «выполнено», правило «задача: …» из чата: карточка подтверждения, отмена
 // командой «отмена» (рабочий путь) и кнопка «отменить последнее действие» (находка D6).
-import { test, expect, watch, shot, openTab, expectText, expectSheet } from '../helpers/index.js'
+import { test, expect, watch, shot, openTab, expectText, expectSheet, openAdd } from '../helpers/index.js'
 
 const IGNORE = [/\/api\/events\/stream/, /favicon/i]
 const uniq = (p) => `${p}-${Date.now().toString(36)}`
@@ -13,7 +13,7 @@ test.describe('задачи: форма, чекбокс, правило из ч�
     const TITLE = `E2E задача D ${uniq(testInfo.project.name)}`
 
     await openTab(page, '/tasks', { testInfo })
-    await page.getByText('+ задача', { exact: true }).click()
+    await openAdd(page, { testInfo, label: '+ задача' })
     const sheet = await expectSheet(page)
     await expect(sheet.getByRole('heading', { name: 'новая задача' })).toBeVisible()
 
@@ -44,7 +44,7 @@ test.describe('задачи: форма, чекбокс, правило из ч�
     const TITLE = `E2E закрыть D ${uniq(testInfo.project.name)}`
 
     await openTab(page, '/tasks', { testInfo })
-    await page.getByText('+ задача', { exact: true }).click()
+    await openAdd(page, { testInfo, label: '+ задача' })
     const sheet = await expectSheet(page)
     await sheet.getByLabel('что сделать').fill(TITLE)
     await sheet.getByRole('button', { name: 'добавить', exact: true }).click()
@@ -57,7 +57,7 @@ test.describe('задачи: форма, чекбокс, правило из ч�
     await expect(row, 'закрытая задача ушла из открытых').toHaveCount(0, { timeout: 15_000 })
 
     // …и появилась во вкладке «выполнено»
-    await page.locator('.top .sg').getByText('выполнено', { exact: true }).click()
+    await page.locator('.top .sg').getByRole('button', { name: /выполнено/ }).click()
     await expectText(page, TITLE, { note: 'задача во вкладке «выполнено»' })
     await expect(page.locator('#p-tasks .rowi', { hasText: TITLE })).toHaveCount(1)
     await shot(page, 'tasks-done-tab', { testInfo })

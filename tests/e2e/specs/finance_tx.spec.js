@@ -5,7 +5,7 @@
 //   3) exportCSV собирает CSV из ВСЕХ txs, а не из отфильтрованного shownTxs.
 // Скриншоты: tests/e2e/screens/<проект>-finance-*.png
 import fs from 'node:fs'
-import { test, expect, watch, shot, openTab, expectSheet, confirmSheet } from '../helpers/index.js'
+import { test, expect, watch, shot, openTab, expectSheet, confirmSheet, openAdd } from '../helpers/index.js'
 
 const IGNORE = [/\/api\/events\/stream/, /favicon/i]
 const uniq = (p) => `${p}-${Date.now().toString(36)}`
@@ -18,7 +18,10 @@ const history = (page) => page.locator('section.c').filter({ hasText: 'исто�
 const rowsOf = (page) => history(page).locator('.rowi')
 
 async function newOperation(page, title, amount) {
-  await page.getByText('+ операция', { exact: true }).click()
+  // На телефоне добавление — кнопкой «+» дока, на ПК — кнопкой в шапке
+  const w = page.viewportSize()?.width ?? 1440
+  if (w < 820) await page.locator('.dock-fab').click()
+  else await page.getByText('+ операция', { exact: true }).click()
   const sheet = await expectSheet(page)
   await sheet.getByLabel(/сумма/).fill(String(amount))
   await sheet.getByLabel(/описание/).fill(title)
@@ -69,7 +72,7 @@ test.describe('финансы: операции, фильтры, периоды,
 
     await openTab(page, 'finance', { testInfo })
     await tabsOf(page).getByText('операции', { exact: true }).click()
-    await page.getByText('+ операция', { exact: true }).click()
+    await openAdd(page, { testInfo, label: '+ операция' })
     const sheet = await expectSheet(page)
     await sheet.getByLabel(/сумма/).fill('0')
     await sheet.getByLabel(/описание/).fill(TITLE)

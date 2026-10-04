@@ -1,6 +1,6 @@
 // Review D: календарь — создание события через «+ событие» (datetime-local, ровно один раз
 // в дне после reload) и навигация «‹ / сегодня / ›» + переключатель неделя ↔ месяц.
-import { test, expect, watch, shot, openTab, expectSheet } from '../helpers/index.js'
+import { test, expect, watch, shot, openTab, expectSheet, openAdd } from '../helpers/index.js'
 
 const IGNORE = [/\/api\/events\/stream/, /favicon/i]
 const uniq = (p) => `${p}-${Date.now().toString(36)}`
@@ -24,7 +24,7 @@ test.describe('календарь', () => {
     const TITLE = `E2E событие D ${uniq(testInfo.project.name)}`
 
     await openTab(page, '/calendar', { testInfo })
-    await page.getByText('+ событие', { exact: true }).click()
+    await openAdd(page, { testInfo, label: '+ событие' })
     const sheet = await expectSheet(page)
     await expect(sheet.getByRole('heading', { name: 'новое событие' })).toBeVisible()
 

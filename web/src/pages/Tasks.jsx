@@ -150,16 +150,13 @@ function PriorityCell({ value, onChange }) {
    нет. Разметка .sg остаётся (единый сегмент системы, на неё ходят проверки e2e).
    На десктопе её границы отдаёт карточка-обёртка, на телефоне сама полоса волосяная:
    телефонная карточка вокруг уже есть, вторая линия была бы лишней. */
+/* Переключатель вида — компактные подчёркнутые вкладки с числом, как на «Финансах».
+   Разметка .sg остаётся (e2e ищет «выполнено» внутри .top .sg). */
 function Counters({ items, view, onChange, label }) {
   const { t } = useI18n()
-  const phone = usePhone()
   return (
-    <div
-      className={`sg w-full !gap-0 !rounded-none !bg-transparent !p-0 !shadow-none max-w-[760px] min-[821px]:!max-w-none max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto ${phone ? '!border-0' : 'border-y border-[var(--line)]'}`}
-      role="group"
-      aria-label={label}
-    >
-      {items.map((c, i) => {
+    <div className="sg tabs w-full" role="group" aria-label={label}>
+      {items.map((c) => {
         const on = c.id === view
         return (
           <button
@@ -168,27 +165,8 @@ function Counters({ items, view, onChange, label }) {
             className={on ? 'on' : ''}
             aria-pressed={on}
             onClick={() => onChange(c.id)}
-            style={{
-              flex: '1 1 0',
-              minWidth: 0,
-              minHeight: 'var(--tap-lg)',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              gap: 3,
-              padding: 'var(--s-2) var(--s-2)',
-              lineHeight: 1.1,
-              borderRadius: 0,
-              borderLeft: i ? '1px solid var(--line)' : 'none',
-              background: on ? 'var(--fill)' : 'transparent',
-              color: on ? 'var(--ink)' : 'var(--ink-2)',
-            }}
           >
-            <span className="num" style={{ fontSize: 'var(--fs-xl)', fontWeight: 600, letterSpacing: '-0.03em', color: on ? 'var(--acc)' : 'var(--ink)' }}>
-              <Num value={c.n} />
-            </span>
-            <span style={{ fontSize: 'var(--fs-xs)', whiteSpace: 'nowrap' }}>{t(c.label)}</span>
+            {t(c.label)} <b className="num" style={{ fontWeight: 600, opacity: on ? 1 : 0.55 }}>{c.n}</b>
           </button>
         )
       })}
@@ -222,6 +200,12 @@ export default function Tasks() {
 
   const load = () => api.tasks(true, true).then(setTasks).catch(() => {})
   useEffect(() => { load() }, [tick])
+  // «+» дока на этом разделе открывает форму новой задачи (AppShell шлёт tasks:add)
+  useEffect(() => {
+    const on = () => setSheet('new')
+    window.addEventListener('tasks:add', on)
+    return () => window.removeEventListener('tasks:add', on)
+  }, [])
   // goals for the counter strip: the same endpoint the «цели» tab renders
   useEffect(() => {
     let alive = true
@@ -362,8 +346,9 @@ export default function Tasks() {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-tasks" style={pageAcc.style}>
-      {/* Header: headline + the one primary action. The counter strip lives inside .top —
-          it is the view switcher (e2e looks for «выполнено» inside .top .sg). */}
+      {/* Header: только крупный заголовок. Действия: «+» — в доке (контекстно),
+          настройка разделов — ниже, справа от переключателя вида. Переключатель
+          (.sg) остаётся внутри .top — на него ходят проверки e2e. */}
       <header className="top">
         <div className="min-w-0 flex-1">
           <h1 className="r fade-r" style={{ '--i': 0 }}>{t(view === 'aims' ? 'goals.title' : 'nav.tasks')}</h1>
@@ -371,30 +356,29 @@ export default function Tasks() {
             {view === 'aims' ? t('goals.active_n', { count: aims }) : kicker}
           </p>
         </div>
-        {view !== 'aims' && (
-          <div className="hr head-actions r" style={{ '--i': 1 }}>
-            {/* Настройка блоков — одна точка входа: на десктопе кнопка с подписью,
-                на телефоне та же кнопка иконкой (подпись и тултип остаются в aria). */}
-            <button
-              type="button"
-              className={`btn-ghost btn-sm ${phone ? '!px-2.5' : ''}`}
-              onClick={() => setCardsEdit((v) => !v)}
-              title={t('tk.layout_tip')}
-              aria-label={t('tk.layout')}
-              aria-pressed={cardsEdit}
-            >
-              {phone ? <Settings2 size={15} /> : t('tk.layout')}
-            </button>
-            <button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>
-              + {t('tk.task')}
-            </button>
-          </div>
-        )}
         {blockOrder.includes('stats') && (
-          /* Счётчики — и переключатель вида: на десктопе своя карточка, на телефоне та же
-             полоса с волосяными границами, что и раньше. Разметка .sg не меняется. */
-          <div className={`r w-full ${cardM('!p-2')}`} style={{ '--i': 2 }}>
-            <Counters items={counters} view={view} onChange={setView} label={t('nav.tasks')} />
+          <div className="r mt-3 flex w-full items-center gap-2" style={{ '--i': 2 }}>
+            <div className="min-w-0 flex-1">
+              <Counters items={counters} view={view} onChange={setView} label={t('nav.tasks')} />
+            </div>
+            {view !== 'aims' && (
+              <button
+                type="button"
+                className="btn-icon outlined shrink-0"
+                onClick={() => setCardsEdit((v) => !v)}
+                title={t('tk.layout_tip')}
+                aria-label={t('tk.layout')}
+                aria-pressed={cardsEdit}
+              >
+                <Settings2 size={16} aria-hidden="true" />
+              </button>
+            )}
+            {/* На ПК добавление остаётся в шапке; на телефоне его заменяет «+» в доке */}
+            {view !== 'aims' && (
+              <button type="button" className="btn-primary btn-sm head-primary max-[820px]:!hidden shrink-0" onClick={() => setSheet('new')}>
+                + {t('tk.task')}
+              </button>
+            )}
           </div>
         )}
       </header>
@@ -408,11 +392,11 @@ export default function Tasks() {
           {/* Quick add — one line, your own words. На десктопе панель-карточка, на телефоне
               тот же блок без обёртки. */}
           {blockOrder.includes('tools') && (
-            <section className={`relative ${cardM('!p-4')} mt-6`}>
+            <section className="relative mt-5">
               {ctl('tools')}
               <div className={cardsEdit ? 'pt-8' : ''}>
                 {projects.length > 0 && (
-                  <div className={`cluster mt-3 ${CHIPS_ROW_M}`} role="group" aria-label={t('task.project')}>
+                  <div className={`cluster mt-3 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('task.project')}>
                     <span className="label">{t('task.project')}</span>
                     <button
                       type="button"
@@ -452,7 +436,7 @@ export default function Tasks() {
           {/* The list: на десктопе панель-карточка с шапкой и волосяными разделителями,
               на телефоне плоский раздел на фоне страницы. Каскад появления общий. */}
           {blockOrder.includes('list') && (
-            <section className={`relative mt-7 ${cardM()}`}>
+            <section className={`relative mt-5 ${cardM()}`}>
               {ctl('list')}
               <div
                 className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"
@@ -462,14 +446,13 @@ export default function Tasks() {
                   <h2 className="h3">{t(VIEW_TITLE[view] || 'tk.open')}</h2>
                   <p className="muted" style={{ fontSize: 'var(--fs-xs)', marginTop: 2 }}>{t('tk.hint')}</p>
                 </div>
-                <div className="seg" role="group" aria-label={t('tk.sort')}>
+                <div className="sg fade-x max-w-full" role="group" aria-label={t('tk.sort')}>
                   {SORTS.map(([v, key]) => (
                     <button
                       key={v}
                       type="button"
                       className={tasksSort === v ? 'on' : ''}
                       aria-pressed={tasksSort === v}
-                      style={SEG_BTN}
                       onClick={() => PREFS.set({ tasksSort: v })}
                     >
                       {t(key)}

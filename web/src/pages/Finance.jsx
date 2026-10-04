@@ -184,6 +184,12 @@ export default function Finance() {
   }
 
   useEffect(() => { load() }, [days, tick])
+  // «+» дока на финансах открывает форму операции текущей вкладки (finance:add)
+  useEffect(() => {
+    const on = () => addForTab()
+    window.addEventListener('finance:add', on)
+    return () => window.removeEventListener('finance:add', on)
+  }, [tab])
 
   const cf = sum?.cashflow || {
     income: 22844,
@@ -353,9 +359,10 @@ export default function Finance() {
               {t('fin.statement')}
             </button>
           )}
+          {/* На ПК добавление в шапке; на телефоне — «+» в доке */}
           <button
             type="button"
-            className="btn btn-sm"
+            className="btn btn-sm head-primary max-[820px]:!hidden"
             title={t('fin.add_entry')}
             aria-label={t('fin.add_entry')}
             onClick={addForTab}

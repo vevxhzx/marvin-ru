@@ -27,6 +27,19 @@ import { canInstall, installPwa } from '../lib/sw'
 import Dock from './Dock'
 import SheetHost from './SheetHost'
 import TitleHeader from './TitleHeader'
+import CaptureSheet from './CaptureSheet'
+
+/* Контекстное действие кнопки «+» дока: на разделе — своё добавление, иначе — шторка
+   быстрого ввода. Разделы слушают событие и открывают свою форму. */
+const ADD_EVENT = {
+  '/tasks': 'tasks:add',
+  '/calendar': 'calendar:add',
+  '/finance': 'finance:add',
+  '/orders': 'orders:add',
+  '/mind': 'mind:add',
+  '/people': 'people:add',
+  '/memory': 'memory:add',
+}
 
 /* ---------- состояние ассистента для шапки и сайдбара ---------- */
 export function assistantState(live, busy) {
@@ -491,7 +504,15 @@ export default function AppShell({
   const headRef = useRef(null)
   const [headH, setHeadH] = useState(0)
   const [moreOpen, setMoreOpen] = useState(false)
+  const [captureOpen, setCaptureOpen] = useState(false)
   const [gtSolid, setGtSolid] = useState(false)
+
+  /* «+» дока: на разделе — своё добавление (событие), иначе — шторка быстрого ввода */
+  const handleAdd = useCallback((path) => {
+    const ev = ADD_EVENT[path]
+    if (ev) window.dispatchEvent(new CustomEvent(ev))
+    else setCaptureOpen(true)
+  }, [])
 
   /* Размытая подложка шапки — только когда страница ушла под неё: у самой строки
      фона нет (макет), а при скролле текст под шапкой не должен просвечивать. */
@@ -584,7 +605,11 @@ export default function AppShell({
           </div>
         </main>
 
-        <Dock tabs={tabs} pathname={pathKey} compact={compact} onMore={() => setMoreOpen(true)} />
+        <Dock tabs={tabs} pathname={pathKey} compact={compact} onMore={() => setMoreOpen(true)} onAdd={handleAdd} />
+
+        <SheetHost open={captureOpen} onClose={() => setCaptureOpen(false)} title={t('cap.title')} sub={t('cap.sub')}>
+          <CaptureSheet open={captureOpen} onClose={() => setCaptureOpen(false)} />
+        </SheetHost>
 
         <SectionsSheet
           open={moreOpen}

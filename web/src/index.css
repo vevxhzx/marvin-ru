@@ -273,8 +273,10 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   display: inline-block; margin-top: 10px; padding: 7px 13px; border-radius: 999px;
   background: var(--accent-soft); color: var(--acc); font-size: var(--fs-sm); font-weight: 500;
 }
-/* Текстовые вкладки с подчёркиванием (финансы макета «вариант B») */
-.sg.tabs { gap: 22px; padding: 0; background: transparent; overflow-x: auto; scrollbar-width: none; }
+/* Текстовые вкладки с подчёркиванием (финансы/задачи макета): одна строка, скролл скрыт,
+   правый край мягко тает — видно, что вкладок больше, и нет жёсткого среза */
+.sg.tabs { gap: 22px; padding: 0; background: transparent; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 20px), transparent); }
+.sg.tabs::-webkit-scrollbar { display: none; }
 .sg.tabs > button, .sg.tabs > span {
   padding: 6px 0; border-radius: 0; font-size: var(--fs-lg); position: relative; background: transparent;
 }
@@ -283,14 +285,16 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   content: ""; position: absolute; left: 0; right: 0; bottom: -8px; height: 2px; border-radius: 2px; background: var(--acc);
 }
 /* Горизонтальные ряды не показывают полосы прокрутки (иначе она наезжает на текст) */
-.sg, .tabs, .chips, .dock-row, .hs, .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+.sg, .tabs, .chips, .dock-row, .hs, .no-scrollbar, .fade-x { scrollbar-width: none; -ms-overflow-style: none; }
 .sg::-webkit-scrollbar, .tabs::-webkit-scrollbar, .chips::-webkit-scrollbar,
-.dock-row::-webkit-scrollbar, .hs::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar { display: none; }
-/* Край прокручиваемого ряда мягко тает — видно, что список продолжается,
-   и жёсткий срез не режет последний элемент. */
-.chips {
-  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
-  mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent);
+.dock-row::-webkit-scrollbar, .hs::-webkit-scrollbar, .no-scrollbar::-webkit-scrollbar, .fade-x::-webkit-scrollbar { display: none; }
+/* Прокручиваемый вбок ряд: правый край мягко тает — видно, что есть ещё, и не режет. */
+.fade-x {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap !important;
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
 }
 
 /* Композер быстрого ввода (шторка кнопки «+», макет «вариант B») */
@@ -2047,7 +2051,7 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 /* overflow прячем только пока тянут/раскрыто — иначе тултипы кнопок внутри строки (таймер, приоритет) режутся по краю */
 .swipe { position: relative; touch-action: pan-y; margin: 0 -16px; padding: 0 16px; }
 .swipe.active, .swipe.open { overflow: hidden; }
-.swipe-fg { position: relative; will-change: transform; background: var(--bg); }
+.swipe-fg { position: relative; will-change: transform; background: var(--sf); }
 .swipe-bg { position: absolute; inset: 0; display: flex; align-items: stretch; opacity: 0; transition: opacity .12s, background-color .2s; color: #fff; overflow: hidden; }
 .swipe-bg.right { justify-content: flex-start; background: var(--pos-solid); }
 .swipe-bg.left  { justify-content: flex-end;   background: var(--neg-solid); }
@@ -2132,9 +2136,8 @@ html { zoom: var(--ui-zoom); }
   .pg .top > div:first-child { width: 100%; text-align: start; }
   .pg .top h1, .pg .top .sub { text-align: start; }
 
-  /* один ряд действий: сегмент периода + иконки + главная кнопка */
+  /* один ряд действий: заголовок идёт первым, управление — ниже; ряд не переносится */
   .top > .hr, .pg .top .hr, .head-actions {
-    order: -1;
     display: flex;
     flex-wrap: nowrap !important;
     align-items: center;
@@ -2143,7 +2146,7 @@ html { zoom: var(--ui-zoom); }
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
-    margin-bottom: var(--s-3);
+    margin-top: var(--s-3);
     padding-bottom: 2px;
   }
   .top > .hr::-webkit-scrollbar, .pg .top .hr::-webkit-scrollbar, .head-actions::-webkit-scrollbar { display: none; }

@@ -226,6 +226,22 @@ export async function confirmSheet(page) {
   await sheet.waitFor({ state: 'detached', timeout: 10_000 }).catch(() => {})
 }
 
+/**
+ * Открыть форму добавления на текущем разделе.
+ *
+ * На телефоне всё добавление ушло в контекстную кнопку «+» дока (.dock-fab) —
+ * в задачах она добавляет задачу, в календаре встречу, в финансах операцию.
+ * На ПК кнопка добавления остаётся в шапке страницы (label).
+ */
+export async function openAdd(page, { testInfo, label } = {}) {
+  const mobile = testInfo?.project?.name === 'mobile'
+  if (mobile) {
+    await page.locator('.dock-fab').click()
+  } else {
+    await page.getByText(label, { exact: true }).click()
+  }
+}
+
 // ---------------------------------------------------------------- текст и счётчики
 /** Видимый текст страницы. */
 export async function pageText(page) {
