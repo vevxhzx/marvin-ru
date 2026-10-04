@@ -752,42 +752,38 @@ export default function Finance() {
         </Block>
       )}
 
-      {/* ---------------- ДОЛГИ ---------------- */}
+      {/* ---------------- ДОЛГИ (бенто: карточки) ---------------- */}
       {tab === 'debts' && (
-        <>
-          <section className={`c hero mt-4 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
+        <div className="bento mt-4">
+          <section className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.total_debt')}</h2></div>
             </div>
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
-              <BigMoney value={debtsTotal} format={fmt.int} label={money(debtsTotal)} />
-              <span className="tag" style={{ marginTop: 0 }}>{t('fin.n_active_debt', { count: debts.length })}</span>
-            </div>
+            <BigMoney value={debtsTotal} format={fmt.int} label={money(debtsTotal)} fs="clamp(24px, 2.6vw, 34px)" />
+            <div className="muted mt-2 text-[length:var(--fs-md)]">{t('fin.n_active_debt', { count: debts.length })}</div>
           </section>
-
-          <Block className="mt-5" title={t('fin.tab_debts')} note={t('fin.n_debts', { count: debts.length })}>
-            {!debts.length ? (
+          {!debts.length ? (
+            <section className={`c s8 ${CARD_M_LIGHT}`} data-reveal>
               <Empty glyph="debt" text={t('td.clean')} sub={t('td.nothing_missed')}
                 action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('debt') }}><Plus size={15} /> {t('fin.add_debt')}</button>} />
-            ) : debts.map((d) => {
+            </section>
+          ) : debts.map((d) => {
               const total = d.total || 1
               const paid = d.paid || 0
               const left = Math.max(0, total - paid)
               const pct = Math.min(100, Math.round((paid / total) * 100))
               return (
-                <div key={d.id} className="rule py-3">
-                  <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-                    <div className="min-w-0 flex-1">
-                      <div className="clamp-2 text-[length:var(--fs-base)] font-medium">{d.name || d.title}</div>
-                      <div className="muted mt-0.5 text-[length:var(--fs-md)]">
-                        {t('fin.paid_out')} {fmt.money(paid)} ({fmt.int(pct)} %) · {t('fin.of')} {fmt.money(total)}
-                      </div>
-                    </div>
-                    <span className="num shrink-0 text-[length:var(--fs-lg)] font-medium">{fmt.money(left)}</span>
+                <section key={d.id} className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+                  <div className="hd flex-wrap">
+                    <div className="min-w-0"><h2 className="clamp-2">{d.name || d.title}</h2></div>
+                    <small className="trunc">{d.creditor || t('fin.creditor')}</small>
                   </div>
-                  <div className="progress mt-2"><div style={{ width: `${pct}%` }} /></div>
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="muted trunc text-[length:var(--fs-xs)]">{d.creditor || t('fin.creditor')}</span>
+                  <BigMoney value={left} format={fmt.int} label={money(left)} fs="clamp(22px, 2.4vw, 30px)" />
+                  <div className="progress mt-3"><div style={{ width: `${pct}%` }} /></div>
+                  <div className="muted mt-2 text-[length:var(--fs-xs)]">
+                    {t('fin.paid_out')} {fmt.money(paid)} ({fmt.int(pct)} %) · {t('fin.of')} {fmt.money(total)}
+                  </div>
+                  <div className="mt-3">
                     <RowActions>
                       <button type="button" className="btn-soft btn-sm" onClick={() => { setEditingItem(d); setSheet('payDebt') }}>{t('fin.make_payment')}</button>
                       <IconBtn onClick={() => { setEditingItem(d); setSheet('debt') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
@@ -805,11 +801,10 @@ export default function Finance() {
                       </IconBtn>
                     </RowActions>
                   </div>
-                </div>
+                </section>
               )
             })}
-          </Block>
-        </>
+        </div>
       )}
 
       {/* ---------------- РЕГУЛЯРНЫЕ ---------------- */}
