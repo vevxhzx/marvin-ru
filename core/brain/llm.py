@@ -614,6 +614,7 @@ def reload_cloud_settings() -> str:
     """Перечитать brain.cloud.* из config.yaml без перезапуска и сбросить кэш (модель/маршрут/ошибку)."""
     global CLOUD_PROVIDER, CLOUD_KEY, CLOUD_MODEL, CLOUD_BASE_URL, CLOUD_PROXY, MODE, GEMINI_AUTO
     global _CLOUD_RESOLVED, _CLOUD_ROUTE_OK, LAST_CLOUD_ERROR
+    global GEMINI_KEY, GEMINI_MODEL, GEMINI_PROXY, MARK_SOURCE, _RESOLVED_MODEL, LAST_GEMINI_ERROR
     import importlib
     from .. import config as _c
     importlib.reload(_c)
@@ -627,6 +628,15 @@ def reload_cloud_settings() -> str:
     CLOUD_PERSONAL = bool(getattr(cc, "personal_tools", False))
     MODE = _c.cfg.brain.mode
     GEMINI_AUTO = bool(getattr(_c.cfg.brain.gemini, "auto", True))
+    # ключ/модель Gemini тоже меняются с сайта — без этого смена ключа требовала перезапуска
+    GEMINI_KEY = (_c.cfg.brain.gemini.api_key or "").strip()
+    GEMINI_MODEL = (str(_c.cfg.brain.gemini.model or "auto")).strip().lower().replace("models/", "") or "auto"
+    if not GEMINI_MODEL.startswith("gemini"):
+        GEMINI_MODEL = "auto"
+    GEMINI_PROXY = (getattr(_c.cfg.brain.gemini, "proxy", "") or "").strip() or None
+    MARK_SOURCE = bool(getattr(_c.cfg.brain.gemini, "mark_source", True))
+    _RESOLVED_MODEL = None
+    LAST_GEMINI_ERROR = None
     global OLLAMA_MODEL, OLLAMA_URL, VISION_MODEL
     OLLAMA_MODEL = str(_c.cfg.brain.ollama.model or "")
     OLLAMA_URL = str(os.getenv("OLLAMA_URL") or _c.cfg.brain.ollama.url or OLLAMA_URL).rstrip("/").replace("://localhost", "://127.0.0.1")

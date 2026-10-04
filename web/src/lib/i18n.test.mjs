@@ -113,6 +113,26 @@ test('форматы чисел и денег зависят от языка', (
   assert.equal(fmtDate('2026-10-02'), '2 октября 2026')
 })
 
+test('fmtMoney: копейки только при ненулевой дробной части, half-up (симметрия с Python money())', () => {
+  setLang('ru')
+  assert.equal(fmtMoney(0.5), '0,50 ₽')
+  assert.equal(fmtMoney(1.5), '1,50 ₽')
+  assert.equal(fmtMoney(2.5), '2,50 ₽')
+  assert.equal(fmtMoney(-0.5), '−0,50 ₽')
+  assert.equal(fmtMoney(-1.5), '−1,50 ₽')
+  assert.equal(fmtMoney(2.675), '2,68 ₽')
+  assert.equal(fmtMoney(999.99), '999,99 ₽')
+  assert.equal(fmtMoney(377.13), '377,13 ₽')
+  assert.equal(fmtMoney(1000.0), '1 000 ₽')
+  assert.equal(fmtMoney(1500), '1 500 ₽')
+  assert.equal(fmtMoney(-1500), '−1 500 ₽')
+  setLang('en')
+  assert.equal(fmtMoney(2.675), '₽2.68')
+  assert.equal(fmtMoney(1000.0), '₽1,000')
+  assert.equal(fmtMoney(-0.5), '−₽0.50')
+  setLang(DEFAULT_LANG)
+})
+
 test('язык по умолчанию — русский', () => {
   assert.equal(DEFAULT_LANG, 'ru')
   assert.deepEqual([...LANGS], ['ru', 'en'])

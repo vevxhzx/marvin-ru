@@ -2677,17 +2677,23 @@ export const fmtNumber = (v, opts = {}) => {
 }
 
 export const fmtMoney = (v, opts = {}) => {
-  const n = Math.round(Number(v) || 0)
-  const plus = opts.plus && n > 0
+  // F2: симметрия с Python money() — копейки только при ненулевой дробной части,
+  // округление half-up до копеек (Math.round — half-up, Python round() — half-even).
+  const num = Number(v) || 0
+  const cents = Math.round(num * 100 + Number.EPSILON * Math.sign(num))
+  const frac = cents % 100 !== 0
+  // целые рубли для компактного режима — half-up от копеек, симметрично в обе стороны
+  const n = Math.sign(cents) * Math.round(Math.abs(cents) / 100)
+  const plus = opts.plus && cents > 0
+  const sign = cents < 0 ? '−' : plus ? '+' : ''
   if (opts.compact) {
     const a = Math.abs(n)
-    if (a >= 1_000_000) return `${n < 0 ? '−' : plus ? '+' : ''}${fmtNumber(a / 1_000_000, { maximumFractionDigits: 1 })}${_lang === 'ru' ? ' млн' : 'M'}`
-    if (a >= 10_000) return `${n < 0 ? '−' : plus ? '+' : ''}${fmtNumber(Math.round(a / 1000))}${_lang === 'ru' ? 'к' : 'k'}`
-    if (a >= 1000) return `${n < 0 ? '−' : plus ? '+' : ''}${fmtNumber(a / 1000, { maximumFractionDigits: 1 })}${_lang === 'ru' ? 'к' : 'k'}`
-    return `${n < 0 ? '−' : plus ? '+' : ''}${fmtNumber(a)}`
+    if (a >= 1_000_000) return `${sign}${fmtNumber(a / 1_000_000, { maximumFractionDigits: 1 })}${_lang === 'ru' ? ' млн' : 'M'}`
+    if (a >= 10_000) return `${sign}${fmtNumber(Math.round(a / 1000))}${_lang === 'ru' ? 'к' : 'k'}`
+    if (a >= 1000) return `${sign}${fmtNumber(a / 1000, { maximumFractionDigits: 1 })}${_lang === 'ru' ? 'к' : 'k'}`
+    return `${sign}${fmtNumber(a)}`
   }
-  const s = Math.abs(n).toLocaleString(localeOf(), { maximumFractionDigits: 0 })
-  const sign = n < 0 ? '−' : plus ? '+' : ''
+  const s = (Math.abs(cents) / 100).toLocaleString(localeOf(), { minimumFractionDigits: frac ? 2 : 0, maximumFractionDigits: frac ? 2 : 0 })
   return _lang === 'ru' ? `${sign}${s}\u00a0₽` : `${sign}₽${s}`
 }
 

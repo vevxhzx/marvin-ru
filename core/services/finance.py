@@ -5,6 +5,7 @@ import re
 
 import math
 from datetime import datetime, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 from dateutil.relativedelta import relativedelta
 from sqlmodel import select
@@ -71,8 +72,16 @@ def _title(x, name: str = "Название") -> str:
 
 
 def money(x: float) -> str:
-    s = f"{x:,.0f}".replace(",", " ")
-    return f"{s} ₽"
+    """Рубли с копейками: копейки показываем, только если дробная часть ненулевая.
+
+    Округление — HALF_UP до 2 знаков через Decimal(str(x)), симметрично с JS
+    (fmtMoney/money): Python round() — half-even, JS Math.round — half-up,
+    одно и то же значение рендерилось по-разному. Группировка пробелами как раньше.
+    """
+    d = Decimal(str(x)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    if d == d.to_integral_value():
+        return f"{int(d):,}".replace(",", " ") + " ₽"
+    return f"{d:,.2f}".replace(",", " ") + " ₽"
 
 
 # ---------- категории ----------

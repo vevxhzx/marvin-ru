@@ -25,7 +25,7 @@ STEPS = 3
 
 
 def _pick_python() -> str:
-    """Каким Python создавать .venv. Предпочитаем 3.11–3.14 (под них точно есть все сборки);
+    """Каким Python создавать .venv. Предпочитаем 3.10–3.14 (под них точно есть все сборки);
     если запущены на более новом — ищем через лаунчер `py` другой установленный, иначе пробуем текущий."""
     v = sys.version_info
     if (3, 10) <= v[:2] <= (3, 14):
@@ -41,7 +41,7 @@ def _pick_python() -> str:
                     return exe
             except Exception:
                 pass
-    print(f"\n  [i] Python {sys.version.split()[0]} новее проверенных (3.11–3.13). Пробую с ним — обычно работает.")
+    print(f"\n  [i] Python {sys.version.split()[0]} новее проверенных (3.10–3.14). Пробую с ним — обычно работает.")
     return sys.executable
 
 
@@ -57,6 +57,19 @@ def main():
         print(f"\n  [!] Нужен Python 3.10 или новее, у вас {sys.version.split()[0]}.")
         print("      Скачайте: https://www.python.org/downloads/  (галочка 'Add python.exe to PATH')")
         return 1
+    if sys.version_info >= (3, 15):
+        # В Python 3.15 удаляют устаревший sqlite3-адаптер datetime — хранение дат
+        # (события, задачи, операции) может молча сломаться. Дальше — только осознанно.
+        if os.getenv("ASSISTANT_ALLOW_PY315") != "1":
+            print(f"\n  [!] Python {sys.version.split()[0]} слишком новый: дальше Python 3.14 не проверяли,")
+            print("      а в Python 3.15 удаляют устаревший sqlite3-адаптер datetime — даты могут")
+            print("      записаться так, что обратно не прочитаются.")
+            print("      Поставьте рядом Python 3.12 (https://www.python.org/downloads/release/python-3120/ , галочка 'Add to PATH'),")
+            print("      удалите папку .venv и запустите install.bat ещё раз — либо продолжите на свой")
+            print("      риск: set ASSISTANT_ALLOW_PY315=1  и снова python setup.py")
+            return 1
+        print(f"\n  [!] Python {sys.version.split()[0]} + ASSISTANT_ALLOW_PY315=1: продолжаю на ваш риск —")
+        print("      следите за датами (события/задачи/операции) после установки.")
     base = _pick_python()
 
     step(1, "Создаю виртуальное окружение (.venv)...")
