@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Pencil, Trash2, Plus, Search, X, Sparkles } from 'lucide-react'
-import Graph from '../components/Graph'
+/* Граф тянет тяжёлый рендер связей — отдельным чанком, грузится только на вкладке «граф». */
+const Graph = lazy(() => import('../components/Graph'))
 import { api, relTime, listOf } from '../lib/api'
 import { useToast, PageAccent, PageHead, Empty, ErrorState, ListSkeleton, Sheet, Field, Confirm, useLeave, useArrived } from '../components/ui'
 import { useRefresh } from '../App'
@@ -314,7 +315,7 @@ export default function Mind() {
       </div>
 
       {tab === 'graph' ? (
-        <div className="mt-4">{loaded ? <Graph /> : <div className="c"><ListSkeleton n={3} /></div>}</div>
+        <div className="mt-4">{loaded ? <Suspense fallback={<div className="c"><ListSkeleton n={3} /></div>}><Graph /></Suspense> : <div className="c"><ListSkeleton n={3} /></div>}</div>
       ) : !loaded ? (
         <div className="mt-4"><ListSkeleton n={5} /></div>
       ) : !items.length ? (

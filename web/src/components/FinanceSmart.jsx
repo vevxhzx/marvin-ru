@@ -49,8 +49,8 @@ export function Goals({ goals, onChange, onErr, onOk }) {
                   <span className="muted">{Math.round(g.pct * 100)} %{g.due ? ` · ${t('aims.by', { date: new Date(g.due).toLocaleDateString(localeOf(), { day: 'numeric', month: 'short' }).replace(/\.?\s*г\.$/u, '') })}` : ''}{g.per_month ? ` · ${t('gl.per_month', { m: money(g.per_month) })}` : g.left ? ` · ${t('gl.left', { m: money(g.left) })}` : ''}{g.days_left != null && g.days_left < 0 && g.left > 0 ? ` · ${t('aims.overdue')}` : ''}</span>
                   <div className="flex items-center gap-1">
                     <button className="btn-soft btn-sm !h-7" onClick={() => setPut(g)}><Plus size={12} /> {t('gl.put')}</button>
-                    <button className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100" data-tip={t('common.edit')} onClick={() => setSheet(g)}><Pencil size={12} /></button>
-                    <button className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100" data-tip={t('common.delete')} onClick={() => setDel(g)}><Trash2 size={12} /></button>
+                    <button className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100" data-tip={t('common.edit')} aria-label={t('common.edit')} title={t('common.edit')} onClick={() => setSheet(g)}><Pencil size={12} /></button>
+                    <button className="btn-icon !h-7 !w-7 opacity-0 transition group-hover:opacity-100 focus:opacity-100" data-tip={t('common.delete')} aria-label={t('common.delete')} title={t('common.delete')} onClick={() => setDel(g)}><Trash2 size={12} /></button>
                   </div>
                 </div>
               </div>

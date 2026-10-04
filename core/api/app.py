@@ -81,6 +81,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next):
         from .auth import is_authorized
+        from .tg_auth import _client_key
         path = request.url.path
         chat = request.method == "POST" and path in CHAT_PATHS
         sensitive = any(path == p or path.startswith(p + "/") for p in self.AUTH_PATHS)
@@ -91,7 +92,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 # не должен упираться в лимит на своём же телефоне
                 or (sensitive and not is_authorized(request))):
             limit = CHAT_RATE_LIMIT if chat else self.AUTH_RATE_LIMIT
-            key = ((request.client.host if request.client else "?") or "?") + ("|chat" if chat else "|auth")
+            # ключ — XFF-aware (_client_key доверяет X-Forwarded-For только от прокси на этом же ПК):
+            # за NAT все клиенты делят адрес соединения, а подделкой XFF лимит не обойти
+            key = _client_key(request) + ("|chat" if chat else "|auth")
             now = time.monotonic()
             if len(_chat_hits) > 512:
                 # редкая уборка: адреса с протухшим окном не держим в памяти
@@ -154,6 +157,18 @@ app.add_middleware(RateLimitMiddleware)
 # раньше AuthMiddleware был снаружи, префлайт получал 401 и CORS для dev-стенда не работал.
 app.add_middleware(CORSMiddleware, allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
                    allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def _security_headers(request, call_next):
+    """Минимум защитных заголовков на каждый ответ. Без CSP: её вводим отдельно
+    в Report-Only — сейчас только то, что ничего не ломает."""
+    resp = await call_next(request)
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    resp.headers["Referrer-Policy"] = "no-referrer"
+    resp.headers["X-Frame-Options"] = "DENY"
+    resp.headers["Permissions-Policy"] = "camera=(),microphone=(),geolocation=()"
+    return resp
 
 # CRM (фаза 4) — отдельный роутер в core/crm/, подключается здесь; существующие пути не трогаются
 from ..crm.router import router as _crm_router  # noqa: E402

@@ -326,7 +326,13 @@ class Setting(SQLModel, table=True):
 
 class SchemaVersion(SQLModel, table=True):
     """Учёт применённых миграций схемы (см. core/migrations.py). Одна строка = одна версия.
-    Таблица только аддитивная: применяем по порядку, бэкапим файл БД перед первой миграцией."""
+    Таблица только аддитивная: применяем по порядку, бэкапим файл БД перед первой миграцией.
+
+    __tablename__ задан явно: без него SQLModel называл таблицу `schemaversion` (имя класса
+    строчными), а миграции работают с `schema_version` — на старых базах остались обе,
+    пустая `schemaversion` чистится миграцией v10."""
+    __tablename__ = "schema_version"
+
     version: int = Field(primary_key=True)
     name: str = ""
     applied_at: datetime = Field(default_factory=now)

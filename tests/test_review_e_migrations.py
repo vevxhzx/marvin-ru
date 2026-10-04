@@ -224,11 +224,15 @@ def test_migrations_apply_twice_on_same_engine(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- 3. только аддитивный SQL
 def test_migration_sources_have_no_destructive_sql():
-    """Ни одна миграция не удаляет колонки/таблицы/индексы и не переименовывает их."""
+    """Ни одна миграция не удаляет колонки/таблицы/индексы и не переименовывает их.
+    Единственное исключение — v10: DROP пустой таблицы-сироты `schemaversion`
+    (только IF EXISTS после проверки COUNT(*)=0 в коде миграции; см. SECURITY.md §2)."""
     for fname in (ROOT / "core" / "migrations.py", ROOT / "core" / "db.py"):
         src = fname.read_text(encoding="utf-8")
         # выкидываем строки-комментарии, чтобы не ругаться на слово DROP в докстрингах
         code = "\n".join(l for l in src.splitlines() if not l.strip().startswith("#"))
+        # v10-исключение: удаление только пустой сироты (guard COUNT(*)=0 — в коде миграции выше)
+        code = re.sub(r"DROP\s+TABLE\s+IF\s+EXISTS\s+schemaversion\b", "", code, flags=re.I)
         assert not re.search(r"DROP\s+(TABLE|COLUMN|INDEX)\b", code, re.I), f"{fname.name}: есть DROP"
         assert not re.search(r"ALTER\s+TABLE\s+\S+\s+(DROP|RENAME|REPLACE)\b", code, re.I), f"{fname.name}: есть деструктивный ALTER"
         assert not re.search(r"DELETE\s+FROM\s+(?!schema_version)", code, re.I), f"{fname.name}: есть DELETE FROM"
@@ -272,7 +276,9 @@ def test_real_db_copy_survives_migration(tmp_path, monkeypatch):
     before_counts: dict[str, int] = {}
     with sqlite3.connect(str(copy)) as con:
         before_tables = {r[0] for r in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
-                         if not r[0].startswith("sqlite_") and r[0] != "schema_version"}
+                         if not r[0].startswith("sqlite_") and r[0] not in ("schema_version", "schemaversion")}
+        # schemaversion исключена намеренно: это пустая таблица-сирота (двойник SchemaVersion),
+        # которую v10 удаляет — её исчезновение и есть ожидаемый эффект миграции
         for t in sorted(before_tables):
             before_counts[t] = con.execute(f'SELECT COUNT(*) FROM "{t}"').fetchone()[0]
         before_cols = {t: {r[1] for r in con.execute(f'PRAGMA table_info("{t}")')} for t in sorted(before_tables)}

@@ -198,7 +198,7 @@ export default function Settings({ health }) {
     freelance: <Freelance key="freelance" />,
     pomodoro: <Pomodoro key="pomodoro" />,
     status: (
-      <Section key="status" title={t('st.status')} action={<button className="btn-icon outlined" data-tip={t('common.retry')} onClick={load}><RefreshCw size={15} /></button>}>
+      <Section key="status" title={t('st.status')} action={<button className="btn-icon outlined" data-tip={t('common.retry')} aria-label={t('common.retry')} title={t('common.retry')} onClick={load}><RefreshCw size={15} /></button>}>
         {!status ? <ListSkeleton n={3} /> : (
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <StatusCard ok={status.ollama.ok} warn={status.game_mode} title={t('st.local_brain')} line1={status.game_mode ? 'игровой режим · спит' : status.ollama.model}

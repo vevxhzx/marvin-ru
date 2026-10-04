@@ -1,16 +1,12 @@
-import { Component, useEffect, useState, createContext, useContext, useCallback, useRef } from 'react'
+import { Component, Suspense, lazy, useEffect, useState, createContext, useContext, useCallback, useRef } from 'react'
 import { BrowserRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
-import Settings from './pages/Settings'
 import { notifyFromEvent } from './lib/notify'
 import { chimeFromEvent } from './lib/sound'
 import Today from './pages/Today'
-import Finance from './pages/Finance'
 import Calendar from './pages/Calendar'
 import Tasks from './pages/Tasks'
 import Mind from './pages/Mind'
-import Memory from './pages/Memory'
 import People from './pages/People'
-import BoardPage from './pages/Board'
 import Orders from './pages/Orders'
 import { useI18n, t as T } from './lib/i18n'
 import { api, kb, kbAlt } from './lib/api'
@@ -19,8 +15,24 @@ import { setName } from './lib/name'
 import { usePrefs, prefs as PREFS, pullRemote, CLIENT_ID, apply } from './lib/prefs'
 import { useLive } from './components/Live'
 import { NAV, NAV_GROUPS, pickTabs, pickMore } from './lib/nav'
-import { toast } from './components/ui'
+import { Skeleton, toast } from './components/ui'
 import AppShell from './components/AppShell'
+
+/* Тяжёлые страницы — отдельными чанками: главная грузится сразу, а финансы/доска/
+// память/настройки подтягиваются по первому переходу. Фолбэк — тот же Skeleton,
+// что и при загрузке данных (components/ui.jsx), прыжка раскладки нет. */
+const Finance = lazy(() => import('./pages/Finance'))
+const BoardPage = lazy(() => import('./pages/Board'))
+const Memory = lazy(() => import('./pages/Memory'))
+const Settings = lazy(() => import('./pages/Settings'))
+
+function PageFallback() {
+  return (
+    <div className="pg" aria-hidden="true">
+      <Skeleton h={220} radius="var(--r-xl)" />
+    </div>
+  )
+}
 
 /* Навигация и её оболочка живут в lib/nav.js (один список на сайдбар, палитру и док).
    Здесь переэкспортируем, потому что настройки и другие страницы берут NAV_GROUPS отсюда.
@@ -302,6 +314,7 @@ function Shell({ inbox }) {
       onRefresh={onRefresh}
     >
       <PageGuard pathKey={loc.pathname}>
+        <Suspense fallback={<PageFallback />}>
         <Routes location={loc}>
           <Route path="/" element={<Today openChat={() => setChatOpen(true)} address={address} />} />
           <Route path="/finance" element={<Finance />} />
@@ -316,6 +329,7 @@ function Shell({ inbox }) {
           <Route path="/settings" element={<Settings health={health} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
+        </Suspense>
       </PageGuard>
     </AppShell>
   )

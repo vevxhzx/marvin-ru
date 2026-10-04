@@ -316,7 +316,7 @@ async def phone_access(request: Request):
 
     ts, lan = await _asyncio.to_thread(tailscale_ip), lan_ip()
     host = socket.gethostname().lower()
-    # в ссылку зашит токен доступа: первый заход по ней ставит cookie на год, дальше адрес можно открывать без ?t=
+    # в ссылку зашит токен доступа: первый заход по ней ставит cookie на 90 дней, дальше адрес можно открывать без ?t=
     from ..auth import token as _tok, is_local as _is_lb
     if not _is_lb(request):
         raise HTTPException(403, "Ссылки для телефона выдаются только с самого компьютера")
@@ -620,7 +620,7 @@ def backup_download(name: str):
 
 @router.post("/api/backups/restore")
 def backups_restore(body: BackupRestoreIn):
-    """Восстановить data/jarvis.db из выбранного backup-*.db. После — перезапуск start.bat."""
+    """Восстановить data/jarvis.db из выбранного снимка (backup-*.db, jarvis-*.db, pre-migration-*.db). После — перезапуск start.bat."""
     from ...services.scheduler import restore_backup
     try:
         return restore_backup(body.name)

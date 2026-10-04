@@ -8,7 +8,7 @@
 ├─ install_voice.bat / voice.bat            ← голосовой аддон и его запуск
 ├─ autostart.bat / phone.bat / build_web.bat
 ├─ config.example.yaml → config.yaml        ← настройки (мастер и сайт пишут сюда сами)
-├─ data/assistant.db                        ← ВСЯ база; data/backups/, data/media/
+├─ data/jarvis.db                            ← ВСЯ база; data/backups/, data/media/
 ├─ run.py                                   ← ядро: API + сайт + Telegram + планировщик
 ├─ voice_client.py                          ← голосовой клиент ПК
 ├─ core/                                    ← мозг (brain/), инструменты (tools/), сервисы, API, Telegram, голос

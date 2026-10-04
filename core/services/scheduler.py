@@ -234,9 +234,11 @@ def backup_db(force: bool = False) -> Path | None:
         except Exception as e:  # pragma: no cover
             log.warning("событие health_bad не отправлено: %s", e)
     else:
-        # чистим старые (в т.ч. копии «перед миграцией», которые раньше росли вечно)
+        # чистим старые (в т.ч. копии «перед миграцией», которые раньше росли вечно,
+        # и ручные снимки jarvis-*.db — см. docs/ROLLBACK.md: их тоже ротируем, файлы не переименовываем)
         cutoff = datetime.now() - timedelta(days=int(cfg.backup.keep_days))
-        for f in list(bdir.glob("backup-*.db")) + list(bdir.glob("pre-migration-*.db")):
+        old = [f for pat in ("backup-*.db", "pre-migration-*.db", "jarvis-*.db") for f in bdir.glob(pat)]
+        for f in old:
             if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
                 f.unlink(missing_ok=True)
     # вторая копия — на другой диск / в папку облака (Яндекс.Диск, Google Drive), если указана
@@ -248,7 +250,8 @@ def backup_db(force: bool = False) -> Path | None:
             shutil.copy2(dst, edir / dst.name)
             if ok:
                 cutoff = datetime.now() - timedelta(days=int(cfg.backup.keep_days))
-                for f in edir.glob("backup-*.db"):
+                old = [f for pat in ("backup-*.db", "jarvis-*.db") for f in edir.glob(pat)]
+                for f in old:
                     if datetime.fromtimestamp(f.stat().st_mtime) < cutoff:
                         f.unlink(missing_ok=True)
         except Exception as e:  # pragma: no cover
@@ -384,6 +387,10 @@ def last_backup() -> dict:
     check = _last_check()
     bdir = _backup_dir()
     files = sorted(bdir.glob("backup-*.db"), key=lambda f: f.stat().st_mtime) if bdir.exists() else []
+    if bdir.exists():
+        # ручные снимки jarvis-*.db (docs/ROLLBACK.md) — тоже бэкапы, считаем их в «последний» и в ротацию
+        files += sorted(bdir.glob("jarvis-*.db"), key=lambda f: f.stat().st_mtime)
+        files.sort(key=lambda f: f.stat().st_mtime)
     # pre-restore — служебные, в «последний» не считаем
     files = [f for f in files if not f.name.startswith("backup-pre-restore-")]
     if not files:
@@ -395,22 +402,23 @@ def last_backup() -> dict:
             "check": check}
 
 
-# обычный снимок / страховка перед restore, копия «перед миграцией», копии конфигов
-_BACKUP_NAME_RX = __import__("re").compile(r"^backup-(?:pre-restore-)?\d{8}-\d{4}\.db$")
+# обычный снимок / страховка перед restore, ручной снимок jarvis-*, копия «перед миграцией», копии конфигов
+_BACKUP_NAME_RX = __import__("re").compile(r"^(?:backup-(?:pre-restore-)?\d{8}-\d{4}|jarvis-\d{8}-\d{4})\.db$")
 _PRE_MIGRATION_RX = __import__("re").compile(r"^pre-migration-\d{8}-\d{6}\.db$")
 _ANY_BACKUP_RX = __import__("re").compile(
-    r"^(?:backup-(?:pre-restore-)?\d{8}-\d{4}|pre-migration-\d{8}-\d{6})\.db$")
+    r"^(?:backup-(?:pre-restore-)?\d{8}-\d{4}|jarvis-\d{8}-\d{4}|pre-migration-\d{8}-\d{6})\.db$")
 _CONFIG_RX = __import__("re").compile(r"^config-\d{8}-\d{4}/[A-Za-z0-9._-]+$")
 
 
 def list_backups(limit: int = 40) -> list[dict]:
     """Список снимков базы (новые сверху) — для «восстановить» в настройках.
-    Включает и `pre-migration-*.db` (помечены pre_migration=True), чтобы они не копились вечно незаметными."""
+    Включает и `pre-migration-*.db` (помечены pre_migration=True), чтобы они не копились вечно незаметными,
+    и ручные `jarvis-*.db` (docs/ROLLBACK.md) — иначе они сироты: лежат в каталоге, но их не видно и не ротируют."""
     bdir = _backup_dir()
     if not bdir.exists():
         return []
     out = []
-    names = list(bdir.glob("backup-*.db")) + list(bdir.glob("pre-migration-*.db"))
+    names = list(bdir.glob("backup-*.db")) + list(bdir.glob("pre-migration-*.db")) + list(bdir.glob("jarvis-*.db"))
     for f in sorted(names, key=lambda p: p.stat().st_mtime, reverse=True):
         if not _ANY_BACKUP_RX.match(f.name):
             continue

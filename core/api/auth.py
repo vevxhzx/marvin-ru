@@ -3,7 +3,7 @@
 Зачем: сервер слушает 0.0.0.0, чтобы сайт открывался с телефона (домашний Wi-Fi, Tailscale). Без проверки любой
 сайт в браузере соседа по сети мог бы слать POST /api/chat, менять ключи в настройках или выключить компьютер
 через ПК-клиент. Отдельного пароля не вводим: токен генерируется сам и один раз попадает в браузер телефона
-через ссылку/QR из ⚙ Настроек → «с телефона» (query ?t=… → cookie на год).
+через ссылку/QR из ⚙ Настроек → «с телефона» (query ?t=… → cookie на 90 дней).
 
 Как передавать токен: cookie `assistant_session` (браузер) или заголовок `X-Auth-Token` (скрипты, голосовой клиент
 на другой машине; на самом ПК он ходит на 127.0.0.1 и токен ему не нужен).
@@ -34,6 +34,7 @@ COOKIE = "assistant_session"
 HEADER = "x-auth-token"
 QUERY = "t"
 
+# время жизни cookie с QR-ключом: 90 дней (было 365 — год без перевыпуска многовато для bearer-куки)
 # без токена (нет ничего секретного / нужны снаружи): здоровье, PWA-манифест, статика сайта, OAuth-возврат от Google
 PUBLIC_PREFIXES = ("/assets/", "/icon-", "/apple-touch-icon", "/favicon")
 PUBLIC_EXACT = {"/api/health", "/manifest.json", "/api/google/callback", "/sw.js", "/robots.txt", "/api/tg/login"}
@@ -222,5 +223,5 @@ class AuthMiddleware(BaseHTTPMiddleware):
         if q and not is_loopback(request) and hmac.compare_digest(q, token()) and not path.startswith("/api/"):  # noqa: E501
             clean = request.url.remove_query_params(QUERY)
             response = RedirectResponse(str(clean), status_code=303)
-            response.set_cookie(COOKIE, token(), max_age=365 * 86400, httponly=True, samesite="lax", path="/", secure=is_https(request))
+            response.set_cookie(COOKIE, token(), max_age=90 * 86400, httponly=True, samesite="lax", path="/", secure=is_https(request))
         return response

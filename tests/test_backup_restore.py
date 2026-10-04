@@ -93,3 +93,35 @@ def test_api_backup_endpoints(backup_env, monkeypatch):
     assert bad.status_code in (400, 422)
     ok = c.post("/api/backups/restore", json={"name": r.json()["name"]})
     assert ok.status_code == 200 and ok.json()["needs_restart"] is True
+
+
+def test_list_backups_sees_jarvis_mask_and_retention_cleans_it(backup_env, monkeypatch):
+    """Ручные снимки jarvis-*.db (docs/ROLLBACK.md) — не сироты: видны в списке,
+    восстанавливаются, старые вычищаются ротацией. Файлы не переименовываем."""
+    import os
+    import time
+
+    from core.services import scheduler
+
+    monkeypatch.setattr(scheduler, "DB_PATH", backup_env["db"])
+    monkeypatch.setattr(scheduler, "ROOT", backup_env["db"].parent)
+    bdir = backup_env["bdir"]
+    bdir.mkdir(parents=True, exist_ok=True)
+    fresh = bdir / "jarvis-20260930-1414.db"
+    fresh.write_bytes(b"fake-db")
+    junk = bdir / "notes.txt"
+    junk.write_text("not a backup")
+    names = [b["name"] for b in scheduler.list_backups()]
+    assert "jarvis-20260930-1414.db" in names, "jarvis-*.db должны быть видны в списке бэкапов"
+    assert "notes.txt" not in names
+    # restore принимает то же имя, что показывает список
+    assert scheduler.resolve_backup_file("jarvis-20260930-1414.db").name == "jarvis-20260930-1414.db"
+    # ротация: старый jarvis-снимок (старше keep_days) удаляется новым бэкапом, свежий — остаётся
+    old = bdir / "jarvis-20200101-0000.db"
+    old.write_bytes(b"fake-db-old")
+    ancient = time.time() - 40 * 86400
+    os.utime(old, (ancient, ancient))
+    dst = scheduler.backup_db(force=True)
+    assert dst and dst.exists()
+    assert not old.exists(), "протухший jarvis-*.db должен вычищаться ротацией"
+    assert fresh.exists(), "свежий jarvis-*.db трогать нельзя"

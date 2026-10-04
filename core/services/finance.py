@@ -616,10 +616,12 @@ def daily_series(days: int = 30) -> list[dict]:
 def summary(days: int = 30) -> dict:
     """Сводка: траты/доходы за период, по категориям, балансы, долги.
 
-    Считается по всей базе, поэтому результат кэшируется на пару секунд (core.db.cached):
-    главная и дашборд зовут сводку по several раз. Любая запись в базу кэш сразу сбрасывает.
+    Считается по всей базе, поэтому результат кэшируется (core.db.cached):
+    /api/dashboard зовёт сводку при каждом опросе, а главная/чат — следом.
+    TTL 45с: повторы дашборда в пределах опроса гасятся кэшем, любая запись
+    в базу кэш сразу сбрасывает (write_stamp).
     """
-    return cached(f"summary:{int(days or 30)}", lambda: _summary(days))
+    return cached(f"summary:{int(days or 30)}", lambda: _summary(days), ttl=45)
 
 
 def _summary(days: int = 30) -> dict:

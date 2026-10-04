@@ -43,7 +43,9 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           cache: pip
-      - run: pip install -r requirements.txt pytest
+      # requirements.txt — человеко-редактируемый источник; requirements.lock — pinned snapshot (pip freeze по прямым deps + pytest).
+      # Править версии в .txt, затем перегенерить lock локально.
+      - run: pip install -r requirements.lock
       - run: python -m compileall -q core run.py voice_client.py setup.py
       - run: python -m pytest tests -q
 

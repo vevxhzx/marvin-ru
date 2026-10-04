@@ -7,7 +7,8 @@
 import { spawn } from 'child_process'
 import http from 'http'
 
-const PORT = process.env.PORT || 3000
+// Порт Python-ядра (start.bat → http://localhost:8765). Node-мок server.ts слушает 3000 только для dev.
+const PORT = process.env.PORT || 8765
 const URL = `http://localhost:${PORT}`
 
 function checkServerReady(timeout = 15000) {

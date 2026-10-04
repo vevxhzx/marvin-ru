@@ -363,7 +363,7 @@ app.get('/api/health', (req, res) => {
     ollama: false,
     mode: 'local',
     time: new Date().toISOString(),
-    version: '1.0.0',
+    version: PKG_VERSION,
     edition: currentEdition,
     name: 'Марвин',
     name_latin: 'Marvin',
@@ -1730,7 +1730,7 @@ app.delete('/api/orders/:id/time/:timeId', (req, res) => {
 app.get('/api/client/info', (req, res) => {
   res.json({
     app_name: 'Марвин',
-    version: '1.0.0',
+    version: PKG_VERSION,
     platform: process.platform,
     mode: 'desktop_projection',
     single_instance: true,
@@ -3021,7 +3021,8 @@ async function setupFrontend() {
     })
     app.use(vite.middlewares)
   } else {
-    const distPath = path.resolve(process.cwd(), 'dist')
+    // Единственный output — web/site (тот же dir, что раздаёт Python-ядро). Fallback на dist/ удалён.
+    const distPath = path.resolve(process.cwd(), 'web', 'site')
     if (fs.existsSync(distPath)) {
       app.use(express.static(distPath))
       app.get('*', (req, res) => {

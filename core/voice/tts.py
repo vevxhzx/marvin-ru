@@ -32,6 +32,35 @@ _model = None
 _lock = threading.Lock()
 LAST_ERROR: str | None = None
 
+# в local-режиме edge-движок молча гнал бы текст в Microsoft — предупреждаем один раз за процесс
+_LOCAL_EDGE_NOTICE_DONE = False
+
+
+def _brain_mode() -> str:
+    """Режим мозга (local / hybrid / cloud) — читаем живьём из cfg, а не кэшируем:
+    настройка меняется с сайта без перезапуска."""
+    try:
+        return str(getattr(getattr(cfg, "brain", None), "mode", "") or "").strip().lower()
+    except Exception:
+        return ""
+
+
+def resolve_engine(configured: str | None = None) -> str:
+    """Какой движок озвучки реально использовать.
+
+    В `local`-режиме `edge` запрещён молча уходить в облако: принудительно `silero`
+    (офлайн; если torch нет — порядок fallback в speak_to_file всё равно попробует edge,
+    но уже с предупреждением в логе). `hybrid`/`cloud` не трогаем. `off` остаётся `off`.
+    """
+    global _LOCAL_EDGE_NOTICE_DONE
+    eng = (configured if configured is not None else ENGINE).strip().lower() or "silero"
+    if eng == "edge" and _brain_mode() == "local":
+        eng = "silero"
+        if not _LOCAL_EDGE_NOTICE_DONE:
+            _LOCAL_EDGE_NOTICE_DONE = True
+            log.warning("TTS: brain.mode=local — движок edge отправлял бы текст в Microsoft, использую silero (офлайн)")
+    return eng
+
 
 # ------------------------------------------------------------------ подготовка текста
 _EMOJI_RX = re.compile("[\U0001F000-\U0001FAFF\U00002600-\U000027BF\U0001F900-\U0001F9FF\u2B50\u2B06\u2934\u2935\u3030\u303D\u3297\u3299\uFE0F\u200D]+")
@@ -114,6 +143,7 @@ def prepare(text: str) -> str:
 # ------------------------------------------------------------------ Silero
 def _download_model() -> None:
     import httpx
+    from .fetch import verify_file
     MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
     tmp = MODEL_PATH.with_suffix(".part")
     log.info("Скачиваю голос Silero v4 (40 МБ) → %s", MODEL_PATH)
@@ -122,6 +152,11 @@ def _download_model() -> None:
         with open(tmp, "wb") as f:
             for chunk in r.iter_bytes(1 << 16):
                 f.write(chunk)
+    try:
+        verify_file(tmp, MODEL_URL)   # mismatch — ValueError, битый файл не подменяет модель
+    except Exception:
+        tmp.unlink(missing_ok=True)
+        raise
     tmp.replace(MODEL_PATH)
 
 
@@ -264,7 +299,7 @@ async def _edge_to_file(text: str, path: Path) -> Path:
 
 # ------------------------------------------------------------------ публичное
 def enabled() -> bool:
-    return ENGINE != "off"
+    return resolve_engine() != "off"
 
 
 CACHE_DIR = DATA_DIR / "voice_cache"   # одинаковые фразы («готово», приветствие, напоминания) не синтезируем дважды
@@ -273,7 +308,8 @@ CACHE_KEEP = 400                        # последние N файлов; с�
 
 def _cache_path(spoken: str, suffix: str) -> Path:
     import hashlib
-    key = f"{ENGINE}|{SPEAKER}|{EDGE_VOICE}|{SAMPLE_RATE}|{suffix}|{spoken}".encode("utf-8")
+    eng = resolve_engine()  # local+edge → silero: кэш не должен отдавать чужой движок
+    key = f"{eng}|{SPEAKER}|{EDGE_VOICE}|{SAMPLE_RATE}|{suffix}|{spoken}".encode("utf-8")
     return CACHE_DIR / (hashlib.sha1(key).hexdigest()[:20] + (suffix or ".ogg"))
 
 
@@ -290,7 +326,7 @@ async def speak_to_file(text: str, path: str | Path) -> Path | None:
     """Озвучить текст в файл (.ogg для Telegram, .wav/.mp3 для ПК). None — не вышло (причина в LAST_ERROR).
     Одинаковые фразы берутся из кэша data/voice_cache — озвучка типовых ответов мгновенная и без сети."""
     global LAST_ERROR
-    if not enabled():
+    if resolve_engine() == "off":
         return None
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -305,7 +341,7 @@ async def speak_to_file(text: str, path: str | Path) -> Path | None:
             return path
         except Exception as e:  # pragma: no cover
             log.debug("tts cache read: %s", e)
-    order = ["silero", "edge"] if ENGINE == "silero" else ["edge", "silero"]
+    order = ["silero", "edge"] if resolve_engine() == "silero" else ["edge", "silero"]
     result = None
     for eng in order:
         try:

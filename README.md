@@ -79,10 +79,18 @@
 
 ## Быстрый старт (Windows, 10–15 минут)
 
-1. [Python 3.12](https://www.python.org/downloads/windows/) → при установке галочка **«Add python.exe to PATH»**.
+1. [Python 3.12](https://www.python.org/downloads/windows/) (поддерживаются 3.10–3.14, см. таблицу) → при установке галочка **«Add python.exe to PATH»**.
 2. Папку `marvin` — например, в `C:\Marvin`. Двойной клик **`install.bat`** — поставит библиотеки и откроет `config.yaml`.
 3. В `config.yaml` две строки: `token` (от @BotFather) и `owner_id` (свой ID от @userinfobot). Сохранить.
 4. **`start.bat`** — в Telegram придёт «Система онлайн». Сайт: http://localhost:8765
+
+Поддерживаемые версии Python (по `setup.py`, истина для этого репозитория):
+
+| Версия | Статус |
+|---|---|
+| 3.10–3.14 | поддерживается |
+| 3.12 | рекомендована |
+| 3.15+ | заблокирована без `ASSISTANT_ALLOW_PY315=1` |
 
 Дальше по желанию, всё кнопками: локальный мозг — [Ollama](https://ollama.com/download) + `ollama pull qwen3.5:4b`; облако для общих вопросов — ключ Groq в ⚙ Настройки → облако; голос — `voice.bat` (для точного распознавания на ПК — `gpu.bat`, тогда доступны `medium`/`large-v3-turbo`); с телефона — `phone.bat` + QR в настройках, а прямо внутри Telegram без VPN — `funnel.bat` ([инструкция](docs/telegram-miniapp.md)); автозагрузка — `autostart.bat`.
 
@@ -104,6 +112,9 @@ start.bat
 
 - Ядро: `python run.py`. Порт берётся из `config.yaml` (`server.port`, по умолчанию 8765). Флаги: `--no-tg` (без Telegram), `--no-browser`, `--no-voice-warmup`.
 - Пересборка сайта после правок в `web/src`: `build_web.bat` (или `cd web && npm run build`) → готовый сайт в `web/site`, дальше перезапустить `start.bat`.
+- Сборка — одна команда `build_web.bat` → `web/site` (единственный output; корень и `web/` конфиги строят туда же).
+- `server.ts` в production раздаёт тот же `web/site` (fallback на `dist/` удалён).
+- Десктоп (`desktop.mjs`) открывает ядро http://localhost:8765; Node-мок :3000 — только dev.
 - Node-стенд (тот же фронт на Express): `npm install && npm run dev` → http://localhost:3000. Второй бот на том же токене одновременно с Python-версией не запускаю.
 - Тесты: `python -m pytest tests -q` (нужен `pip install -r requirements-dev.txt`) и `npm test` (Node-стенд).
 - Переменные окружения — `.env.example` (скопируй в `.env`; в git `.env` не попадает).

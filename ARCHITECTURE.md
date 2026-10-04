@@ -6,7 +6,7 @@
 
 Один Python-процесс (`run.py`) на ПК пользователя (Windows) или в Docker, который:
 
-- держит **SQLite-базу** (`data/assistant.db`) со всеми личными данными;
+- держит **SQLite-базу** (`data/jarvis.db`) со всеми личными данными;
 - отдаёт **HTTP API + собранный сайт** (FastAPI + uvicorn, порт 8765);
 - ведёт **Telegram-бота** (aiogram 3, long polling, только `owner_id`);
 - крутит **планировщик** (APScheduler: напоминания, бэкап, дайджесты);
@@ -68,7 +68,7 @@
 
 ## 5. Данные и их жизненный цикл
 
-- `data/assistant.db` — всё; WAL; бэкап через `sqlite3.backup()` ежедневно в `backups/` (+ `extra_dir`), хранение `keep_days`.
+- `data/jarvis.db` — всё; WAL; бэкап через `sqlite3.backup()` ежедневно в `backups/` (+ `extra_dir`), хранение `keep_days`.
 - `data/media/` — фото заметок и чеков; зеркалируется в `backups/media/` инкрементально.
 - `data/api_token` — ключ доступа с других устройств (создаётся при старте, права 600 вне Windows).
 - `config.yaml` — настройки и секреты (TG-токен, ключи облака, Google OAuth). В API отдаются маскированными. Не в git.

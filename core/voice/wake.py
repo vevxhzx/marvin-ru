@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import logging
-import zipfile
 
 from ..config import DATA_DIR
 
@@ -24,6 +23,7 @@ WAKE_RX = identity.VOSK_WAKE_RX
 
 def _download() -> None:
     import httpx
+    from .fetch import safe_extract_zip, verify_file
     MODEL_DIR.parent.mkdir(parents=True, exist_ok=True)
     zpath = MODEL_DIR.parent / "vosk-small-ru.zip"
     log.info("Скачиваю модель wake word Vosk (45 МБ) → %s", MODEL_DIR)
@@ -32,8 +32,12 @@ def _download() -> None:
         with open(zpath, "wb") as f:
             for chunk in r.iter_bytes(1 << 16):
                 f.write(chunk)
-    with zipfile.ZipFile(zpath) as z:
-        z.extractall(MODEL_DIR.parent)
+    try:
+        verify_file(zpath, MODEL_URL)   # mismatch — ValueError, архив удаляется
+        safe_extract_zip(zpath, MODEL_DIR.parent)   # zip-slip невозможен: .. и абсолютные пути отклоняются
+    except Exception:
+        zpath.unlink(missing_ok=True)
+        raise
     zpath.unlink(missing_ok=True)
 
 

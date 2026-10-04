@@ -4,6 +4,8 @@
 
 - Миграции только **аддитивные**: `CREATE TABLE` / `ALTER TABLE … ADD COLUMN` со значением
   по умолчанию. Никаких `DROP`, переименований колонок/таблиц и удаления данных.
+  Единственное исключение — v10 (`_v10_drop_stray_schemaversion`): удаление пустой
+  таблицы-сироты `schemaversion` (только при `COUNT(*)=0`, иначе warning).
 - Каждая миграция **идемпотентна**: повторный запуск ничего не ломает.
 - Перед первым применением к существующей непустой БД автоматически делается бэкап
   файла БД (SQLite backup API) в `backups/pre-migration-<дата>.db`.
@@ -214,6 +216,28 @@ def _v9_retention_dates(conn) -> None:
         create_index(conn, _name, _table, _cols)
 
 
+def _v10_drop_stray_schemaversion(conn) -> None:
+    """Убрать пустую таблицу-сироту `schemaversion`.
+
+    Откуда взялась: SQLModel без явного __tablename__ называл таблицу модели SchemaVersion
+    именем класса строчными (`schemaversion`), а версионирование миграций всегда работало
+    с `schema_version` — на всех старых базах лежат обе, первая всегда пустая.
+    Модель теперь с явным __tablename__ = "schema_version" (см. core/db.py), так что новые
+    сироты не появляются, а эту убираем — но ТОЛЬКО если она пуста (COUNT(*)=0).
+    Непустая (теоретически — чужие данные под тем же именем) не трогается, только warning в лог.
+
+    Единственное разрешённое исключение из правила «миграции без DROP»
+    (см. SECURITY.md §2 и тест test_migration_sources_have_no_destructive_sql)."""
+    if not table_exists(conn, "schemaversion"):
+        return
+    n = conn.execute(text('SELECT COUNT(*) FROM "schemaversion"')).scalar() or 0
+    if int(n) == 0:
+        conn.execute(text("DROP TABLE IF EXISTS schemaversion"))
+        log.info("миграция v10: пустая таблица-сирота schemaversion удалена")
+    else:
+        log.warning("миграция v10: таблица schemaversion не пуста (%s строк) — не трогаю", n)
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
@@ -226,6 +250,7 @@ MIGRATIONS: list[Migration] = [
     # следующая свободная статическая версия 8.
     (8, "деньги: <col>_cents INTEGER + бэкфилл CAST(ROUND(col*100)) (float-колонки оставлены)", _v8_money_cents),
     (9, "ретеншн-поддержка: date-индексы chatmessage/memory/actionlog (без удаления данных)", _v9_retention_dates),
+    (10, "сирота schemaversion: DROP пустой таблицы-двойника SchemaVersion (непустую не трогаем, только warning)", _v10_drop_stray_schemaversion),
 ]
 
 

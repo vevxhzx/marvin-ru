@@ -190,11 +190,11 @@ function PersonRow({ p, stage, next, onOpen, onStage, onErr, bump }) {
           <span className="av2 shrink-0">{initials(p.name)}</span>
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="truncate font-medium" style={{ fontSize: 'var(--fs-lg)' }}>{p.name}</span>
+              <span className="truncate break-anywhere font-medium" style={{ fontSize: 'var(--fs-lg)' }}>{p.name}</span>
               <span className={`faint shrink-0 ${SMALL_M}`} style={{ fontSize: 'var(--fs-xs)' }}>{kindLabel(p)}</span>
               {HAS_STAGE.has(p.kind) && <ClientStageBadge view={stage} className="shrink-0" />}
             </div>
-            {alias && <div className="muted truncate text-[12.5px]" title={alias}>{alias}</div>}
+            {alias && <div className="muted break-anywhere truncate text-[12.5px]" title={alias}>{alias}</div>}
             {step && (
               <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 text-[12.5px]">
                 <CalendarClock size={12} className="faint shrink-0" aria-hidden />
