@@ -366,7 +366,7 @@ export default function Tasks() {
           it is the view switcher (e2e looks for «выполнено» inside .top .sg). */}
       <header className="top">
         <div className="min-w-0 flex-1">
-          <h1 className="r" style={{ '--i': 0 }}>{t(view === 'aims' ? 'goals.title' : 'nav.tasks')}</h1>
+          <h1 className="r fade-r" style={{ '--i': 0 }}>{t(view === 'aims' ? 'goals.title' : 'nav.tasks')}</h1>
           <p className="sub r" style={{ '--i': 1 }}>
             {view === 'aims' ? t('goals.active_n', { count: aims }) : kicker}
           </p>
