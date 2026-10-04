@@ -411,33 +411,10 @@ export default function Tasks() {
             <section className={`relative ${cardM('!p-4')} mt-6`}>
               {ctl('tools')}
               <div className={cardsEdit ? 'pt-8' : ''}>
-                {/* .comp сам отступает от верха страницы; внутри карточки отступ отдаёт она */}
-                <div className="comp min-[821px]:!mt-0">
-                  <i aria-hidden="true" />
-                  <input
-                    className="ph0"
-                    aria-label={t('tk.quick_ph')}
-                    value={quick}
-                    onChange={(e) => setQuick(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && addQuick(e)}
-                    placeholder={t('tk.quick_ph')}
-                    style={{ background: 'transparent', border: 0, outline: 'none', flex: '1 1 auto', minWidth: 0, color: 'var(--ink)' }}
-                  />
-                  <button
-                    type="button"
-                    className="send"
-                    onClick={addQuick}
-                    aria-label={`${t('common.add')} ${t('tk.task')}`}
-                    title={`${t('common.add')} ${t('tk.task')}`}
-                    data-tip={`${t('common.add')} ${t('tk.task')}`}
-                  >
-                    <Plus size={20} strokeWidth={2.4} aria-hidden="true" />
-                  </button>
-                </div>
-
-                {/* Search: a calm input, not a toolbar */}
+                {/* Поиск — спокойное поле, не toolbar. Быстрый ввод строкой убран:
+                    добавить задачу можно кнопкой «+ задача» или шторкой «+» в доке. */}
                 <div
-                  className="input mt-3 flex items-center gap-2.5 focus-within:!border-[var(--accent)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
+                  className="input flex items-center gap-2.5 focus-within:!border-[var(--accent)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
                   style={{ paddingLeft: 14, paddingRight: 6 }}
                 >
                   <SearchIcon size={16} className="faint shrink-0" aria-hidden="true" />
