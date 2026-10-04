@@ -411,34 +411,6 @@ export default function Tasks() {
             <section className={`relative ${cardM('!p-4')} mt-6`}>
               {ctl('tools')}
               <div className={cardsEdit ? 'pt-8' : ''}>
-                {/* Поиск — спокойное поле, не toolbar. Быстрый ввод строкой убран:
-                    добавить задачу можно кнопкой «+ задача» или шторкой «+» в доке. */}
-                <div
-                  className="input flex items-center gap-2.5 focus-within:!border-[var(--accent)] focus-within:shadow-[0_0_0_3px_var(--accent-soft)]"
-                  style={{ paddingLeft: 14, paddingRight: 6 }}
-                >
-                  <SearchIcon size={16} className="faint shrink-0" aria-hidden="true" />
-                  <input
-                    className="min-w-0 flex-1"
-                    aria-label={t('common.search')}
-                    value={q}
-                    onChange={(e) => setQ(e.target.value)}
-                    placeholder={t('tk.search_ph')}
-                    style={{ background: 'transparent', border: 0, outline: 'none', font: 'inherit', color: 'var(--ink)' }}
-                  />
-                  {q && (
-                    <button
-                      type="button"
-                      className="btn-icon shrink-0"
-                      onClick={() => setQ('')}
-                      aria-label={t('tk.clear_search')}
-                      title={t('tk.clear_search')}
-                    >
-                      <X size={15} />
-                    </button>
-                  )}
-                </div>
-
                 {projects.length > 0 && (
                   <div className={`cluster mt-3 ${CHIPS_ROW_M}`} role="group" aria-label={t('task.project')}>
                     <span className="label">{t('task.project')}</span>

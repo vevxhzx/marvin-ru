@@ -166,13 +166,6 @@ export default function Orders() {
           одной кнопкой «?» — это её единственная точка входа, второй кнопки в шапке нет. */}
       <div className="-mt-4"><HowToOrders /></div>
 
-      <form onSubmit={addQuick} className="composer animate-rise flex items-center gap-2 py-1.5 !pl-4 pr-1.5">
-        <Plus size={16} className="faint shrink-0" />
-        <input value={quick} onChange={(e) => setQuick(e.target.value)} className="h-9 w-full bg-transparent text-[15px] outline-none placeholder:text-[var(--ink-3)]" placeholder={t('or.quick_ph')} aria-label={t('or.quick_ph')} />
-        <button className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" disabled={!quick.trim()} aria-label={t('common.add')} data-tip={t('or.quick_tip')}>
-          <span className="sr-only">{t('common.add')}</span><Plus size={16} />
-        </button>
-      </form>
 
       {/* Панель заказов идёт ПЕРВОЙ из модалок: всё, что открывают из неё (оплата, форма,
           карточка клиента), должно оказываться поверх — порядок DOM определяет стек. */}
