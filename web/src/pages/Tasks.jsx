@@ -480,7 +480,6 @@ export default function Tasks() {
                     >
                       <div
                         className={`rowi ck ${leaveCls(task.id)} ${arriveCls(task.id)} ${task.done ? 'is-done' : ''}`}
-                        style={{ alignItems: 'flex-start' }}
                       >
                         {/* big checkbox: the label is the touch target, the circle is 22–26px */}
                         <label className="ck shrink-0" style={{ display: 'grid', placeItems: 'center', width: 'var(--tap)', height: 'var(--tap)', marginLeft: -10 }}>
@@ -501,42 +500,25 @@ export default function Tasks() {
                             className="t"
                             onClick={() => openTask(task)}
                             title={task.title}
-                            style={{
-                              display: 'block',
-                              width: '100%',
-                              minHeight: 'var(--tap)',
-                              padding: '2px 0',
-                              textAlign: 'left',
-                              overflowWrap: 'anywhere',
-                              background: 'transparent',
-                              border: 0,
-                              font: 'inherit',
-                              color: 'inherit',
-                              cursor: 'pointer',
-                            }}
+                            style={{ display: 'block', width: '100%', textAlign: 'left', overflowWrap: 'anywhere', background: 'transparent', border: 0, font: 'inherit', color: 'inherit', cursor: 'pointer' }}
                           >
-                            {task.title}
-                            {task.kind === 'event' ? (
-                              <small>{t('tk.event')}</small>
-                            ) : (task.sub || task.category) ? (
-                              <small>{task.sub || task.category}</small>
-                            ) : null}
-                          </button>
-
-                          <div className="cluster" style={{ marginTop: 4, gap: 6 }}>
-                            {task.kind === 'event'
-                              ? <span className="badge shrink-0">{t('tk.event')}</span>
-                              : <PriorityCell value={task.priority} onChange={(p) => setPriority(task, p)} />}
-
-                            {task.due && !isAllDay(task.due) && <time className="shrink-0">{hhmm(task.due)}</time>}
-
-                            {task.project && (
-                              <span className="badge shrink-0" style={{ maxWidth: '42vw' }} title={task.project}>
-                                <span className="trunc">{task.project}</span>
+                            <span className="flex min-w-0 items-center gap-2">
+                              {task.kind !== 'event' && <PriorityCell value={task.priority} onChange={(p) => setPriority(task, p)} />}
+                              <span className="trunc font-medium" style={{ fontSize: 'var(--fs-base)' }}>{task.title}</span>
+                            </span>
+                            {(task.kind === 'event' || task.sub || task.category || task.project) && (
+                              <span className="muted mt-0.5 block trunc text-[length:var(--fs-xs)]" title={[task.sub || task.category, task.project].filter(Boolean).join(' · ')}>
+                                {task.kind === 'event' ? t('tk.event') : [task.sub || task.category, task.project].filter(Boolean).join(' · ')}
                               </span>
                             )}
-                          </div>
+                          </button>
                         </div>
+
+                        {task.due && (
+                          <span className="due-tag shrink-0">
+                            {isAllDay(task.due) ? shortDate(task.due) : hhmm(task.due)}
+                          </span>
+                        )}
 
                         <button
                           type="button"
