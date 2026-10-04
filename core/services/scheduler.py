@@ -312,9 +312,12 @@ def _last_check() -> dict | None:
 
 def _backup_configs(bdir: Path) -> int:
     """Копии настроек и ключей доступа рядом с бэкапами (иначе базу восстановить, а ключи — нет).
-    Ретеншн — тот же backup.keep_days. Содержимое файлов не пишем ни в лог, ни в ответы."""
+    Ретеншн — тот же backup.keep_days. Содержимое файлов не пишем ни в лог, ни в ответы.
+    Копии config-* — только информативные: автовосстановления из них нет (restore_backup
+    подменяет только БД); вернуть ключи можно вручную через download. google_token.json
+    намеренно не копируем — долгоживущий OAuth refresh-токен, лишний риск без пользы для restore."""
     from ..config import ROOT, DATA_DIR
-    files = [ROOT / "config.yaml", DATA_DIR / "google_token.json", DATA_DIR / "api_token", DATA_DIR / "session_secret"]
+    files = [ROOT / "config.yaml", DATA_DIR / "api_token", DATA_DIR / "session_secret"]
     files = [f for f in files if f.exists()]
     if not files:
         return 0
@@ -322,7 +325,12 @@ def _backup_configs(bdir: Path) -> int:
     dst.mkdir(parents=True, exist_ok=True)
     n = 0
     for f in files:
-        shutil.copy2(f, dst / f.name)
+        target = dst / f.name
+        shutil.copy2(f, target)
+        try:
+            target.chmod(0o600)
+        except Exception:  # Windows
+            pass
         n += 1
     cutoff = datetime.now() - timedelta(days=int(cfg.backup.keep_days))
     for d in bdir.glob("config-*"):

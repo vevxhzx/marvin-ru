@@ -64,3 +64,14 @@ docs/second-*.md
 docs/PROGRESS-merge.md
 PLAN.md
 REVIEW.md
+
+# --- publish guard: secret-like files (publish.bat aborts on these) ---
+*.pem
+*.key
+*.crt
+*.p12
+google_token.json
+config.*.yaml
+!config.example.yaml
+*api_token*
+*session_secret*

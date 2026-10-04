@@ -435,7 +435,12 @@ def _gcal_reload():
     """Настройки Google меняются с сайта без перезапуска: перечитываем config."""
     from ... import config as _cfg
     from ...services import gcal
-    _cfg.cfg = _cfg._load()
+    fresh = _cfg._load()
+    # Обновляем существующий объект, а не подменяем: модули, сделавшие
+    # `from config import cfg`, держат ссылку на него — подмена оставляла
+    # их (планировщик и др.) со старым конфигом после смены настроек с сайта.
+    _cfg.cfg.__dict__.clear()
+    _cfg.cfg.__dict__.update(fresh.__dict__)
     gcal.cfg = _cfg.cfg
     return gcal
 

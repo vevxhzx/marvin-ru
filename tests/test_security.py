@@ -51,6 +51,20 @@ def test_token_link_sets_cookie_and_strips_query():
     assert c.get("/api/tasks").status_code == 200
 
 
+def test_api_rejects_query_token_but_keeps_cookie_login():
+    """S5: ?t= на /api/* не авторизует (только cookie/заголовок), а вход
+    по ссылке вне /api/ по-прежнему ставит cookie (303)."""
+    from core.api import auth
+    c = _client(remote=True)
+    tok = auth.token()
+    assert c.get(f"/api/status?t={tok}").status_code == 401
+    assert c.get("/api/status", headers={"X-Auth-Token": tok}).status_code == 200
+    r = c.get(f"/auth?t={tok}", follow_redirects=False)
+    assert r.status_code == 303 and auth.COOKIE in r.cookies
+    assert "t=" not in r.headers["location"]
+    assert c.get("/api/status").status_code == 200
+
+
 def test_setup_wizard_local_only():
     from core.api import auth
     c = _client(remote=True)
@@ -146,6 +160,25 @@ def test_open_app_never_uses_shell(monkeypatch):
     r = actions.open_app("несуществующая_программа_xyz")
     assert "Не нашёл" in r
     assert all(not k.get("shell") for _, k in calls)
+
+
+def test_open_app_shell_allowlist(monkeypatch):
+    """S12: shell:/ms-settings: — только 5 значений из APPS (services/pc.py),
+    остальное отказываем без вызова startfile."""
+    from core.pc import actions
+    calls = []
+    monkeypatch.setattr(actions, "IS_WIN", True)
+    monkeypatch.setattr(actions.os, "startfile", lambda *a, **k: calls.append(a), raising=False)
+    for legit in ("ms-settings:", "shell:RecycleBinFolder", "shell:Downloads",
+                  "shell:Desktop", "shell:Personal"):
+        calls.clear()
+        assert actions.open_app(legit) == "", legit
+        assert calls, legit
+    for evil in ("shell:::evil", "ms-settings:whatever-evil"):
+        calls.clear()
+        out = actions.open_app(evil)
+        assert out != "" and "не открываю" in out, evil
+        assert calls == [], evil
 
 
 # ---------------- F5: бэкап включает картинки ----------------

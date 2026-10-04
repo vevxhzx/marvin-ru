@@ -82,6 +82,18 @@ if errorlevel 1 (popd && echo [!] Site build failed && pause && exit /b 1)
 popd
 
 :commit
+REM --- preflight: secret-like files must never reach GitHub ---
+set PREF=%TEMP%\publish-preflight.txt
+git status --porcelain > "%PREF%"
+findstr /I ".pem .key .crt .p12" "%PREF%" >nul
+if not errorlevel 1 (echo [!] Refusing to publish: key or certificate files in changes - remove them. && findstr /I ".pem .key .crt .p12" "%PREF%" && del "%PREF%" && pause && exit /b 1)
+findstr /I "google_token.json api_token session_secret" "%PREF%" >nul
+if not errorlevel 1 (echo [!] Refusing to publish: token or secret files in changes - remove them. && findstr /I "google_token.json api_token session_secret" "%PREF%" && del "%PREF%" && pause && exit /b 1)
+findstr /I ".csv .xlsx .db" "%PREF%" >nul
+if not errorlevel 1 (echo [!] Refusing to publish: data files in changes - csv/xlsx/db stay local. && findstr /I ".csv .xlsx .db" "%PREF%" && del "%PREF%" && pause && exit /b 1)
+findstr /I "config." "%PREF%" | findstr /I ".yaml" > "%PREF%.cfg"
+if not errorlevel 1 (findstr /I /V "config.example.yaml" "%PREF%.cfg" >nul && echo [!] Refusing to publish: real config yaml in changes - only config.example.yaml may be committed. && findstr /I /V "config.example.yaml" "%PREF%.cfg" && del "%PREF%" "%PREF%.cfg" 2>nul && pause && exit /b 1)
+del "%PREF%" "%PREF%.cfg" 2>nul
 git add -A
 git diff --cached --quiet
 if errorlevel 1 (git commit -q -m "v%VER%" || (echo [!] commit failed && pause && exit /b 1)) else (echo No changes to commit - release only.)
@@ -104,7 +116,7 @@ echo     [2] Cancel
 set CH=
 set /p CH=Choice: 
 if not "%CH%"=="1" (echo Cancelled. && pause && exit /b 1)
-git push -q -u --force origin %BR% || (echo [!] push failed && pause && exit /b 1)
+git push -q -u --force-with-lease origin %BR% || (echo [!] push failed && pause && exit /b 1)
 :pushed
 
 git rev-parse -q --verify "refs/tags/v%VER%" >nul 2>nul

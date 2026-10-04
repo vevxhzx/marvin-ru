@@ -69,6 +69,46 @@ def public_url(status_text: str) -> str | None:
     return m.group(1) if m else None
 
 
+def preflight() -> bool:
+    """Проверка перед открытием туннеля: сервер отвечает, а снаружи без ключа — 401.
+
+    Туннель публикует весь порт API, поэтому смотрим глазами «снаружи»:
+    Funnel добавляет заголовки X-Forwarded-*, и сервер считает такой запрос
+    внешним (plain-запрос с loopback сервер доверяет по дизайну — см. core/api/auth.py).
+    """
+    import urllib.error
+    import urllib.request
+    base = f"http://127.0.0.1:{PORT}"
+    warn = ""
+    try:
+        with urllib.request.urlopen(base + "/api/health", timeout=5) as r:
+            if r.status != 200:
+                warn = f"/api/health отвечает HTTP {r.status}, а не 200"
+    except Exception as e:
+        warn = f"сервер не отвечает (/api/health: {e}) — туннель откроет мёртвый порт"
+    if not warn:
+        req = urllib.request.Request(base + "/api/status", headers={"X-Forwarded-For": "203.0.113.1"})
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                code = r.status
+        except urllib.error.HTTPError as e:
+            code = e.code
+        except Exception as e:
+            code = None
+            warn = f"не смог проверить защиту API (/api/status: {e})"
+        if not warn and code != 401:
+            warn = f"/api/status без ключа отвечает {code}, а не 401 — данные могут быть видны всем"
+    if warn:
+        print(f"  [!] {warn}.")
+        print("      Туннель публикует ВЕСЬ порт API; единственная защита — bearer cookie/ключ.")
+        try:
+            return input("  Продолжить всё равно? [y/N]: ").strip().lower() == "y"
+        except (EOFError, KeyboardInterrupt):
+            return False
+    print("  [ок] Сервер отвечает, снаружи без ключа — 401.")
+    return True
+
+
 def check() -> int:
     """Проверка без изменений: есть ли tailscale, подключён ли, включён ли Funnel.
 
@@ -128,6 +168,10 @@ def main() -> int:
         print("  " + out.strip().splitlines()[0] if out.strip() else "")
         return 1
 
+    if not preflight():
+        print("  Отменено.")
+        return 1
+
     # уже включён?
     _, st = ts("funnel", "status")
     if "funnel on" in st.lower() and str(PORT) in st:
@@ -180,8 +224,8 @@ def main() -> int:
     print("   3. Хотите кнопку и в списке чатов/по ссылке — @BotFather → /mybots → бот → Bot Settings → Menu Button")
     print(f"      → Configure menu button → вставьте {url}")
     print()
-    print("  Кто может открыть этот адрес: любой, кто его знает — но увидит только пустой экран входа.")
-    print("  Данные отдаются только после подтверждения Telegram, что это вы (ваш ID из config.yaml).")
+    print("  Важно: туннель публикует ВЕСЬ порт API, а не только экран входа.")
+    print("  Единственная защита — bearer cookie/ключ: не делитесь адресом с посторонними.")
     print(f"  Выключить публичный доступ: {'funnel.bat off' if IS_WIN else '.venv/bin/python funnel_setup.py off'}")
     return 0
 

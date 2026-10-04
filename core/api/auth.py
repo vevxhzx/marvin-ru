@@ -129,8 +129,14 @@ def _token_ok(request: Request) -> bool:
 
 
 def _presented(request: Request) -> str | None:
-    return (request.headers.get(HEADER) or request.cookies.get(COOKIE)
-            or request.query_params.get(QUERY) or None)
+    tok = request.headers.get(HEADER) or request.cookies.get(COOKIE)
+    if tok:
+        return tok
+    # S5: ?t= светится в логах/истории браузера — на /api/* его не принимаем,
+    # только cookie/заголовок. Вход по ссылке (?t= → cookie + 303) работает вне /api/.
+    if request.url.path.startswith("/api/"):
+        return None
+    return request.query_params.get(QUERY) or None
 
 
 def is_authorized(request: Request) -> bool:

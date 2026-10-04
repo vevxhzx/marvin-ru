@@ -90,3 +90,21 @@ cd web && npm run build && cd ..
 :: 3. в индексе нет секретов и данных
 git ls-files | findstr /R "config.yaml ^data/ ^backups/ .env$"
 ```
+
+## 8. Копии секретов в бэкапах
+
+- `backups/config-<дата>/` содержат живые секреты: `config.yaml`, `data/api_token`,
+  `data/session_secret` (`google_token.json` в копии не входит — долгоживущий OAuth
+  refresh-токен, автовосстановления из копий нет).
+- Копии информативные: `restore_backup` подменяет только БД; возврат ключей — вручную
+  через скачивание файла бэкапа (`resolve_backup_file` / `GET /api/backups/.../download`).
+- Скопированные файлы получают права `0o600` (best-effort, на Windows игнорируется).
+- Ротация при утечке копии: кнопка «новый ключ» (`auth.rotate()` — новый `data/api_token`
+  + сброс всех Telegram-сессий через `tg_auth.rotate_secret()`); ключи облака/Google
+  менять вручную в их кабинетах.
+
+## 9. Время жизни сессий
+
+- Cookie `assistant_session`: `max_age=365*86400` (1 год, `core/api/auth.py`).
+- Telegram-сессия (`assistant_tg`): `TG_SESSION_DAYS=30` (`core/api/tg_auth.py`).
+- Ротация только вручную: кнопка «новый ключ» (`auth.rotate()`).

@@ -44,6 +44,15 @@ def _start_menu_apps() -> dict[str, Path]:
 _APPS_CACHE: tuple[float, dict[str, Path]] = (0.0, {})
 
 
+# S12: точечные команды shell:/ms-settings: — только те 5 значений, что есть
+# в core/services/pc.py (APPS). Остальное отказываем, не выполняя: произвольный
+# shell:-URI может вести куда угодно (shell:::evil, ms-settings:*-evil…).
+_ALLOWED_SHELL_CMDS = frozenset({
+    "ms-settings:", "shell:RecycleBinFolder", "shell:Downloads",
+    "shell:Desktop", "shell:Personal",
+})
+
+
 def open_app(name: str) -> str:
     """Запустить программу: по имени exe/команды, иначе ищем ярлык в «Пуске» по подстроке."""
     global _APPS_CACHE
@@ -51,6 +60,8 @@ def open_app(name: str) -> str:
     if name == "__browser__":
         webbrowser.open("about:blank"); return ""
     if name.startswith(("shell:", "ms-settings:")):
+        if name not in _ALLOWED_SHELL_CMDS:
+            return f"Так не открываю, сэр: «{name[:60]}» — это не из разрешённого списка."
         if IS_WIN:
             os.startfile(name)  # type: ignore[attr-defined]
         return ""
