@@ -1,5 +1,6 @@
 const BASE = ''
 import { getLang, localeOf, t, fmtDate, fmtNumber, fmtMoney, pluralIndex } from './i18n'
+import { tg } from './tg'
 
 async function req(method, path, body, timeoutMs = 30000) {
   const ctrl = new AbortController()
@@ -23,7 +24,6 @@ async function req(method, path, body, timeoutMs = 30000) {
     clearTimeout(timer)
   }
   if (r.status === 401) {
-    const { tg } = await import('./tg')
     const msg = tg.active
       ? (tg.error ? t('api.tg_denied', { err: tg.error }) : t('api.tg_session_expired'))
       : t('api.no_access_device')

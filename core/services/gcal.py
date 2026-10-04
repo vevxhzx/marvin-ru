@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import secrets
 import time
 from datetime import datetime, timedelta
@@ -103,6 +104,10 @@ def _load_token() -> dict:
 
 def _save_token(tok: dict) -> None:
     TOKEN_PATH.write_text(json.dumps(tok, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        os.chmod(TOKEN_PATH, 0o600)
+    except Exception:  # Windows
+        pass
 
 
 def status() -> dict:

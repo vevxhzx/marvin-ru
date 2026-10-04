@@ -219,6 +219,22 @@ def test_media_traversal_does_not_leak_files():
         assert r.status_code in (200, 404), f"{p} → неожиданный {r.status_code}"
 
 
+def test_media_sibling_prefix_is_rejected():
+    """Файл в соседнем каталоге-префиксе (…/media_evil/…) не отдаётся через /media/… (S7).
+
+    Строковая проверка `str(f).startswith(str(MEDIA_DIR))` пропускала такой файл
+    (префикс совпадает), корректная — только `is_relative_to` после resolve()."""
+    from core.services import brain_notes
+    evil = brain_notes.MEDIA_DIR.parent / (brain_notes.MEDIA_DIR.name + "_evil_probe.html")
+    evil.write_text("secret-sibling-probe", encoding="utf-8")
+    try:
+        r = _client().get("/media/%2e%2e/" + evil.name)
+        assert r.status_code == 404, f"соседний префикс-каталог отдан: {r.status_code}"
+        assert "secret-sibling-probe" not in r.text
+    finally:
+        evil.unlink(missing_ok=True)
+
+
 def test_cloud_backup_name_traversal_is_rejected():
     """Имя файла в облачных бэкапах проверяется регуляркой — обход не проходит."""
     from core.api import auth, tg_auth  # noqa: F401  (импорт ради единообразия фикстур)
@@ -254,6 +270,22 @@ def test_google_callback_does_not_reflect_html(payload, monkeypatch):
     for tag in ("<script>alert", "<img src=x", "<svg/onload", "<svg onload"):
         assert tag not in body.lower(), f"в ответе остался сырой тег: {tag}"
     assert "&lt;" in body or "&quot;" in body, "ожидаем экранированную форму текста"
+
+
+def test_google_callback_finish_auth_failure_renders_page(monkeypatch):
+    """Проваленный обмен код→токен: 200 + «Не вышло», без NameError (S2: log не был определён)."""
+    from core import config as config_mod
+    from core.services import gcal
+    # _gcal_reload перечитывает config.yaml и подменяет core.config.cfg — возвращаем как было
+    monkeypatch.setattr(config_mod, "cfg", config_mod.cfg)
+
+    async def _boom(code, state):
+        raise RuntimeError("exchange failed")
+
+    monkeypatch.setattr(gcal, "finish_auth", _boom)
+    r = _client(remote=True).get("/api/google/callback?code=bad&state=x")
+    assert r.status_code == 200
+    assert "Не вышло" in r.text
 
 
 # ================================================================ 6. инъекции

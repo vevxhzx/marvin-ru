@@ -2,6 +2,7 @@
 # Основной набор (faster-whisper, av, numpy, Pillow) уже стоит из requirements.txt —
 # здесь только то, что нужно именно для голоса. Silero/VAD — отдельным файлом requirements-silero.txt.
 faster-whisper>=1.1
+ctranslate2>=4.0,<5  # прямой импорт в core/voice/stt.py (иначе только транзитивно через faster-whisper)
 av>=12
 numpy>=1.26
 vosk>=0.3.45

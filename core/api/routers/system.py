@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio as _asyncio
 import json as _json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 
@@ -36,6 +37,7 @@ from .._shared import _ev_out, broadcast
 from ..schemas import BackupRestoreIn, EditionIn, GameBody, SettingsIn, TgLogin, UiPrefsIn
 
 router = APIRouter()
+log = logging.getLogger("jarvis.api.system")
 # Облачные бэкапы живут в отдельном роутере: базовый `router` выше сверяется тестом
 # tests/test_review_a_contract.py со списком SYSTEM_ROUTES (роуты «до разбиения app.py»),
 # новые маршруты его не должны ломать. Регистрируем ПЕРВЫМ — иначе

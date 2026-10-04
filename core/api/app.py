@@ -308,8 +308,9 @@ async def _fin_err(_, exc: finance.FinanceError):
 @app.get("/media/{path:path}", include_in_schema=False)
 def media(path: str):
     from fastapi.responses import FileResponse
-    f = (brain_notes.MEDIA_DIR / path).resolve()
-    if not str(f).startswith(str(brain_notes.MEDIA_DIR.resolve())) or not f.is_file():
+    root = brain_notes.MEDIA_DIR.resolve()
+    f = (root / path).resolve()
+    if not f.is_file() or not f.is_relative_to(root):
         raise HTTPException(404)
     return FileResponse(f, headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
