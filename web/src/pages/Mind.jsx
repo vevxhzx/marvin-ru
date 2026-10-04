@@ -305,7 +305,7 @@ export default function Mind() {
         </>} />
 
       {/* вкладки — спокойные переключатели, а не «простыня кнопок» */}
-      <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="tablist" aria-label={t('nav.mind')}>
+      <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="tablist" aria-label={t('nav.mind')}>
         {TABS.map(([id, l]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>{t(l)}</button>
         ))}
