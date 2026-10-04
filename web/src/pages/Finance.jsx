@@ -394,7 +394,7 @@ export default function Finance() {
           {/* Герой: баланс крупно и три строки мелким под ним — без карточек на каждое число */}
           {/* Герой: баланс крупно и три строки мелким под ним — на телефоне и на ПК
               одна и та же акцентная карточка (герой везде акцентный). */}
-          <section className={`c hero min-[821px]:col-span-6 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
+          <section className={`c hero col-span-12 min-[821px]:col-span-6 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.c_balance')}</h2></div>
               <small className={`trunc ${SMALL_M}`}>{t('fin.all_accounts')}</small>
@@ -421,7 +421,7 @@ export default function Finance() {
           </section>
 
           {/* Один график на экран: касса на N дней, интерактивный, с подсказками ChartTip */}
-          <section className={`c chart mt-4 ${CARD_M_LIGHT} min-[821px]:col-span-6`} data-reveal>
+          <section className={`c chart mt-4 ${CARD_M_LIGHT} col-span-12 min-[821px]:col-span-6`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0">
                 <h2 className="trunc">{t('fin.cash_on', { n: days || t('common.all'), days: t('run.days_n', { count: days }) })}</h2>
@@ -467,7 +467,7 @@ export default function Finance() {
               /* Поток денег: четыре строки-числа и полоса долей */
               if (id === 'flow') {
                 return (
-                  <section key="flow" data-reveal className={`relative min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="flow" data-reveal className={`relative col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.flow_month')}</h2></div>
@@ -502,7 +502,7 @@ export default function Finance() {
               /* Лимиты по категориям: строки с полосками */
               if (id === 'budgets') {
                 return (
-                  <section key="budgets" data-reveal className={`relative min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="budgets" data-reveal className={`relative col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.budgets_month')}</h2></div>
@@ -558,7 +558,7 @@ export default function Finance() {
 
               /* Ближайшие платежи: строки с датой и суммой */
               return (
-                <section key="upcoming" data-reveal className={`relative min-[821px]:col-span-4 ${CARD_M}`}>
+                <section key="upcoming" data-reveal className={`relative col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                   {ctl}
                   <div className="hd flex-wrap">
                     <div className="min-w-0"><h2 className="trunc">{t('fin.c_upcoming')}</h2></div>

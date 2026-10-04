@@ -174,8 +174,9 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
   const pomoReload = useCallback(() => { api.timer().then(setPomoT).catch(() => {}) }, [])
   useEffect(() => {
     pomoReload()
-    const iv = setInterval(() => { setPomoTick((n) => n + 1); pomoReload() }, 20000)
-    return () => clearInterval(iv)
+    const tick = setInterval(() => setPomoTick((n) => n + 1), 1000)   // отсчёт виден каждую секунду
+    const sync = setInterval(pomoReload, 20000)                        // сверка с сервером реже
+    return () => { clearInterval(tick); clearInterval(sync) }
   }, [pomoReload])
   const { t } = useI18n()
   const st = assistantState(live, busy)
