@@ -501,10 +501,8 @@ export default function Calendar() {
           <h1 className="r" style={{ '--i': 0 }}>{headTitle}</h1>
           <p className="sub r" style={{ '--i': 1 }}>{view === 'week' ? weekRange : cursor.getFullYear()}</p>
         </div>
-        <div className="r mt-3 flex w-full items-center gap-2" style={{ '--i': 2 }}>
-          {/* вид и навигация — в одну строку (скролл с затуханием), настройка справа */}
-          <div className="fade-x flex min-w-0 flex-1 items-center gap-2">
-            <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
+        <div className="flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
+          <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
             <button
               type="button"
               className={view === 'month' ? 'on' : ''}
@@ -534,7 +532,6 @@ export default function Calendar() {
             <button type="button" onClick={() => shiftTime(1)} aria-label={shiftLabel(1)} title={shiftLabel(1)} style={NAV_BTN}>
               <span aria-hidden="true">›</span>
             </button>
-          </div>
           </div>
           {shown.length > 1 && (
             <button

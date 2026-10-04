@@ -98,6 +98,13 @@ export default function Mind() {
     return () => clearTimeout(t)
   }, [q, tick])
 
+  // «+» дока на «Мозге» открывает форму новой записи (AppShell шлёт mind:add)
+  useEffect(() => {
+    const on = () => setAddOpen(true)
+    window.addEventListener('mind:add', on)
+    return () => window.removeEventListener('mind:add', on)
+  }, [])
+
   // вкладка и поиск живут в адресе: ссылку можно кинуть, reload ничего не теряет
   useEffect(() => {
     const next = new URLSearchParams(params)
@@ -292,7 +299,7 @@ export default function Mind() {
           {/* Цвет раздела — вторичное действие: на телефоне его точка входа одна,
               и она уже есть в настройках вида, поэтому в шапке остаётся одно действие. */}
           {!phone && <PageAccent page="mind" />}
-          <button type="button" className="btn-primary head-primary" onClick={() => setAddOpen(true)}>
+          <button type="button" className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setAddOpen(true)}>
             <Plus size={15} /> {t('common.add')}
           </button>
         </>} />
@@ -302,14 +309,6 @@ export default function Mind() {
         {TABS.map(([id, l]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>{t(l)}</button>
         ))}
-      </div>
-
-      {/* поиск по смыслу: на десктопе — своей карточкой, на телефоне просто строка поля
-          на всю ширину: нечему горизонтально листаться */}
-      <div className={`mt-3 flex items-center gap-2 ${FIELD_M}`} style={{ minHeight: 'var(--tap)' }}>
-        <Search size={16} className="faint shrink-0" aria-hidden="true" />
-        <input value={q} onChange={(e) => setQ(e.target.value)} className="input flex-1" placeholder={t('mind.search_ph')} aria-label={t('mind.search_ph')} />
-        {q && <button className="btn-icon shrink-0" onClick={() => setQ('')} aria-label={t('tk.clear_search')} title={t('tk.clear_search')}><X size={15} /></button>}
       </div>
 
       {tab === 'graph' ? (

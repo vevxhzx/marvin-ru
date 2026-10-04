@@ -2634,7 +2634,7 @@ export function translate(key, params) {
     return segRu()[seg] || humanize(key)
   }
   const forms = entry[_lang] != null ? entry[_lang] : (entry[DEFAULT_LANG] ?? '')
-  if (Array.isArray(forms)) return plural(params?.count ?? 0, forms, _lang)
+  if (Array.isArray(forms)) return fill(plural(params?.count ?? 0, forms, _lang), params)
   return fill(forms, params)
 }
 

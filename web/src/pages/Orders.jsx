@@ -85,6 +85,12 @@ export default function Orders() {
     api.crmFollowups().then(setFollowups).catch(() => {}), api.crmAnalytics(6).then(setAnalytics).catch(() => {}),
   ]).catch(() => {})
   useEffect(() => { load() }, [tick])
+  // «+» дока на заказах открывает форму нового заказа (AppShell шлёт orders:add)
+  useEffect(() => {
+    const on = () => setSheet('new')
+    window.addEventListener('orders:add', on)
+    return () => window.removeEventListener('orders:add', on)
+  }, [])
   useEffect(() => { try { localStorage.setItem('orders.layout', layout) } catch { /* приватный режим — не запоминаем */ } }, [layout])
   useEffect(() => {
     if (!deepId) return
@@ -159,7 +165,7 @@ export default function Orders() {
         right={<>
           <button type="button" className="btn-icon outlined" aria-label={t('howto.toggle_aria')} data-tip={t('howto.title')}
             onClick={() => window.dispatchEvent(new CustomEvent('orders:howto', { detail: 'toggle' }))}><HelpCircle size={16} /></button>
-          <button className="btn-primary head-primary" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
+          <button className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
         </>} />
 
       {/* Подсказка «как это работает» на телефоне свёрнута (см. HowToOrders) и открывается
