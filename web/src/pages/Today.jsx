@@ -52,7 +52,9 @@ const CARD_LIGHT_M = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820
 /* Герой телефона: минимум 310px высотой (макет) и содержимое по центру — иначе
    простор уходит в пустоту под полосой дней. Лаймовый градиент и его мягкая тень
    остаются: это идентичность карточки, а не «лишняя» тень поверхности. */
-const HERO_M = 'max-[820px]:!min-h-[310px] max-[820px]:!justify-center'
+/* На телефоне герой компактнее: баланс доминирует, но карточка не занимает весь экран —
+   больше контента видно без прокрутки. */
+const HERO_M = 'max-[820px]:!min-h-0 max-[820px]:!justify-start'
 
 /* Быстрые слова — одна прокручиваемая строка (макет), а не три ряда кнопок */
 const CHIPS_M = 'no-scrollbar max-[820px]:!mx-0 max-[820px]:!mt-3 max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto max-[820px]:!pb-1'
@@ -398,8 +400,9 @@ export default function Today({ openChat, address = '' }) {
         return (
           <section key={id} {...bp}>
             {ctl}
-            {/* Как в макете: в шапке карточки — 「баланс」 слева и пилюля срока справа,
-                крупная сумма по центру, полоса дней и три строки под ней. */}
+            {/* Как в макете: в шапке 「баланс」 слева и стеклянная пилюля срока справа,
+                крупная сумма доминирует, полоса дней — под ней, а спокойные вторичные
+                числа уходят в стеклянные плитки внизу (не спорят с балансом). */}
             <div className="hd flex-wrap">
               <h2 className="trunc">{t('td.w_balance')}</h2>
               <span className="tag" style={{ marginTop: 0 }}>{t('td.days_of_30', { count: daysLeft })}</span>
@@ -417,10 +420,10 @@ export default function Today({ openChat, address = '' }) {
                   ))}
                 </div>
                 <div className="dl mono !max-w-[440px]"><span>{startStr}</span><span>{endStr}</span></div>
-                <div className="mt-3">
-                  <HeroLine label={t('td.avg_day')} value={money(avgDaily)} />
-                  <HeroLine label={t('fin.c_free')} value={money(freeMonth)} />
-                  <HeroLine label={t('aims.by', { date: endStr })} value={`${forecastBalance < 0 ? '−' : ''}${money(Math.abs(forecastBalance))}`} />
+                <div className="glass-tiles mt-4">
+                  <div><small>{t('td.avg_day')}</small><b className="num">{money(avgDaily)}</b></div>
+                  <div><small>{t('fin.c_free')}</small><b className="num">{money(freeMonth)}</b></div>
+                  <div><small>{t('aims.by', { date: endStr })}</small><b className="num">{`${forecastBalance < 0 ? '−' : ''}${money(Math.abs(forecastBalance))}`}</b></div>
                 </div>
               </>
             )}
@@ -805,42 +808,6 @@ export default function Today({ openChat, address = '' }) {
           <h1 className="fade-r" title={`${greeting}, ${ownerName}`}>{greeting}, {ownerName}</h1>
         </div>
       </header>
-
-      {/* 2. Композер фразы под строкой статуса */}
-      <div className="comp composer-hero max-[380px]:!pl-4" data-reveal>
-        <i></i>
-        {isTypingManual ? (
-          <input
-            autoFocus
-            className="ph"
-            style={{ background: 'transparent', border: 0, outline: 'none', width: '100%', color: 'inherit' }}
-            value={inputVal}
-            onChange={(e) => setInputVal(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSend()}
-            onBlur={() => { if (!inputVal.trim()) setIsTypingManual(false) }}
-          />
-        ) : (
-          <button type="button" className="ph" id="ph" onClick={() => setIsTypingManual(true)}
-            style={{ cursor: 'text', background: 'transparent', border: 0, textAlign: 'left' }}>
-            {typed || t('td.tap_to_write')}
-          </button>
-        )}
-        <button type="button" className="send" onClick={handleSend} aria-label={t('chat.send')} title={t('chat.send')}>
-          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 16V4M5 9l5-5 5 5" /></svg>
-        </button>
-      </div>
-
-      {/* Быстрые слова — чипы под композером. На телефоне это ОДНА прокручиваемая строка
-          (макет): чипы не сжимаются и не переносятся, три ряда кнопок телефон не читает. */}
-      <div className={`chips ${CHIPS_M}`} data-reveal>
-        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_task') + ': ') }}>{t('graph.one_task')}</button>
-        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('qa.seed_expense') + ': ') }}>{t('qa.expense')}</button>
-        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('ev_seed') + ': ') }}>{t('graph.one_event')}</button>
-        <button type="button" className="max-[820px]:!shrink-0" onClick={() => { setIsTypingManual(true); setInputVal(T('nt_seed') + ': ') }}>{t('graph.one_note')}</button>
-        <button type="button" className="max-[820px]:!shrink-0" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_digest'), send: true } }))}>☀️ {t('rc.morning_digest')}</button>
-        <button type="button" className="max-[820px]:!shrink-0" onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: T('td.seed_week'), send: true } }))}>📊 {t('rc.week_summary')}</button>
-        <button type="button" className="max-[820px]:!shrink-0" onClick={() => window.open('/api/snapshot/month.png', '_blank')}>🗓 {t('td.month_snapshot')}</button>
-      </div>
 
       {/* Панель режима правки главной страницы */}
       {editMode && (

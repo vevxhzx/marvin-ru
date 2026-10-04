@@ -212,6 +212,25 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .hero .big { text-shadow: 0 2px 18px rgba(8, 12, 40, 0.22), 0 1px 0 rgba(255, 255, 255, 0.14); }
 /* Плашка-срок в шапке героя — стеклянная: светлая заливка + внутренний блик */
 .hero .tag { background: var(--hero-w-22); box-shadow: inset 0 1px 0 var(--hero-w-55), inset 0 0 0 1px var(--hero-w-18); }
+
+/* Стеклянные плитки вторичных чисел. Внутри героя — морозное белое стекло на акценте;
+   вне героя — светлое стекло из токенов --glass-*. Иерархия: подпись тихая, число весомее. */
+.glass-tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-2); }
+.glass-tiles > div {
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(14px) saturate(160%);
+  backdrop-filter: blur(14px) saturate(160%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 0 0 1px var(--glass-ring), 0 10px 24px -14px rgba(16, 20, 43, 0.35);
+}
+.glass-tiles small { display: block; margin-bottom: 3px; font-size: var(--fs-xs); color: var(--ink-3); line-height: 1.2; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.glass-tiles b { font-size: var(--fs-base); font-weight: 600; letter-spacing: -0.02em; white-space: nowrap; }
+/* Внутри героя плитки — морозное белое стекло на акцентной заливке */
+.hero .glass-tiles > div { background: var(--hero-w-18); box-shadow: inset 0 1px 0 var(--hero-w-45), inset 0 0 0 1px var(--hero-w-18); }
+.hero .glass-tiles small { color: var(--hero-ink-70); }
+.hero .glass-tiles b { color: var(--hero-ink); }
 .hm { margin-top: auto; display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); padding-top: var(--card-pad); }
 /* стеклянные подложки внутри героя: белая заливка + белая внутренняя линия */
 .hm div { padding: 14px 16px; border-radius: var(--r-md); background: var(--hero-w-18); box-shadow: inset 0 1px 0 var(--hero-w-45); }
@@ -1260,6 +1279,10 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --dock-ring: rgba(255, 255, 255, 0.7);
   --dock-shadow: 0 12px 30px rgba(40, 50, 140, 0.18);
   --dock-ink: #555a78;
+  /* Стекло (liquid glass) для плавающих слоёв и плиток: светлая тема — морозное белое,
+     тёмная — прозрачное с внутренней светящейся линией. */
+  --glass-bg: rgba(255, 255, 255, 0.62);
+  --glass-ring: rgba(255, 255, 255, 0.55);
   /* композер на главной: своя высота на десктопе и на телефоне */
   --comp-h: 68px;
   --comp-h-m: 56px;
@@ -1350,6 +1373,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     --dock-ring: rgba(255, 255, 255, 0.12);
     --dock-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
     --dock-ink: #9aa3d6;
+    --glass-bg: rgba(255, 255, 255, 0.08);
+    --glass-ring: rgba(255, 255, 255, 0.14);
     --neg: #ff7d90;
     --neg-ink: #ff9fae;
     --neg-solid: #a8283f;
@@ -1409,6 +1434,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --dock-ring: rgba(255, 255, 255, 0.12);
   --dock-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
   --dock-ink: #9aa3d6;
+  --glass-bg: rgba(255, 255, 255, 0.08);
+  --glass-ring: rgba(255, 255, 255, 0.14);
   --neg: #ff7d90;
   --neg-ink: #ff9fae;
   --neg-solid: #a8283f;
