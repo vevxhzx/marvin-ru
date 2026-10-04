@@ -77,7 +77,8 @@ aside nav { margin: 4px 0 0; }
 aside .sb { margin-top: 0; }
 /* Помодоро: кликабельная строка (обработчик ведёт в «заказы»), поэтому у неё есть
    своя подложка наведения — на тёмной колонке она читается как кнопка. */
-.pomo { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-2) var(--s-3); color: var(--sb-dim); font-size: var(--fs-md); border-radius: var(--r-sm); transition: background var(--t-base) var(--e), color var(--t-base) var(--e); }
+.pomo { display: flex; align-items: center; gap: var(--s-3); min-width: 0; padding: var(--s-2) var(--s-3); color: var(--sb-dim); font-size: var(--fs-md); border-radius: var(--r-sm); transition: background var(--t-base) var(--e), color var(--t-base) var(--e); }
+.pomo .pomo-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pomo:hover { background: var(--sb-hover); color: var(--sb-ink); }
 .pomo b { color: var(--sb-ink); font-weight: 500; font-size: var(--fs-base); }
 .pomo-ring, .ring, .pomo-gauge, .pomo-circle {

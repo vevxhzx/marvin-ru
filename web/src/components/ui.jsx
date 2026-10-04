@@ -322,7 +322,7 @@ function useSnaps(phone, vp) {
    (SHEET_MOTION). Поэтому у .sheet в index.css НЕТ animation с fill: заполненная
    анимация перебила бы инлайновый transform, и свайп за ручку не двигал бы шторку.
    Свайп, точки прилипания и закрытие по скорости — useSheetDrag из lib/gestures.js. */
-export function Sheet({ open, onClose, title, sub, hint, children, wide, snaps: snapProp, footer, bodyClass, ariaLabel }) {
+export function Sheet({ open, onClose, title, sub, hint, children, wide, snaps: snapProp, initialSnap, footer, bodyClass, ariaLabel }) {
   const { t } = useI18n()
   const [shown, closing] = useSheetPresence(open)
   const idRef = useRef(0)
@@ -336,7 +336,7 @@ export function Sheet({ open, onClose, title, sub, hint, children, wide, snaps: 
   const vp = useViewport()
   const phone = vp.w < PHONE
   const snaps = useSnaps(phone && snapProp !== false, vp)
-  const [snap, setSnap] = useState(1)
+  const [snap, setSnap] = useState(initialSnap ?? 1)
   const [contentH, setContentH] = useState(0)
   const last = Math.max(0, snaps.length - 1)
   const fits = (h) => !snaps.length || h <= snaps[0] + 8     // влезает в свёрнутый — растягивать нечего

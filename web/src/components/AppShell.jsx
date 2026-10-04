@@ -445,7 +445,7 @@ function SectionsSheet({ open, onClose, more, onSearch, onChat, onTheme, onHelp,
     else toast(t('st.install_failed'), { kind: 'err', sub: t('st.install_manual') })
   }
   return (
-    <SheetHost open={open} onClose={onClose} title={t('nav.more_title')} sub={t('nav.more_sub')}>
+    <SheetHost open={open} onClose={onClose} title={t('nav.more_title')} sub={t('nav.more_sub')} initialSnap={2}>
       <div className="space-y-2">
         <button type="button" className="more-row" onClick={() => { onClose?.(); onSearch?.() }}>
           <span className="more-ic"><Search size={17} strokeWidth={1.8} aria-hidden="true" /></span>

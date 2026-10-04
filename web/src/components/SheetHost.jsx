@@ -17,7 +17,7 @@ import { Sheet } from './ui'
  * откроет оболочка позже. Пропсы — как у Sheet: open, onClose, title, sub, wide, children.
  * ariaLabel — подпись для окна без заголовка.
  */
-export default function SheetHost({ open, onClose, title, sub, wide, children, ariaLabel }) {
+export default function SheetHost({ open, onClose, title, sub, wide, children, ariaLabel, initialSnap }) {
   return (
     <Sheet
       open={open}
@@ -26,6 +26,7 @@ export default function SheetHost({ open, onClose, title, sub, wide, children, a
       sub={sub}
       wide={wide}
       ariaLabel={ariaLabel}
+      initialSnap={initialSnap}
     >
       {children}
     </Sheet>
