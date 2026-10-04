@@ -106,13 +106,22 @@ export default function People() {
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-ppl" style={pageAcc.style}>
       <PageHead title={T('nav.people')}
-        sub={<StatRow items={[
-          { key: 'debt', label: t('or.cc_debt'), value: money(unpaidTotal), tone: unpaidTotal ? 'warn' : '' },
-          { key: 'orders', label: t('or.cc_orders'), value: ordersTotal },
-          { key: 'open', label: t('people.open_orders', { n: openCount }) },
-          ltvTotal ? { key: 'ltv', label: 'LTV', value: money(ltvTotal), tone: 'ok' } : null,
-        ].filter(Boolean)} />}
         right={<button type="button" className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}>{t('people.add')}</button>} />
+
+      {/* Ключевое число — премиум-карточка (градиент); остальное — строго ниже */}
+      <div className="hero-card" data-reveal>
+        <div className="hc-label">{t('or.cc_debt')}</div>
+        <div className="hc-big">{money(unpaidTotal || 0)}</div>
+        <div className="hc-row">
+          <span>{t('or.cc_orders')}: <b className="num">{ordersTotal}</b></span>
+          <span>{t('people.open_orders', { n: openCount })}</span>
+        </div>
+      </div>
+      {ltvTotal ? (
+        <div className="kv-grid mt-3">
+          <div className="kv"><span>LTV</span><b className="num">{money(ltvTotal)}</b></div>
+        </div>
+      ) : null}
 
       {/* Тип контакта — спокойные пилюли с переносом, не одна «таблетка» на семь пунктов */}
       <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('people.kind_label')}>

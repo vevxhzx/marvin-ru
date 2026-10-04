@@ -161,12 +161,26 @@ export default function Orders() {
   return (
     <div className={`bento-page pg space-y-6 pt-4 ${FIELD_LABEL_M}`} style={pageAcc.style}>
       <PageHead kicker={kicker} title={t('nav.orders')}
-        sub={<StatRow items={counters} />}
         right={<>
           <button type="button" className="btn-icon outlined" aria-label={t('howto.toggle_aria')} data-tip={t('howto.title')}
             onClick={() => window.dispatchEvent(new CustomEvent('orders:howto', { detail: 'toggle' }))}><HelpCircle size={16} /></button>
           <button className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
         </>} />
+
+      {/* Ключевое число — премиум-карточка (градиент); остальные метрики — строго ниже */}
+      <div className="hero-card" data-reveal>
+        <div className="hc-label">{t('or.v_unpaid')}</div>
+        <div className="hc-big">{money(unpaid || 0)}</div>
+        <div className="hc-row">
+          <span>{t('or.v_open')}: <b className="num">{openN}</b></span>
+          {month ? <span>{t('or.this_month')}: <b className="num">{money(month)}</b></span> : null}
+        </div>
+      </div>
+      <div className="kv-grid mt-3">
+        {counters.filter((c) => c.key === 'rate' || c.key === 'check').map((c) => (
+          <div className="kv" key={c.key}><span className="trunc">{c.label}</span><b className="num">{c.value}</b></div>
+        ))}
+      </div>
 
       {/* Подсказка «как это работает» на телефоне свёрнута (см. HowToOrders) и открывается
           одной кнопкой «?» — это её единственная точка входа, второй кнопки в шапке нет. */}
@@ -192,7 +206,7 @@ export default function Orders() {
       </div>
 
       {stageChips.length > 0 && (
-        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 animate-rise" role="group" aria-label={t('stage.block')}>
+        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 animate-rise fade-x" role="group" aria-label={t('stage.block')}>
           {stageChips.map(([k, label, n]) => (
             <button key={k} type="button"
               className={`pill shrink-0 !min-h-[var(--tap)] ${stageTab === k ? 'on' : ''}`}
