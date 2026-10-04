@@ -809,57 +809,59 @@ export default function Finance() {
 
       {/* ---------------- РЕГУЛЯРНЫЕ ---------------- */}
       {tab === 'recurring' && (
-        <Block
-          className="mt-5"
-          title={t('fin.c_recurring')}
-          note={`${fmt.money(recExpense)}${recIncome > 0 ? ` · +${fmt.money(recIncome)}` : ''}`}
-          action={recPaused.length > 0 ? (
-            <button type="button" className="btn-soft btn-sm" onClick={() => setShowPaused((v) => !v)} title={t('fin.paused_hint')}>
-              {showPaused ? t('fin.hide_paused') : t('fin.show_paused_n', { n: recPaused.length })}
-            </button>
-          ) : null}
-        >
+        <div className="bento mt-4">
+          <section className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+            <div className="hd"><div className="min-w-0"><h2 className="trunc">{t('fin.c_recurring')}</h2></div></div>
+            <div className="big num" style={{ fontSize: 'clamp(24px, 2.6vw, 34px)' }}>{fmt.money(recExpense)}</div>
+            {recIncome > 0 && <div className="muted mt-1 text-[length:var(--fs-md)]">+{fmt.money(recIncome)}</div>}
+            {recPaused.length > 0 && (
+              <button type="button" className="btn-soft btn-sm mt-3" onClick={() => setShowPaused((v) => !v)} title={t('fin.paused_hint')}>
+                {showPaused ? t('fin.hide_paused') : t('fin.show_paused_n', { n: recPaused.length })}
+              </button>
+            )}
+          </section>
           {recShown.length === 0 ? (
-            <div className="muted py-3 text-[length:var(--fs-md)]">{recurring.length > 0 ? t('fin.all_paused') : t('fin.no_recurring')}</div>
+            <section className={`c s8 ${CARD_M_LIGHT}`} data-reveal>
+              <div className="muted text-[length:var(--fs-md)]">{recurring.length > 0 ? t('fin.all_paused') : t('fin.no_recurring')}</div>
+            </section>
           ) : recShown.map((r) => (
-            <div className="rowi" key={r.id}>
-              <time>{(r.day_of_month || r.day) ? t('fin.day_of_month', { d: r.day_of_month || r.day }) : t('fin.per_month_short')}</time>
-              <span className="t">
-                <span className="clamp-2 block">{r.name || r.title}</span>
-                <small>{[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}</small>
-              </span>
-              <span className="amt" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit' }}>
-                {r.kind === 'income' ? '+' : MINUS}{fmt.money(r.amount)}
-              </span>
-              <RowActions>
-                <IconBtn
-                  title={r.active === false ? 'Включить: платёж снова пойдёт в прогноз' : t('fin.pause_tip')}
-                  onClick={() => toggleActive(r)}
-                >
-                  {r.active === false ? <Play size={14} /> : <Pause size={14} />}
-                </IconBtn>
-                <IconBtn onClick={() => { setEditingItem(r); setSheet('recurring') }} title={t('fin.edit_pay')}><Edit2 size={14} /></IconBtn>
-                <IconBtn
-                  danger
-                  title={t('fin.remove_pay')}
-                  onClick={() => setAsk({
-                    title: t('fin.del_rec_q_name', { name: r.name || r.title }),
-                    text: t('fin.pause_note'),
-                    msg: t('fin.paused'),
-                    run: () => api.delRecurring(r.id),
-                  })}
-                >
-                  <Trash2 size={14} />
-                </IconBtn>
-              </RowActions>
-            </div>
+            <section key={r.id} className={`c s4 ${CARD_M_LIGHT}`} data-reveal>
+              <div className="hd flex-wrap">
+                <span className="due-tag">{(r.day_of_month || r.day) ? t('fin.day_of_month', { d: r.day_of_month || r.day }) : t('fin.per_month_short')}</span>
+                <span className="num" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit', fontSize: 'var(--fs-lg)', fontWeight: 600 }}>
+                  {r.kind === 'income' ? '+' : MINUS}{fmt.money(r.amount)}
+                </span>
+              </div>
+              <div className="clamp-2 font-medium" style={{ fontSize: 'var(--fs-base)' }}>{r.name || r.title}</div>
+              <div className="muted mt-1 trunc text-[length:var(--fs-xs)]" title={[r.category, r.account].filter(Boolean).join(' · ')}>
+                {[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}
+              </div>
+              <div className="mt-3">
+                <RowActions>
+                  <IconBtn
+                    title={r.active === false ? 'Включить: платёж снова пойдёт в прогноз' : t('fin.pause_tip')}
+                    onClick={() => toggleActive(r)}
+                  >
+                    {r.active === false ? <Play size={14} /> : <Pause size={14} />}
+                  </IconBtn>
+                  <IconBtn onClick={() => { setEditingItem(r); setSheet('recurring') }} title={t('fin.edit_pay')}><Edit2 size={14} /></IconBtn>
+                  <IconBtn
+                    danger
+                    title={t('fin.remove_pay')}
+                    onClick={() => setAsk({
+                      title: t('fin.del_rec_q_name', { name: r.name || r.title }),
+                      text: t('fin.pause_note'),
+                      msg: t('fin.paused'),
+                      run: () => api.delRecurring(r.id),
+                    })}
+                  >
+                    <Trash2 size={14} />
+                  </IconBtn>
+                </RowActions>
+              </div>
+            </section>
           ))}
-          {recPaused.length > 0 && (
-            <div className="rule pt-3 text-[length:var(--fs-md)] text-[var(--ink-3)]">
-              {t('fin.paused_n', { count: recPaused.length })}
-            </div>
-          )}
-        </Block>
+        </div>
       )}
 
       {/* ---------------- ЦЕЛИ ---------------- */}

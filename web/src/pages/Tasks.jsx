@@ -391,8 +391,9 @@ export default function Tasks() {
         <>
           {/* Quick add — one line, your own words. На десктопе панель-карточка, на телефоне
               тот же блок без обёртки. */}
+          <div className="bento mt-5">
           {blockOrder.includes('tools') && (
-            <section className="relative mt-5">
+            <section className={`relative s4 ${cardM('!p-4')}`}>
               {ctl('tools')}
               <div className={cardsEdit ? 'pt-8' : ''}>
                 {projects.length > 0 && (
@@ -436,7 +437,7 @@ export default function Tasks() {
           {/* The list: на десктопе панель-карточка с шапкой и волосяными разделителями,
               на телефоне плоский раздел на фоне страницы. Каскад появления общий. */}
           {blockOrder.includes('list') && (
-            <section className={`relative mt-5 ${cardM()}`}>
+            <section className={`relative s8 ${cardM()}`}>
               {ctl('list')}
               <div
                 className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"
@@ -536,6 +537,7 @@ export default function Tasks() {
               )}
             </section>
           )}
+          </div>
 
           {cardsEdit && blockOrder.length < BLOCKS.length && (
             <section className="relative mt-7">
