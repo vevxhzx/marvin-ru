@@ -387,32 +387,14 @@ export default function Finance() {
               дальше карточки по 4 в ряд. На телефоне всё в одну колонку. */}
           <div className="bento mt-4">
           {/* Герой: баланс крупно и три строки мелким под ним — без карточек на каждое число */}
-          {/* Телефон — по свежему макету владельца: лаймовая карточка «свободно в месяц»
-                с полосой и строкой баланс/потрачено. На десктопе остаётся акцентный герой
-                с балансом — так в макете из восьми экранов. */}
-            <div className="min-[821px]:!hidden">
-              <div className="lime-card">
-                <div className="lime-lab">{`${t('fin.c_free')} ${t('td.per_month').toLowerCase()}`}</div>
-                <div className="mt-1">
-                  <BigMoney value={cf.free || 0} format={fmt.int} label={money(cf.free || 0)} />
-                </div>
-                <div className="lime-bar mt-3">
-                  <i style={{
-                    width: `${Math.max(4, Math.min(100, Math.round(((cf.free || 0) / Math.max(1, Math.abs(balance || 1))) * 100)))}%`,
-                  }} />
-                </div>
-                <div className="lime-meta mt-3">
-                  <span>{t('fin.c_balance')} <b className="num">{money(balance)}</b></span>
-                  <span>{t('fin.c_spent')} <b className="num">{money(spent)}</b></span>
-                </div>
-              </div>
-            </div>
-          <section className={`c hero max-[820px]:!hidden min-[821px]:col-span-6 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
+          {/* Герой: баланс крупно и три строки мелким под ним — на телефоне и на ПК
+              одна и та же акцентная карточка (герой везде акцентный). */}
+          <section className={`c hero min-[821px]:col-span-6 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.c_balance')}</h2></div>
               <small className={`trunc ${SMALL_M}`}>{t('fin.all_accounts')}</small>
             </div>
-            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2 max-[821px]:flex-nowrap">
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2">
               <BigMoney value={balance} format={fmt.int} label={money(balance)} fs="clamp(30px, 3.4vw, 46px)" />
               <span className="tag" style={{ marginTop: 0 }}>{t('fin.for_days', { n: days || t('common.all'), m: money(spent) })}</span>
             </div>

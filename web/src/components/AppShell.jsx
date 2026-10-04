@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Sun, Moon, Monitor, Square, Play, Search } from 'lucide-react'
+import { Sun, Moon, Monitor, Square, Play, Search, MoreHorizontal, MessageCircle, HelpCircle, Download } from 'lucide-react'
 import Chat from './Chat'
 import Palette from './Palette'
 import { LivePopover } from './Live'
@@ -22,7 +22,8 @@ import { useI18n, t as T } from '../lib/i18n'
 import { crossfadeIn, crossfadeOut, viewTransition, motionOff, usePhone } from '../lib/motion'
 import { usePullToRefresh } from '../lib/gestures'
 import { headOf, textOf } from '../lib/nav'
-import { Toaster } from './ui'
+import { Toaster, toast } from './ui'
+import { canInstall, installPwa } from '../lib/sw'
 import Dock from './Dock'
 import SheetHost from './SheetHost'
 import TitleHeader from './TitleHeader'
@@ -407,6 +408,76 @@ function PomodoroPanel({ timer, left, onClose, onChanged }) {
   )
 }
 
+/* ---------- «все разделы»: шторка меню телефона (кнопка «…» в шапке) ----------
+   Заказы, мозг, доска, люди, память, настройки — всё, чего нет в доке; ниже
+   разделитель и действия: чат, язык, тема, справка, установка приложения. */
+function useInstallable() {
+  const [yes, setYes] = useState(() => (typeof canInstall === 'function' ? canInstall() : false))
+  useEffect(() => {
+    const on = () => setYes(!!canInstall())
+    window.addEventListener('pwa:installable', on)
+    on()
+    return () => window.removeEventListener('pwa:installable', on)
+  }, [])
+  return yes
+}
+
+function SectionsSheet({ open, onClose, more, onSearch, onChat, onTheme, onHelp, mode, langNode }) {
+  const { t } = useI18n()
+  const installable = useInstallable()
+  const doInstall = async () => {
+    const ok = await installPwa()
+    if (ok) { onClose?.(); toast(t('common.done')) }
+    else toast(t('st.install_failed'), { kind: 'err', sub: t('st.install_manual') })
+  }
+  return (
+    <SheetHost open={open} onClose={onClose} title={t('nav.more_title')} sub={t('nav.more_sub')}>
+      <div className="space-y-2">
+        <button type="button" className="more-row" onClick={() => { onClose?.(); onSearch?.() }}>
+          <span className="more-ic"><Search size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+          {t('common.search')}
+        </button>
+        {(more || []).map(({ to, label, icon: Icon }) => (
+          <NavLink key={to} to={to} className="more-row" onClick={onClose}>
+            <span className="more-ic"><Icon size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+            {t(label)}
+          </NavLink>
+        ))}
+        <div className="rule !my-3" />
+        <button type="button" className="more-row" onClick={() => { onClose?.(); onChat?.() }}>
+          <span className="more-ic"><MessageCircle size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+          {t('more.chat')}
+        </button>
+        {langNode && (
+          <div className="more-row !cursor-default items-center justify-between" style={{ background: 'transparent' }}>
+            <span className="flex items-center gap-3">
+              <span className="more-ic"><MoreHorizontal size={17} strokeWidth={1.8} aria-hidden="true" style={{ visibility: 'hidden' }} /></span>
+              <span>{T('lang.aria')}</span>
+            </span>
+            {langNode}
+          </div>
+        )}
+        <button type="button" className="more-row" onClick={() => { onClose?.(); onTheme?.() }}>
+          <span className="more-ic">
+            {mode === 'light' ? <Sun size={17} /> : mode === 'dark' ? <Moon size={17} /> : <Monitor size={17} />}
+          </span>
+          {t('st.theme')}
+        </button>
+        <button type="button" className="more-row" onClick={() => { onClose?.(); onHelp?.() }}>
+          <span className="more-ic"><HelpCircle size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+          {t('more.keys')}
+        </button>
+        {installable && (
+          <button type="button" className="more-row" onClick={() => { doInstall() }}>
+            <span className="more-ic"><Download size={17} strokeWidth={1.8} aria-hidden="true" /></span>
+            {t('st.install')}
+          </button>
+        )}
+      </div>
+    </SheetHost>
+  )
+}
+
 export default function AppShell({
   live, busy, health, inbox, inboxOpen, onInbox, pathKey, address, onSearch,
   chatOpen, chatSeed, onChat, onChatClose, palOpen, onPalClose, onPalChat, setTheme,
@@ -419,6 +490,17 @@ export default function AppShell({
   const contentRef = useRef(null)
   const headRef = useRef(null)
   const [headH, setHeadH] = useState(0)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [gtSolid, setGtSolid] = useState(false)
+
+  /* Размытая подложка шапки — только когда страница ушла под неё: у самой строки
+     фона нет (макет), а при скролле текст под шапкой не должен просвечивать. */
+  useEffect(() => {
+    const on = () => setGtSolid(window.scrollY > 8)
+    on()
+    window.addEventListener('scroll', on, { passive: true })
+    return () => window.removeEventListener('scroll', on)
+  }, [])
 
   /* Строка-статус телефона: слева дата («суббота · 3 октября»), справа иконки —
      как в свежем макете владельца. Дата живёт здесь, а не в шапке страницы. */
@@ -446,28 +528,12 @@ export default function AppShell({
         <Sidebar live={live} busy={busy} hiddenNav={hiddenNav} />
 
         <main>
-          <div className="gt r" ref={headRef}>
-            {phone && <div className="th-date trunc" title={dateLine}>{dateLine}</div>}
+          <div className={`gt r ${gtSolid ? 'gt-solid' : ''}`} ref={headRef}>
             <TopTimer />
-            {phone && (
-              <TitleHeader
-                title={head.title ? t(head.title) : ''}
-                sub={textOf(t, head.sub)}
-                contentRef={contentRef}
-                pathKey={pathKey}
-              />
-            )}
             {phone ? (
-              /* на телефоне поиск — кнопка: строка целиком отдана заголовку и действиям */
-              <button
-                type="button"
-                className="btn-icon shrink-0"
-                onClick={onSearch}
-                aria-label={t('common.search')}
-                data-tip={t('common.search')}
-              >
-                <Search size={18} aria-hidden="true" />
-              </button>
+              /* на телефоне поиск — строка в шторке «все разделы»: в шапке по макету
+                 только круглые кнопки, иначе они теснят дату и сжимаются в эллипсы */
+              null
             ) : (
               <div className="search" onClick={onSearch} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
                 aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSearch() } }}>
@@ -475,16 +541,16 @@ export default function AppShell({
                 {t('common.search')}<span className="kbd mono">{kb('K')}</span>
               </div>
             )}
-            {!phone && <LangToggle />}
             <div className="ib" onClick={onInbox} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
               aria-label={t('inbox.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onInbox() } }}>
               <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 1.5h-13zM8.5 18h3"/></svg>
               {inbox.unread > 0 && <u></u>}
             </div>
-            <div className="av" onClick={onChat} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
-              aria-label={t('chat.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onChat() } }}>
-              {address ? address.slice(0, 1).toLowerCase() : t('common.you_initial')}
-            </div>
+            {/* Чат — иконкой, а не кругом-профилем с инициалом: профилей у владельца нет */}
+            <button type="button" className="ib" onClick={onChat}
+              aria-label={t('chat.title')} title={t('chat.title')}>
+              <MessageCircle size={18} aria-hidden="true" />
+            </button>
           </div>
 
           <div className="relative">
@@ -518,11 +584,13 @@ export default function AppShell({
           </div>
         </main>
 
-        <Dock
-          tabs={tabs}
-          pathname={pathKey}
-          compact={compact}
+        <Dock tabs={tabs} pathname={pathKey} compact={compact} onMore={() => setMoreOpen(true)} />
+
+        <SectionsSheet
+          open={moreOpen}
+          onClose={() => setMoreOpen(false)}
           more={more}
+          onSearch={onSearch}
           onChat={onChat}
           onTheme={onTheme}
           onHelp={onHelp}

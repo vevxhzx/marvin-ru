@@ -48,24 +48,30 @@ export function useReveal(dep) {
   return ref
 }
 
-/* Крупное число на телефоне — ровно 44px, а не clamp(): «жидкий» размер едет вместе
-   с шириной окна, цифры меняют вес при повороте экрана, и счётчик (CountUp) «прыгает»
-   ещё сильнее. На десктопе размер прежний — та же токенная шкала (--hero-fs /
-   --hero-fs-2), её не трогаем. Табличные цифры даёт .big. */
-export const BIG_PHONE_PX = 44
+/* Крупное число на телефоне — ровно 52px (макет «вариант B»: 58px на 390pt, но
+   длинные суммы «256 000» не должны переноситься и на 375px). Размер фиксированный,
+   а не clamp(): «жидкий» размер едет вместе с шириной окна, цифры меняют вес при
+   повороте экрана, и счётчик (CountUp) «прыгает» ещё сильнее. На десктопе размер
+   прежний — та же токенная шкала (--hero-fs / --hero-fs-2), её не трогаем.
+   Табличные цифры даёт .big. */
+export const BIG_PHONE_PX = 52
 export function useBigSize(fs = 'var(--hero-fs)') {
   const phone = usePhone()
   return phone ? `${BIG_PHONE_PX}px` : fs
 }
 
-/* Сумма одной строкой: число тянет на себя вес, ₽ — на полтона кегля легче. */
-export function BigMoney({ value, format, label, className = '', fs = 'var(--hero-fs)' }) {
+/* Сумма одной строкой: число тянет на себя вес, ₽ — мельче и легче (макеты владельца).
+   cur="accent" — знак ₽ акцентом (лайм ночью, синий днём), как на «финансах» макета. */
+export function BigMoney({ value, format, label, className = '', fs = 'var(--hero-fs)', cur = 'soft' }) {
   const size = useBigSize(fs)
+  const curStyle = cur === 'accent'
+    ? { fontSize: '0.55em', fontWeight: 500, opacity: 1, marginLeft: '0.18em', color: 'var(--acc)' }
+    : { fontSize: '0.55em', fontWeight: 400, opacity: 0.6, marginLeft: '0.18em' }
   return (
     <span className={`big ${className}`} style={{ fontSize: size }}>
       <span aria-hidden="true">
         <CountUp value={Number(value) || 0} format={format} roll={false} />
-        <span style={{ fontSize: '0.5em', fontWeight: 400, opacity: 0.75, marginLeft: '0.18em' }}>{CUR}</span>
+        <span style={curStyle}>{CUR}</span>
       </span>
       <span className="sr-only">{label}</span>
     </span>

@@ -67,6 +67,8 @@ export default function TitleHeader({ title, sub, contentRef, pathKey }) {
       const p = st.p
       el.style.opacity = String(p)
       el.style.transform = `translate3d(0, ${((1 - p) * 8).toFixed(2)}px, 0) scale(${(0.97 + 0.03 * p).toFixed(3)})`
+      /* прогресс уходит в слот шапки (.th-slot): по нему гаснет дата под заголовком */
+      el.parentElement?.style.setProperty('--th-p', String(v))
       if (subRef.current) {
         /* подзаголовок выезжает позже — он не должен спорить с заголовком */
         const q = Math.min(1, Math.max(0, (p - 0.55) / 0.45))
