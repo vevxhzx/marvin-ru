@@ -62,7 +62,7 @@ export default function Memory() {
     <div className={`pg space-y-6 ${FIELD_LABEL_M}`}>
       <PageHead kicker={t('mem.kicker', { name: aName().toLowerCase() })} title={t('nav.memory')} idx={idx} sub={t(SUBS[tab])} />
       {/* вкладки — спокойные переключатели: переносятся на две строки, ничего не уезжает и не листается */}
-      <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="tablist" aria-label={t('nav.memory')}>
+      <div className={`flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="tablist" aria-label={t('nav.memory')}>
         {TABS.map(([id, l]) => (
           <button key={id} type="button" role="tab" aria-selected={tab === id} onClick={() => setTab(id)} className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === id ? 'on' : ''}`}>
             {t(l)}{counts[id] ? <span className="idx opacity-60" style={{ marginLeft: 5 }}>{counts[id]}</span> : null}

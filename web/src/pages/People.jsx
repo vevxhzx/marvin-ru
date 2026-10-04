@@ -71,6 +71,12 @@ export default function People() {
 
   const load = () => api.people().then(setList).catch(() => setList([]))
   useEffect(() => { load() }, [tick])
+  // «+» дока на «Людях» открывает форму нового контакта (AppShell шлёт people:add)
+  useEffect(() => {
+    const on = () => setSheet('new')
+    window.addEventListener('people:add', on)
+    return () => window.removeEventListener('people:add', on)
+  }, [])
 
   // стадия клиента и следующий шаг — по одному проходу по клиентам
   useEffect(() => {
@@ -106,10 +112,10 @@ export default function People() {
           { key: 'open', label: t('people.open_orders', { n: openCount }) },
           ltvTotal ? { key: 'ltv', label: 'LTV', value: money(ltvTotal), tone: 'ok' } : null,
         ].filter(Boolean)} />}
-        right={<button type="button" className="btn-primary head-primary" onClick={() => setSheet('new')}>{t('people.add')}</button>} />
+        right={<button type="button" className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}>{t('people.add')}</button>} />
 
       {/* Тип контакта — спокойные пилюли с переносом, не одна «таблетка» на семь пунктов */}
-      <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="group" aria-label={t('people.kind_label')}>
+      <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('people.kind_label')}>
         {[['all', t('common.all')], ...Object.entries(KIND_RU).map(([k, label]) => [k, t(label)])].map(([k, l]) => (
           <button key={k} type="button" className={`pill max-[820px]:!shrink-0 !min-h-[var(--tap)] ${tab === k ? 'on' : ''}`} aria-pressed={tab === k} onClick={() => setTab(k)}>{l}</button>
         ))}
@@ -117,7 +123,7 @@ export default function People() {
 
       {/* Фильтр по стадии клиента — вторая, отдельная сущность (не стадия заказа) */}
       {withStages && (
-        <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M}`} role="group" aria-label={t('cstage.title')}>
+        <div className={`animate-rise flex flex-wrap items-center gap-1.5 ${CHIPS_ROW_M} fade-x`} role="group" aria-label={t('cstage.title')}>
           <span className={`label mr-1 shrink-0 ${SMALL_M}`}>{t('cstage.title')}</span>
           {CLIENT_STAGES.map(([k, label]) => (
             <button key={k} type="button"
@@ -129,19 +135,6 @@ export default function People() {
           ))}
         </div>
       )}
-
-      {/* Поиск */}
-      <div className="search animate-rise" style={{ width: '100%', height: '54px' }}>
-        <Search size={16} aria-hidden />
-        <input
-          value={q}
-          onChange={(e) => setQ(e.target.value)}
-          aria-label={t('people.search_ph')}
-          className="min-w-0 flex-1 bg-transparent outline-none"
-          style={{ color: 'var(--ink)' }}
-          placeholder={t('people.search_ph')}
-        />
-      </div>
 
       {/* Сетка карточек человека: на десктопе — карточки в три (две) колонки, на телефоне —
           те же секции, но плоские строки вплотную. Разметка <section class="c"> — по ней
