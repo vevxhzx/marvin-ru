@@ -2058,26 +2058,39 @@ html { zoom: var(--ui-zoom); }
 
 
 /* ---------- шапки страниц на телефоне ---------- */
-/* Макет «вариант B»: ОДИН ряд действий над заголовком — сегмент слева, кнопки справа,
-   полоса прокрутки скрыта, кнопки не переносятся и не расползаются по сетке. */
+/* Макет «вариант B»: заголовок и дата — СЛЕВА; ОДИН ряд действий над заголовком —
+   сегмент слева, кнопки справа, полоса прокрутки скрыта, кнопки не переносятся. */
 .head-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .nav-group-btn { display: inline-flex; gap: 4px; align-items: center; }
 @media (max-width: 820px) {
-  .top { flex-direction: column; align-items: stretch; }
-  .head-actions {
+  /* заголовок и подпись — слева, а не по правому краю */
+  .pg .top {
+    flex-direction: column;
+    align-items: flex-start;
+    text-align: start;
+  }
+  .pg .top > div:first-child { width: 100%; text-align: start; }
+  .pg .top h1, .pg .top .sub { text-align: start; }
+
+  /* один ряд действий: сегмент периода + иконки + главная кнопка */
+  .top > .hr, .pg .top .hr, .head-actions {
     order: -1;
     display: flex;
-    flex-wrap: nowrap;
+    flex-wrap: nowrap !important;
     align-items: center;
     gap: var(--s-2);
+    width: 100%;
     overflow-x: auto;
     overflow-y: hidden;
     scrollbar-width: none;
     margin-bottom: var(--s-3);
     padding-bottom: 2px;
   }
-  .head-actions::-webkit-scrollbar { display: none; }
-  .head-actions > * { flex: 0 0 auto; min-width: 0; }
+  .top > .hr::-webkit-scrollbar, .pg .top .hr::-webkit-scrollbar, .head-actions::-webkit-scrollbar { display: none; }
+  .top > .hr > *, .pg .top .hr > *, .head-actions > * { flex: 0 0 auto; min-width: 0; }
+  /* сегмент периода ужимается первым — кнопке действия место остаётся всегда */
+  .top > .hr > .sg, .pg .top .hr > .sg,
+  .top > .hr > .seg, .pg .top .hr > .seg { flex: 0 1 auto; flex-wrap: nowrap; }
   .head-actions > .seg, .head-actions > .sg { flex-wrap: nowrap; }
   .head-actions > .nav-group-btn { display: flex; }
   .head-actions > .head-primary { height: var(--tap); font-size: 14.5px; box-shadow: 0 10px 24px -12px var(--accent); }
