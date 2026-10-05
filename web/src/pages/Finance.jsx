@@ -119,8 +119,9 @@ function IconBtn({ onClick, title, children, danger }) {
 в том же токенном масштабе (var(--fs-*), var(--tap)). Тап-зоны отдельно не
 растим: на тач-экранах .btn-icon/.btn-sm уже дает --tap (@media pointer:coarse). */
 
-/* Полоса прогресса акцент → роза (фолбэк .gc-debts/.gc-goals). */
+/* Полоса прогресса акцент → роза (фолбэк .gc-debts/.gc-goals). Свечение — акцентом, как .gau в референсе. */
 const GRAD_BAR = 'linear-gradient(90deg, var(--acc), var(--neg))'
+const BAR_GLOW = '0 0 14px color-mix(in srgb, var(--acc) 55%, transparent)'
 
 /* Цель-копилка и цель задач — одна карточка. main/target — деньги (финансы),
    для задач-целей опускаются, раскрытое тело едет children. */
@@ -160,7 +161,7 @@ export function GoalGlassCard({
         ) : null}
       </button>
       <div className="progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={safePct}>
-        <div style={{ width: `${Math.max(2, safePct)}%`, background: barStyle || GRAD_BAR }} />
+        <div style={{ width: `${Math.max(2, safePct)}%`, background: barStyle || GRAD_BAR, boxShadow: BAR_GLOW }} />
       </div>
       {sub ? <div className="muted mt-2 text-[length:var(--fs-xs)]">{sub}</div> : null}
       {deadlineText ? (
@@ -903,7 +904,7 @@ export default function Finance() {
                   </div>
                   <BigMoney value={left} format={fmt.int} label={money(left)} fs="clamp(22px, 2.4vw, 30px)" />
                   <div className="progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
-                    <div style={{ width: `${pct}%`, background: GRAD_BAR }} />
+                    <div style={{ width: `${pct}%`, background: GRAD_BAR, boxShadow: BAR_GLOW }} />
                   </div>
                   <div className="muted mt-2 text-[length:var(--fs-xs)]">
                     {t('fin.paid_out')} <b className="num pos">{fmt.money(paid)}</b> (<b className="num">{fmt.int(pct)} %</b>) · {t('fin.of')} {fmt.money(total)}

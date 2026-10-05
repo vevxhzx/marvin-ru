@@ -211,8 +211,9 @@ export default function Today({ openChat, address = '' }) {
     d: ((i * 0.7) % 6).toFixed(1),
   })), [])
 
-  /* Liquid-указатели: спотлайт + 3D-tilt (макс 5°, perspective 1000) на .liq-карточках
-     и курсорное пятно .liq-amb. Только точный указатель и только если движение
+  /* Liquid-tilt: лёгкий 3D-tilt (макс 5°, perspective 1000) на .liq-карточках.
+     Курсорного света нет: спотлайт ::before и пятно .liq-amb удалены, орбы
+     плавают сами (CSS liq-fl). Только точный указатель и только если движение
      разрешено (motionOff: prefers-reduced-motion / .no-motion / .no-anim). */
   useEffect(() => {
     if (typeof window === 'undefined' || motionOff()) return undefined
@@ -226,8 +227,6 @@ export default function Today({ openChat, address = '' }) {
         const r = el.getBoundingClientRect()
         if (!r.width || !r.height) return
         const x = e.clientX - r.left, y = e.clientY - r.top
-        el.style.setProperty('--mx', `${x}px`)
-        el.style.setProperty('--my', `${y}px`)
         el.style.transform = `perspective(1000px) rotateX(${((y / r.height - 0.5) * -5).toFixed(2)}deg) rotateY(${((x / r.width - 0.5) * 5).toFixed(2)}deg) translateY(-3px)`
       }
       const onLeave = () => { el.style.transform = '' }
@@ -235,17 +234,8 @@ export default function Today({ openChat, address = '' }) {
       el.addEventListener('pointerleave', onLeave)
       wired.push([el, onMove, onLeave])
     })
-    const amb = root.querySelector('[data-liq-amb]')
-    const orbs = [...root.querySelectorAll('.liq-orb')]
-    const onWin = (e) => {
-      if (amb) amb.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`
-      const x = e.clientX / window.innerWidth - 0.5, y = e.clientY / window.innerHeight - 0.5
-      orbs.forEach((o, i) => { o.style.translate = `${Math.round(x * (i ? -70 : 90))}px ${Math.round(y * (i ? -70 : 90))}px` })
-    }
-    window.addEventListener('pointermove', onWin)
     return () => {
       wired.forEach(([el, a, b]) => { el.removeEventListener('pointermove', a); el.removeEventListener('pointerleave', b) })
-      window.removeEventListener('pointermove', onWin)
     }
   }, [widgetOrder, loaded])
 
@@ -452,7 +442,7 @@ export default function Today({ openChat, address = '' }) {
     // в режиме правки у секций справа освобождаем место под стрелки/ширину/глаз (CSS .wsec-edit)
     const pad = editMode && !surface ? 'wsec-edit' : ''
     // liq — liquid-стиль мокапа (index.css, блок TODAY · LIQUID-GLASS):
-    // спотлайт/tilt цепляются к .liq, каскад появления — к --i (70мс, blur-to-sharp),
+    // tilt цепляется к .liq, каскад появления — к --i (70мс, blur-to-sharp),
     // data-reveal блокам больше не ставим (иначе двойное появление с useReveal).
     return {
       className: `${editMode ? 'wig ' : ''}wsec liq liq-${id} ${cls} ${pad} ${CARD_LIGHT_M}`,
@@ -558,7 +548,7 @@ export default function Today({ openChat, address = '' }) {
                 />
                 <Rowi
                   title={t('rc.meetings')}
-                  sub={todayEvents[0]?.title || t('nextup.day_free')}
+                  sub={todayEvents.length ? t('cal.events_n', { count: todayEvents.length }) : t('nextup.day_free')}
                   right={<span className="num text-[length:var(--fs-base)]">{todayEvents.length}</span>}
                   onClick={() => nav('/calendar')}
                 />
@@ -718,7 +708,7 @@ export default function Today({ openChat, address = '' }) {
                   <defs>
                     <linearGradient id="pomoTodayGrad" x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0%" stopColor="var(--acc)" />
-                      <stop offset="100%" stopColor="#c04cff" />
+                      <stop offset="100%" stopColor="color-mix(in srgb, var(--acc) 55%, #ffffff)" />
                     </linearGradient>
                   </defs>
                   <circle className="bg" cx="40" cy="40" r="34" />
@@ -903,12 +893,11 @@ export default function Today({ openChat, address = '' }) {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-today" style={pageAcc.style} ref={reveal}>
-      {/* liquid-фон мокапа: пятна + орбы + курсорное пятно (зерно — в CSS #p-today::after) */}
+      {/* liquid-фон мокапа: пятна + орбы (зерно — в CSS #p-today::after) */}
       <div className="liq-bg" aria-hidden="true">
         <i className="liq-bl liq-b1" /><i className="liq-bl liq-b2" />
         <i className="liq-bl liq-b3" /><i className="liq-bl liq-b4" />
         <i className="liq-orb liq-o1" /><i className="liq-orb liq-o2" />
-        <i className="liq-amb" data-liq-amb />
       </div>
       {/* 1. Строка-статус: день мельче, имя крупно. h1 нужен и TitleHeader телефона.
           На телефоне верхней шапки нет — дата стоит здесь, над именем, как в макете. */}

@@ -256,7 +256,7 @@ export function WeekSummaryCard({ data, ownerName }) {
                     className="progress-bar-fill"
                     style={{
                       width: `${cat.pct}%`,
-                      background: 'linear-gradient(90deg, #2f57ff, #8a5cff)',
+                      background: 'linear-gradient(90deg, var(--acc), color-mix(in srgb, var(--acc) 55%, #ffffff))',
                     }}
                   />
                 </div>

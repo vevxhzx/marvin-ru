@@ -78,6 +78,39 @@ export default function Dock({ tabs, more, pathname, compact, onMore, onAdd }) {
     return () => { pressClean.current.forEach((fn) => fn()); pressClean.current = [] }
   }, [phone, tabsKey, moreKey, sections.length, deskSections.length])
 
+  /* macOS-магнификация десктопной пилюли (только .dock.desk): масштаб иконки от
+     расстояния курсора — как в мокапе (1 + max(0,1-d/110)*.55, вид — в index.css:
+     origin снизу, переход 120мс, только pointer:fine). Только точный указатель и
+     только если движение разрешено (motionOff из lib/motion.js); фаб-кнопка «+»
+     не масштабируется (это действие, а не иконка раздела). Телефонная ветка ниже —
+     без изменений; подсказки title — как были. */
+  useEffect(() => {
+    if (phone) return undefined
+    if (motionOff()) return undefined
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return undefined
+    if (!window.matchMedia('(pointer: fine)').matches) return undefined
+    const row = rowRef.current
+    if (!row || !row.closest('.dock.desk')) return undefined
+    const icons = [...row.querySelectorAll('.dock-item')]
+    if (!icons.length) return undefined
+    const onMove = (e) => {
+      for (const el of icons) {
+        const r = el.getBoundingClientRect()
+        if (!r.width) continue
+        const d = Math.abs(e.clientX - (r.left + r.width / 2))
+        el.style.setProperty('--ds', (1 + Math.max(0, 1 - d / 110) * 0.55).toFixed(3))
+      }
+    }
+    const onLeave = () => { for (const el of icons) el.style.setProperty('--ds', 1) }
+    row.addEventListener('pointermove', onMove)
+    row.addEventListener('pointerleave', onLeave)
+    return () => {
+      row.removeEventListener('pointermove', onMove)
+      row.removeEventListener('pointerleave', onLeave)
+      for (const el of icons) { try { el.style.removeProperty('--ds') } catch {} }
+    }
+  }, [phone, tabsKey, moreKey])
+
   /* Пока открыта шторка или открыта доска — док уезжает: правил для него в CSS нет,
      поэтому прячем его сами (тело получает класс .sheet-open / .board-page). */
   const [muted, setMuted] = useState(false)

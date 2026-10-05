@@ -590,6 +590,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   flex: 1;
   padding: 4px 0;
 }
+/* Month day cell — ref .dy: glass (radius ~20px = --r-md), inset highlight, hover lift+glow on pointer:fine */
 .cal2 b {
   position: relative;
   display: flex;
@@ -603,27 +604,33 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   font-weight: 500;
   font-variant-numeric: tabular-nums;
   padding: var(--s-2) 10px;
-  background: var(--cell-1);
+  background: linear-gradient(145deg, var(--glass-bg), transparent 160%), var(--cell-1);
   border: 1px solid var(--cell-2);
+  box-shadow: inset 0 1px 1px var(--glass-ring);
   transition: transform var(--t-base) var(--e), background var(--t-base) var(--e), box-shadow var(--t-base) var(--e), border-color var(--t-base);
   cursor: pointer;
   user-select: none;
 }
-.cal2 b:hover:not(.o) {
-  background: var(--sf2);
-  border-color: var(--line-2);
-  transform: translateY(-2px) scale(1.02);
-  box-shadow: var(--shadow-2);
-  z-index: 2;
+@media (hover: hover) and (pointer: fine) {
+  .cal2 b:hover:not(.o) {
+    background: var(--sf2);
+    border-color: var(--line-2);
+    transform: translateY(-4px) scale(1.04);
+    box-shadow: inset 0 1px 1px var(--glass-ring), 0 16px 30px -12px color-mix(in srgb, var(--acc) 55%, transparent);
+    z-index: 2;
+  }
 }
 .cal2 b.o {
   color: var(--ink3);
   opacity: 0.35;
   background: transparent;
   border-color: transparent;
+  box-shadow: none;
 }
 .cal2 b.t {
+  background: linear-gradient(145deg, color-mix(in srgb, var(--acc) 22%, transparent), color-mix(in srgb, var(--acc) 8%, transparent)), var(--sf);
   border-color: color-mix(in srgb, var(--acc) 50%, transparent);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--acc) 55%, transparent), 0 0 34px -4px color-mix(in srgb, var(--acc) 55%, transparent), inset 0 1px 1px var(--glass-ring);
 }
 .cal2 b.t .day-num {
   width: 28px;
@@ -634,12 +641,16 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   background: linear-gradient(135deg, var(--acc), var(--ai));
   color: var(--accent-ink);
   font-weight: 600;
-  box-shadow: 0 4px 14px -2px color-mix(in srgb, var(--acc) 70%, transparent);
+  box-shadow: 0 4px 14px -2px color-mix(in srgb, var(--acc) 70%, transparent), 0 0 0 0 color-mix(in srgb, var(--acc) 55%, transparent);
+  animation: cal-today-pulse 2.4s infinite;
+}
+@keyframes cal-today-pulse {
+  to { box-shadow: 0 4px 14px -2px color-mix(in srgb, var(--acc) 70%, transparent), 0 0 0 12px transparent; }
 }
 .cal2 b.is-sel:not(.t) {
   background: var(--sf2);
   border-color: var(--acc);
-  box-shadow: inset 0 0 0 1.5px var(--acc), 0 8px 24px -6px color-mix(in srgb, var(--acc) 35%, transparent);
+  box-shadow: inset 0 1px 1px var(--glass-ring), inset 0 0 0 1.5px var(--acc), 0 8px 24px -6px color-mix(in srgb, var(--acc) 35%, transparent);
 }
 .cal2 .day-evs {
   margin-top: 4px;
@@ -652,7 +663,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .cal2 .ev-pill {
   font-size: 12px;
   padding: 2px 6px;
-  border-radius: 8px;
+  border-radius: 99px;
   background: color-mix(in srgb, var(--acc) 16%, transparent);
   color: var(--acc);
   border: 1px solid color-mix(in srgb, var(--acc) 25%, transparent);
@@ -2428,6 +2439,11 @@ aside.sidebar-bench, aside { height: calc(100dvh - var(--app-pad) * 2); }
 
 /* Страница — колонка; ширина не «уезжает», длинные слова ломаются, а не растягивают сетку */
 .pg { min-width: 0; max-width: 100%; }
+/* Десктоп: контентная колонка — 1240px по центру с воздухом по бокам (мокап);
+   телефон не трогаем (там свои поля 20px из правила ≤820px). */
+@media (min-width: 821px) {
+  .pg { max-width: 1240px; margin-inline: auto; padding-inline: 20px; }
+}
 .pg, .bento, .c, .panel, .row, .rowi, .note, .hd, .hr { min-width: 0; }
 
 /* ---------- 2. Шапка экрана: единственная на всех страницах ---------- */
@@ -2953,13 +2969,15 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   --liq-sh: rgba(42, 69, 255, .35);
   --liq-tr: rgba(13, 17, 48, .08);
   /* смысловые краски мокапа — литералами: app-токен --lime означает --pos
-     (другой цвет), а --rose/--mint в токенах отсутствуют */
+     (другой цвет), а --rose/--mint в токенах отсутствуют.
+     --liq-blue/--liq-violet — не смысл, а акцент: идут от --acc, чтобы тема
+     (синий/teal/lime) красила и блобы, и пик, и рамку героя */
   --liq-lime: #c8f23d;
   --liq-rose: #ff4d73;
-  --liq-blue: #3d5bff;
+  --liq-blue: var(--acc);
   --liq-mint: #35e0a1;
   --liq-cyan: #22d3ee;
-  --liq-violet: #8b5cff;
+  --liq-violet: color-mix(in srgb, var(--acc) 55%, #ffffff);
   --liq-amber: #ffb347;
 }
 :root[data-theme="dark"] #p-today, .dark #p-today {
@@ -2984,10 +3002,10 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   position: fixed; border-radius: 50%; filter: blur(130px); opacity: .22;
   animation: liq-fl 36s ease-in-out infinite alternate; z-index: 0; pointer-events: none;
 }
-#p-today .liq-b1 { width: 520px; height: 520px; background: #2a45ff; top: -140px; left: -100px; }
-#p-today .liq-b2 { width: 420px; height: 420px; background: var(--liq-violet); top: 24%; right: -140px; animation-delay: -12s; opacity: .18; }
+#p-today .liq-b1 { width: 520px; height: 520px; background: var(--acc); top: -140px; left: -100px; }
+#p-today .liq-b2 { width: 420px; height: 420px; background: color-mix(in srgb, var(--acc) 55%, #ffffff); top: 24%; right: -140px; animation-delay: -12s; opacity: .18; }
 #p-today .liq-b3 { width: 260px; height: 260px; background: var(--liq-lime); opacity: .12; bottom: -100px; left: 38%; animation-delay: -20s; }
-#p-today .liq-b4 { width: 220px; height: 220px; background: var(--liq-cyan); top: 58%; left: -80px; opacity: .14; animation-delay: -7s; }
+#p-today .liq-b4 { width: 220px; height: 220px; background: color-mix(in srgb, var(--acc) 45%, #ffffff); top: 58%; left: -80px; opacity: .14; animation-delay: -7s; }
 #p-today .liq-orb {
   position: fixed; border-radius: 50%; z-index: 0; pointer-events: none; opacity: .5;
   background: radial-gradient(circle at 30% 28%, rgba(255, 255, 255, .6), rgba(255, 255, 255, .06) 55%, transparent 70%);
@@ -3004,15 +3022,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   opacity: .08; mix-blend-mode: overlay;
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)'/%3E%3C/svg%3E");
 }
-/* курсорное пятно — только точный указатель, включается в @media ниже */
-#p-today .liq-amb { display: none; }
-@media (pointer: fine) {
-  #p-today .liq-amb {
-    display: block; position: fixed; left: -260px; top: -260px; width: 520px; height: 520px;
-    border-radius: 50%; background: radial-gradient(circle, rgba(170, 190, 255, .4), transparent 65%);
-    pointer-events: none; z-index: 0; transition: transform .35s ease-out;
-  }
-}
+/* курсорного пятна нет: орбы и блобы плавают сами (liq-fl), за курсором ничего не ездит */
 
 /* ---------- появление: fade-up + blur-to-sharp, каскад 70мс через --i (мокап) ----------
    Кадры `up` уже есть в файле (blur(8px) → резко) — переиспользуем, не плодим. */
@@ -3042,14 +3052,8 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
     opacity: .7;
   }
 }
-/* курсорный спотлайт карточек (координаты --mx/--my ставит эффект Today.jsx).
-   Герою заменяет статичный угловой блик ::before — динамика вместо статики. */
-#p-today .wsec.liq::before {
-  content: ""; position: absolute; inset: 0; border-radius: inherit; pointer-events: none;
-  opacity: 0; transition: opacity .3s;
-  background: radial-gradient(320px circle at var(--mx, 50%) var(--my, 0%), rgba(255, 255, 255, .28), transparent 60%);
-}
-#p-today .wsec.liq:hover::before { opacity: 1; }
+/* курсорного спотлайта карточек нет (удалён вместе с .liq-amb): остаются только
+   статичная стеклянная рамка ::after и tilt в Today.jsx. */
 
 /* ---------- герой: полупрозрачный градиент + вода + пузыри + conic-рамка ---------- */
 #p-today .home-hero {
@@ -3082,15 +3086,15 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 @keyframes liq-lv { to { height: var(--lvl, 50%); } }
 #p-today .liq-water svg {
   position: absolute; bottom: 100%; left: 0; width: 200%; height: 34px; margin-bottom: -1px;
-  animation: liq-wv 7s linear infinite; fill: rgba(200, 242, 61, .55);
+  animation: liq-wv 7s linear infinite; fill: color-mix(in srgb, var(--acc) 55%, transparent);
 }
 #p-today .liq-water svg + svg {
   animation-duration: 11s; animation-direction: reverse;
-  fill: rgba(120, 150, 255, .5); bottom: calc(100% - 5px);
+  fill: color-mix(in srgb, var(--acc) 35%, transparent); bottom: calc(100% - 5px);
 }
 #p-today .liq-water::after {
   content: ""; position: absolute; inset: 0;
-  background: linear-gradient(rgba(200, 242, 61, .55), rgba(60, 90, 255, .35) 70%, rgba(60, 90, 255, .1));
+  background: linear-gradient(color-mix(in srgb, var(--acc) 55%, transparent), color-mix(in srgb, var(--acc) 35%, transparent) 70%, color-mix(in srgb, var(--acc) 10%, transparent));
 }
 @keyframes liq-wv { to { transform: translateX(-50%); } }
 #p-today .liq-bub {
@@ -3120,6 +3124,14 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   }
   #p-today .liq-summary .liq-peb .rowi .num { font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.03em; }
   #p-today .liq-summary .liq-peb .rowi .amt { font-size: var(--fs-2xl); font-weight: 600; letter-spacing: -.03em; }
+  /* Контент Rowi не проектировался под камушки: длинные встречи/дела вылезали
+     за скругление — режем с многоточием, вёрстку строк не трогаем. */
+  #p-today .liq-summary .liq-peb .rowi { overflow: hidden; }
+  #p-today .liq-summary .liq-peb .rowi > * { min-width: 0; max-width: 100%; }
+  #p-today .liq-summary .liq-peb .rowi span:not(.num):not(.amt) {
+    display: block; overflow: hidden; text-overflow: ellipsis;
+    font-size: var(--fs-xs); line-height: 1.3;
+  }
 }
 @keyframes liq-bob { 50% { transform: translateY(-6px); } }
 
@@ -3132,7 +3144,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 @keyframes liq-gr { from { transform: scaleY(0); } }
 #p-today .bars i.liq-hi {
   background: linear-gradient(180deg, var(--liq-lime), var(--liq-blue));
-  box-shadow: 0 0 22px rgba(120, 150, 255, .7);
+  box-shadow: 0 0 22px color-mix(in srgb, var(--acc) 70%, transparent);
 }
 /* свободно: волна из 30 светящихся ячеек (декор; данные — в столбиках TipBars выше) */
 #p-today .liq-dots { display: flex; gap: 3px; margin-top: 14px; }
@@ -3171,14 +3183,33 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 }
 #p-today .liq-screen .liq-appdot { box-shadow: 0 0 10px var(--liq-glow, currentColor); }
 
-/* ---------- «что упускаю» и мозг: строки выезжают каскадом + rose-пилюли ---------- */
+/* ---------- «что упускаю» и мозг: строки выезжают каскадом + rose-пилюли ----------
+   Каскад liq-sl уже был (70мс шаги через --k, ставит Today.jsx) — его не трогаем.
+   Пилюля missed — лёгкий scoped-вариант стекла мокапа (радиус 22, стекло +
+   верхний блик): .glass-card для строк тяжёл (паддинги/кромка/тень), нового
+   глобального класса не заводим — grep: .mpill-row отсутствует, эквивалента нет.
+   Строки лежат прямо в секции без .list-обёртки — зазор даёт margin.
+   Hover — только точный указатель (pointer:fine); reduced-motion уже глушит
+   общее правило (index.css, «Гашение движения») — отдельного дубля не нужно. */
 #p-today .liq-missed .rowi, #p-today .liq-brain .rowi {
   animation: liq-sl .7s cubic-bezier(.2, .8, .2, 1) both;
   animation-delay: calc(var(--k, 0) * 70ms + .5s);
 }
 @keyframes liq-sl { from { opacity: 0; transform: translateX(-30px); } }
-#p-today .liq-missed .rowi:hover { transform: translateX(6px) scale(1.01); }
+#p-today .liq-missed .rowi {
+  border: 0;
+  border-radius: 22px;
+  padding: 12px 14px;
+  background: linear-gradient(135deg, var(--liq-g1), var(--liq-g2));
+  box-shadow: inset 0 1px 1px var(--liq-hl);
+  transition: transform .25s, background .25s;
+}
+#p-today .liq-missed .rowi + .rowi { margin-top: 8px; }
+@media (pointer: fine) {
+  #p-today .liq-missed .rowi:hover { transform: translateX(6px) scale(1.01); }
+}
 #p-today .liq-missed .amt {
+  font-size: 13px; font-weight: 600; white-space: nowrap;
   color: #fff; background: linear-gradient(135deg, #ff7a9c, var(--liq-rose));
   padding: 6px 13px; border-radius: 99px;
   box-shadow: 0 6px 18px -4px var(--liq-rose), inset 0 1px 1px rgba(255, 255, 255, .5);
@@ -3213,7 +3244,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 /* ---------- меньше движения: глушим и liquid-слой (общее правило выше
    уже ставит .01ms всему, здесь — явный дубль для чек-листа мокапа) ---------- */
 @media (prefers-reduced-motion: reduce) {
-  #p-today .liq-bl, #p-today .liq-orb, #p-today .liq-amb,
+  #p-today .liq-bl, #p-today .liq-orb,
   #p-today .home-hero::after, #p-today .liq-water, #p-today .liq-water svg,
   #p-today .liq-bub, #p-today .liq-sun, #p-today .liq-chip,
   #p-today .liq-debts .progress > div::after { animation: none; }
@@ -3262,6 +3293,21 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
     margin: 0 2px;
   }
   .dock.desk .dock-fab svg { width: 22px; height: 22px; }
+}
+
+/* macOS-магнификация десктопной пилюли (только .dock.desk, только точный
+   указатель): масштаб иконки от расстояния курсора ставит эффект Dock.jsx
+   (--ds = 1 + max(0,1-d/110)*.55, как в мокапе). Origin снизу, переход 120мс.
+   Телефонная ветка (.dock без .desk) не тронута; подсказки title — как были.
+   Reduced-motion глушит общее правило «Гашение движения» (длительность .01ms),
+   а сам эффект при motionOff() вообще не вешается. */
+@media (min-width: 821px) and (pointer: fine) {
+  .dock.desk .dock-item {
+    transform: scale(var(--ds, 1));
+    transform-origin: 50% 100%;
+    transition: color var(--t-fast) var(--ease-out), background-color var(--t-base) var(--ease-out),
+      padding var(--t-base) var(--ease-spring), transform .12s ease-out;
+  }
 }
 
 /* ---------- шапка десктопа: помодоро и статус (AppShell HeadPomo/HeadStatus) ----------

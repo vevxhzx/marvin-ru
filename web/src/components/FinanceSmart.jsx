@@ -13,7 +13,7 @@ const BUCKET = { need: 'bucket.need', want: 'bucket.want', save: 'bucket.save' }
 const BUCKET_TONE = { need: 'var(--ink)', want: 'var(--accent)', save: 'var(--pos)' }
 const BUCKET_GRAD = {
   need: 'linear-gradient(90deg, var(--ink), #4b4b55)',
-  want: 'linear-gradient(90deg, var(--accent), #8a5cff)',
+  want: 'linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--acc) 55%, #ffffff))',
   save: 'linear-gradient(90deg, #19b34a, #14b8a6)',
 }
 const ask = (text, send = true) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text, send } }))
@@ -44,7 +44,7 @@ export function Goals({ goals, onChange, onErr, onOk }) {
                   <button className="min-w-0 truncate text-left text-[15px] font-medium hover:text-accent" onClick={() => setSheet(g)}>{g.icon} {g.title}</button>
                   <span className="num shrink-0 text-[14px]"><b>{money(g.saved)}</b> <span className="faint">/ {money(g.target)}</span></span>
                 </div>
-                <div className="progress mt-2 !h-[6px]"><div style={{ width: `${Math.round(g.pct * 100)}%`, background: g.pct >= 1 ? 'linear-gradient(90deg, #19b34a, #14b8a6)' : 'linear-gradient(90deg, var(--accent), #8a5cff)' }} /></div>
+                <div className="progress mt-2 !h-[6px]"><div style={{ width: `${Math.round(g.pct * 100)}%`, background: g.pct >= 1 ? 'linear-gradient(90deg, #19b34a, #14b8a6)' : 'linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--acc) 55%, #ffffff))' }} /></div>
                 <div className="mt-1.5 flex items-center justify-between gap-2 text-[12px]">
                   <span className="muted">{Math.round(g.pct * 100)} %{g.due ? ` · ${t('aims.by', { date: new Date(g.due).toLocaleDateString(localeOf(), { day: 'numeric', month: 'short' }).replace(/\.?\s*г\.$/u, '') })}` : ''}{g.per_month ? ` · ${t('gl.per_month', { m: money(g.per_month) })}` : g.left ? ` · ${t('gl.left', { m: money(g.left) })}` : ''}{g.days_left != null && g.days_left < 0 && g.left > 0 ? ` · ${t('aims.overdue')}` : ''}</span>
                   <div className="flex items-center gap-1">

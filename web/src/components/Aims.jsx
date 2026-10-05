@@ -111,7 +111,7 @@ function AimCard({ a, onPatch, onChange }) {
         <div className="num shrink-0 text-[20px] font-semibold leading-none tracking-[-0.03em]">{pct}<span className="text-[0.65em] font-medium opacity-60"> %</span></div>
         <button className="btn-icon shrink-0" onClick={() => setOpen(!open)} aria-label={t(open ? 'aims.collapse' : 'aims.expand')} aria-expanded={open}>{open ? <ChevronUp size={14} /> : <ChevronDown size={14} />}</button>
       </div>
-      <div className="progress mt-3 !h-[6px]"><div style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), #8a5cff)' }} /></div>
+      <div className="progress mt-3 !h-[6px]"><div style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), color-mix(in srgb, var(--acc) 55%, #ffffff))' }} /></div>
       {(a.due || a.days_left < 0 || stale) && (
         <div className="muted mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
           {a.due && <span className="num">{t('aims.by', { date: fmtDate(a.due) })}{a.days_left != null && a.days_left >= 0 ? t('aims.days_left', { n: a.days_left }) : ''}</span>}
