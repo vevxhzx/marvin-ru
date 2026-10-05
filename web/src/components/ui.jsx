@@ -606,10 +606,11 @@ export function Pill({ children, warn, className = '', ...p }) {
 
 /* Строка списка. onClick — это div, а не button: внутрь кладут кнопки (меню, чекбоксы),
    а <button> внутри <button> невалиден. Поэтому роль и клавиатура добавляются вручную. */
-export function Rowi({ time, title, sub, right, className = '', onClick }) {
+export function Rowi({ time, title, sub, right, className = '', style, onClick }) {
   return (
     <div
       className={`rowi ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      style={style}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}

@@ -507,6 +507,9 @@ def rules(text: str, channel: str) -> Reply | None:
     text = _VENT_PREFIX_RX.sub("", text, count=1) or text
     t = text.strip()
     low = t.lower()
+    tq = quick.time_q(t)   # «который час» — сразу, без БД и LLM (иначе вопрос утекал в модель с инструментами)
+    if tq:
+        return Reply(tq[0], tq[1])
     if FIN_TECH_RX.match(t):   # «хватит ли на платежи» — готовый отчёт, а не анализ моделью
         return _orders_rules(t, low, channel)
     if pc.TIDY_RX.match(t) or pc.TIDY_UNDO_RX.match(t) or pc.ORGANIZE_RX.match(t) or pc.ORGANIZE_UNDO_RX.match(t):   # файловые операции — только через план и подтверждение

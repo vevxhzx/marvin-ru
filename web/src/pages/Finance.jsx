@@ -981,14 +981,15 @@ export default function Finance() {
                 {[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}
               </div>
               <div className="mt-3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                {/* Тап по карточке открывает RecurringSheet (правка полей); пауза и удаление
+                    живут только здесь: в шторке их нет, поэтому кнопки остаются в карточке. */}
                 <RowActions>
                   <IconBtn
-                    title={r.active === false ? 'Включить: платёж снова пойдёт в прогноз' : t('fin.pause_tip')}
+                    title={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
                     onClick={() => toggleActive(r)}
                   >
                     {r.active === false ? <Play size={14} /> : <Pause size={14} />}
                   </IconBtn>
-                  <IconBtn onClick={() => { setEditingItem(r); setSheet('recurring') }} title={t('fin.edit_pay')}><Edit2 size={14} /></IconBtn>
                   <IconBtn
                     danger
                     title={t('fin.remove_pay')}

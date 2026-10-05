@@ -62,7 +62,7 @@ export function useBigSize(fs = 'var(--hero-fs)') {
 
 /* Сумма одной строкой: число тянет на себя вес, ₽ — мельче и легче (макеты владельца).
    cur="accent" — знак ₽ акцентом (лайм ночью, синий днём), как на «финансах» макета. */
-export function BigMoney({ value, format, label, className = '', fs = 'var(--hero-fs)', cur = 'soft' }) {
+export function BigMoney({ value, format, label, className = '', fs = 'var(--hero-fs)', cur = 'soft', duration = 900, delay = 0 }) {
   const size = useBigSize(fs)
   const curStyle = cur === 'accent'
     ? { fontSize: '0.55em', fontWeight: 500, opacity: 1, marginLeft: '0.18em', color: 'var(--acc)' }
@@ -70,7 +70,7 @@ export function BigMoney({ value, format, label, className = '', fs = 'var(--her
   return (
     <span className={`big ${className}`} style={{ fontSize: size }}>
       <span aria-hidden="true">
-        <CountUp value={Number(value) || 0} format={format} roll={false} />
+        <CountUp value={Number(value) || 0} format={format} roll={false} duration={duration} delay={delay} />
         <span style={curStyle}>{CUR}</span>
       </span>
       <span className="sr-only">{label}</span>

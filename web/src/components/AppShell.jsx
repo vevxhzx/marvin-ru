@@ -11,7 +11,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { flushSync } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
-import { Sun, Moon, Monitor, Square, Play, Search, MoreHorizontal, MessageCircle, HelpCircle, Download } from 'lucide-react'
+import { Sun, Moon, Monitor, Square, Play, Search, MoreHorizontal, MessageCircle, HelpCircle, Download, Timer } from 'lucide-react'
 import Chat from './Chat'
 import Palette from './Palette'
 import { LivePopover } from './Live'
@@ -155,6 +155,68 @@ function SideTimer({ min }) {
       </button>
       <button className="grid h-7 w-7 shrink-0 place-items-center rounded-lg transition hover:bg-[var(--fill)]" aria-label={t('pomo.stop')} data-tip={t('pomo.stop_short')} onClick={() => run(() => api.stopTimer())}><Square size={10} /></button>
     </div>
+  )
+}
+
+/* ---------- помодоро и статус в шапке десктопа (сайдбара больше нет) ----------
+   Помодоро: иконка-таймер, при активной сессии рядом тикает mmss; по клику —
+   то же окно PomodoroPanel (старт/пауза/сброс/переход в заказы), что было в сайдбаре.
+   Статус: компактная точка + текст, по клику — тот же LivePopover. */
+function HeadPomo() {
+  const { t } = useI18n()
+  const { t: tmr, left, reload } = useTimer()
+  const [open, setOpen] = useState(false)
+  const active = !!tmr?.active
+  const brk = tmr?.kind === 'break'
+  const label = active ? (tmr.order || (brk ? t('unit.break') : t('unit.focus'))) : t('unit.pomodoro')
+  return (
+    <span className="pomo-head-wrap">
+      <button
+        type="button"
+        className={`pomo-head num${active ? ' live' : ''}`}
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        aria-label={`${t('side.pomodoro')}${active ? ` · ${mmss(left)}` : ''}`}
+        title={active ? `${mmss(left)} · ${label}` : label}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={(e) => { if (e.key === 'Escape') setOpen(false) }}
+      >
+        <Timer size={17} strokeWidth={1.8} aria-hidden="true" />
+        {active && <span className="tabular-nums">{mmss(left)}</span>}
+      </button>
+      {open && (
+        <PomodoroPanel
+          timer={tmr}
+          left={left}
+          onClose={() => setOpen(false)}
+          onChanged={reload}
+          className="pomo-pop-head"
+        />
+      )}
+    </span>
+  )
+}
+
+function HeadStatus({ live, busy }) {
+  const st = assistantState(live, busy)
+  const [pop, setPop] = useState(false)
+  const onEnter = (fn) => (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fn() } }
+  return (
+    <span className="st-head-wrap">
+      <span
+        className="st-head"
+        role="button"
+        tabIndex={0}
+        aria-expanded={pop}
+        onClick={() => setPop((v) => !v)}
+        onKeyDown={onEnter(() => setPop((v) => !v))}
+        title={st.text}
+      >
+        <i className="dot" style={{ background: st.dot }}></i>
+        {st.text}
+      </span>
+      {pop && <LivePopover live={live} onClose={() => setPop(false)} place="absolute right-0 top-[calc(100%+8px)]" />}
+    </span>
   )
 }
 
@@ -363,7 +425,7 @@ export function PageTransition({ children, pathKey }) {
 /* ---------- оболочка ---------- */
 /* ---------- помодоро: окошко управления над пунктом сайдбара ---------- */
 
-function PomodoroPanel({ timer, left, onClose, onChanged }) {
+function PomodoroPanel({ timer, left, onClose, onChanged, className = '' }) {
   const { t } = useI18n()
   const nav = useNavigate()
   const [mins, setMins] = useState(25)
@@ -400,7 +462,7 @@ function PomodoroPanel({ timer, left, onClose, onChanged }) {
   }
 
   return (
-    <div ref={ref} className="pomo-pop" role="dialog" aria-label={t('side.pomodoro')}>
+    <div ref={ref} className={`pomo-pop ${className}`} role="dialog" aria-label={t('side.pomodoro')}>
       <div className="pomo-pop-row">
         <span className="num pomo-pop-time">{timer?.active ? mmss(left) : '—:—'}</span>
         <span className="faint pomo-pop-hint">
@@ -560,11 +622,15 @@ export default function AppShell({
                  только круглые кнопки, иначе они теснят дату и сжимаются в эллипсы */
               null
             ) : (
-              <div className="search" onClick={onSearch} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
-                aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSearch() } }}>
-                <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m14 14 3.5 3.5"/></svg>
-                {t('common.search')}<span className="kbd mono">{kb('K')}</span>
-              </div>
+              <>
+                <HeadStatus live={live} busy={busy} />
+                <HeadPomo />
+                <div className="search" onClick={onSearch} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
+                  aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSearch() } }}>
+                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m14 14 3.5 3.5"/></svg>
+                  {t('common.search')}<span className="kbd mono">{kb('K')}</span>
+                </div>
+              </>
             )}
             <div className="ib" onClick={onInbox} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
               aria-label={t('inbox.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onInbox() } }}>
@@ -609,7 +675,7 @@ export default function AppShell({
           </div>
         </main>
 
-        <Dock tabs={tabs} pathname={pathKey} compact={compact} onMore={() => setMoreOpen(true)} onAdd={handleAdd} />
+        <Dock tabs={tabs} more={more} pathname={pathKey} compact={compact} onMore={() => setMoreOpen(true)} onAdd={handleAdd} />
 
         <SheetHost open={captureOpen} onClose={() => setCaptureOpen(false)} title={t('cap.title')} sub={t('cap.sub')}>
           <CaptureSheet open={captureOpen} onClose={() => setCaptureOpen(false)} />

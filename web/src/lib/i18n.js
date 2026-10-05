@@ -2309,6 +2309,7 @@ export const DICT = {
   'fin.paused_hint': { ru: 'показать или скрыть платежи на паузе', en: 'show or hide paused payments' },
   'fin.all_paused': { ru: 'все на паузе', en: 'all paused' },
   'fin.pause_tip': { ru: 'Пауза: платёж перестаёт идти в прогноз', en: 'Pause: the payment stops feeding the forecast' },
+  'fin.resume_tip': { ru: 'Включить: платёж снова пойдёт в прогноз', en: 'Resume: the payment feeds the forecast again' },
   'fin.pause_note': { ru: 'Платёж на паузе — он не попадёт в прогноз кассы. Данные сохранятся.', en: 'The payment is paused — it will not feed the cash forecast. The data stays.' },
   'fin.paused': { ru: 'платёж на паузе', en: 'payment paused' },
   'fin.remove_pay': { ru: 'Убрать платёж', en: 'Remove the payment' },

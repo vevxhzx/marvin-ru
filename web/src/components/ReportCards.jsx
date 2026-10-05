@@ -464,8 +464,9 @@ export function ScreenTimeBentoWidget({ data }) {
             return (
               <div key={h} className="flex h-full flex-1 items-end">
                 <div
-                  className="chart-pt w-full rounded-md"
+                  className="chart-pt liq-segbar w-full rounded-md"
                   style={{
+                    '--k': idx,
                     height: `${pct}%`,
                     background: val > 20
                       ? 'linear-gradient(180deg, color-mix(in srgb, var(--ai) 70%, transparent), var(--acc))'
@@ -493,7 +494,7 @@ export function ScreenTimeBentoWidget({ data }) {
         {(d.apps || []).slice(0, 3).map(([name, m, cat], i) => (
           <div key={i} className="row" style={{ fontSize: 'var(--fs-md)' }}>
             <span className="min-w-0 flex-1 trunc">
-              <span className="mr-2 inline-block h-2 w-2 shrink-0 align-middle rounded-full" style={{ background: CAT_COLORS[cat] || 'var(--ink-3)' }} />
+              <span className="liq-appdot mr-2 inline-block h-2 w-2 shrink-0 align-middle rounded-full" style={{ background: CAT_COLORS[cat] || 'var(--ink-3)', '--liq-glow': CAT_COLORS[cat] || 'var(--ink-3)' }} />
               <span className="font-medium">{name}</span>
             </span>
             <span className="mono shrink-0 text-[var(--ink-2)]">{fmt.int(m)} {t('unit.min')}</span>

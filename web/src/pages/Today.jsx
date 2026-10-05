@@ -24,6 +24,8 @@ import { ArrowLeft, Check, EyeOff, Play, Plus, RotateCcw, Sparkles, Square } fro
 import { api, hhmm, money, relTime, shortDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
 import { Empty, Rowi, Sheet, Skeleton, useToast } from '../components/ui'
 import { BigMoney, HeroLine, useNumFormats, useReveal } from '../components/Widgets'
+import { CountUp } from '../components/CountUp'
+import { motionOff } from '../lib/motion'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import { EventSheet } from './Calendar'
@@ -201,6 +203,67 @@ export default function Today({ openChat, address = '' }) {
   }
 
   useEffect(() => { load() }, [tick])
+
+  /* Пузыри героя — детерминированные (без Math.random: стабильны между рендерами) */
+  const bubbles = useMemo(() => Array.from({ length: 10 }, (_, i) => ({
+    x: 5 + ((i * 37) % 90),
+    s: 4 + ((i * 13) % 9),
+    d: ((i * 0.7) % 6).toFixed(1),
+  })), [])
+
+  /* Liquid-указатели: спотлайт + 3D-tilt (макс 5°, perspective 1000) на .liq-карточках
+     и курсорное пятно .liq-amb. Только точный указатель и только если движение
+     разрешено (motionOff: prefers-reduced-motion / .no-motion / .no-anim). */
+  useEffect(() => {
+    if (typeof window === 'undefined' || motionOff()) return undefined
+    if (typeof window.matchMedia !== 'function' || !window.matchMedia('(pointer: fine)').matches) return undefined
+    const root = document.getElementById('p-today')
+    if (!root) return undefined
+    const wired = []
+    root.querySelectorAll('.wsec.liq').forEach((c) => {
+      const el = c
+      const onMove = (e) => {
+        const r = el.getBoundingClientRect()
+        if (!r.width || !r.height) return
+        const x = e.clientX - r.left, y = e.clientY - r.top
+        el.style.setProperty('--mx', `${x}px`)
+        el.style.setProperty('--my', `${y}px`)
+        el.style.transform = `perspective(1000px) rotateX(${((y / r.height - 0.5) * -5).toFixed(2)}deg) rotateY(${((x / r.width - 0.5) * 5).toFixed(2)}deg) translateY(-3px)`
+      }
+      const onLeave = () => { el.style.transform = '' }
+      el.addEventListener('pointermove', onMove)
+      el.addEventListener('pointerleave', onLeave)
+      wired.push([el, onMove, onLeave])
+    })
+    const amb = root.querySelector('[data-liq-amb]')
+    const orbs = [...root.querySelectorAll('.liq-orb')]
+    const onWin = (e) => {
+      if (amb) amb.style.transform = `translate(${e.clientX}px, ${e.clientY}px)`
+      const x = e.clientX / window.innerWidth - 0.5, y = e.clientY / window.innerHeight - 0.5
+      orbs.forEach((o, i) => { o.style.translate = `${Math.round(x * (i ? -70 : 90))}px ${Math.round(y * (i ? -70 : 90))}px` })
+    }
+    window.addEventListener('pointermove', onWin)
+    return () => {
+      wired.forEach(([el, a, b]) => { el.removeEventListener('pointermove', a); el.removeEventListener('pointerleave', b) })
+      window.removeEventListener('pointermove', onWin)
+    }
+  }, [widgetOrder, loaded])
+
+  /* Пик столбиков «траты»/«свободно»: самый высокий светится lime→blue (мокап) */
+  useEffect(() => {
+    const root = document.getElementById('p-today')
+    if (!root) return
+    root.querySelectorAll('.liq-expenses .bars, .liq-free .bars').forEach((box) => {
+      const bars = [...box.querySelectorAll('i')]
+      let best = null, bv = -1
+      bars.forEach((b) => {
+        b.classList.remove('liq-hi')
+        const v = parseFloat(b.style.getPropertyValue('--h')) || 0
+        if (v > bv) { bv = v; best = b }
+      })
+      if (best && bv > 0) best.classList.add('liq-hi')
+    })
+  }, [d])
 
   const now = new Date()
   const dark = typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
@@ -380,7 +443,7 @@ export default function Today({ openChat, address = '' }) {
 
      На телефоне блок — тоже карточка (макет): одна колонка, отступ 21px, радиус из токена, без
      тени и без хайрлайна; разделение тоном. На десктопе вид остаётся прежним. */
-  const blockProps = (id) => {
+  const blockProps = (id, idx = 0) => {
     const span = widgetWidths[id] || DEFAULT_WIDTHS[id] || 6
     const surface = PANELS.has(id)
     const cls = surface
@@ -388,10 +451,12 @@ export default function Today({ openChat, address = '' }) {
       : (GLASS.has(id) ? 'panel' : '')
     // в режиме правки у секций справа освобождаем место под стрелки/ширину/глаз (CSS .wsec-edit)
     const pad = editMode && !surface ? 'wsec-edit' : ''
+    // liq — liquid-стиль мокапа (index.css, блок TODAY · LIQUID-GLASS):
+    // спотлайт/tilt цепляются к .liq, каскад появления — к --i (70мс, blur-to-sharp),
+    // data-reveal блокам больше не ставим (иначе двойное появление с useReveal).
     return {
-      'data-reveal': '',
-      className: `${editMode ? 'wig ' : ''}wsec ${cls} ${pad} ${CARD_LIGHT_M}`,
-      style: { '--wspan': span },
+      className: `${editMode ? 'wig ' : ''}wsec liq liq-${id} ${cls} ${pad} ${CARD_LIGHT_M}`,
+      style: { '--wspan': span, '--i': idx },
       draggable: editMode || undefined,
       onDragStart: editMode ? (e) => handleDragStart(e, id) : undefined,
       onDragOver: editMode ? handleDragOver : undefined,
@@ -400,8 +465,8 @@ export default function Today({ openChat, address = '' }) {
   }
 
   // Генератор блоков
-  const renderBlock = (id) => {
-    const bp = blockProps(id)
+  const renderBlock = (id, idx = 0) => {
+    const bp = blockProps(id, idx)
     const ctl = renderCardControls(id)
 
     switch (id) {
@@ -423,7 +488,15 @@ export default function Today({ openChat, address = '' }) {
                 : <Skeleton h={150} radius="var(--r-lg)" />
             ) : (
               <>
-                <BigMoney value={balance} format={fmt.int} label={money(balance)} />
+                <BigMoney value={balance} format={fmt.int} label={money(balance)} duration={1800} delay={400} />
+                {/* вода героя: уровень --lvl = доля daysLeft/30 (в мокапе 53% при «16 из 30») */}
+                <div className="liq-water" aria-hidden="true" style={{ '--lvl': `${Math.round((daysLeft / 30) * 100)}%` }}>
+                  <svg viewBox="0 0 1200 40" preserveAspectRatio="none"><path d="M0,20 Q150,0 300,20 T600,20 T900,20 T1200,20 V40 H0Z" /></svg>
+                  <svg viewBox="0 0 1200 40" preserveAspectRatio="none"><path d="M0,20 Q150,38 300,20 T600,20 T900,20 T1200,20 V40 H0Z" /></svg>
+                  {bubbles.map((b, i) => (
+                    <i key={i} className="liq-bub" style={{ '--x': `${b.x}%`, '--s': `${b.s}px`, '--d': `${b.d}s` }} />
+                  ))}
+                </div>
                 <div className="days !max-w-[440px]" id="days">
                   {Array.from({ length: 30 }, (_, i) => (
                     <i key={i} className={i < daysLeft ? 'on' : ''} style={{ '--k': i }} />
@@ -475,15 +548,14 @@ export default function Today({ openChat, address = '' }) {
                 ? <Empty compact glyph="money" text={t('td.no_summary')} sub={t('td.no_summary_hint')} />
                 : <Skeleton h={132} />
             ) : (
-              <Rowi
-                title={t('rc.money')}
-                sub={t('rc.spent_short', { m: money(d.finance?.spent_today ?? 0) })}
-                right={<span className="amt"><span className="num">{fmt.int(balance)}</span> <span className="faint text-[length:var(--fs-xs)]">₽</span></span>}
-                onClick={() => nav('/finance')}
-              />
-            )}
-            {d && (
-              <>
+              /* liq-peb: на десктопе три строки становятся bobbing-стекляшками мокапа (CSS) */
+              <div className="liq-peb">
+                <Rowi
+                  title={t('rc.money')}
+                  sub={t('rc.spent_short', { m: money(d.finance?.spent_today ?? 0) })}
+                  right={<span className="amt"><span className="num">{fmt.int(balance)}</span> <span className="faint text-[length:var(--fs-xs)]">₽</span></span>}
+                  onClick={() => nav('/finance')}
+                />
                 <Rowi
                   title={t('rc.meetings')}
                   sub={todayEvents[0]?.title || t('nextup.day_free')}
@@ -498,7 +570,7 @@ export default function Today({ openChat, address = '' }) {
                   right={<span className="num text-[length:var(--fs-base)]">{(d.tasks || []).filter((x) => !x.done).length}</span>}
                   onClick={() => nav('/tasks')}
                 />
-              </>
+              </div>
             )}
           </section>
         )
@@ -510,7 +582,10 @@ export default function Today({ openChat, address = '' }) {
             {ctl}
             <BlockHead title={t('common.today')} note={t('cal.events_n', { count: todayEvents.length })} />
             {!d ? <Skeleton h={92} /> : todayEvents.length === 0 ? (
-              <div className="muted py-3 text-[length:var(--fs-md)]">{t('td.no_events_today')}</div>
+              <div className="liq-dayfree">
+                <span className="liq-sun" aria-hidden="true" />
+                <div className="muted py-3 text-[length:var(--fs-md)]">{t('td.no_events_today')}</div>
+              </div>
             ) : (
               todayEvents.map((e, eidx) => (
                 <Rowi key={e.id || eidx} time={hhmm(e.start || now)} title={e.title} onClick={() => setEditEvent(e)} />
@@ -526,7 +601,7 @@ export default function Today({ openChat, address = '' }) {
             {ctl}
             <BlockHead title={t('td.w_expenses')} note={t('td.d30')} />
             <div className="text-[length:var(--fs-2xl)] font-medium tracking-[-0.03em] num">
-              {fmt.int(expenses30)} <span className="text-[length:var(--fs-lg)] opacity-70">₽</span>
+              <CountUp value={expenses30} format={fmt.int} duration={1800} delay={500} roll={false} /> <span className="text-[length:var(--fs-lg)] opacity-70">₽</span>
             </div>
             {/* столбики по дням недели: подсказка — сколько потрачено в этот день недели */}
             {/* сервер отдаёт weekday[0] = понедельник, а WD_SHORT_MON начинается с воскресенья, поэтому подписи сдвигаем на день */}
@@ -547,7 +622,13 @@ export default function Today({ openChat, address = '' }) {
             {ctl}
             <BlockHead title={t('td.w_free')} note={t('td.per_month')} />
             <div className="text-[length:var(--fs-2xl)] font-medium tracking-[-0.03em] num">
-              {fmt.int(freeMonth)} <span className="text-[length:var(--fs-lg)] opacity-70">₽</span>
+              <CountUp value={freeMonth} format={fmt.int} duration={1800} delay={500} roll={false} /> <span className="text-[length:var(--fs-lg)] opacity-70">₽</span>
+            </div>
+            {/* волна из 30 светящихся ячеек мокапа (декор; распределение — в столбиках ниже) */}
+            <div className="liq-dots" aria-hidden="true">
+              {Array.from({ length: 30 }, (_, i) => (
+                <i key={i} style={{ '--k': i }} />
+              ))}
             </div>
             <TipBars
               kind="month"
@@ -566,7 +647,7 @@ export default function Today({ openChat, address = '' }) {
             {ctl}
             <BlockHead title={t('td.w_debts')} note={t('common.total')} />
             <div className="text-[length:var(--fs-2xl)] font-medium tracking-[-0.03em] num">
-              {fmt.int(debtTotal)} <span className="text-[length:var(--fs-lg)] opacity-70">₽</span>
+              <CountUp value={debtTotal} format={fmt.int} duration={1800} delay={500} roll={false} /> <span className="text-[length:var(--fs-lg)] opacity-70">₽</span>
             </div>
             <div className="progress mt-3"><div style={{ width: `${Math.max(2, debtClosedPct)}%` }} /></div>
             <div className="mt-1.5 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{t('td.closed_pct', { pct: debtClosedPct })}</div>
@@ -617,8 +698,8 @@ export default function Today({ openChat, address = '' }) {
           <section key={id} {...bp}>
             {ctl}
             <BlockHead title={t('nav.mind')} note={t('mem.entries_n', { count: (d?.memory || []).length })} />
-            {!d ? <Skeleton h={92} /> : recentNotes.length ? recentNotes.map((n) => (
-              <Rowi key={n.id} title={n.title} sub={[n.type, n.date].filter(Boolean).join(' · ')} onClick={() => nav('/memory')} />
+            {!d ? <Skeleton h={92} /> : recentNotes.length ? recentNotes.map((n, i) => (
+              <Rowi key={n.id} style={{ '--k': i }} title={n.title} sub={[n.type, n.date].filter(Boolean).join(' · ')} onClick={() => nav('/memory')} />
             )) : (
               <div className="muted py-3 text-[length:var(--fs-md)]">{t('td.no_notes')}</div>
             )}
@@ -702,7 +783,18 @@ export default function Today({ openChat, address = '' }) {
               note={open.length ? `${t('tk.open_n', { n: open.length })}${unpaid ? ` · ${t('or.st_awaiting', { m: money(unpaid) })}` : ''}` : ''}
             />
             {!loaded ? <Skeleton h={96} /> : !open.length ? (
-              <Empty glyph="tasks" compact text={t('or.empty_open')} sub={t('td.no_orders_sub')} hint={t('or.empty_open_hint')} />
+              /* пунктирное стекло + бликующий чип мокапа (ключи и поведение Empty.hint те же) */
+              <div className="liq-ord-empty">
+                <div className="note">{t('or.empty_open')}</div>
+                <div className="muted text-[length:var(--fs-md)]">{t('td.no_orders_sub')}</div>
+                <button
+                  type="button"
+                  className="liq-chip"
+                  onClick={() => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text: t('or.empty_open_hint') } }))}
+                >
+                  {`«${t('or.empty_open_hint')}» ↗`}
+                </button>
+              </div>
             ) : (
               open.map((o) => {
                 const left = Number(o.left ?? 0)
@@ -741,9 +833,10 @@ export default function Today({ openChat, address = '' }) {
               rows.slice(0, 8).map((r, i) => (
                 <Rowi
                   key={i}
+                  style={{ '--k': i }}
                   title={<span className="trunc">{r.t}</span>}
                   sub={r.s || undefined}
-                  right={r.v ? <span className="amt" style={{ color: (r.k === 'debt' || r.k === 'unpaid') ? 'var(--neg)' : 'var(--ink2)' }}>{r.v}</span> : undefined}
+                  right={r.v ? <span className="amt">{r.v}</span> : undefined}
                 />
               ))
             )}
@@ -810,6 +903,13 @@ export default function Today({ openChat, address = '' }) {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-today" style={pageAcc.style} ref={reveal}>
+      {/* liquid-фон мокапа: пятна + орбы + курсорное пятно (зерно — в CSS #p-today::after) */}
+      <div className="liq-bg" aria-hidden="true">
+        <i className="liq-bl liq-b1" /><i className="liq-bl liq-b2" />
+        <i className="liq-bl liq-b3" /><i className="liq-bl liq-b4" />
+        <i className="liq-orb liq-o1" /><i className="liq-orb liq-o2" />
+        <i className="liq-amb" data-liq-amb />
+      </div>
       {/* 1. Строка-статус: день мельче, имя крупно. h1 нужен и TitleHeader телефона.
           На телефоне верхней шапки нет — дата стоит здесь, над именем, как в макете. */}
       <header className="top" data-reveal>
@@ -861,11 +961,11 @@ export default function Today({ openChat, address = '' }) {
         </div>
       )}
 
-      {/* 3–4. Блоки: ширина по настройке, появление каскадом (data-reveal).
+      {/* 3–4. Блоки: ширина по настройке, появление каскадом --i (70мс, CSS up).
           На телефоне это одна колонка (CSS даёт span 12), а вертикальный ритм между
           блоками шире десктопных 16px — карточкам нужно воздуха, иначе лента слипается. */}
       <div className="bento" style={phone ? { rowGap: 20 } : undefined}>
-        {widgetOrder.map((id) => renderBlock(id))}
+        {widgetOrder.map((id, idx) => renderBlock(id, idx))}
       </div>
 
       {/* Настройка главной — одна точка входа (и на телефоне тоже): полоса-подпись

@@ -6,7 +6,7 @@ import { Sheet, Field, Empty, useToast, PageHead, ListSkeleton } from '../compon
 import { StatRow } from './Orders'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
-import { ClientStageBadge, ClientStageSelect, ClientStageNote } from '../components/ClientStage'
+import { ClientStageSelect, ClientStageNote } from '../components/ClientStage'
 import ClientNextStep from '../components/ClientNextStep'
 import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageApi, clientStageLabel, ORDER_STAGE_LABEL, stageOf } from '../lib/crm'
 import { useI18n, SERVER, t as T } from '../lib/i18n'
@@ -201,9 +201,8 @@ function PersonRow({ p, stage, next, onOpen }) {
           <span className="av2 shrink-0">{initials(p.name)}</span>
           <div className="min-w-0">
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="truncate break-anywhere font-medium" style={{ fontSize: 'var(--fs-lg)' }}>{p.name}</span>
+              <span className="min-w-0 max-w-full truncate break-anywhere font-medium" style={{ fontSize: 'var(--fs-lg)' }}>{p.name}</span>
               <span className={`faint shrink-0 ${SMALL_M}`} style={{ fontSize: 'var(--fs-xs)' }}>{kindLabel(p)}</span>
-              {HAS_STAGE.has(p.kind) && <ClientStageBadge view={stage} className="shrink-0" />}
             </div>
             {alias && <div className="muted break-anywhere truncate text-[12.5px]" title={alias}>{alias}</div>}
             {step && (
@@ -223,11 +222,11 @@ function PersonRow({ p, stage, next, onOpen }) {
              точка + подпись чипом, тап открывает шторку (стадия правится там).
              Клик гасится — иначе сработает и onOpen секции-двойником. */
           <div className="flex min-w-0 items-center max-[820px]:justify-end min-[821px]:absolute min-[821px]:right-4 min-[821px]:top-4 min-[821px]:mt-0" onClick={(e) => e.stopPropagation()}>
-            <button type="button" className={`badge min-h-[32px] max-w-full !gap-1.5 ${stageTone}`}
+            <button type="button" className={`badge min-h-[32px] min-w-0 max-w-full !gap-1.5 ${stageTone}`}
               aria-label={t('cstage.for', { name: p.name })} title={t('people.change_stage')} data-tip={t('people.change_stage')}
               onClick={(e) => { e.stopPropagation(); onOpen() }}>
               <span aria-hidden className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: stageDot(stageKey) }} />
-              <span className="truncate">{stageName}</span>
+              <span className="min-w-0 max-w-full truncate">{stageName}</span>
             </button>
           </div>
         ) : <div className="max-[820px]:hidden" />}
