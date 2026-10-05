@@ -19,6 +19,7 @@ import { useTimer, mmss } from '../pages/Orders'
 import { lower } from '../lib/name'
 import { api, relTime, kb } from '../lib/api'
 import { useI18n, t as T } from '../lib/i18n'
+import { usePrefs } from '../lib/prefs'
 import { crossfadeIn, crossfadeOut, viewTransition, motionOff, usePhone } from '../lib/motion'
 import { usePullToRefresh } from '../lib/gestures'
 import { headOf, textOf } from '../lib/nav'
@@ -217,6 +218,59 @@ function HeadStatus({ live, busy }) {
       </span>
       {pop && <LivePopover live={live} onClose={() => setPop(false)} place="absolute right-0 top-[calc(100%+8px)]" />}
     </span>
+  )
+}
+
+/* ---------- шапка десктопа ver6: дата-пилюля с живыми часами ----------
+   Формат как в мокапе («понедельник, 5 октября · 04:44»): только уже
+   используемые fmt-функции, новых i18n-строк нет. Часы тикают каждые 15 с. */
+function HeadDate() {
+  const { fmtDate, fmtWeekday, fmtTime } = useI18n()
+  const [now, setNow] = useState(() => new Date())
+  useEffect(() => {
+    const id = setInterval(() => setNow(new Date()), 15000)
+    return () => clearInterval(id)
+  }, [])
+  const label = `${fmtWeekday(now, 'long')}, ${fmtDate(now, { day: 'numeric', month: 'long' })} · ${fmtTime(now)}`
+  return <span className="gt-date num" title={label}>{label}</span>
+}
+
+/* Акцентные точки шапки: 6 цветов из ACCENT_PALETTE (lib/color.js).
+   Тот же механизм, что в настройках: prefs.set({ accentHex }) → localStorage +
+   apply() мгновенно и PUT /api/ui-prefs через pushRemote (lib/prefs.js). */
+const HEAD_ACCENTS = ['#0a3cff', '#8a5cff', '#c6f24a', '#ff7a1a', '#12b5a5', '#ff4d8d']
+function HeadAccents() {
+  const { t } = useI18n()
+  const [p, set] = usePrefs()
+  const cur = String(p.accentHex || '').toLowerCase()
+  return (
+    <span className="gt-dots" role="group" aria-label={t('st.accent_now2')}>
+      {HEAD_ACCENTS.map((hex) => {
+        const on = cur === hex
+        return (
+          <button
+            key={hex}
+            type="button"
+            className={`gt-dot${on ? ' on' : ''}`}
+            style={{ background: hex, color: hex }}
+            aria-pressed={on}
+            title={hex}
+            aria-label={hex}
+            onClick={() => { if (!on) set({ accentHex: hex }) }}
+          />
+        )
+      })}
+    </span>
+  )
+}
+
+/* Переключатель темы в шапке: та же onTheme из App.jsx (auto → light → dark). */
+function HeadTheme({ mode, onTheme }) {
+  const { t } = useI18n()
+  return (
+    <button type="button" className="ib" onClick={onTheme} title={t('st.theme')} aria-label={t('st.theme')}>
+      {mode === 'light' ? <Sun size={17} aria-hidden="true" /> : mode === 'dark' ? <Moon size={17} aria-hidden="true" /> : <Monitor size={17} aria-hidden="true" />}
+    </button>
   )
 }
 
@@ -610,7 +664,10 @@ export default function AppShell({
 
   return (
     <>
-      <div className="aur"><i></i><i></i><i></i></div>
+      {/* Единый фон всего приложения (фон везде един): спокойные пятна + орбы
+          на всех страницах, не только на «сегодня». Локальный .liq-bg в Today.jsx
+          скрыт в CSS, чтобы не двоилось. */}
+      <div className="aur" aria-hidden="true"><i></i><i></i><i></i><i className="liq-bl liq-b1" /><i className="liq-bl liq-b2" /><i className="liq-bl liq-b3" /><i className="liq-bl liq-b4" /><i className="liq-orb liq-o1" /><i className="liq-orb liq-o2" /></div>
       <div className="app">
         {/* Сайдбар монтируем только на телефоне (там его прячет CSS, но дерево нужно
             для e2e-хуков): на десктопе навигация — плавающий док, а скрытый aside
@@ -626,13 +683,16 @@ export default function AppShell({
               null
             ) : (
               <>
-                <HeadStatus live={live} busy={busy} />
-                <HeadPomo />
+                <HeadDate />
+                <HeadAccents />
+                <HeadTheme mode={mode} onTheme={onTheme} />
                 <div className="search" onClick={onSearch} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
                   aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSearch() } }}>
                   <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m14 14 3.5 3.5"/></svg>
                   {t('common.search')}<span className="kbd mono">{kb('K')}</span>
                 </div>
+                <HeadPomo />
+                <HeadStatus live={live} busy={busy} />
               </>
             )}
             <div className="ib" onClick={onInbox} style={{ cursor: 'pointer' }} role="button" tabIndex={0}

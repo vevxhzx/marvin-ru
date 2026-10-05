@@ -139,6 +139,56 @@
   text-overflow: ellipsis;
 }
 
+/* Side empty-day: breathing sun orb + note (ref empty-day; footer .calg-btn
+   below stays the single accent CTA reusing the existing create handler).
+   Orb mirrors Today .liq-sun but on accent tokens so it glows in dark + light. */
+#p-cal .calg-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 18px 2px;
+}
+
+#p-cal .calg-sun {
+  flex: none;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 35% 30%,
+    #fff,
+    color-mix(in srgb, var(--acc) 68%, #fff) 45%,
+    var(--acc)
+  );
+  box-shadow:
+    0 0 50px color-mix(in srgb, var(--acc) 55%, transparent),
+    inset 0 -6px 14px rgba(0, 0, 0, .15);
+  animation: calg-sun-br 4s ease-in-out infinite;
+}
+
+@keyframes calg-sun-br {
+  50% {
+    transform: scale(1.1);
+    box-shadow:
+      0 0 80px color-mix(in srgb, var(--acc) 65%, transparent),
+      inset 0 -6px 14px rgba(0, 0, 0, .15);
+  }
+}
+
+#p-cal .calg-empty-t {
+  font-size: var(--fs-lg);
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+#p-cal .calg-empty-s {
+  font-size: var(--fs-md);
+  line-height: var(--lh-snug);
+  color: var(--ink3);
+  max-width: 46ch;
+}
+
 /* Side panel footer: accent create button reusing the existing create handler */
 #p-cal .calg-side-foot {
   display: flex;
@@ -270,6 +320,11 @@
     font-size: 64px;
   }
 
+  #p-cal .calg-sun {
+    width: 60px;
+    height: 60px;
+  }
+
   #p-cal .calg-tr {
     height: 104px;
   }
@@ -284,7 +339,8 @@
 @media (prefers-reduced-motion: reduce) {
   #p-cal .cal2-grid > b.calg-dy,
   #p-cal .cal2 b.t .day-num,
-  #p-cal .calg-nd.calg-now {
+  #p-cal .calg-nd.calg-now,
+  #p-cal .calg-sun {
     animation: none;
   }
 

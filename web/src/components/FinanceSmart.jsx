@@ -11,11 +11,6 @@ const SEG_ROW_M = 'no-scrollbar max-[820px]:!flex-nowrap max-[820px]:!overflow-x
 
 const BUCKET = { need: 'bucket.need', want: 'bucket.want', save: 'bucket.save' }
 const BUCKET_TONE = { need: 'var(--ink)', want: 'var(--accent)', save: 'var(--pos)' }
-const BUCKET_GRAD = {
-  need: 'linear-gradient(90deg, var(--ink), #4b4b55)',
-  want: 'linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--acc) 55%, #ffffff))',
-  save: 'linear-gradient(90deg, #19b34a, #14b8a6)',
-}
 const ask = (text, send = true) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text, send } }))
 const ICONS = ['🎯', '🛟', '📷', '💻', '✈️', '🚗', '🏠', '🎁', '🎓', '💍', '🏋️', '🐶']
 
@@ -166,30 +161,61 @@ export function Techniques({ t: data, onOpenCat }) {
 function Buckets({ b, onOpenCat }) {
   const { t } = useI18n()
   if (!b?.base) return <Empty glyph="money" text={t('tech.no_ops')} sub={t('tech.no_ops_hint')} compact />
+  // ver6: кольцо 50/30/20 вместо полос — те же buckets/share/norm/status, вид только.
+  const C = 2 * Math.PI * 52
+  let _acc = 0
+  const segs = b.buckets.map((x) => { const start = _acc; _acc += Number(x.share) || 0; return { ...x, start } })
+  const save = b.buckets.find((x) => x.bucket === 'save')
   return (
     <div>
-      <div className="flex h-[10px] w-full overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-        {b.buckets.map((x) => <div key={x.bucket} className="h-full transition-all duration-700" style={{ width: `${Math.min(100, x.share * 100)}%`, background: BUCKET_GRAD[x.bucket] || BUCKET_TONE[x.bucket] }} />)}
-      </div>
-      <div className="mt-1.5 flex h-[3px] w-full overflow-hidden rounded-full opacity-40" style={{ background: 'var(--fill-2)' }} title={t('tech.norm')}>
-        {b.buckets.map((x) => <div key={x.bucket} className="h-full" style={{ width: `${x.norm * 100}%`, background: BUCKET_GRAD[x.bucket] || BUCKET_TONE[x.bucket] }} />)}
-      </div>
-      <div className="mt-5">
-        {b.buckets.map((x) => (
-          <div key={x.bucket} className="rule row">
-            <span className="flex min-w-0 items-center gap-2">
-              <i className="h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_TONE[x.bucket] }} />
-              <span className="label trunc">{t.sv(x.label) || x.label}</span>
-            </span>
-            <span className={`num shrink-0 text-[length:var(--fs-lg)] font-medium ${x.status === 'over' ? 'neg' : x.status === 'low' ? 'warn' : ''}`}>
-              {Math.round(x.share * 100)} <span className="text-[length:var(--fs-md)]">%</span>
-            </span>
-            <span className="num ml-auto shrink-0 text-[length:var(--fs-md)] text-[var(--ink-2)]">{money(x.amount)}</span>
-            <span className="muted shrink-0 truncate text-[length:var(--fs-xs)]">
-              {t('tech.norm')} {Math.round(x.norm * 100)} %{x.status === 'over' ? t('tech.over') : x.status === 'low' ? t('tech.under') : ''}
-            </span>
+      <div className="fg-tech">
+        <div className="fg-donut fg-tech-ring" role="img" aria-label={t('tech.tab_buckets')}>
+          <svg viewBox="0 0 120 120" aria-hidden="true">
+            <circle className="fg-track" cx="60" cy="60" r="52" strokeWidth="14" />
+            {segs.map((x) => {
+              const len = Math.max(0, (Number(x.share) || 0) * C - 3)
+              if (len <= 0) return null
+              return (
+                <circle
+                  key={x.bucket}
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  strokeWidth="14"
+                  strokeDasharray={`${len} ${C}`}
+                  strokeDashoffset={-x.start * C}
+                  transform="rotate(-90 60 60)"
+                  style={{
+                    fill: 'none',
+                    stroke: BUCKET_TONE[x.bucket] || 'var(--acc)',
+                    ...(x.bucket === 'want' ? { filter: 'drop-shadow(0 0 6px color-mix(in srgb, var(--acc) 60%, transparent))' } : null),
+                  }}
+                />
+              )
+            })}
+          </svg>
+          <div className="fg-donut-ct">
+            <b className="num">{Math.round((Number(save?.share) || 0) * 100)}&nbsp;%</b>
+            <span>{t.sv(save?.label || '')}</span>
           </div>
-        ))}
+        </div>
+        <div className="fg-legend">
+          {b.buckets.map((x) => (
+            <div key={x.bucket} className="rule row">
+              <span className="flex min-w-0 items-center gap-2">
+                <i className="fg-dot h-2 w-2 shrink-0 rounded-full" style={{ background: BUCKET_TONE[x.bucket], color: BUCKET_TONE[x.bucket] }} />
+                <span className="label trunc">{t.sv(x.label) || x.label}</span>
+              </span>
+              <span className={`num shrink-0 text-[length:var(--fs-lg)] font-medium ${x.status === 'over' ? 'neg' : x.status === 'low' ? 'warn' : ''}`}>
+                {Math.round(x.share * 100)} <span className="text-[length:var(--fs-md)]">%</span>
+              </span>
+              <span className="num ml-auto shrink-0 text-[length:var(--fs-md)] text-[var(--ink-2)]">{money(x.amount)}</span>
+              <span className="muted shrink-0 truncate text-[length:var(--fs-xs)]">
+                {t('tech.norm')} {Math.round(x.norm * 100)} %{x.status === 'over' ? t('tech.over') : x.status === 'low' ? t('tech.under') : ''}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
       <div className="muted mt-4 text-[length:var(--fs-md)]">
         {t('tech.counting', { base: b.income > 0 ? t('tech.from_income') : t('tech.from_spend') })}{money(b.base)}.

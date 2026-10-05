@@ -10,8 +10,9 @@ import Aims from '../components/Aims'
 import { usePrefs, prefs as PREFS } from '../lib/prefs'
 import { usePageAccent } from '../lib/prefs'
 import { useCardLayout, CardCtl } from '../lib/layout'
-import { useI18n } from '../lib/i18n'
+import { useI18n, fmtWeekday } from '../lib/i18n'
 import { usePhone } from '../lib/motion'
+import '../tasks-glass.css'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
@@ -226,6 +227,27 @@ export default function Tasks() {
     return [...todayTasks, ...agenda].sort((a, b) => (Number(!!a.done) - Number(!!b.done)) || at(a) - at(b))
   }, [tasks, tasksSort])
 
+  /* Side column (glass port): today ring + week bars. Client-side only, derived
+     from the already-loaded api.tasks(true,true) payload — no new requests.
+     Week bars count done.done_at per day over the last 7 days incl. today. */
+  const todayDone = todayList.filter((t) => t.done).length
+  const todayTotal = todayList.length
+  const ringFrac = todayTotal ? todayDone / todayTotal : 0
+  const ringNote = !todayTotal ? t('tk.today_empty') : todayDone === todayTotal ? t('tk.all_done') : t('tk.open_n', { count: todayTotal - todayDone })
+  const weekBars = useMemo(() => {
+    const days = []
+    for (let i = 6; i >= 0; i--) days.push(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i))
+    const counts = days.map((d) => done.filter((x) => {
+      if (!x.done_at) return false
+      const at = new Date(x.done_at)
+      return !Number.isNaN(at) && isSameDay(at, d)
+    }).length)
+    return { days, counts, total: counts.reduce((a, b) => a + b, 0), peak: Math.max(...counts, 0) }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tasks])
+  const RING_R = 52
+  const RING_C = 2 * Math.PI * RING_R
+
   /* Search and project filter are local, no server requests. Lists are derived from the
      same data, so the filter applies to «сегодня» too; meetings have no project. */
   const filtering = !!q.trim() || !!proj
@@ -393,10 +415,12 @@ export default function Tasks() {
           {/* Quick add — one line, your own words. На десктопе панель-карточка, на телефоне
               тот же блок без обёртки. */}
           <div className="bento mt-5">
-          {/* The list: на десктопе панель-карточка с шапкой и волосяными разделителями,
-              на телефоне плоский раздел на фоне страницы. Каскад появления общий. */}
+          {/* The list: на десктопе широкая glass-панель двухколоночной раскладки
+              (вторая колонка — .tg-side ниже), на телефоне плоский раздел.
+              Строки без изменений разметки: dot приоритета, заголовок,
+              чип due-tag, chevron — одевает tasks-glass.css. */}
           {blockOrder.includes('list') && (
-            <section className={`relative s12 ${cardM()}`}>
+            <section className={`relative s12 tg-list ${cardM()}`}>
               {ctl('list')}
               <div
                 className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"
@@ -495,6 +519,62 @@ export default function Tasks() {
                 </div>
               )}
             </section>
+          )}
+          {/* Side column (glass port, ref ver6): ring «сегодня» + бары недели.
+              div, не aside — index.css прячет aside на телефоне, а колонка там
+              остаётся, стеком под списком. Те же данные, что уже загружены. */}
+          {blockOrder.includes('list') && (
+            <div className="s12 tg-side">
+              <section className={`tg-card ${cardM()}`}>
+                <div className="hd">
+                  <h2 className="h3">{t('common.today')}</h2>
+                  <small>{t('tk.open_n', { count: open.length })}</small>
+                </div>
+                <div className="tg-ringw">
+                  <svg viewBox="0 0 120 120" aria-hidden="true">
+                    <circle cx="60" cy="60" r={RING_R} className="tg-ring-track" />
+                    <circle
+                      cx="60"
+                      cy="60"
+                      r={RING_R}
+                      className="tg-ring-fg"
+                      strokeDasharray={RING_C}
+                      strokeDashoffset={RING_C * (1 - ringFrac)}
+                      strokeLinecap="round"
+                      transform="rotate(-90 60 60)"
+                    />
+                  </svg>
+                  <div className="tg-ring-ct">
+                    <span className="tg-ring-num num">{todayDone}/{todayTotal}</span>
+                    <span className="tg-ring-note">{ringNote}</span>
+                  </div>
+                </div>
+              </section>
+              <section className={`tg-card ${cardM()}`}>
+                <div className="hd">
+                  <h2 className="h3">{t('common.week')}</h2>
+                  <small>{t('tk.done')} · <span className="num">{weekBars.total}</span></small>
+                </div>
+                <div className="tg-bars" role="img" aria-label={`${t('tk.done')} · ${weekBars.total}`}>
+                  {weekBars.days.map((d, i) => {
+                    const v = weekBars.counts[i]
+                    const peak = v > 0 && v === weekBars.peak
+                    return (
+                      <div key={d.toDateString()} className="tg-bar-col">
+                        <span className="tg-bar-num num">{v}</span>
+                        <div className="tg-bar-track">
+                          <div
+                            className={`tg-bar-fill${peak ? ' is-peak' : ''}`}
+                            style={{ height: `${v ? Math.max(Math.round((v / weekBars.peak) * 100), 18) : 0}%` }}
+                          />
+                        </div>
+                        <span className="tg-bar-day">{fmtWeekday(d, 'short')}</span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </section>
+            </div>
           )}
           </div>
 

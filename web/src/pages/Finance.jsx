@@ -18,7 +18,7 @@ import CashChart from '../components/CashChart'
 import LifeRegime from '../components/LifeRegime'
 import { ImportButton } from '../components/Widgets'
 import { useRefresh } from '../App'
-import { Plus, Search, Trash2, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, ChevronRight, EyeOff, Play, Pause, Settings2 } from 'lucide-react'
+import { Plus, Search, Trash2, X, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, ChevronRight, EyeOff, Settings2 } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
 import { useCardLayout, CardCtl } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
@@ -401,6 +401,24 @@ export default function Finance() {
     return { list, income: Math.round(income), expense: Math.round(expense) }
   }, [txs, txCategory, txAccount, txSearch])
   const shownTxs = filteredTxs.list
+
+  // СЧЕТА (visual-only): итог и поток ± за период по счёту — из уже загруженных
+  // txs (период days), новых запросов нет. История балансов на счёте не хранится
+  // (Account: name/kind/balance) — спарклайна нет, опускаем.
+  const accTotal = accounts.reduce((s, a) => s + (Number(a.balance) || 0), 0)
+  const accFlow = {}
+  for (const tx of txs) {
+    if (!tx.account) continue
+    const e = accFlow[tx.account] || (accFlow[tx.account] = { in: 0, out: 0 })
+    const v = Number(tx.amount) || 0
+    if (tx.kind === 'income') e.in += v
+    else if (tx.kind === 'expense') e.out += v
+  }
+  // ДОЛГИ (visual-only): кольцо сводки — доля выплаченного, те же debts/total/paid
+  const debtTotalAll = debts.reduce((s, d) => s + (Number(d.total) || 0), 0)
+  const debtPaidAll = debts.reduce((s, d) => s + (Number(d.paid) || 0), 0)
+  const debtPct = debtTotalAll > 0 ? Math.min(100, Math.round((debtPaidAll / debtTotalAll) * 100)) : 0
+  const DONUT_C = 2 * Math.PI * 52
 
   // Экспорт выписки в CSV — повторяет то, что видит пользователь: берём shownTxs
   // (учитывает период, фильтр по счёту/категории и поиск), а не все txs (D2)
@@ -891,54 +909,108 @@ export default function Finance() {
         </>
       )}
 
-      {/* ---------------- СЧЕТА ---------------- */}
+      {/* ---------------- СЧЕТА (ver6: hero с итогом + лаймовый бар + карточки) ---------------- */}
       {tab === 'accounts' && (
-        <Block className="mt-5" title={t('fin.tab_accounts')} note={t('fin.n_accounts', { count: accounts.length })}>
-          {!accounts.length ? (
-            <Empty glyph="money" text={t('fin.no_accounts')} sub={t('fin.no_accounts_hint')}
-              action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('account') }}><Plus size={15} /> {t('fin.add_account')}</button>} />
-          ) : accounts.map((a) => {
-            const atype = a.type || a.kind || 'bank'
-            const Icon = atype === 'card' ? CreditCard : atype === 'cash' ? Wallet : atype === 'crypto' ? PiggyBank : Landmark
-            const kindLabel = ({ card: t('acc.card'), cash: t('acc.cash2'), bank: t('graph.one_account'), savings: t('acc.deposit'), crypto: t('acc.crypto') })[atype] || t('graph.one_account')
-            return (
-              <div className="rowi" key={a.id || a.name}>
-                <span className="w-9 shrink-0 text-[var(--ink-3)]" aria-hidden="true"><Icon size={17} /></span>
-                <span className="t">
-                  <span className="clamp-2 block">{a.name}</span>
-                  <small>{a.comment || kindLabel} · {a.currency || 'RUB'}</small>
-                </span>
-                <span className="amt num" style={{ fontSize: 'var(--fs-lg)' }}>{fmt.money(a.balance || 0)}</span>
-                <RowActions>
-                  <IconBtn onClick={() => { setEditingItem(a); setSheet('account') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
-                  <IconBtn
-                    danger
-                    title={t('fin.del_acc_q')}
-                    onClick={() => setAsk({
-                      title: t('fin.del_acc_q_name', { name: a.name }),
-                      text: t('fin.del_acc_text'),
-                      msg: t('fin.acc_deleted'),
-                      run: () => api.delAccount(a.id),
-                    })}
-                  >
-                    <Trash2 size={14} />
-                  </IconBtn>
-                </RowActions>
+        <div className="bento mt-4">
+          <section className={`c fg-card fg-acc-hero col-span-12 ${CARD_M_LIGHT}`} data-reveal>
+            <div className="hd flex-wrap">
+              <div className="min-w-0"><h2 className="trunc">{t('fin.tab_accounts')}</h2></div>
+              <small className="trunc">{t('fin.n_accounts', { count: accounts.length })}</small>
+            </div>
+            <BigMoney value={accTotal} format={fmt.int} label={money(accTotal)} fs="clamp(28px, 3vw, 42px)" />
+            {accTotal > 0 && accounts.length > 0 && (
+              <div className="fg-acc-bar mt-3" role="img" aria-label={t('fin.all_accounts')}>
+                {accounts.map((a) => {
+                  const w = Math.max(0, (Number(a.balance) || 0) / accTotal) * 100
+                  return w > 0 ? <i key={a.id || a.name} style={{ width: `${w}%` }} /> : null
+                })}
               </div>
-            )
-          })}
-        </Block>
+            )}
+            <div className="muted mt-2 text-[length:var(--fs-md)]">
+              {t('fin.for_days', { n: days || t('common.all'), m: money(filteredTxs.expense) })}
+            </div>
+          </section>
+          {!accounts.length ? (
+            <section className={`c col-span-12 ${CARD_M_LIGHT}`} data-reveal>
+              <Empty glyph="money" text={t('fin.no_accounts')} sub={t('fin.no_accounts_hint')}
+                action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('account') }}><Plus size={15} /> {t('fin.add_account')}</button>} />
+            </section>
+          ) : (
+            <div className="fg-accts col-span-12">
+              {accounts.map((a) => {
+                const atype = a.type || a.kind || 'bank'
+                const Icon = atype === 'card' ? CreditCard : atype === 'cash' ? Wallet : atype === 'crypto' ? PiggyBank : Landmark
+                const kindLabel = ({ card: t('acc.card'), cash: t('acc.cash2'), bank: t('graph.one_account'), savings: t('acc.deposit'), crypto: t('acc.crypto') })[atype] || t('graph.one_account')
+                const f = accFlow[a.name] || { in: 0, out: 0 }
+                return (
+                  <section className={`c fg-card fg-acct ${CARD_M_LIGHT}`} data-reveal key={a.id || a.name}>
+                    <div className="flex items-center gap-2.5">
+                      <span className="fg-chip" aria-hidden="true"><Icon size={18} /></span>
+                      <span className="t min-w-0 flex-1">
+                        <span className="clamp-2 block" style={{ fontWeight: 600 }}>{a.name}</span>
+                        <small className="muted trunc">{a.comment || kindLabel} · {a.currency || 'RUB'}</small>
+                      </span>
+                      <RowActions>
+                        <IconBtn onClick={() => { setEditingItem(a); setSheet('account') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
+                        <IconBtn
+                          danger
+                          title={t('fin.del_acc_q')}
+                          onClick={() => setAsk({
+                            title: t('fin.del_acc_q_name', { name: a.name }),
+                            text: t('fin.del_acc_text'),
+                            msg: t('fin.acc_deleted'),
+                            run: () => api.delAccount(a.id),
+                          })}
+                        >
+                          <Trash2 size={14} />
+                        </IconBtn>
+                      </RowActions>
+                    </div>
+                    <div className="num fg-big mt-2">{fmt.money(a.balance || 0)}</div>
+                    {(f.in > 0 || f.out > 0) && (
+                      <div className="fg-delta">
+                        {t('fin.for_days_short', { n: days || t('common.all') })}: <span className="pos">+{fmt.money(f.in)}</span> / <span>{MINUS}{fmt.money(f.out)}</span>
+                      </div>
+                    )}
+                  </section>
+                )
+              })}
+            </div>
+          )}
+        </div>
       )}
 
-      {/* ---------------- ДОЛГИ (бенто: карточки) ---------------- */}
+      {/* ---------------- ДОЛГИ (ver6: сводка с кольцом + тонкие бары + лаймовая кнопка) ---------------- */}
       {tab === 'debts' && (
         <div className="bento mt-4">
-          <section className={`c s4 glass-card gc-debts ${CARD_M_LIGHT}`} data-reveal>
-            <div className="hd flex-wrap">
-              <div className="min-w-0"><h2 className="trunc">{t('fin.total_debt')}</h2></div>
+          <section className={`c s4 glass-card gc-debts fg-debt-top ${CARD_M_LIGHT}`} data-reveal>
+            <div className="min-w-0">
+              <div className="hd flex-wrap">
+                <div className="min-w-0"><h2 className="trunc">{t('fin.total_debt')}</h2></div>
+              </div>
+              <BigMoney value={debtsTotal} format={fmt.int} label={money(debtsTotal)} fs="clamp(24px, 2.6vw, 34px)" />
+              <div className="muted mt-2 text-[length:var(--fs-md)]">{t('fin.n_active_debt', { count: debts.length })}</div>
             </div>
-            <BigMoney value={debtsTotal} format={fmt.int} label={money(debtsTotal)} fs="clamp(24px, 2.6vw, 34px)" />
-            <div className="muted mt-2 text-[length:var(--fs-md)]">{t('fin.n_active_debt', { count: debts.length })}</div>
+            <div className="fg-donut" role="img" aria-label={`${t('fin.paid_out')} ${debtPct} %`}>
+              <svg viewBox="0 0 120 120" aria-hidden="true">
+                <circle className="fg-track" cx="60" cy="60" r="52" strokeWidth="12" />
+                <circle
+                  className="fg-val"
+                  cx="60"
+                  cy="60"
+                  r="52"
+                  strokeWidth="12"
+                  strokeLinecap="round"
+                  strokeDasharray={DONUT_C}
+                  strokeDashoffset={DONUT_C * (1 - debtPct / 100)}
+                  transform="rotate(-90 60 60)"
+                />
+              </svg>
+              <div className="fg-donut-ct">
+                <b className="num">{debtPct}&nbsp;%</b>
+                <span>{t('fin.paid_out')}</span>
+              </div>
+            </div>
           </section>
           {!debts.length ? (
             <section className={`c s8 ${CARD_M_LIGHT}`} data-reveal>
@@ -959,7 +1031,7 @@ export default function Finance() {
                     <small className="trunc">{d.creditor || t('fin.creditor')}</small>
                   </div>
                   <BigMoney value={left} format={fmt.int} label={money(left)} fs="clamp(22px, 2.4vw, 30px)" />
-                  <div className="progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
+                  <div className="progress fg-debtbar mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
                     <div style={{ width: `${pct}%`, background: GRAD_BAR, boxShadow: BAR_GLOW }} />
                   </div>
                   <div className="muted mt-2 text-[length:var(--fs-xs)]">
@@ -967,7 +1039,7 @@ export default function Finance() {
                   </div>
                   <div className="mt-3">
                     <RowActions>
-                      <button type="button" className="btn btn-sm" onClick={() => { setEditingItem(d); setSheet('payDebt') }}>{t('fin.make_payment')}</button>
+                      <button type="button" className="btn btn-sm fg-pay" onClick={() => { setEditingItem(d); setSheet('payDebt') }}>{t('fin.make_payment')}</button>
                       <IconBtn onClick={() => { setEditingItem(d); setSheet('debt') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
                       <IconBtn
                         danger
@@ -1036,30 +1108,32 @@ export default function Finance() {
               <div className="clamp-2" style={{ fontSize: 'var(--fs-base)', fontWeight: 600, color: 'var(--ink)' }}>{r.name || r.title}</div>
               <div className="muted mt-1 trunc text-[length:var(--fs-xs)]" title={[r.category, r.account].filter(Boolean).join(' · ')}>
                 {[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}
+                {' · '}{r.active === false ? t('fin.paused') : t('fin.status_active')}
               </div>
-              <div className="mt-3" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                {/* Тап по карточке открывает RecurringSheet (правка полей); пауза и удаление
-                    живут только здесь: в шторке их нет, поэтому кнопки остаются в карточке. */}
-                <RowActions>
-                  <IconBtn
-                    title={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
-                    onClick={() => toggleActive(r)}
-                  >
-                    {r.active === false ? <Play size={14} /> : <Pause size={14} />}
-                  </IconBtn>
-                  <IconBtn
-                    danger
-                    title={t('fin.remove_pay')}
-                    onClick={() => setAsk({
-                      title: t('fin.del_rec_q_name', { name: r.name || r.title }),
-                      text: t('fin.pause_note'),
-                      msg: t('fin.paused'),
-                      run: () => api.delRecurring(r.id),
-                    })}
-                  >
-                    <Trash2 size={14} />
-                  </IconBtn>
-                </RowActions>
+              <div className="mt-3 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                {/* Тап по карточке открывает RecurringSheet (правка полей); здесь только
+                    тумблер паузы (тот же toggleActive) и удаление — иконок паузы больше нет. */}
+                <button
+                  type="button"
+                  role="switch"
+                  aria-checked={r.active !== false}
+                  className={`switch ${r.active === false ? '' : 'on'}`}
+                  title={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
+                  aria-label={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
+                  onClick={() => toggleActive(r)}
+                />
+                <IconBtn
+                  danger
+                  title={t('fin.remove_pay')}
+                  onClick={() => setAsk({
+                    title: t('fin.del_rec_q_name', { name: r.name || r.title }),
+                    text: t('fin.pause_note'),
+                    msg: t('fin.paused'),
+                    run: () => api.delRecurring(r.id),
+                  })}
+                >
+                  <X size={15} />
+                </IconBtn>
               </div>
             </section>
           ))}

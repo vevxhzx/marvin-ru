@@ -660,13 +660,13 @@ export default function Calendar() {
                 {!loaded ? (
                   <ListSkeleton n={4} rowH={58} />
                 ) : dayEvents.length === 0 ? (
-                  <Empty
-                    compact
-                    glyph="calendar"
-                    text={t('cal.e_day')}
-                    sub={t('cal.e_day_sub')}
-                    action={<button type="button" className="btn-soft btn-sm" onClick={() => setSheet('new')}>{t('cal.add_event')}</button>}
-                  />
+                  /* Ref empty-day: sun orb + note (footer .calg-btn below is the accent CTA) —
+                     same strings/handler, visual-only, no new i18n */
+                  <div className="calg-empty">
+                    <span className="calg-sun" aria-hidden="true" />
+                    <div className="calg-empty-t">{t('cal.e_day')}</div>
+                    <div className="calg-empty-s">{t('cal.e_day_sub')}</div>
+                  </div>
                 ) : (
                   dayEvents.map((e) => (
                     <div

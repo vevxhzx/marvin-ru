@@ -1,0 +1,227 @@
+/* tasks-glass.css — Tasks glass port (visual-only, no logic/i18n changes).
+   Ref ver6: two-pane — LEFT wide glass card (view tabs, sort seg, grouped rows
+   with priority dots + chips + chevron), RIGHT column (top "сегодня / N в работе"
+   ring card with progress ring + note; bottom "неделя / закрыто за неделю" bar
+   chart card with glowing bars + day labels/counts).
+   Scoped to #p-tasks. Tokens only (acc, line, glass, sf and fill vars), no raw
+   palette. index.css is NOT touched (owned by another agent).
+   Data: ring + week bars derive client-side from the already-loaded tasks
+   (api.tasks(true,true) in Tasks.jsx) — no new backend calls. */
+
+#p-tasks .tg-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--bento-gap);
+  min-width: 0;
+}
+
+/* Active segments follow the accent with a strong glow (ref active seg).
+   View tabs keep their underline style — the underline + count turn accent;
+   the sort pill seg gets the accent gradient pill. */
+#p-tasks .top .sg.tabs > .on {
+  color: var(--acc);
+}
+#p-tasks .top .sg.tabs > .on::after {
+  background: var(--acc);
+  box-shadow: 0 0 12px color-mix(in srgb, var(--acc) 70%, transparent);
+}
+#p-tasks .tg-list .sg > button.on {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--acc) 72%, #fff), var(--acc));
+  color: var(--accent-ink);
+  box-shadow:
+    0 0 20px color-mix(in srgb, var(--acc) 60%, transparent),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+
+/* Header "+ задача" — accent gradient + strong glow (ref add button). */
+#p-tasks .head-primary {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--acc) 62%, #fff), var(--acc));
+  color: var(--accent-ink);
+  border: 0;
+  box-shadow:
+    0 10px 30px -6px color-mix(in srgb, var(--acc) 65%, transparent),
+    inset 0 1px 1px rgba(255, 255, 255, 0.5);
+}
+
+/* List card: glass container on desktop; rows keep their markup (.rowi with
+   priority dot, title, due-tag chip, chevron) — only dressed here. The base
+   .rowi hairline (border-top) stays the divider; the first row drops its top
+   hairline so it never doubles the .rule above it. */
+#p-tasks .tg-list .stagger > .swipe:first-child .rowi {
+  border-top: 0;
+}
+#p-tasks .tg-list .due-tag {
+  background: var(--accent-soft);
+  color: var(--acc);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 22%, transparent);
+}
+#p-tasks .tg-list .is-done .due-tag {
+  background: var(--fill);
+  color: var(--ink-3);
+  box-shadow: none;
+}
+#p-tasks .tg-list .row-open {
+  color: var(--ink3);
+}
+#p-tasks .tg-list .rowi:hover .row-open {
+  color: var(--acc);
+}
+
+/* Today ring card (ref .ringw): static SVG ring, accent arc with strong glow. */
+#p-tasks .tg-ringw {
+  position: relative;
+  width: min(100%, 210px);
+  aspect-ratio: 1;
+  margin: 2px auto 0;
+}
+#p-tasks .tg-ringw svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+#p-tasks .tg-ring-track {
+  fill: none;
+  stroke: var(--line);
+  stroke-width: 10;
+}
+#p-tasks .tg-ring-fg {
+  fill: none;
+  stroke: var(--acc);
+  stroke-width: 10;
+  filter: drop-shadow(0 0 8px color-mix(in srgb, var(--acc) 65%, transparent));
+  transition: stroke-dashoffset 0.6s var(--ease-out);
+}
+#p-tasks .tg-ring-ct {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  text-align: center;
+  padding: var(--s-3);
+}
+#p-tasks .tg-ring-num {
+  font-size: clamp(26px, 2.6vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+#p-tasks .tg-ring-note {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  max-width: 22ch;
+}
+
+/* Week bars card (ref glowing bars): 7 columns, count on top, weekday below.
+   Peak bar glows strong; empty days stay a flat dim track. */
+#p-tasks .tg-bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: var(--s-2);
+}
+#p-tasks .tg-bar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+#p-tasks .tg-bar-num {
+  font-size: var(--fs-xs);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  line-height: 1;
+  min-height: 12px;
+}
+#p-tasks .tg-bar-track {
+  display: flex;
+  align-items: flex-end;
+  width: 100%;
+  height: 92px;
+  border-radius: 8px;
+  background: var(--fill);
+  box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.18);
+  overflow: hidden;
+  padding: 3px;
+}
+#p-tasks .tg-bar-fill {
+  width: 100%;
+  border-radius: 6px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 55%, #fff), var(--acc));
+  opacity: 0.55;
+}
+#p-tasks .tg-bar-fill.is-peak {
+  opacity: 1;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--acc) 45%, #fff), var(--acc));
+  box-shadow:
+    0 0 18px color-mix(in srgb, var(--acc) 65%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+#p-tasks .tg-bar-day {
+  font-size: var(--fs-xs);
+  color: var(--ink-3);
+  text-transform: capitalize;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* Desktop (≥821px): two-pane — wide list + side column. #p-tasks prefix beats
+   the .s8/.s4/.s12 span rules in index.css, so the pair survives 821–1060px
+   where .s8 would otherwise go full-width. Glass surfaces desktop-only. */
+@media (min-width: 821px) {
+  #p-tasks .tg-list {
+    grid-column: span 8;
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
+      var(--sf);
+    border: 1px solid var(--glass-ring);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    backdrop-filter: blur(14px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      inset 0 0 0 1px var(--glass-ring),
+      var(--shadow-1);
+  }
+  #p-tasks .tg-side {
+    grid-column: span 4;
+  }
+  #p-tasks .tg-card {
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
+      var(--sf);
+    border: 1px solid var(--glass-ring);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    backdrop-filter: blur(14px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      inset 0 0 0 1px var(--glass-ring),
+      var(--shadow-1);
+  }
+}
+
+/* Mobile (≤820px): side cards stack below the list (DOM order), compact —
+   smaller ring, shorter bars; the light card look from cardM is untouched. */
+@media (max-width: 820px) {
+  #p-tasks .tg-side {
+    gap: var(--bento-gap-m);
+  }
+  #p-tasks .tg-ringw {
+    width: min(100%, 180px);
+  }
+  #p-tasks .tg-bar-track {
+    height: 72px;
+  }
+}
+
+/* Reduced motion: the ring sweep is the only transition here — pin it. */
+@media (prefers-reduced-motion: reduce) {
+  #p-tasks .tg-ring-fg {
+    transition: none;
+  }
+}
