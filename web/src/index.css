@@ -307,14 +307,16 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 }
 .gc-subs::after { background: color-mix(in srgb, var(--acc) 80%, transparent); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--acc) 55%, transparent); }
 .gc-debts {
+  /* Долги: розовый намеренно приглушён (карточка не должна быть «розовой» целиком) —
+     цвет держат кромка, цифры и бейджи, заливка даёт лишь лёгкий тон. */
   background:
-    linear-gradient(135deg, color-mix(in srgb, var(--neg) 32%, transparent) 0%, transparent 58%),
-    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--warn) 18%, transparent), transparent 62%),
-    radial-gradient(70% 55% at 10% 100%, color-mix(in srgb, var(--neg) 15%, transparent), transparent 65%),
+    linear-gradient(135deg, color-mix(in srgb, var(--neg) 15%, transparent) 0%, transparent 58%),
+    radial-gradient(90% 70% at 85% 0%, color-mix(in srgb, var(--warn) 9%, transparent), transparent 62%),
+    radial-gradient(70% 55% at 10% 100%, color-mix(in srgb, var(--neg) 7%, transparent), transparent 65%),
     linear-gradient(180deg, var(--glass-bg), transparent 160%),
     var(--sf);
 }
-.gc-debts::after { background: color-mix(in srgb, var(--neg) 80%, transparent); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--neg) 55%, transparent); }
+.gc-debts::after { background: color-mix(in srgb, var(--neg) 72%, transparent); box-shadow: 0 0 12px 0 color-mix(in srgb, var(--neg) 45%, transparent); }
 .gc-goals {
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--pos) 32%, transparent) 0%, transparent 58%),
@@ -332,6 +334,61 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     var(--sf);
 }
 .gc-orders::after { background: color-mix(in srgb, var(--acc) 70%, transparent); }
+
+/* ---------- БАНКА ЦЕЛИ (мокап ver6, rGoal): волна вместо полосы прогресса ----------
+   Вода поднимается по формуле мокапа (150px пусто → 138px при 100%), две волны едут
+   навстречу (transform-only, дешёвая анимация), свечение — цветом акцента. */
+.gc-jar-row {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 4vw, 22px);
+}
+
+.gc-jar-col {
+  flex: 1;
+  min-width: 0;
+}
+
+.gc-jar {
+  width: clamp(78px, 26%, 112px);
+  flex: none;
+  filter: drop-shadow(0 14px 22px color-mix(in srgb, var(--acc) 30%, transparent));
+}
+
+.gc-jar .gc-jar-glass {
+  fill: color-mix(in srgb, var(--ink) 5%, transparent);
+  stroke: color-mix(in srgb, var(--ink) 16%, transparent);
+}
+
+.gc-jar .gc-jar-shine {
+  fill: #fff;
+  opacity: .18;
+}
+
+.gc-jar .gc-jar-fill {
+  transition: transform 1.6s cubic-bezier(.2, .9, .3, 1);
+}
+
+.gc-jar .gc-jar-wv {
+  fill: color-mix(in srgb, var(--acc) 58%, #ffffff);
+  opacity: .75;
+  animation: gc-jar-wv 5s linear infinite;
+}
+
+.gc-jar .gc-jar-wv.b {
+  fill: var(--acc);
+  opacity: .6;
+  animation-duration: 8s;
+  animation-direction: reverse;
+}
+
+@keyframes gc-jar-wv {
+  to { transform: translateX(-120px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gc-jar .gc-jar-wv { animation: none; }
+}
 .gc-people {
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--acc) 12%, var(--ai) 10%) 0%, transparent 55%),
@@ -1956,7 +2013,7 @@ select.input { appearance: none; }
 .nav-item:hover { background: var(--fill); color: var(--ink); }
 .nav-item.active { background: var(--surface-2); color: var(--ink); box-shadow: var(--shadow-1); }
 .nav-item.active svg { color: var(--accent); }
-.nav-item .nav-label { white-space: nowrap; overflow: hidden; transition: opacity .2s; }
+.nav-item .nav-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity .2s; }
 .sidebar.min .nav-item { justify-content: center; padding: 0; }
 .sidebar.min .nav-label, .sidebar.min .nav-kbd, .sidebar.min .nav-group { display: none; }
 .nav-kbd { margin-left: auto; opacity: 0; transition: opacity .15s; }
@@ -2081,7 +2138,11 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 .page-enter .animate-rise:nth-child(6) { animation-delay: .34s }
 .page-enter .animate-rise:nth-child(n+7) { animation-delay: .40s }
 
-/* строки списков — каскад */
+/* строки списков — каскад.
+   Новая строка (.arrived) живёт по тем же правилам: раньше два правила спорили за
+   одни и те же opacity/transform (выигрывало позже объявленное, а задержка каскада
+   применялась к другим keyframes) — теперь у новой строки имя анимации задано явно,
+   а её собственная задержка остаётся от .stagger (она объявлена раньше и не спорит). */
 @keyframes rowIn { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
 .stagger > * { animation: rowIn .45s var(--ease-out) backwards; }
 .stagger > *:nth-child(1) { animation-delay: .03s } .stagger > *:nth-child(2) { animation-delay: .07s }
@@ -2089,9 +2150,12 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 .stagger > *:nth-child(5) { animation-delay: .19s } .stagger > *:nth-child(6) { animation-delay: .23s }
 .stagger > *:nth-child(7) { animation-delay: .27s } .stagger > *:nth-child(8) { animation-delay: .31s }
 .stagger > *:nth-child(n+9) { animation-delay: .35s }
+/* новая строка внутри каскада: keyframes — только .arrived (с подсветкой),
+   задержка позиции — от .stagger > *:nth-child(...) выше. Раньше оба правила
+   объявляли animation целиком и порядок в файле решал, чей keyframes увидит браузер. */
+.stagger > .arrived { animation-name: arrive; animation-duration: 1.4s; animation-timing-function: var(--ease-out); animation-fill-mode: both; }
 
-/* большой заголовок — буквы «проявляются» снизу (fill — см. правило .r) */
-@keyframes headIn { from { opacity: 0; transform: translateY(.35em); clip-path: inset(0 0 100% 0) } to { opacity: 1; transform: none; clip-path: inset(-20% 0 -20% 0) } }
+/* большой заголовок */
 .page-enter .h1 { animation: rowIn .5s var(--ease-out) backwards; animation-delay: .04s; }
 .page-enter .label:first-child { animation: rowIn .5s var(--ease-out) backwards; }
 
@@ -2242,9 +2306,11 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 @keyframes cardOut { to { opacity: 0; transform: scale(.92) translateY(6px); filter: blur(2px) } }
 .leaving-card { animation: cardOut .26s var(--ease-io) both; pointer-events: none; }
 
-/* новая строка: влетает и на секунду подсвечивается */
+/* новая строка: влетает и на секунду подсвечивается.
+   Фон квадратура не анимируется весь срок — вспышка гаснет к 70%, дальше кадры
+   не перерисовываются (это единственный некомпозитный участок в появлении строк). */
 @keyframes arrive { 0% { opacity: 0; transform: translateY(-8px); background: color-mix(in srgb, var(--accent) 14%, transparent) }
-                    40% { opacity: 1; transform: none; background: color-mix(in srgb, var(--accent) 12%, transparent) } 100% { background: transparent } }
+                    40% { opacity: 1; transform: none; background: color-mix(in srgb, var(--accent) 12%, transparent) } 70%, 100% { background: transparent } }
 .arrived { animation: arrive 1.4s var(--ease-out) both; border-radius: var(--r-sm); }
 
 /* кнопка после успеха: галочка «выстреливает» */
@@ -3448,9 +3514,9 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   bottom: auto;
 }
 
-/* ---------- шапка десктопа ver6: дата-пилюля + акцент-точки (AppShell) ----------
+/* ---------- шапка десктопа ver6: дата-пилюля (AppShell) ----------
    Телефон не трогаем: .gt скрыт ≤820px, а новые узлы — только в !phone-ветке.
-   Пилюли — в тон шапки (.ib/.search); активная точка светится своим цветом. */
+   Пилюли — в тон шапки (.ib/.search). */
 .gt { flex-wrap: wrap; }
 .gt-date {
   display: inline-flex;
@@ -3464,26 +3530,6 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
 }
-.gt-dots {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: var(--tap);
-  padding: 0 12px;
-  border-radius: 999px;
-  background: var(--sf);
-}
-.gt-dot {
-  width: 14px;
-  height: 14px;
-  border: 0;
-  border-radius: 50%;
-  padding: 0;
-  cursor: pointer;
-  transition: transform var(--t-fast) var(--e), box-shadow var(--t-fast) var(--e);
-}
-.gt-dot:hover { transform: scale(1.2); }
-.gt-dot.on { box-shadow: 0 0 0 2px var(--sf), 0 0 0 4px currentColor, 0 0 12px currentColor; }
 
 /* ---------- ШТОРКА ДЕСКТОПА: ОДНА СТЕКЛЯННАЯ ПОЛОСА В КОЛОНКЕ КОНТЕНТА ----------
    Всё содержимое строки живёт в .gt-in: max-width 1240 + margin-inline auto +
@@ -3499,6 +3545,10 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
    Телефон не трогаем: .gt там display:none (блок «ШАПКА ТЕЛЕФОНА»), поэтому весь
    блок закрыт @media (min-width: 821px) — граница зеркалит usePhone. */
 @media (min-width: 821px) {
+  /* липкая .gt перекрывает верх контента: любая прокрутка к якорю/фокусу должна
+     учитывать её высоту (min-height .gt-in = --tap + 12 + поля 6+6), иначе вкладки
+     и заголовки ныряют под шапку. На телефоне .gt скрыт — там остаётся только safe-t. */
+  html { scroll-padding-top: calc(var(--safe-t) + var(--tap) + 36px); }
   /* блок, а не флекс: иначе .gt-in (100%) сжимается по содержимому и уезжает
      от центра — а его поля должны совпадать с полями .pg до пикселя */
   .gt { display: block; position: sticky; top: 0; z-index: var(--z-topbar); }

@@ -161,42 +161,49 @@ export function Techniques({ t: data, onOpenCat }) {
 function Buckets({ b, onOpenCat }) {
   const { t } = useI18n()
   if (!b?.base) return <Empty glyph="money" text={t('tech.no_ops')} sub={t('tech.no_ops_hint')} compact />
-  // ver6: кольцо 50/30/20 вместо полос — те же buckets/share/norm/status, вид только.
-  const C = 2 * Math.PI * 52
-  let _acc = 0
-  const segs = b.buckets.map((x) => { const start = _acc; _acc += Number(x.share) || 0; return { ...x, start } })
-  const save = b.buckets.find((x) => x.bucket === 'save')
+  /* ver6 (rTech): колесо из трёх концентрических колец вместо одного «пончика».
+     Цветное кольцо — сколько уже в корзине (доля от базы месяца), полупрозрачная
+     дуга того же цвета — где должно быть по норме; в центре — база (доход, а если
+     его нет — траты). Данные те же (buckets/share/norm/status), вид из мокапа. */
+  const income = Math.max(0, Number(b.income) || 0)
+  const base = Math.max(1, income || Number(b.base) || 1)
+  const frac = (v) => Math.max(0, Math.min(1, Number(v) || 0))
+  const n = Math.max(1, b.buckets.length)
+  const step = n > 1 ? Math.min(24, 48 / (n - 1)) : 0   /* мокап: 104 → 80 → 56 */
   return (
     <div>
       <div className="fg-tech">
         <div className="fg-donut fg-tech-ring" role="img" aria-label={t('tech.tab_buckets')}>
-          <svg viewBox="0 0 120 120" aria-hidden="true">
-            <circle className="fg-track" cx="60" cy="60" r="52" strokeWidth="14" />
-            {segs.map((x) => {
-              const len = Math.max(0, (Number(x.share) || 0) * C - 3)
-              if (len <= 0) return null
+          <svg viewBox="0 0 240 240" aria-hidden="true" className="fg-wheel">
+            {b.buckets.map((x, k) => {
+              const r = 104 - k * step
+              const c = 2 * Math.PI * r
+              const tone = BUCKET_TONE[x.bucket] || 'var(--acc)'
+              const val = frac(Number(x.amount) / base)
+              const norm = frac(x.norm)
+              if (val <= 0 && norm <= 0) return null
               return (
-                <circle
-                  key={x.bucket}
-                  cx="60"
-                  cy="60"
-                  r="52"
-                  strokeWidth="14"
-                  strokeDasharray={`${len} ${C}`}
-                  strokeDashoffset={-x.start * C}
-                  transform="rotate(-90 60 60)"
-                  style={{
-                    fill: 'none',
-                    stroke: BUCKET_TONE[x.bucket] || 'var(--acc)',
-                    ...(x.bucket === 'want' ? { filter: 'drop-shadow(0 0 6px color-mix(in srgb, var(--acc) 60%, transparent))' } : null),
-                  }}
-                />
+                <g key={x.bucket}>
+                  <circle className="fg-track" cx="120" cy="120" r={r} strokeWidth="12" />
+                  {norm > 0 && (
+                    <circle
+                      className="fg-norm" cx="120" cy="120" r={r} strokeWidth="12"
+                      strokeDasharray={c} strokeDashoffset={c * (1 - norm)}
+                      style={{ stroke: tone }}
+                    />
+                  )}
+                  <circle
+                    className="fg-arc" cx="120" cy="120" r={r} strokeWidth="12"
+                    strokeDasharray={c} strokeDashoffset={c * (1 - val)}
+                    style={{ stroke: tone, '--c': String(c), '--k': String(k) }}
+                  />
+                </g>
               )
             })}
           </svg>
           <div className="fg-donut-ct">
-            <b className="num">{Math.round((Number(save?.share) || 0) * 100)}&nbsp;%</b>
-            <span>{t.sv(save?.label || '')}</span>
+            <b className="num">{money(base)}</b>
+            <span>{income > 0 ? t('fin.income') : t('td.w_expenses')}</span>
           </div>
         </div>
         <div className="fg-legend">

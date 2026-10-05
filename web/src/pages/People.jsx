@@ -67,6 +67,7 @@ export default function People() {
   const [tab, setTab] = useState('all')
   const [stageTab, setStageTab] = useState('all')
   const [stages, setStages] = useState({})             // id → стадия клиента (/stage)
+  const [stageTick, setStageTick] = useState(0)        // правка стадии в шторке — перечитать её
   const [steps, setSteps] = useState({})               // id → «следующий шаг» (из карточки CRM)
   const [sheet, setSheet] = useState(null)
   const { tick, bump } = useRefresh()
@@ -80,14 +81,16 @@ export default function People() {
     return () => window.removeEventListener('people:add', on)
   }, [])
 
-  // стадия клиента и следующий шаг — по одному проходу по клиентам
+  // стадия клиента и следующий шаг — по одному проходу по клиентам.
+  // stageTick: правили стадию в шторке — карточки списка должны показать новое значение,
+  // иначе после смены стадии бейдж до следующей загрузки страницы остаётся старым.
   useEffect(() => {
     const ids = (list || []).filter((p) => HAS_STAGE.has(p.kind)).map((p) => p.id)
     if (!ids.length) return
     let on = true
     loadPeople(ids).then((m) => { if (on) { setStages(m.stages); setSteps(m.steps) } }).catch(() => {})
     return () => { on = false }
-  }, [list])
+  }, [list, stageTick])
 
   const items = useMemo(() => {
     const s = q.trim().toLowerCase()
@@ -155,7 +158,8 @@ export default function People() {
         </div>
       )}
 
-      <PersonSheet open={!!sheet} person={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }} />
+      <PersonSheet open={!!sheet} person={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }}
+        onStage={() => setStageTick((n) => n + 1)} />
     </div>
   )
 }
@@ -227,6 +231,9 @@ function PersonRow({ p, stage, next, onOpen }) {
               onClick={(e) => { e.stopPropagation(); onOpen() }}>
               <span aria-hidden className="shrink-0 rounded-full" style={{ width: 8, height: 8, background: stageDot(stageKey) }} />
               <span className="min-w-0 max-w-full truncate">{stageName}</span>
+              {/* Без этой метки на списке не видно, что стадия «прибита» руками и авто-логика её не тронет —
+                  то же, что ClientStageBadge даёт в CRM. Она и есть причина смотреть на бейдж. */}
+              {stage?.manual && <span className="faint shrink-0" style={{ fontSize: 'var(--fs-xs)' }}>{t('cstage.manual')}</span>}
             </button>
           </div>
         ) : <div className="max-[820px]:hidden" />}
@@ -251,7 +258,7 @@ function Sec({ title, children }) {
 /* Карточка человека — шторка с разделами: контакт, следующий шаг, стадия клиента,
    деньги, заказы, теги. Правка полей контакта и создание нового человека — те же формы,
    что и раньше, просто разложены по разделам с волосяными линиями. */
-function PersonSheet({ open, person, onClose, onDone, onDone2 }) {
+function PersonSheet({ open, person, onClose, onDone, onDone2, onStage }) {
   const { t } = useI18n()
   const nav = useNavigate()
   const isNew = person === 'new' || !person?.id
@@ -348,6 +355,7 @@ function PersonSheet({ open, person, onClose, onDone, onDone2 }) {
                   view={card?.stage}
                   onView={(v) => setCard((c) => ({ ...(c || {}), stage: v }))}
                   onErr={show.err}
+                  onChanged={onStage}
                   label={t('cstage.for', { name: person?.name || '' })} />
                 <ClientStageNote view={card?.stage} />
               </Sec>

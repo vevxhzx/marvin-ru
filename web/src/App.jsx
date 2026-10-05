@@ -191,7 +191,13 @@ function Shell({ inbox }) {
     const load = () => api.health().then((h) => { setHealth(h); if (h?.name) setName(h.name) }).catch(() => setHealth({ ok: false }))
     load(); const t = setInterval(load, 30000); return () => clearInterval(t)
   }, [])
-  useEffect(() => { window.scrollTo({ top: 0 }) }, [loc.pathname])
+  // Скролл наверх — при смене страницы И при смене вкладки внутри неё (?tab=).
+  // Раньше реакция была только на pathname: на «Мозге» клик по вкладке менял лишь
+  // query, остаток прокрутки оставался — новый список открывался под липкой шапкой,
+  // а сами вкладки уезжали вверх и было непонятно, что открыто. ?q= (поиск) не
+  // участвует намеренно: он пишется на каждый символ, прыжок наверх помешал бы набору.
+  const scrollKey = `${loc.pathname}#${new URLSearchParams(loc.search).get('tab') || ''}`
+  useEffect(() => { window.scrollTo({ top: 0 }) }, [scrollKey])
   // внутри Telegram: системная кнопка «назад» в шапке ведёт на главную (с главной Telegram сам показывает «закрыть»)
   useEffect(() => {
     if (!tg.active) return

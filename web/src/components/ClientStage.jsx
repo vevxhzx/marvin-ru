@@ -32,8 +32,10 @@ export function ClientStageNote({ view }) {
   )
 }
 
-/** Выпадающий список стадии клиента + «вернуть авто», если значение ручное. */
-export function ClientStageSelect({ view, onView, onErr, className = '', label }) {
+/** Выпадающий список стадии клиента + «вернуть авто», если значение ручное.
+    `onChanged` — сигнал «стадия на сервере изменилась»: локальный `onView` правит
+    только ответ этого списка, а владельцу нужно обновить и карточки на странице. */
+export function ClientStageSelect({ view, onView, onErr, className = '', label, onChanged }) {
   const { t } = useI18n()
   const [busy, setBusy] = useState(false)
   const cur = view?.stage || 'lead'
@@ -41,11 +43,11 @@ export function ClientStageSelect({ view, onView, onErr, className = '', label }
     const v = e.target.value
     if (!view?.client_id || v === cur) return
     setBusy(true)
-    try { onView(await clientStageApi.set(view.client_id, v)) } catch (err) { onErr?.(err) } finally { setBusy(false) }
+    try { onView(await clientStageApi.set(view.client_id, v)); onChanged?.() } catch (err) { onErr?.(err) } finally { setBusy(false) }
   }
   const toAuto = async () => {
     setBusy(true)
-    try { onView(await clientStageApi.clearManual(view.client_id)) } catch (err) { onErr?.(err) } finally { setBusy(false) }
+    try { onView(await clientStageApi.clearManual(view.client_id)); onChanged?.() } catch (err) { onErr?.(err) } finally { setBusy(false) }
   }
   return (
     <div className={`flex flex-wrap items-center gap-2 ${className}`}>

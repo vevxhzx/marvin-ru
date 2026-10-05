@@ -309,6 +309,9 @@
   display: block;
   width: 100%;
   height: 100%;
+  /* SVG по умолчанию режет всё, что выходит за viewBox, — вместе с фильтром
+     drop-shadow у .fg-val свечение кольца обрезалось квадратом по краю канвы. */
+  overflow: visible;
 }
 
 #p-fin .fg-donut-ct {
@@ -321,6 +324,36 @@
   gap: 2px;
   text-align: center;
   padding: 8px;
+}
+
+/* КОЛЕСО ТЕХНИК (мокап ver6, rTech): три кольца, повёрнутых так, чтобы дуга
+   начиналась сверху; цветное = факт, прозрачное = норма, глоу — цветом акцента. */
+#p-fin .fg-wheel {
+  transform: rotate(-90deg);
+}
+
+#p-fin .fg-wheel .fg-track {
+  stroke: var(--fill-2);
+  stroke-width: 12;
+}
+
+#p-fin .fg-wheel .fg-norm {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+  opacity: .2;
+}
+
+#p-fin .fg-wheel .fg-arc {
+  fill: none;
+  stroke-width: 12;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 6px color-mix(in srgb, var(--acc) 60%, transparent));
+  animation: fg-wheel-draw 1.6s calc(var(--k, 0) * .2s + .3s) cubic-bezier(.2, .9, .3, 1) both;
+}
+
+@keyframes fg-wheel-draw {
+  from { stroke-dashoffset: var(--c); }
 }
 
 #p-fin .fg-donut-ct b {
@@ -376,7 +409,8 @@
 }
 
 #p-fin .fg-tech-ring {
-  width: min(100%, 190px);
+  /* мокап ver6: колесо 250px (кольца 104/80/56 в системе 240) */
+  width: min(100%, 250px);
 }
 
 #p-fin .fg-legend {
@@ -418,6 +452,7 @@
   #p-fin .fg-acc-bar > i,
   #p-fin .fg-pay,
   #p-fin .fg-debtbar,
+  #p-fin .fg-wheel .fg-arc,
   #p-fin .switch,
   #p-fin .switch::after {
     animation: none;

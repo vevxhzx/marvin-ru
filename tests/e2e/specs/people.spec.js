@@ -16,12 +16,17 @@ test.describe('люди: стадия клиента и следующий ша�
     await expectText(page, 'Кофейня «Зерно»', { note: 'демо-клиент' })
     await shot(page, 'people-list', { testInfo })
 
-    // у карточек клиентов есть бейдж + выпадающий список для смены
-    const sel = page.getByLabel('Стадия клиента: Кофейня «Зерно»')
-    await expect(sel).toBeVisible({ timeout: 15_000 })
+    // у карточки клиента — бейдж стадии; тап открывает шторку, стадия правится там
+    const badge = page.getByRole('button', { name: 'Стадия клиента: Кофейня «Зерно»' })
+    await expect(badge).toBeVisible({ timeout: 15_000 })
 
     // ручная смена стадии: значение видно и метка «вручную» тоже
+    await badge.click()
+    const sheet = await expectSheet(page)
+    const sel = sheet.getByRole('combobox', { name: 'Стадия клиента: Кофейня «Зерно»' })
+    await expect(sel).toBeVisible({ timeout: 15_000 })
     await sel.selectOption('permanent')
+    await closeSheet(page)
     const card = page.locator('section.c').filter({ hasText: 'Кофейня «Зерно»' })
     await expect(card.locator('.badge').filter({ hasText: 'постоянный' }).filter({ hasText: 'вручную' })).toBeVisible({ timeout: 15_000 })
     await shot(page, 'people-stage', { testInfo })
@@ -29,9 +34,11 @@ test.describe('люди: стадия клиента и следующий ша�
     // фильтр по стадии: остаются только карточки с выбранной стадией
     await page.getByRole('button', { name: /^постоянный/ }).first().click()
     await page.waitForTimeout(400)
-    const vals = await page.getByLabel(/^Стадия клиента:/).evaluateAll((els) => els.map((e) => e.value))
-    expect(vals.length, 'после фильтра должны остаться клиенты со стадией «постоянный»').toBeGreaterThan(0)
-    expect(vals.every((v) => v === 'permanent'), 'фильтр оставил чужие стадии').toBe(true)
+    // бейдж в карточке больше не <select> — сверяем его подпись, а не value
+    const names = await page.getByRole('button', { name: /^Стадия клиента:/ })
+      .evaluateAll((els) => els.map((e) => (e.textContent || '').trim()))
+    expect(names.length, 'после фильтра должны остаться клиенты со стадией «постоянный»').toBeGreaterThan(0)
+    expect(names.every((s) => s.includes('постоянный')), `фильтр оставил чужие стадии: ${names.join(' | ')}`).toBe(true)
     await shot(page, 'people-filter', { testInfo })
 
     await diag.expectClean('люди: стадия клиента')

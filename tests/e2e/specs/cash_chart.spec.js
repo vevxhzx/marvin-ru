@@ -18,6 +18,11 @@ test.describe('график «касса на N дней»', () => {
 
     const svg = page.locator(CHART).first()
     await expect(svg).toBeVisible({ timeout: 20_000 })
+    // Плавающий док прижат к низу экрана и лежит поверх контента: пока страница сверху,
+    // середина графика уходит под док и наведение попадает в него, а не в svg.
+    // Центрируем график, даём карточке доехать после reveal — и меряем уже так.
+    await svg.evaluate((el) => el.scrollIntoView({ block: 'center', behavior: 'instant' }))
+    await page.waitForTimeout(600)
     // прямоугольник берём из самой страницы: boundingBox() иногда смещён на доли пикселя
     const box = await svg.evaluate((el) => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height } })
     expect(box.w).toBeGreaterThan(50)

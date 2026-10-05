@@ -10,7 +10,7 @@
    Остальные вкладки — то же правило: один блок с данными сверху и списки-строки ниже.
    Все формы остались в шторках Sheet — меняется только вид. */
 
-import { useEffect, useMemo, useState, useRef, Children, cloneElement } from 'react'
+import { useEffect, useMemo, useState, useRef, Children, cloneElement, useId } from 'react'
 import { api, money, shortDate, toLocalISO } from '../lib/api'
 import { Sheet, Field, Empty, Money, Rowi, Skeleton, useToast, Confirm } from '../components/ui'
 import { BigMoney, HeroLine, useNumFormats, useReveal } from '../components/Widgets'
@@ -125,20 +125,46 @@ function IconBtn({ onClick, title, children, danger }) {
 const GRAD_BAR = 'linear-gradient(90deg, var(--acc), var(--neg))'
 const BAR_GLOW = '0 0 14px color-mix(in srgb, var(--acc) 55%, transparent)'
 
+/* Банка-копилка из мокапа ver6 (rGoal): уровень воды = процент цели,
+   две волны едут навстречу друг другу (мокап .wv и .wv.b), стекло — полупрозрачный
+   тинт. id клип-пути берём из useId: карточек целей несколько, чужой clipPath
+   обрезал бы воду не той банке. */
+const JAR_WAVE = 'M-120,0 Q-90,-8 -60,0 T0,0 T60,0 T120,0 T180,0 T240,0 V150 H-120Z'
+const JAR_WAVE_B = 'M-120,3 Q-90,11 -60,3 T0,3 T60,3 T120,3 T180,3 T240,3 V150 H-120Z'
+
+function GoalJar({ pct }) {
+  const cid = `jar${useId().replace(/[^a-zA-Z0-9]/g, '')}`
+  const p = Math.max(0, Math.min(100, pct)) / 100
+  const y = p > 0 ? 138 - p * 124 : 150            /* формула мокапа gv(): 150 = пусто */
+  return (
+    <svg className="gc-jar" viewBox="0 0 120 150" aria-hidden="true" focusable="false">
+      <defs>
+        <clipPath id={cid}><rect x="14" y="14" width="92" height="124" rx="28" /></clipPath>
+      </defs>
+      <rect className="gc-jar-glass" x="14" y="14" width="92" height="124" rx="28" strokeWidth="2" />
+      <g clipPath={`url(#${cid})`}>
+        <g className="gc-jar-fill" style={{ transform: `translateY(${y}px)` }}>
+          <path className="gc-jar-wv" d={JAR_WAVE} />
+          <path className="gc-jar-wv b" d={JAR_WAVE_B} />
+        </g>
+      </g>
+      <rect className="gc-jar-shine" x="30" y="26" width="8" height="70" rx="4" />
+    </svg>
+  )
+}
+
 /* Цель-копилка и цель задач — одна карточка. main/target — деньги (финансы),
-   для задач-целей опускаются, раскрытое тело едет children. */
+   для задач-целей опускаются, раскрытое тело едет children.
+   jar: если не null — слева банка из мокапа (тогда полосы прогресса нет,
+   сама банка и есть индикатор; роль progressbar убираем, чтобы не дублировать). */
 export function GoalGlassCard({
   title, meta, pct = 0, main, target, sub, deadlineText, overdue = false,
   eta, onOpen, openLabel, expandIcon, barStyle, actions, children, style, className = '',
+  jar = null,
 }) {
   const safePct = Math.max(0, Math.min(100, Math.round(pct)))
-  return (
-    <section
-      className={`c glass-card gc-goals ${className}`}
-      data-reveal
-      data-car
-      style={{ scrollSnapAlign: 'start', ...style }}
-    >
+  const body = (
+    <>
       <button
         type="button"
         onClick={onOpen}
@@ -162,9 +188,11 @@ export function GoalGlassCard({
           </div>
         ) : null}
       </button>
-      <div className="progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={safePct}>
-        <div style={{ width: `${Math.max(2, safePct)}%`, background: barStyle || GRAD_BAR, boxShadow: BAR_GLOW }} />
-      </div>
+      {jar == null ? (
+        <div className="progress mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={safePct}>
+          <div style={{ width: `${Math.max(2, safePct)}%`, background: barStyle || GRAD_BAR, boxShadow: BAR_GLOW }} />
+        </div>
+      ) : null}
       {sub ? <div className="muted mt-2 text-[length:var(--fs-xs)]">{sub}</div> : null}
       {deadlineText ? (
         <div className="mt-1 text-[length:var(--fs-xs)]" style={overdue ? { color: 'var(--neg)', fontWeight: 600 } : undefined}>
@@ -174,6 +202,21 @@ export function GoalGlassCard({
       {eta ? <div className="mt-1 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{eta}</div> : null}
       {children}
       {actions ? <div className="mt-3 flex flex-wrap items-center gap-2">{actions}</div> : null}
+    </>
+  )
+  return (
+    <section
+      className={`c glass-card gc-goals ${className}`}
+      data-reveal
+      data-car
+      style={{ scrollSnapAlign: 'start', ...style }}
+    >
+      {jar == null ? body : (
+        <div className="gc-jar-row">
+          <GoalJar pct={safePct} />
+          <div className="gc-jar-col">{body}</div>
+        </div>
+      )}
     </section>
   )
 }
@@ -1153,7 +1196,9 @@ export default function Finance() {
           ) : (
             <CarRow count={goals.length} label={t('goals.title')}>
               {goals.map((g) => {
-            const current = g.current || 0
+            // API отдаёт накопленное в поле saved (GoalIn/GoalPatch), а не current:
+            // раньше читался g.current → карточка всегда показывала 0 ₽ и 0 %
+            const current = g.current ?? g.saved ?? 0
             const target = g.target || 1
             const pct = Math.min(100, Math.round((current / target) * 100))
             const eta = target > current ? goalEta(target - current) : null
@@ -1166,6 +1211,7 @@ export default function Finance() {
                 className={`s4 ${CARD_M_LIGHT}`}
                 title={g.title || g.name}
                 pct={pct}
+                jar={pct}
                 main={fmt.money(current)}
                 target={fmt.money(target)}
                 onOpen={() => { setEditingItem(g); setSheet('goal') }}
@@ -1688,7 +1734,9 @@ function GoalSheet({ open, goal, onClose, onDone }) {
     if (!open) return
     setTitle(goal?.title || goal?.name || '')
     setTarget(goal?.target != null ? String(goal.target) : '')
-    setCurrent(goal?.current != null ? String(goal.current) : '0')
+    // у бэкенда поле называется saved — по current заполнялось нулём
+    const saved0 = goal?.saved ?? goal?.current ?? 0
+    setCurrent(String(saved0))
   }, [open, goal])
 
   const submit = async (e) => {
@@ -1699,7 +1747,8 @@ function GoalSheet({ open, goal, onClose, onDone }) {
       const payload = {
         title: title.trim(),
         target: parseFloat(target) || 0,
-        current: parseFloat(current) || 0,
+        // GoalIn/GoalPatch ждут saved: поле current бэкенд молча отбрасывал
+        saved: parseFloat(current) || 0,
       }
       if (isNew) {
         await api.addGoal(payload)

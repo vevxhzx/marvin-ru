@@ -19,7 +19,6 @@ import { useTimer, mmss } from '../pages/Orders'
 import { lower } from '../lib/name'
 import { api, relTime, kb } from '../lib/api'
 import { useI18n, t as T } from '../lib/i18n'
-import { usePrefs } from '../lib/prefs'
 import { crossfadeIn, crossfadeOut, viewTransition, motionOff, usePhone } from '../lib/motion'
 import { usePullToRefresh } from '../lib/gestures'
 import { headOf, textOf } from '../lib/nav'
@@ -235,34 +234,8 @@ function HeadDate() {
   return <span className="gt-date num" title={label}>{label}</span>
 }
 
-/* Акцентные точки шапки: 6 цветов из ACCENT_PALETTE (lib/color.js).
-   Тот же механизм, что в настройках: prefs.set({ accentHex }) → localStorage +
-   apply() мгновенно и PUT /api/ui-prefs через pushRemote (lib/prefs.js). */
-const HEAD_ACCENTS = ['#0a3cff', '#8a5cff', '#c6f24a', '#ff7a1a', '#12b5a5', '#ff4d8d']
-function HeadAccents() {
-  const { t } = useI18n()
-  const [p, set] = usePrefs()
-  const cur = String(p.accentHex || '').toLowerCase()
-  return (
-    <span className="gt-dots" role="group" aria-label={t('st.accent_now2')}>
-      {HEAD_ACCENTS.map((hex) => {
-        const on = cur === hex
-        return (
-          <button
-            key={hex}
-            type="button"
-            className={`gt-dot${on ? ' on' : ''}`}
-            style={{ background: hex, color: hex }}
-            aria-pressed={on}
-            title={hex}
-            aria-label={hex}
-            onClick={() => { if (!on) set({ accentHex: hex }) }}
-          />
-        )
-      })}
-    </span>
-  )
-}
+/* Цветных точек акцента в шапке больше нет (в мокапе ver6 их нет — акцент
+   меняется в Настройках), остался только переключатель темы. */
 
 /* Переключатель темы в шапке: та же onTheme из App.jsx (auto → light → dark). */
 function HeadTheme({ mode, onTheme }) {
@@ -434,10 +407,11 @@ export function PageTransition({ children, pathKey }) {
   const hostRef = useRef(null)
   const first = useRef(true)
   const vtUsed = useRef(false)
-  /* Вход новой страницы ведёт либо CSS (.page-enter → pageIn), либо наш WAAPI
-     crossfadeIn — раньше они шли одновременно: два анимационных источника на
-     одних и тех же opacity/transform (WAAPI перекрывал CSS, вид не менялся,
-     а считались кадры оба). Теперь в WAAPI-ветке CSS-вариант выключен (page-cf). */
+  /* Вход новой страницы ведёт кто-то один: либо CSS (.page-enter → pageIn),
+     либо наш WAAPI crossfadeIn, либо браузерный View Transition. Раньше два
+     источника считали одни и те же opacity/transform, а в VT-ветке снимок
+     замораживал CSS-анимацию — страница «призрачилась». Теперь, как только
+     переход запущен, CSS-вариант выключен (page-cf). */
   const cf = useRef(false)
 
   /* ref-колбэк ставит имя для View Transitions сразу на коммите — тогда и старый,
@@ -456,7 +430,11 @@ export function PageTransition({ children, pathKey }) {
     const swap = () => { if (alive) setShown(latest.current) }
     /* View Transitions срабатывают синхронно внутри вызова, поэтому флаг ставим заранее */
     vtUsed.current = !motionOff() && typeof document.startViewTransition === 'function'
-    cf.current = !vtUsed.current                // переход идёт без VT → ведёт WAAPI
+    /* Анимацию ведёт кто-то один: в браузерный переход (Android Chrome) попадает
+       снимок нового раздела, и CSS pageIn на нём замораживается вместе со снимком —
+       страница «призрачилась» и потом дёргалась. Раньше page-cf ставился только в
+       WAAPI-ветке, а в VT-ветке CSS-анимация продолжала идти параллельно. */
+    cf.current = true
     const vt = viewTransition(() => flushSync(swap))
     if (!vt.used) {
       vtUsed.current = false
@@ -704,7 +682,6 @@ export default function AppShell({
                   null
                 ) : (
                   <>
-                    <HeadAccents />
                     <HeadTheme mode={mode} onTheme={onTheme} />
                     <div className="search" onClick={onSearch} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
                       aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSearch() } }}>

@@ -656,7 +656,18 @@ export default function Calendar() {
                   <span className="calg-side-mo">{MONTHS_GEN[selected.getMonth()]} {selected.getFullYear()}</span>
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto" style={{ overscrollBehavior: 'contain', paddingRight: 2 }}>
+              {/* Прокрутка нужна только когда есть что листать: на пустом дне inline
+                  overflow-y обрезал бы свечение солнышка (.calg-sun, box-shadow до 80px)
+                  жёстким прямоугольником — там короткий блок, скролла нет, поэтому
+                  свечению позволяем выйти за колонку (обрезает уже карточка — мягко). */}
+              <div
+                className="flex-1 overflow-y-auto"
+                style={{
+                  overscrollBehavior: 'contain',
+                  paddingRight: 2,
+                  overflow: loaded && dayEvents.length === 0 ? 'visible' : undefined,
+                }}
+              >
                 {!loaded ? (
                   <ListSkeleton n={4} rowH={58} />
                 ) : dayEvents.length === 0 ? (
