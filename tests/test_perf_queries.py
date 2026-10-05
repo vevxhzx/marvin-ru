@@ -130,7 +130,8 @@ def test_perf_migration_is_aditive_and_idempotent(tmp_path, monkeypatch):
     path = tmp_path / "m.db"
     eng = create_engine(f"sqlite:///{path}", connect_args={"check_same_thread": False})
     sa_event.listen(eng, "connect", db._pragmas)
-    db.init_db()  # сначала обычная инициализация на дефолтном движке тестов не нужна — у нас свой движок
+    # ВАЖНО: init_db() здесь НЕ зовём до подмены движка — любой вызов на дефолтном
+    # db.engine бьёт по настоящей data/jarvis.db (create_all + миграции + set_setting).
     monkeypatch.setattr(db, "engine", eng)
     db.init_db()
     with eng.connect() as conn:

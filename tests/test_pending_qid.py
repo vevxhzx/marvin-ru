@@ -8,7 +8,9 @@ CH = "test_qid"
 
 
 @pytest.fixture(autouse=True)
-def _clean():
+def _clean(fresh_db):  # noqa: ARG001 — fresh_db обязателен: _pending_* и set_setting пишут в setting
+    """Чистый слот до и после. БД — временная: без fresh_db эти вызовы писали
+    в настоящую data/jarvis.db (ключ pending:test_qid)."""
     agent._pending_clear(CH)
     yield
     agent._pending_clear(CH)

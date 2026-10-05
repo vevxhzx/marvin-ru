@@ -704,7 +704,7 @@ def test_past_tense_and_health_go_to_memory_not_calendar():
     assert parse_datetime("потратил на 10к")[0] is None
 
 
-def test_upload_size_limits():
+def test_upload_size_limits(fresh_db):  # noqa: ARG001 — изоляция БД: POST идёт в живой API
     """Слишком большой файл отклоняется до разбора: фото > 20 МБ, выписка > 25 МБ → 413."""
     from fastapi.testclient import TestClient
     from core.api.app import app

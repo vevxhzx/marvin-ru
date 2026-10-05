@@ -362,7 +362,7 @@ def test_llm_parse_json_helper():
     ("PUT", "/api/english/settings", {"track": "general"}),
     ("DELETE", "/api/english/custom/0", None),
 ])
-def test_remote_without_key_401(method, path, body):
+def test_remote_without_key_401(fresh_db, method, path, body):  # noqa: ARG001 — изоляция БД: DELETE/PUT идут в живой API
     """С телефона без ключа — 401 на всех маршрутах блока (общий AuthMiddleware)."""
     from fastapi.testclient import TestClient
 

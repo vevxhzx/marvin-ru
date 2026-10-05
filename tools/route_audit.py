@@ -1,14 +1,29 @@
 """Стенд маршрутизации: куда уйдёт фраза БЕЗ вызова моделей. Запуск: ASSISTANT_TEST=1 python tools/route_audit.py
-Печатает таблицу: правило / судья / сортировщик / облако / локальная-с-инструментами, и размер промпта для локальной."""
+Печатает таблицу: правило / судья / сортировщик / облако / локальная-с-инструментами, и размер промпта для локальной.
+
+БД стенда — отдельная, во временной папке: стенд не имеет права трогать настоящую
+data/jarvis.db (раньше init_db() звался на импорте и писал в неё). Перенаправление
+выполняется ДО `import core.*`, потому что core/config.py читает пути на импорте.
+"""
 from __future__ import annotations
-import json, sys, os
+import json, sys, os, tempfile
+from pathlib import Path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("ASSISTANT_TEST", "1")
+
+# --- изоляция: своя папка и своя БД, плюс проверка «не настоящая» (как в tests/e2e/demo_db.py)
+_ROOT = Path(__file__).resolve().parent.parent
+_REAL_DB = (_ROOT / "data" / "jarvis.db").resolve()
+_WORK = Path(tempfile.mkdtemp(prefix="route-audit-"))
+os.environ["JARVIS_DATA_DIR"] = str(_WORK)
+os.environ["JARVIS_DB_PATH"] = str(_WORK / "audit.db")
+os.environ["JARVIS_CONFIG"] = str(_WORK / "config.yaml")
+if Path(os.environ["JARVIS_DB_PATH"]).resolve() == _REAL_DB:
+    raise RuntimeError("отказ: путь БД стенда совпал с настоящей data/jarvis.db")
+
 from core import db
-db.init_db()   # свежая схема (миграции), иначе на старой базе упадёт guess_category
 from core.brain import agent, sorter, persona, llm
 from core.tools import registry
-from core.services import memory
 
 CASES = [
  # (фраза, ожидаемый маршрут)  маршруты: rule / judge / batch / cloud / local
@@ -48,6 +63,7 @@ def route(t: str) -> tuple[str, str]:
 
 
 def main() -> int:
+    db.init_db()   # свежая схема (миграции) на БД стенда; иначе на старой базе упадёт guess_category
     bad = 0
     print(f"{'фраза':60} {'куда':6} {'ожид.':10} детали")
     for t, exp in CASES:
