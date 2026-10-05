@@ -190,7 +190,7 @@ function AimSheet({ open, onClose, onDone }) {
   const save = async (e) => {
     e.preventDefault(); if (title.trim().length < 2) return
     setBusy(true)
-    try { await api.post('/api/aims', { title: title.trim(), why: why.trim(), due: due ? new Date(due + 'T00:00').toISOString() : null }); onDone() } catch (err) { show.err(err) } finally { setBusy(false) }
+    try { await api.post('/api/aims', { title: title.trim(), why: why.trim(), due: due ? due + 'T00:00' : null }); onDone() } catch (err) { show.err(err) } finally { setBusy(false) }
   }
   return (
     <Sheet open={open} onClose={onClose} title={t('aims.new_title')} sub={t('aims.new_sub')}>

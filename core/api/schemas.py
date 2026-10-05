@@ -66,7 +66,7 @@ class RelationIn(BaseModel):
 
 class EventIn(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
-    start: datetime
+    start: datetime                          # локальное «наивное» время — так хранит БД и так считает datetime.now()
     duration_min: int = Field(60, ge=0, le=24 * 60 * 14)
     location: Optional[str] = Field(None, max_length=300)
     notes: Optional[str] = Field(None, max_length=4000)
@@ -76,6 +76,15 @@ class EventIn(BaseModel):
     repeat_until: Optional[datetime] = None
     task_id: Optional[int] = None          # привязать встречу к задаче — галочка закроет и её
     order_id: Optional[int] = None         # привязать к заказу — галочка закроет заказ
+
+    @field_validator("start", "repeat_until", mode="after")
+    @classmethod
+    def _local_clock(cls, v: Optional[datetime]) -> Optional[datetime]:
+        """Встречи хранятся в локальных «наивных» часах. Клиент вправе прислать абсолютный
+        момент с зоной (вебовский `toISOString()`) — зона при записи в SQLite молча терялась,
+        и встреча вместе со сроком привязанной задачи уезжала на 3 часа назад (10:59 → 07:59).
+        Откатываем в локальное время явно; «наивный» вход проходит без изменений."""
+        return v.astimezone().replace(tzinfo=None) if v is not None and v.tzinfo is not None else v
 
     @field_validator("title")
     @classmethod

@@ -82,14 +82,18 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
     if (!title.trim()) return
     setSaving(true)
     try {
+      // Время уходит локальным «наивным» (то, что стоит в поле), а не через toISOString():
+      // сервер, БД и подсказки живут в локальных часах, а UTC-строка теряла зону при записи —
+      // 10:59 превращалось в 07:59 и вместе с встречей уезжал срок привязанной задачи.
+      const at = new Date(start)
       const payload = {
         title: title.trim(),
-        start: new Date(start).toISOString(),
+        start: toLocalISO(at),
         location: location.trim() || null,
         task_id: taskId ? Number(taskId) : null,
         order_id: orderId ? Number(orderId) : null,
       }
-      if (isNew) await api.addEvent({ ...payload, duration_min: 60, end: new Date(new Date(start).getTime() + 3600000).toISOString() })
+      if (isNew) await api.addEvent({ ...payload, duration_min: 60, end: toLocalISO(new Date(at.getTime() + 3600000)) })
       else await api.updateEvent(ev.id, payload)
       onDone()
     } catch (err) {
