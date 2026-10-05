@@ -1267,6 +1267,70 @@ def _resolve_confirm(text: str, channel: str) -> Reply | None:
 
 _SAVED_RX = re.compile(r"\b(запис[ая]|записал|сохран[ия]|сохранил|запомн[ию]|запомнил|добав[ия]л|зафиксир|внес|внёс)\w*", re.I)
 
+# «распредели это на задачи» — явная просьба разобрать реплику (обычно предыдущую, длинную) на записи.
+# Такое сообщение списком не является, но и отвечать планом текстом нельзя: раньше модель выдавала красивое
+# перечисление «записал задачи», ничего не вызвав, — тогда и жалоба «никаких задач не записалось».
+_SPLIT_VERB_RX = re.compile(r"\b(распредели|раздели|разбей|разложи|раскидай|разбери|собери|преврати|оформи|"
+                            r"распиши|запиши|добавь|переведи|выдели)\w*", re.I)
+_SPLIT_TARGET_RX = re.compile(r"\b(?:на|в|во)\s+задач\w*|\bзадачами\b|\bна\s+(?:пункты|дела|список)\b", re.I)
+# жалоба, что ничего не записалось («никаких задач не записалось», «ты же не записал») — это тоже просьба
+# доделать запись, а не тема для заметки: раньше такая фраза сохранялась как заметка и отвечало «Записал в память».
+_COMPLAINT_RX = re.compile(r"\b(никаких\s+задач|задачи\s+(?:же\s+)?не\s+записал\w*|не\s+записалось|ничего\s+не\s+записал|"
+                           r"ты\s+(?:же\s+)?ничего\s+не\s+(?:записал|добавил|сохранил)|ничего\s+не\s+добавил|"
+                           r"ничего\s+не\s+сохранил|пусто\s+(?:же\s+)?в\s+задачах)\w*", re.I)
+
+
+def _is_split_cmd(text: str) -> bool:
+    """Короткая просьба разобрать на записи («распредели это на задачи», «запиши всё это в задачи»)
+    или жалоба «ничего не записалось» — оба случая требуют добрать записи из прошлой реплики."""
+    t = (text or "").strip()
+    if len(t) > 240 or t.endswith("?"):
+        return False
+    if _COMPLAINT_RX.search(t):
+        return True
+    return bool(_SPLIT_VERB_RX.search(t) and _SPLIT_TARGET_RX.search(t))
+
+
+def _split_source(text: str) -> str | None:
+    """Что разбирать: само сообщение (если оно список) или последняя длинная реплика человека из истории.
+
+    Команда «распредели это на задачи» почти всегда ссылается на предыдущее сообщение с делами —
+    сама по себе она списком не является, и оставлять её обычному пути (модель отвечает текстом)
+    значит не записать ничего.
+    """
+    if sorter.looks_like_batch(text):
+        return text
+    since = datetime.now() - timedelta(hours=HISTORY_MAX_AGE_H)
+    with session() as s:
+        rows = s.exec(select(ChatMessage).where(ChatMessage.created_at >= since, ChatMessage.role == "user",
+                                                ChatMessage.channel != "digest").order_by(ChatMessage.id.desc()).limit(6)).all()
+    me = (text or "").strip()
+    for row in rows:
+        t = (row.text or "").strip()
+        if not t or t == me or len(t) < 100:
+            continue
+        if t.endswith("?") or ANALYZE_RX.search(t):   # разбор чужого вопроса/анализа не записываем
+            continue
+        return t
+    return None
+
+
+# просят записать/разложить, а модель не вызвала ни одного инструмента — один жёсткий повтор с указанием
+_ASKS_RECORD_RX = re.compile(r"\b(распредели|раздели|разбей|разложи|раскидай|запиши|запишите|записать|добавь|добавьте|"
+                             r"добавить|сохрани|сохранить|запомни|запомнить|создай|создать|оформи|преврати|напомни|напомнить|"
+                             r"разобрать|раскидать|внеси|внести)\w*", re.I)
+_ASKS_TARGET_RX = re.compile(r"\b(задач\w*|дела\b|делами|пункт\w*|список|списка|напоминани\w*|календар\w*|заметк\w*|"
+                             r"мозг|план\w*)", re.I)
+_NO_TOOLS = ("Ты ответил текстом и не вызвал НИ ОДНОГО инструмента — значит, в базу ничего не записано, "
+             "а «записал» было бы ложью. Если в моей реплике есть дела, события, траты или заметки — вызови "
+             "инструменты (можно несколько вызовов подряд, по одному на пункт: add_task / add_event / add_note). "
+             "Если непонятно, что именно записать, — задай ОДИН короткий уточняющий вопрос и ничего не записывай.")
+
+
+def _asks_records(text: str) -> bool:
+    """Просьба записать/разложить (длинный список или явная команда), а не вопрос и не анализ."""
+    return bool(_ASKS_RECORD_RX.search(text or "") and _ASKS_TARGET_RX.search(text or ""))
+
 
 _FORCED = [
     # «что там на сегодня» / «дайджест» — модель без инструмента тут же начинает тянуть воду, день показываем сами
@@ -1298,7 +1362,9 @@ def _claims_saved(answer: str) -> bool:
 
 
 # Вода вместо ответа: «Чё там на сегодня? Запускаю мозги. 🧠» — модель пересказала вопрос и ничего не сделала.
-_FILLER_RX = re.compile(r"\b(запускаю\s+мозги|мозги\s+запуск|секунду|подожди\w*|подождите|момент|анализирую|обрабатываю|"
+# Ищем только в начале ответа: «в этот момент», «в тот же момент» в середине нормального ответа — не вода,
+# и раньше такой ответ отбрасывался, облако отвечало дважды (сначала впустую, потом через локальную модель).
+_FILLER_RX = re.compile(r"\b(запускаю\s+мозги|мозги\s+запуск|секунду|подожди\w*|подождите|анализирую|обрабатываю|"
                         r"слушаю\s+вас|не\s+совсем\s+понял|не\s+уловил|не\s+понял\s+вопрос|перефразируй|повтори\w*\s+вопрос|"
                         r"сейчас\s+(?:скажу|подумаю|разберусь|посмотрю)|я\s+сейчас\s+(?:думаю|работаю))\b", re.I)
 
@@ -1308,7 +1374,7 @@ def _weak_answer(ans: str, question: str) -> bool:
     a = (ans or "").strip()
     if len(a) < 15:
         return True                      # «…», «Готово.» — на вопрос это не ответ
-    if len(a) < 220 and _FILLER_RX.search(a):
+    if len(a) < 220 and _FILLER_RX.search(a[:90]):
         return True                      # «Запускаю мозги», «Секунду, думаю»
     if len(a) < 220 and not re.search(r"\d", a):
         a_norm = re.sub(r"[^\w\s]", "", a.lower()).strip()
@@ -1756,6 +1822,11 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                  "• «Цель/копим/подушка … к …» → add_goal; «отложил … в …» → save_to_goal; «50/30/20», «сравни с прошлым месяцем», "
                  "«на сколько хватит», «хватит ли на платежи», «цели» → finance_report.\n"
                  "• Если непонятно, событие это или задача, — задай ОДИН короткий уточняющий вопрос вместо угадывания.\n"
+                 "• Просят «распредели/разбей/разложи на задачи» или прислали список дел — вызови add_task на КАЖДЫЙ пункт "
+                 "(несколько вызовов подряд, по одному на пункт). Перечислять их текстом вместо вызова ЗАПРЕЩЕНО: без вызова "
+                 "в базу не ляжет ни строка.\n"
+                 "• Пунктов несколько, а сроки не названы — после записей задай ровно ОДИН короткий вопрос про сроки "
+                 "(«Когда что выполнять?»), больше ничего не спрашивай.\n"
                  "• Просто вопрос или болтовня — отвечай без инструментов.\n"
                  "• Вопрос про день/планы («что там на сегодня», «че сегодня», «дайджест», «что у меня на неделе») — "
                  "вызови today_briefing или agenda и ответь по результату. Отвечать текстом вроде «запускаю мозги», «секунду», "
@@ -1782,6 +1853,7 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     results: list[registry.ToolResult] = []   # чем на самом деле кончился каждый вызов (проверено по базе)
     seen_calls: dict[tuple[str, str], bool] = {}   # подпись вызова → прошёл ли он (для стража дублей)
     allow_cloud = llm.cloud_enabled() and llm.GEMINI_AUTO
+    retried = False   # уже дали модели один жёсткий повтор — второй не делаем (лишние секунды на каждый вопрос)
     try:
         for _ in range(4):  # максимум 4 вызова инструментов подряд
             out = await _chat(messages, tools_now if allow_cloud == allow_cloud_pre else registry.tools_schema(with_cloud=False, text=None if cloud_tools else text))
@@ -1812,8 +1884,25 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                         else registry.tools_schema(with_cloud=False, text=None if cloud_tools else text))
                     if out2 and (out2.get("tool_calls") or not _weak_answer(out2.get("content") or "", text)):
                         out = out2
+                        retried = True
                 except Exception as e:  # pragma: no cover
                     log.debug("[%s] ретрай не удался: %s", channel, e)
+            if (not out["tool_calls"] and not actions and not results and not retried and not _looks_like_question(text)
+                    and not _is_analysis(text) and (_asks_records(text) or sorter.looks_like_batch(text))):
+                # просят записать/разложить (в т.ч. длинное сообщение-список), а модель ответила планом текстом
+                # и ни одного инструмента не вызвала — один повтор с прямым указанием, иначе выйдет ложь «записал»
+                log.warning("[%s] просят записать, инструментов нет (%r) — повторяю с указанием", channel, (out.get("content") or "")[:60])
+                retried = True
+                try:
+                    out2 = await _chat(messages + [
+                        {"role": "assistant", "content": out.get("content") or ""},
+                        {"role": "user", "content": _NO_TOOLS}], tools_now if allow_cloud == allow_cloud_pre
+                        else registry.tools_schema(with_cloud=False, text=None if cloud_tools else text))
+                    if out2 and (out2.get("tool_calls") or (not _claims_saved(out2.get("content") or "")
+                                                            and not _weak_answer(out2.get("content") or "", text))):
+                        out = out2
+                except Exception as e:  # pragma: no cover
+                    log.debug("[%s] ретрай (инструменты) не удался: %s", channel, e)
             if not out["tool_calls"]:
                 content = (await _russian_only(messages, out)) or "…"
                 content = _truth_gate(content, results)
@@ -1825,23 +1914,39 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                 # модель не вызвала НИ ОДНОГО инструмента, но пишет «записал» — старый путь: сохраняем сами.
                 # Если инструмент вызывался и провалился, сюда не идём: _truth_gate уже сказал правду,
                 # а угадывать запись за упавшим инструментом — как раз способ записать не то.
-                if not actions and not results and _claims_saved(content) and not _looks_like_question(text) and not _is_analysis(text) and not _too_long_for_rules(text):
-                    # модель соврала, что сохранила — сохраняем сами: время → событие, глагол дела → задача, иначе заметка
-                    dt, rest = parse_datetime(text)
-                    if dt and rest:
-                        title = rest[0].upper() + rest[1:]
-                        if ACTION_VERB_RX.match(text):
-                            tasks.add_task(title, dt, source=channel); actions.append("add_task")
-                            content = say("task", title=title) + f" Дедлайн {fmt_dt(dt)}."
-                        else:
-                            ev = calendar.add_event(title, dt, source=channel); actions.append("add_event")
-                            content = say("event", title=ev.title, when=fmt_dt(ev.start))
-                    elif ACTION_VERB_RX.match(text):
-                        tk = tasks.add_task(text[0].upper() + text[1:], source=channel); actions.append("add_task")
-                        content = say("task", title=tk.title)
+                if not actions and not results and _claims_saved(content) and not _looks_like_question(text) and not _is_analysis(text):
+                    if _too_long_for_rules(text):
+                        # Длинное сообщение раньше просто получало ложное «записал задачи» — ручной разбор тут
+                        # не угадываем (списком мог быть разобран сортировщик выше), но и врать не оставляем.
+                        content = (content.rstrip() +
+                                   "\n\n⚠️ Но сам я этого не записал: из длинного текста пункты сам не разложил. "
+                                   "Скажи «распредели это на задачи» — или перечисли дела с новой строки, запишу.")
                     else:
-                        brain_notes.add_note(text, source=channel); actions.append("add_note")
-                        content = say("note")
+                        # модель соврала, что сохранила — сохраняем сами: время → событие, глагол дела → задача, иначе заметка
+                        dt, rest = parse_datetime(text)
+                        if dt and rest:
+                            title = rest[0].upper() + rest[1:]
+                            if ACTION_VERB_RX.match(text):
+                                tasks.add_task(title, dt, source=channel); actions.append("add_task")
+                                content = say("task", title=title) + f" Дедлайн {fmt_dt(dt)}."
+                            else:
+                                ev = calendar.add_event(title, dt, source=channel); actions.append("add_event")
+                                content = say("event", title=ev.title, when=fmt_dt(ev.start))
+                        elif ACTION_VERB_RX.match(text):
+                            tk = tasks.add_task(text[0].upper() + text[1:], source=channel); actions.append("add_task")
+                            content = say("task", title=tk.title)
+                        elif _COMPLAINT_RX.search(text):
+                            # жалобу «ничего не записалось» заметкой не делаем — это была бы вторая ложь сверх первой
+                            content = ("Понял: значит, не записал. Так и скажи мне — «распредели это на задачи», "
+                                       "и я разберу твоё прошлое сообщение по пунктам.")
+                        else:
+                            brain_notes.add_note(text, source=channel); actions.append("add_note")
+                            content = say("note")
+                if (not actions and not results and not _looks_like_question(text) and not _is_analysis(text)
+                        and (_asks_records(text) or sorter.looks_like_batch(text)) and "не записал" not in content.lower()):
+                    # просят записать/разложить, инструментов не было и обещания «записал» тоже нет — подсказать, как добиться записи
+                    content = (content.rstrip() +
+                               "\n\n⚠️ Ничего не записал. Скажи «распредели это на задачи» — или перечисли дела с новой строки.")
                 return Reply(content, actions, via)
             # локальная модель решила, что вопрос общий → в облако (обезличенно)
             cloud = next((c for c in out["tool_calls"] if c["name"] == registry.CLOUD_TOOL), None)
@@ -2324,6 +2429,18 @@ async def _handle(text: str, channel: str) -> Reply:
             r = _resolve_pending(text, channel)
         if r is None:
             r = _bulk_rule(text, channel)
+        if r is None and not force_local and _is_split_cmd(text):
+            # «распредели это на задачи»: само сообщение-команда списком не является, разбираем то,
+            # что человек написал до этого (в истории) — иначе модель отвечает планом текстом и не пишет ничего.
+            src = _split_source(text)
+            if src:
+                log.info("[%s] КОМАНДА → сортировщик по контексту (%d симв.): %r", channel, len(src), src[:60])
+                t0 = time.monotonic()
+                r = await sorter.sort(src, channel, CONFIRM_AMOUNT)
+                log.info("[%s] сортировщик %s за %.1f с", channel, "разобрал" if r else "не справился — обычный путь",
+                         time.monotonic() - t0)
+                if r is not None and src is not text:
+                    r.text = r.text.replace("Разобрал, получилось", "Разобрал твоё сообщение выше — получилось", 1)
         if r is None and not force_local and sorter.looks_like_batch(text):
             # список из нескольких дел/записей: сначала нейронка раскладывает по типам (JSON), потом каждая запись — своим
             # сервисом. Иначе шаблон схватит первое время («в 15:00») как одно событие, а модель с инструментами

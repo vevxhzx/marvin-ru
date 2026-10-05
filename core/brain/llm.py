@@ -234,7 +234,7 @@ async def ollama_diagnose() -> str:
         return f"Ollama на {OLLAMA_URL}: {type(e).__name__}: {e}"
 
 
-_THINK_RX = re.compile(r"qwen3|gemma4|deepseek-r1|gpt-oss|magistral|phi4-reasoning", re.I)
+_THINK_RX = re.compile(r"qwen3|gemma4|deepseek-r1|deepseek-reasoner|gpt-oss|magistral|phi4-reasoning", re.I)
 _THINK_BLOCK_RX = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
 _THINK_OPEN_RX = re.compile(r"^\s*<think>", re.I)
 
@@ -857,6 +857,12 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             # модель/провайдер не принял параметр reasoning — убираем и повторяем один раз, иначе чат молчит
             log.warning("%s: параметр reasoning не принят (%s) — повторяю запрос без него", cloud_title(), r.text[:160])
             body.pop("reasoning", None)
+            r = await _cloud_post("/chat/completions", body, headers)
+        if r.status_code == 400 and "temperature" in body and "temperature" in (r.text or ""):
+            # deepseek-reasoner и часть reasoning-моделей отвергают temperature («does not support the parameter») —
+            # убираем и повторяем один раз, иначе ответ уходит локальной модели без причины
+            log.warning("%s: параметр temperature не принят (%s) — повторяю запрос без него", cloud_title(), r.text[:160])
+            body.pop("temperature", None)
             r = await _cloud_post("/chat/completions", body, headers)
         if r.status_code in (400, 404) and model != main_model:
             # голосовую модель убрали/переименовали — запоминаем и идём основной

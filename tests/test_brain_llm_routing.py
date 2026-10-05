@@ -421,3 +421,54 @@ def test_reasoning_is_never_returned_as_answer(monkeypatch):
     out = asyncio.run(llm.cloud_chat("S", "расскажи шутку", None))
     assert out is None, f"рассуждения не должны отдаваться как ответ, получено: {str(out)[:80]!r}"
     assert llm.LAST_CLOUD_ERROR and "рассуждени" in llm.LAST_CLOUD_ERROR
+
+
+# ============================================================ DeepSeek как облако
+def test_deepseek_provider_preset_is_ready():
+    """Провайдер DeepSeek подключается пресетом: base_url, модель и опознавание reasoning-версии."""
+    from core.brain import llm
+
+    p = llm.PROVIDERS["deepseek"]
+    assert p["base_url"] == "https://api.deepseek.com/v1"
+    assert p["model"] == "deepseek-chat"
+    monkey_model = llm._THINK_RX.search("deepseek-reasoner")
+    assert monkey_model, "deepseek-reasoner должна распознаваться как reasoning-модель (лимит ответа 700, а не 220)"
+
+
+def test_deepseek_temperature_is_stripped_on_400(monkeypatch):
+    """deepseek-reasoner отвечает 400 на temperature — снимаем параметр и повторяем, а не уводим ответ в локальную модель."""
+    from core.brain import llm
+
+    seen: list[dict] = []
+    calls = {"n": 0}
+
+    class _Resp:
+        status_code = 400
+        text = "deepseek-reasoner does not support the parameter temperature"
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": "Готово, ответил."}}]}
+
+    async def fake_post(path, body, headers, timeout=45):
+        calls["n"] += 1
+        seen.append(dict(body))
+        if calls["n"] == 1:
+            return _Resp()
+        r = _Resp()
+        r.status_code = 200
+        r.text = ""
+        return r
+
+    monkeypatch.setattr(llm, "MODE", "hybrid")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "deepseek")
+    monkeypatch.setattr(llm, "CLOUD_KEY", "k")
+    monkeypatch.setattr(llm, "anonymize", lambda t: t)
+    monkeypatch.setattr(llm, "resolve_cloud_model", lambda force=False: asyncio.sleep(0, result="deepseek-reasoner"))
+    monkeypatch.setattr(llm, "_cloud_post", fake_post)
+    out = asyncio.run(llm.cloud_chat("system", "привет", None))
+    assert out == "Готово, ответил.", out
+    assert calls["n"] == 2, "должен быть ровно один повтор без temperature"
+    assert "temperature" in seen[0] and "temperature" not in seen[1]
