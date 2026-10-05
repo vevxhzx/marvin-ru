@@ -612,7 +612,10 @@ export default function AppShell({
     <>
       <div className="aur"><i></i><i></i><i></i></div>
       <div className="app">
-        <Sidebar live={live} busy={busy} hiddenNav={hiddenNav} />
+        {/* Сайдбар монтируем только на телефоне (там его прячет CSS, но дерево нужно
+            для e2e-хуков): на десктопе навигация — плавающий док, а скрытый aside
+            ломал e2e (первый невидимый <a>) и крутил лишний поллинг помодоро. */}
+        {phone ? <Sidebar live={live} busy={busy} hiddenNav={hiddenNav} /> : null}
 
         <main>
           <div className={`gt r ${gtSolid ? 'gt-solid' : ''}`} ref={headRef}>

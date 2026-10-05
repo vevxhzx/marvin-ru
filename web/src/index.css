@@ -2979,20 +2979,20 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   }
 }
 
-/* ---------- фон: 4 дрейфующих пятна + 2 стеклянных орба + зерно + amb ---------- */
+/* ---------- фон: спокойная аура (не неон): 4 приглушённых пятна + 2 орба + зерно ---------- */
 #p-today .liq-bl {
-  position: fixed; border-radius: 50%; filter: blur(80px); opacity: .7;
-  animation: liq-fl 20s ease-in-out infinite alternate; z-index: 0; pointer-events: none;
+  position: fixed; border-radius: 50%; filter: blur(130px); opacity: .22;
+  animation: liq-fl 36s ease-in-out infinite alternate; z-index: 0; pointer-events: none;
 }
-#p-today .liq-b1 { width: 520px; height: 520px; background: #2a45ff; top: -120px; left: -80px; }
-#p-today .liq-b2 { width: 420px; height: 420px; background: var(--liq-violet); top: 30%; right: -100px; animation-delay: -6s; }
-#p-today .liq-b3 { width: 380px; height: 380px; background: var(--liq-lime); opacity: .4; bottom: -120px; left: 30%; animation-delay: -11s; }
-#p-today .liq-b4 { width: 300px; height: 300px; background: var(--liq-cyan); top: 55%; left: -60px; opacity: .5; animation-delay: -3s; }
+#p-today .liq-b1 { width: 520px; height: 520px; background: #2a45ff; top: -140px; left: -100px; }
+#p-today .liq-b2 { width: 420px; height: 420px; background: var(--liq-violet); top: 24%; right: -140px; animation-delay: -12s; opacity: .18; }
+#p-today .liq-b3 { width: 260px; height: 260px; background: var(--liq-lime); opacity: .12; bottom: -100px; left: 38%; animation-delay: -20s; }
+#p-today .liq-b4 { width: 220px; height: 220px; background: var(--liq-cyan); top: 58%; left: -80px; opacity: .14; animation-delay: -7s; }
 #p-today .liq-orb {
-  position: fixed; border-radius: 50%; z-index: 0; pointer-events: none;
-  background: radial-gradient(circle at 30% 28%, rgba(255, 255, 255, .75), rgba(255, 255, 255, .08) 55%, transparent 70%);
-  box-shadow: inset 0 0 30px rgba(255, 255, 255, .25);
-  animation: liq-fl 14s ease-in-out infinite alternate;
+  position: fixed; border-radius: 50%; z-index: 0; pointer-events: none; opacity: .5;
+  background: radial-gradient(circle at 30% 28%, rgba(255, 255, 255, .6), rgba(255, 255, 255, .06) 55%, transparent 70%);
+  box-shadow: inset 0 0 30px rgba(255, 255, 255, .18);
+  animation: liq-fl 26s ease-in-out infinite alternate;
 }
 #p-today .liq-o1 { width: 170px; height: 170px; top: 9%; left: 41%; }
 #p-today .liq-o2 { width: 110px; height: 110px; top: 62%; right: 6%; animation-delay: -5s; }
