@@ -782,11 +782,23 @@ def _explain_cloud_error(e: Exception, r: "httpx.Response | None") -> str:
     return f"{name}: {type(e).__name__}: {e}"
 
 
+# Облако не должно отдавать свои «мысли»: reasoning-модели (deepseek-r1, qwen3, gpt-oss) думают
+# отдельным потоком, и часть провайдеров кладёт эти мысли прямо в content — тогда в чат приходит
+# сплошной разбор («Хорошо, пользователь просит шутку… Сначала смотрю на данные…») вместо ответа.
+# Подсказка в системный промпт + параметры запроса (см. body["reasoning"] ниже) + разбор ответа
+# (пустой content при заполненном reasoning → НЕ отдаём его как ответ).
+_NO_THINK_HINT = ("\nРАССУЖДЕНИЯ. Думай молча и отвечай только готовым результатом: не выводи в текст свой разбор, "
+                  "план, перебор вариантов, самокритику и реплики вроде «хорошо, пользователь просит…», "
+                  "«сначала посмотрю на данные…», «проверяю историю…». Если вопрос сложный — разберись внутри "
+                  "и сразу отдай итог, одним ответом для хозяина.")
+
+
 async def cloud_chat(system: str, user_text: str, history: list[dict] | None = None, _force_model: str | None = None,
                      temperature: float = 0.7) -> str | None:
     """Единая точка входа в облако. Провайдер — из настроек; Gemini — частный случай."""
     global LAST_CLOUD_ERROR, _CLOUD_RESOLVED, LAST_CLOUD_MODEL
     history_retry = _force_model is not None
+    system = system + _NO_THINK_HINT   # для всех путей в облако (чат, голос, инициативные фразы, сортировка)
     if not CLOUD_PROVIDER or CLOUD_PROVIDER == "gemini":
         ans = await gemini_chat(system, user_text, history)
         LAST_CLOUD_ERROR = None if ans else LAST_GEMINI_ERROR
@@ -821,6 +833,11 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
     # reasoning-модели тратят max_tokens и на скрытые размышления: 220 на голосовой ответ для gpt-oss/qwen3 — это пустой content
     short_max = 700 if _THINK_RX.search(model) else 220
     body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": short_max if short_mode.get() else 1024}
+    if CLOUD_PROVIDER == "openrouter":
+        # effort=minimal — мыслим коротко (~10% max_tokens, иначе размышления съедают лимит и content
+        # остаётся пустым), exclude — готовые мысли не возвращаем вообще. Если провайдер не принял
+        # параметр (400) — убираем его и повторяем один раз, см. ниже.
+        body["reasoning"] = {"effort": "minimal", "exclude": True}
     r = None
     sink = token_sink.get()
     if sink is not None:
@@ -836,6 +853,11 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         r = await _cloud_post("/chat/completions", body, headers)
         if r is None:   # защита: ни один маршрут не ответил — дальше по коду ждали бы r.status_code
             raise httpx.ConnectError("провайдер не ответил ни одним маршрутом")
+        if r.status_code == 400 and "reasoning" in body:
+            # модель/провайдер не принял параметр reasoning — убираем и повторяем один раз, иначе чат молчит
+            log.warning("%s: параметр reasoning не принят (%s) — повторяю запрос без него", cloud_title(), r.text[:160])
+            body.pop("reasoning", None)
+            r = await _cloud_post("/chat/completions", body, headers)
         if r.status_code in (400, 404) and model != main_model:
             # голосовую модель убрали/переименовали — запоминаем и идём основной
             log.warning("%s: голосовая модель %s не принята (%s) — использую %s", cloud_title(), model, r.status_code, main_model)
@@ -855,9 +877,14 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             data = r.json()
             msg = (data.get("choices") or [{}])[0].get("message") or {}
             text = strip_think(msg.get("content") or "")
-            # reasoning-модели (deepseek-r1) иногда кладут ответ в reasoning, а content пустой
-            if not text:
-                text = strip_think(msg.get("reasoning") or msg.get("reasoning_content") or "")
+            # Пустой content при заполненном reasoning НИКОГДА не отдаём как ответ: раньше тут стоял
+            # фолбэк на msg["reasoning"]/reasoning_content — в чат приходил сплошной поток мыслей,
+            # обрезанный по max_tokens (без единой финальной реплики). Уходит фолбэком на локальную модель.
+            _reasoning_only = not text and bool((msg.get("reasoning") or msg.get("reasoning_content") or "").strip())
+            if _reasoning_only:
+                log.warning("%s: content пуст, reasoning заполнен (finish_reason=%s) — рассуждения в чат не отдаю, "
+                            "ответит локальная модель", cloud_title(),
+                            (data.get("choices") or [{}])[0].get("finish_reason"))
             if not text and body["model"] != main_model:
                 # быстрая голосовая модель промолчала (обычно finish_reason=length: всё ушло в размышления) — один раз основной
                 fin = (data.get("choices") or [{}])[0].get("finish_reason")
@@ -869,9 +896,11 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 r.raise_for_status()
                 data = r.json()
                 msg = (data.get("choices") or [{}])[0].get("message") or {}
-                text = strip_think(msg.get("content") or "") or strip_think(msg.get("reasoning") or msg.get("reasoning_content") or "")
+                text = strip_think(msg.get("content") or "")
+                _reasoning_only = not text and bool((msg.get("reasoning") or msg.get("reasoning_content") or "").strip())
             if not text:
-                LAST_CLOUD_ERROR = f"{cloud_title()}: пустой ответ."
+                LAST_CLOUD_ERROR = (f"{cloud_title()}: пустой ответ (модель вернула только рассуждения)."
+                                    if _reasoning_only else f"{cloud_title()}: пустой ответ.")
                 return None
             LAST_CLOUD_ERROR = None
             LAST_CLOUD_MODEL = body.get("model", "")
@@ -957,8 +986,14 @@ async def cloud_tools_chat(messages: list[dict], tools: list[dict], temperature:
             pending = [tc["id"] for tc in mm["tool_calls"]]
         elif mm["role"] == "tool":
             mm["tool_call_id"] = pending.pop(0) if pending else "call_0"
+    if msgs and msgs[0]["role"] == "system":
+        # та же просьба не показывать рассуждения, что и в cloud_chat: иначе content приходит
+        # сплошным разбором, а tool_calls — пустыми
+        msgs[0] = {**msgs[0], "content": (msgs[0]["content"] or "") + _NO_THINK_HINT}
     body = {"model": model, "messages": msgs, "tools": tools, "tool_choice": "auto", "temperature": temperature,
             "max_tokens": 160 if short_mode.get() else 700}
+    if CLOUD_PROVIDER == "openrouter":
+        body["reasoning"] = {"exclude": True}   # мысли не отдаём; бюджет не режем — здесь важна точность вызовов
     r = None
     try:
         r = await _cloud_post("/chat/completions", body, headers, timeout=60)
@@ -1130,7 +1165,8 @@ async def gemini_chat(system: str, user_text: str, history: list[dict] | None = 
             data = r.json()
             cand = (data.get("candidates") or [{}])[0]
             parts = cand.get("content", {}).get("parts") or []
-            text = "".join(p.get("text", "") for p in parts).strip()
+            # у reasoning-моделей Gemini отдаёт мысли отдельными parts с флагом thought=true — их в чат не даём
+            text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
             if not text:
                 reason = cand.get("finishReason") or data.get("promptFeedback", {}).get("blockReason") or "пусто"
                 LAST_GEMINI_ERROR = f"Gemini вернул пустой ответ ({reason})."

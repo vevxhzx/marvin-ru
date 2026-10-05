@@ -359,3 +359,65 @@ def test_cloud_tool_not_sent_to_local_only_turn():
     names = [t["function"]["name"] for t in registry.tools_schema(with_cloud=False, text="привет")]
     assert registry.CLOUD_TOOL not in names
     assert registry.CLOUD_TOOL in [t["function"]["name"] for t in registry.tools_schema(with_cloud=True, text="привет")]
+
+
+# ============================================================ reasoning в чат не попадает
+def test_cloud_openrouter_suppresses_reasoning(monkeypatch):
+    """OpenRouter: мыслим коротко (effort=minimal) и reasoning не отдаём; в системном промпте —
+    просьба отвечать только готовым результатом.
+
+    FIX: в чат приходил сплошной поток рассуждений («Хорошо, пользователь просит шутку… Сначала
+    смотрю на данные…»), обрезанный по max_tokens, без единой финальной реплики."""
+    from core.brain import llm
+
+    seen: list[dict] = []
+
+    async def fake_post(path, body, headers, timeout=45):
+        seen.append(body)
+        return None
+
+    monkeypatch.setattr(llm, "MODE", "hybrid")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "openrouter")
+    monkeypatch.setattr(llm, "CLOUD_KEY", "k")
+    monkeypatch.setattr(llm, "anonymize", lambda t: t)
+    monkeypatch.setattr(llm, "resolve_cloud_model", lambda force=False: asyncio.sleep(0, result="deepseek/deepseek-r1:free"))
+    monkeypatch.setattr(llm, "_cloud_post", fake_post)
+    monkeypatch.setattr(llm, "_cloud_stream", lambda b, h, s: asyncio.sleep(0, result=None))
+    asyncio.run(llm.cloud_chat("system", "привет", None))
+    assert seen, "запрос в облако должен был уйти"
+    body = seen[0]
+    assert body.get("reasoning") == {"effort": "minimal", "exclude": True}, body.get("reasoning")
+    sys_msg = body["messages"][0]
+    assert sys_msg["role"] == "system"
+    assert llm._NO_THINK_HINT in sys_msg["content"], "в системный промпт не попала просьба не показывать мысли"
+
+
+def test_reasoning_is_never_returned_as_answer(monkeypatch):
+    """Пустой content при заполненном reasoning → None (фолбэк на локальную модель), а не поток мыслей."""
+    from core.brain import llm
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"finish_reason": "length",
+                                 "message": {"content": "",
+                                             "reasoning": "Хорошо, пользователь просит шутку. Сначала смотрю на данные: "
+                                                          "сейчас понедельник, за ПК 1 минута. Нужно ответить в характере…"}}]}
+
+    async def fake_post(path, body, headers, timeout=45):
+        return _Resp()
+
+    monkeypatch.setattr(llm, "MODE", "hybrid")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "openrouter")
+    monkeypatch.setattr(llm, "CLOUD_KEY", "k")
+    monkeypatch.setattr(llm, "anonymize", lambda t: t)
+    monkeypatch.setattr(llm, "resolve_cloud_model", lambda force=False: asyncio.sleep(0, result="deepseek/deepseek-r1:free"))
+    monkeypatch.setattr(llm, "_cloud_post", fake_post)
+    out = asyncio.run(llm.cloud_chat("S", "расскажи шутку", None))
+    assert out is None, f"рассуждения не должны отдаваться как ответ, получено: {str(out)[:80]!r}"
+    assert llm.LAST_CLOUD_ERROR and "рассуждени" in llm.LAST_CLOUD_ERROR
