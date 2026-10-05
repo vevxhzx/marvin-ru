@@ -1,8 +1,9 @@
-﻿import { useEffect, useMemo, useState } from 'react'
-import { Plus, Check, Play, Square, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, TrendingUp, Coins, RefreshCw, Bell, User, HelpCircle } from 'lucide-react'
+﻿import { useEffect, useMemo, useRef, useState } from 'react'
+import { Plus, Check, Play, Square, Trash2, MessageCircle, Wallet, Clock, ChevronDown, ChevronUp, Pencil, Clapperboard, RefreshCw, HelpCircle } from 'lucide-react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { api, money, moneyShort, dayLabel, shortDate, hhmm, toLocalISO } from '../lib/api'
 import { Section, Empty, ErrorState, Sheet, Field, DateTimeField, Seg, Pills, Money, useToast, PageHead, useLeave, Swipe, ListSkeleton, Confirm } from '../components/ui'
+import '../orders-glass.css'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
 import StageStepper from '../components/StageStepper'
@@ -20,11 +21,16 @@ const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
 
 /* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
    отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
-   На десктопе (≥821px) класс не действует: там разделы остаются плоскими, как были. */
+   На десктопе (≥821px) класс не действует — там раздел получает стекло из .og-card (см. sectionCls). */
 const CARD_M_LIGHT = 'max-[820px]:!bg-[var(--sf)] max-[820px]:!p-[21px] max-[820px]:!rounded-[var(--r-lg)] max-[820px]:!shadow-none max-[820px]:!transform-none'
 
-/* Раздел страницы на телефоне — карточка, на десктопе — как было */
-const sectionCls = (phone) => (phone ? `c ${CARD_M_LIGHT}` : '')
+/* Раздел страницы на телефоне — карточка, на десктопе — стеклянная карточка макета
+   (.og-card в orders-glass.css: фон/кромка/блюр только ≥821px, телефон не трогаем). */
+const sectionCls = (phone) => (phone ? `c ${CARD_M_LIGHT}` : 'c og-card')
+
+/* Состояние человека в шапке героя (макет .av): щёлкает по кругу + тост, цвет —
+   смысловой (зелёный свободен / янтарь занят / розовый пауза), ключи словаря свои. */
+const AV_STATUS = [['or.free', 'var(--pos)'], ['status_in_progress', 'var(--warn)'], ['status_paused', 'var(--neg)']]
 
 /* Срезы списка. Названия — ключи словаря (см. lib/i18n.js). */
 const VIEWS = [['open', 'or.v_open'], ['unpaid', 'or.v_unpaid'], ['all', 'common.all']]
@@ -34,6 +40,33 @@ const STAGE_VAR = { warn: 'var(--warn)', pos: 'var(--pos)', neg: 'var(--neg)' }
 const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
 const ask = (text) => window.dispatchEvent(new CustomEvent('assistant:chat', { detail: { text } }))
 const hours = (h) => (h >= 1 ? `${Math.round(h * 10) / 10} ${T('unit.hour')}` : h > 0 ? `${Math.round(h * 60)} ${T('unit.min')}` : '—')
+
+/* Ключевая сумма «доезжает» до значения за ~900 мс (макет: счётчик #ow/data-n).
+   prefers-reduced-motion — сразу финальное значение. Значение тут числовое,
+   форматирование — обычным money(), поэтому анимация не ломает валюту и пробелы. */
+function useCountUp(to, ms = 900) {
+  const [v, setV] = useState(to)
+  const from = useRef(to)
+  useEffect(() => {
+    const reduce = typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const a = from.current
+    if (reduce || a === to) { from.current = to; setV(to); return }
+    let raf = 0
+    const t0 = performance.now()
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / ms)
+      const e = 1 - Math.pow(1 - p, 4)
+      const nv = Math.round(a + (to - a) * e)
+      from.current = nv
+      setV(nv)
+      if (p < 1) raf = requestAnimationFrame(step)
+      else from.current = to
+    }
+    raf = requestAnimationFrame(step)
+    return () => cancelAnimationFrame(raf)
+  }, [to, ms])
+  return v
+}
 
 /* Таймер помодоро: одна активная сессия на всю систему (сайт + Telegram + голос). Тикает локально, сверяется по SSE. */
 export function useTimer() {
@@ -81,6 +114,34 @@ export default function Orders() {
   const [params] = useSearchParams()
   const deepId = params.get('order')
 
+  /* Состояние-пилюля героя (макет .av): цикл «свободен → в работе → на паузе» + тост. */
+  const [avIdx, setAvIdx] = useState(0)
+  const cycleAv = () => {
+    const n = (avIdx + 1) % AV_STATUS.length
+    setAvIdx(n)
+    show(`${t('st.status')}: ${t(AV_STATUS[n][0])}`)
+  }
+  /* «Посадка» карточки после смены стадии (макет .land): строка/карточка подсвечивается
+     один раз после перерисовки. Таймер чистим, чтобы предыдущая подсветка не «мигала». */
+  const [landId, setLandId] = useState(null)
+  const landT = useRef(0)
+  const markLand = (id) => {
+    setLandId(id)
+    clearTimeout(landT.current)
+    landT.current = setTimeout(() => setLandId(null), 1200)
+  }
+  useEffect(() => () => clearTimeout(landT.current), [])
+  /* Вода в герое: высота подъезжает через transition (макет .water height-переход),
+     стартует чуть позже монтирования, чтобы анимация было видно. */
+  const [waterOn, setWaterOn] = useState(false)
+  useEffect(() => { const id = setTimeout(() => setWaterOn(true), 350); return () => clearTimeout(id) }, [])
+  /* 12 пузырьков — детерминированные смещения, без Math.random в рендере. */
+  const bubbles = useMemo(() => Array.from({ length: 12 }, (_, i) => ({
+    x: 4 + ((i * 47) % 92), s: 4 + ((i * 5) % 6), d: ((i * 1.7) % 6).toFixed(1),
+  })), [])
+  /* Иконка «проверить снова» крутится заново на каждый клик (перемонтирование по key). */
+  const [fuSpin, setFuSpin] = useState(0)
+
   const load = () => {
     setLoadErr(false)
     return Promise.all([
@@ -105,17 +166,18 @@ export default function Orders() {
   }, [deepId])
 
   const all = orders || []
-  /* Сколько заказов в каждой стадии — для фильтра. Пустые стадии в фильтр не попадают:
-     девять плашек с нулём — шум, а не навигация. */
+  /* Рельс стадий (макет .rail/.sn): счётчик и сумма по каждой стадии, включая пустые —
+     пустые гаснут (.has), но остаются кликабельными: это навигация по воронке. */
   const stageCounts = useMemo(() => {
     const m = {}
     for (const o of all) { const k = stageOf(o); m[k] = (m[k] || 0) + 1 }
     return m
   }, [all])
-  const stageChips = useMemo(
-    () => ORDER_STAGES.filter(([k]) => stageCounts[k] > 0).map(([k, label]) => [k, t(label), stageCounts[k]]),
-    [stageCounts, t],
-  )
+  const stageSums = useMemo(() => {
+    const m = {}
+    for (const o of all) { const k = stageOf(o); m[k] = (m[k] || 0) + (o.price || 0) }
+    return m
+  }, [all])
   const list = useMemo(() => {
     let l = all
     if (view === 'open') l = l.filter((o) => ['new', 'work', 'review'].includes(o.status))
@@ -125,7 +187,16 @@ export default function Orders() {
   }, [all, view, stageTab])
   const openN = all.filter((o) => ['new', 'work', 'review'].includes(o.status)).length
   const unpaid = all.filter((o) => ['work', 'review', 'done'].includes(o.status)).reduce((s, o) => s + o.left, 0)
+  /* Сколько заказов ждут оплаты (штуки) — та же выборка, что и фильтр «ждут оплаты»,
+     чтобы число в герое и список под ним не спорили друг с другом. */
+  const unpaidN = all.filter((o) => o.status !== 'cancelled' && o.status !== 'paid' && o.left > 0 && o.status !== 'new').length
   const overdue = all.filter((o) => o.overdue).length
+  const priceTotal = useMemo(() => all.reduce((s, o) => s + (o.price || 0), 0), [all])
+  /* Уровень воды в герое (макет .water): доля неоплаченного от общей суммы заказов —
+     реальные данные, 6% пустого героя, когда ждать нечего. Считаем здесь, а не выше:
+     там unpaid/priceTotal ещё не объявлены (TDZ — страница падала целиком). */
+  const fillPct = unpaid > 0 && priceTotal > 0 ? Math.min(70, 24 + 46 * Math.min(1, unpaid / priceTotal)) : 6
+  const unpaidShown = useCountUp(unpaid)
 
   const addQuick = async (e) => {
     e.preventDefault(); if (!quick.trim()) return
@@ -142,7 +213,7 @@ export default function Orders() {
     if (stage === stageOf(o)) return
     if (stage === 'lost') return setLost(o)
     if (stage === 'paid' && o.left > 0) return setPay(o)
-    try { await api.crmSetStage(o.id, stage); show(t('stage.of', { label: t(ORDER_STAGE_LABEL[stage]) }), '', o.title); load(); bump() } catch (e) { show.err(e) }
+    try { await api.crmSetStage(o.id, stage); show(t('stage.of', { label: t(ORDER_STAGE_LABEL[stage]) }), '', o.title); markLand(o.id); load(); bump() } catch (e) { show.err(e) }
   }
   const openDrawer = (o) => setDrawerId(o.id)
   const scanFollowups = async () => { try { const r = await api.crmScanFollowups(); await load(); show(t('or.fu_updated'), r.created?.length ? t('or.fu_new', { n: r.created.length }) : t('or.fu_none')) } catch (e) { show.err(e) } }
@@ -156,6 +227,7 @@ export default function Orders() {
   /* Счётчики воронки — одной строкой под заголовком, без тяжёлых карточек. */
   const counters = [
     { key: 'open', label: t('or.v_open'), value: openN, hint: overdue ? t('or.overdue_n', { count: overdue }) : t('or.all_ok') },
+    { key: 'unpaidn', label: t('or.v_unpaid'), value: unpaidN, hint: unpaidN ? t('or.find_debtors') : t('or.all_settled') },
     unpaid
       ? { key: 'unpaid', label: t('or.v_unpaid'), value: money(unpaid), tone: 'warn', onClick: () => setView('unpaid'), tip: t('or.find_debtors') }
       : { key: 'unpaid', label: t('or.v_unpaid'), value: money(0), hint: t('or.all_settled') },
@@ -165,28 +237,46 @@ export default function Orders() {
   ].filter(Boolean)
 
   /* Плитки внутри героя: все метрики, кроме неоплаченного остатка (он — ключевое число).
-     Порядок фиксированный: в работе → за месяц → средний чек → ставка в час. */
-  const HERO_CELL_ORDER = { open: 0, month: 1, check: 2, rate: 3 }
+     Порядок — как в макете: в работе → ждут оплаты → средний чек → за месяц → ставка. */
+  const HERO_CELL_ORDER = { open: 0, unpaidn: 1, check: 2, month: 3, rate: 4 }
   const heroCells = counters
     .filter((c) => c.key !== 'unpaid')
     .sort((a, b) => (HERO_CELL_ORDER[a.key] ?? 9) - (HERO_CELL_ORDER[b.key] ?? 9))
 
   return (
-    <div className={`bento-page pg space-y-6 pt-4 ${FIELD_LABEL_M}`} style={pageAcc.style}>
-      <PageHead kicker={kicker} title={t('nav.orders')}
-        right={<>
+    <div id="p-ord" className={`bento-page pg space-y-6 pt-4 ${FIELD_LABEL_M}`} style={pageAcc.style}>
+      <PageHead kicker={kicker} title={t('nav.orders')} />
+
+      {/* Панель страницы (макет .tb): вид и фильтр слева, «?» и «+ заказ» справа —
+          всё в одну строку над героем, как в макете. */}
+      <div className="og-tb animate-rise">
+        <Seg value={layout} onChange={setLayout} options={[['list', t('or.layout_list')], ['board', t('or.layout_board')]]} />
+        <Seg value={view} onChange={setView} options={VIEWS.map(([v, k]) => [v, t(k)])} />
+        <span className="og-tb-r">
           <button type="button" className="btn-icon outlined" aria-label={t('howto.toggle_aria')} data-tip={t('howto.title')}
             onClick={() => window.dispatchEvent(new CustomEvent('orders:howto', { detail: 'toggle' }))}><HelpCircle size={16} /></button>
           <button className="btn-primary head-primary max-[820px]:!hidden" onClick={() => setSheet('new')}><Plus size={15} /> {t('od.order')}</button>
-        </>} />
+        </span>
+      </div>
 
-      {/* Ключевое число — премиум-карточка: неоплаченный остаток крупно, остальные метрики —
-          стеклянными плитками внутри неё (.hm — штатный примитив «стекло внутри героя»),
-          а не строками, прижатыми к углам. Контракт .glass-card/.gc-orders/.gc-num
-          отсутствует — стоим на .hero-card/.hm/.num. */}
+      {/* Ключевое число — герой макета (.oh): заголовок «ждут оплаты», пилюля состояния
+          (клик щёлкает по кругу + тост), сумма с плавным «доездом», вода внизу с волной
+          и пузырьками, снизу — плитки метрик (.mini). Всё остальное — в orders-glass.css. */}
       <div className="hero-card" data-reveal>
-        <div className="hc-label">{t('or.v_unpaid')}</div>
-        <div className="hc-big num">{money(unpaid || 0)}</div>
+        <div className="hc-label og-hh">
+          <b>{t('or.v_unpaid')}</b>
+          <button type="button" className="og-av" aria-label={`${t('st.status')}: ${t(AV_STATUS[avIdx][0])}`}
+            data-tip={t('st.status')} onClick={cycleAv}>
+            <i style={{ background: AV_STATUS[avIdx][1], color: AV_STATUS[avIdx][1] }} aria-hidden="true" />
+            <span>{t(AV_STATUS[avIdx][0])}</span>
+          </button>
+        </div>
+        <div className="hc-big num">{money(unpaidShown || 0)}</div>
+        <div className="og-water" aria-hidden="true" style={{ height: waterOn ? `${fillPct}%` : '0%' }}>
+          <svg className="og-wv" viewBox="0 0 1200 40" preserveAspectRatio="none"><path d="M0,20 Q150,0 300,20 T600,20 T900,20 T1200,20 V40 H0Z" /></svg>
+          <svg className="og-wv og-wv2" viewBox="0 0 1200 40" preserveAspectRatio="none"><path d="M0,20 Q150,38 300,20 T600,20 T900,20 T1200,20 V40 H0Z" /></svg>
+          {bubbles.map((b, i) => <i key={i} className="og-bub" style={{ '--x': `${b.x}%`, '--s': `${b.s}px`, '--d': `${b.d}s` }} />)}
+        </div>
         <div className="hm">
           {heroCells.map((c) => (
             <div key={c.key} className="min-w-0" title={c.hint || undefined}>
@@ -198,7 +288,7 @@ export default function Orders() {
       </div>
 
       {/* Подсказка «как это работает» на телефоне свёрнута (см. HowToOrders) и открывается
-          одной кнопкой «?» — это её единственная точка входа, второй кнопки в шапке нет. */}
+          кнопкой «?» на панели выше — её единственная точка входа. */}
       <div className="-mt-4"><HowToOrders /></div>
 
 
@@ -214,30 +304,13 @@ export default function Orders() {
       <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show(t('od.lost_marked'), '', lost.title); setLost(null); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} />
       <ClientCardSheet cid={personCard} onClose={() => setPersonCard(null)} onOrder={(oid) => { setPersonCard(null); setDrawerId(oid) }} />
 
-      {/* Переключатель вида и фильтры: спокойные сегменты и пилюли, активное состояние видно сразу. */}
-      <div className="animate-rise flex flex-wrap items-center gap-x-3 gap-y-2">
-        <Seg value={layout} onChange={setLayout} options={[['list', t('or.layout_list')], ['board', t('or.layout_board')]]} />
-        <Seg value={view} onChange={setView} options={VIEWS.map(([v, k]) => [v, t(k)])} />
-      </div>
-
-      {stageChips.length > 0 && (
-        <div className="no-scrollbar -mx-1 flex gap-1.5 overflow-x-auto px-1 animate-rise fade-x" role="group" aria-label={t('stage.block')}>
-          {stageChips.map(([k, label, n]) => (
-            <button key={k} type="button"
-              className={`pill shrink-0 !min-h-[var(--tap)] ${stageTab === k ? 'on' : ''}`}
-              aria-pressed={stageTab === k}
-              onClick={() => setStageTab(stageTab === k ? 'all' : k)}>
-              {label}<span className="num ml-1.5 opacity-60">{n}</span>
-            </button>
-          ))}
-        </div>
-      )}
-
+      {/* Задержки оплат и налог — живая строка-пульс (без макетного аналога): точки
+          мигают янтарём (ожидание), клик уводит в фильтр «ждут оплаты». */}
       {pulse?.enabled && (pulse.late?.length > 0 || pulse.tax?.tax_total > 0) && (
-        <div className="animate-rise flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
+        <div className="og-pulse animate-rise flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
           {pulse.late.map((x) => (
             <button key={x.order_id} type="button" className="max-[820px]:min-h-[var(--tap)] flex items-center gap-1.5 text-left" onClick={() => setView('unpaid')}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--warn)' }} />
+              <span className="og-pdot" style={{ background: 'var(--warn)', color: 'var(--warn)' }} />
               <span><b className="font-medium">{x.client || x.title}</b><span className="muted"> {t('or.delays', { m: money(x.left), count: x.days }) + (x.typical_days != null ? t('or.typically', { n: x.typical_days }) : '')}</span></span>
             </button>
           ))}
@@ -245,27 +318,56 @@ export default function Orders() {
         </div>
       )}
 
+      {/* Напоминания (макет .rm/.rmc): чипы с пульсирующей точкой, справа — «проверить
+          снова» с иконкой, которая крутится при клике. */}
       {followups.length > 0 && (
-        <div className="animate-rise flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px]">
-          <span className="muted flex items-center gap-1.5"><Bell size={13} /> {t('or.followups')}:</span>
-          {followups.slice(0, 5).map((f) => (
-            <button key={f.id} type="button" className="max-[820px]:min-h-[var(--tap)] flex items-center gap-1.5 text-left" onClick={() => f.order_id && setDrawerId(f.order_id)}>
-              <span className="h-1.5 w-1.5 rounded-full" style={{ background: f.kind === 'overdue' ? 'var(--neg)' : 'var(--warn)' }} />
-              <span className="truncate max-w-[280px]">{f.text}</span>
-            </button>
-          ))}
-          <button type="button" className="btn-ghost btn-sm" onClick={scanFollowups}><RefreshCw size={12} /> {t('common.retry')}</button>
+        <Section className={sectionCls(phone)} title={t('or.followups')} i={3}
+          action={<button type="button" className="pill" onClick={() => { setFuSpin((x) => x + 1); scanFollowups() }}>
+            <RefreshCw key={fuSpin} size={13} className={fuSpin ? 'og-spin' : undefined} /> {t('common.retry')}
+          </button>}>
+          <div className="og-rm">
+            {followups.slice(0, 5).map((f) => (
+              <button key={f.id} type="button" className="og-rmc" onClick={() => f.order_id && setDrawerId(f.order_id)}>
+                <span className="trunc">{f.text}</span>
+              </button>
+            ))}
+          </div>
+        </Section>
+      )}
+
+      {/* Стадии (макет .rail/.sn): карточка со сворачиваемыми счётчиками — цветная
+          планка сверху, количество, сумма; клик фильтрует список и канбан.
+          Пустые стадии гаснут, но остаются: это навигация по воронке. */}
+      {orders !== null && (
+        <Section className={sectionCls(phone)} title={t('stage.block')} i={4}>
+        <div className="og-rail no-scrollbar" role="group" aria-label={t('stage.block')}>
+          {ORDER_STAGES.map(([k, label]) => {
+            const n = stageCounts[k] || 0
+            const on = stageTab === k
+            return (
+              <button key={k} type="button"
+                className={`og-sn${on ? ' on' : ''}${n ? ' has' : ''}`}
+                style={{ '--k': STAGE_VAR[ORDER_STAGE_TONE[k]] || 'var(--acc)' }}
+                aria-pressed={on}
+                onClick={() => setStageTab(on ? 'all' : k)}>
+                <span>{t(label)}</span>
+                <b className="num">{n}</b>
+                <small className="num">{n ? moneyShort(stageSums[k] || 0) : '—'}</small>
+              </button>
+            )
+          })}
         </div>
+      </Section>
       )}
 
       {orders === null
         ? (loadErr ? <ErrorState onRetry={load} /> : <ListSkeleton n={5} rowH={78} avatar={false} />)
         : layout === 'board' ? (
-          <Section className={sectionCls(phone)} title={t('or.layout_board')} idx={list.length} hint={t('or.board_hint')}>
-            <Board orders={list} onOpen={openDrawer} onStage={setStage} />
+          <Section className={sectionCls(phone)} title={t('or.layout_board')} idx={list.length} hint={t('or.board_hint')} i={5}>
+            <Board orders={list} onOpen={openDrawer} onStage={setStage} stageTab={stageTab} landId={landId} />
           </Section>
         ) : (
-          <Section className={sectionCls(phone)} title={t(VIEWS.find((v) => v[0] === view)[1])} idx={list.length}>
+          <Section className={sectionCls(phone)} title={t(VIEWS.find((v) => v[0] === view)[1])} idx={list.length} i={5}>
             {list.length === 0 ? (
               <div className="animate-rise">
                 {view === 'open' ? <Empty glyph="tasks" text={t('or.empty_open')} sub={t('or.empty_open_sub')} hint={t('or.empty_open_hint')} />
@@ -273,17 +375,22 @@ export default function Orders() {
                     : <Empty glyph="tasks" text={t('or.empty_all')} hint={t('or.empty_all_hint')} />}
               </div>
             ) : (
-              <div className="rule stagger">
-                  {list.map((o) => <Row key={o.id} o={o} onOpen={() => openDrawer(o)} onEdit={() => setSheet(o)} onPay={() => setPay(o)}
-                    onDel={() => setDel(o)} onStatus={setStatus} onStart={() => start(o)} onStage={(k) => setStage(o, k)} timer={timer} extra={leaveCls(o.id)} />)}
+              <div className="og-olr">
+                  {list.map((o, i) => <Row key={o.id} o={o} k={i} onOpen={() => openDrawer(o)} onEdit={() => setSheet(o)} onPay={() => setPay(o)}
+                    onDel={() => setDel(o)} onStatus={setStatus} onStart={() => start(o)} onStage={(k) => setStage(o, k)} timer={timer}
+                    extra={`${leaveCls(o.id)} ${landId === o.id ? 'og-land' : ''}`} />)}
               </div>
             )}
           </Section>
         )}
 
-      {stats && (stats.clients.length > 0 || stats.months.some((m) => m.income)) && <StatsBlock stats={stats} onUnpaid={() => { setView('unpaid'); window.scrollTo({ top: 0, behavior: 'smooth' }) }} />}
+      {stats && (stats.clients.length > 0 || stats.months.some((m) => m.income)) && (
+        <StatsBlock stats={stats} unpaid={unpaid} timer={timer} left={left}
+          onUnpaid={() => { setView('unpaid'); window.scrollTo({ top: 0, behavior: 'smooth' }) }}
+          onStart={() => start(null)} onStop={stop} i={6} />
+      )}
 
-      {analytics && analytics.clients?.length > 0 && <AnalyticsBlock a={analytics} />}
+      {analytics && analytics.clients?.length > 0 && <AnalyticsBlock a={analytics} i={7} />}
     </div>
   )
 }
@@ -323,10 +430,11 @@ export function StatRow({ items }) {
   )
 }
 
-/* Строка заказа: плоская, с волосяным разделителем. Клик открывает панель заказа,
-    одна главная кнопка «следующий шаг» с понятным текстом по текущей стадии, остальные
-    действия — в меню «⋯». Долг, срок и часы — вторичными подписями, а не отдельными коробками. */
-function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, timer, extra = '' }) {
+/* Строка заказа — карточка списка (макет .orw): точка стадии со свечением, заголовок
+    и клиент, срок/долг подписями, сумма + «не оплачен», бейдж стадии и рельс прогресса
+    (StageStepper — те же 9 отрезков, что .dts в макете), одна главная кнопка
+    «следующий шаг», остальное — в меню «⋯». k — порядковый № для стартовой анимации. */
+function Row({ o, k = 0, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, timer, extra = '' }) {
   const { t } = useI18n()
   const nav = useNavigate()
   const [, show] = useToast()
@@ -355,12 +463,12 @@ function Row({ o, onOpen, onEdit, onPay, onDel, onStart, onStage, onStatus, time
   const dlTone = o.overdue ? 'neg' : (!o.past_due && o.days_left != null && o.days_left <= 2) ? 'warn' : 'faint'
   return (
     <Swipe onLeft={!closed ? onDel : undefined} onRight={next ? () => onStage(next.stage) : undefined} rightLabel={next ? t(next.text) : t('common.done')}>
-      <div className={`row-slide ${extra} ${closed ? 'opacity-60' : ''}`}>
+      <div className={`row-slide ${extra} ${closed ? 'opacity-60' : ''}`} style={{ '--k': k }}>
         <div role="button" tabIndex={0} aria-label={t('or.open_order', { title: o.title })} onClick={onOpen}
           onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen() } }}
           className="row wide-row cursor-pointer"
           style={o.overdue ? { background: 'var(--neg-soft)' } : undefined}>
-          <span aria-hidden="true" className="h-2 w-2 shrink-0 rounded-full" style={{ background: o.overdue ? 'var(--neg)' : (STAGE_VAR[ORDER_STAGE_TONE[stage]] || 'var(--acc)') }} />
+          <span aria-hidden="true" className="og-sd h-2 w-2 shrink-0 rounded-full" style={{ background: o.overdue ? 'var(--neg)' : (STAGE_VAR[ORDER_STAGE_TONE[stage]] || 'var(--acc)'), color: o.overdue ? 'var(--neg)' : (STAGE_VAR[ORDER_STAGE_TONE[stage]] || 'var(--acc)') }} />
           <div className="min-w-0 flex-[1_1_220px]">
             <div className="flex min-w-0 flex-wrap items-baseline gap-x-2.5">
               <span className="clamp-2 min-w-0 font-medium" style={{ fontSize: 'var(--fs-lg)' }} title={o.title}>{o.title}</span>
@@ -439,7 +547,7 @@ function readBoardMore() {
    Колонка показывает стадию, количество и сумму заказов; цвет — по смыслу из DESIGN.md.
    Счётчик и сумма в шапке считаются по ВСЕМ заказам стадии, а не по видимым карточкам,
    иначе цифры в колонке врали бы относительно сводки и аналитики. */
-function Board({ orders, onOpen, onStage }) {
+function Board({ orders, onOpen, onStage, stageTab = 'all', landId = null }) {
   const { t } = useI18n()
   const [drag, setDrag] = useState(null)
   const [over, setOver] = useState(null)
@@ -482,7 +590,7 @@ function Board({ orders, onOpen, onStage }) {
           <span className="faint text-[12px]">{t('or.board_hint_limited')}</span>
         </div>
       )}
-      <div className="flex gap-3" style={{ minWidth: 'max-content' }}>
+      <div className="og-kb flex gap-3" style={{ minWidth: 'max-content' }}>
         {ORDER_STAGES.map(([k, label]) => {
           const tone = ORDER_STAGE_TONE[k]
           const col = cols[k] || []
@@ -490,25 +598,23 @@ function Board({ orders, onOpen, onStage }) {
           // в закрытой стадии видно не всё: 10 по умолчанию, дальше порциями по 30
           const shown = shownOf(k, col.length)
           const rest = col.length - shown
+          const kcolor = STAGE_VAR[tone] || 'var(--acc)'
           return (
-            <div key={k} className="w-[262px] shrink-0"
+            <div key={k} className={`og-kcol w-[262px] shrink-0 ${stageTab === k ? 'hl' : ''} ${over === k ? 'ovr' : ''}`}
+              style={{ '--k': kcolor }}
               onDragOver={(e) => { e.preventDefault(); setOver(k) }}
               onDragLeave={() => setOver((x) => (x === k ? null : x))}
               onDrop={(e) => { e.preventDefault(); const d = drag; setOver(null); setDrag(null); if (d) onStage(d, k) }}>
-              <div className="mb-2 overflow-hidden rounded-xl" aria-label={t('or.column_aria', {
+              <div className="og-kh" aria-label={t('or.column_aria', {
                 label: t(label), n: col.length, sum: sum > 0 ? t('or.column_sum', { m: money(sum) }) : '',
-              })}
-                style={{ background: 'var(--sf2)', boxShadow: 'inset 0 0 0 1px var(--line)', outline: over === k ? '2px solid var(--acc)' : 'none' }}>
-                <div className="h-[3px]" style={{ background: STAGE_VAR[tone] || 'var(--acc)' }} aria-hidden />
-                <div className="flex items-center justify-between gap-2 px-3 py-2.5">
-                  <span className="truncate text-[13px] font-medium">{t(label)}</span>
-                  <span className="num shrink-0 text-[12px]">
-                    <span className={col.length ? 'text-[var(--ink-2)]' : 'faint'}>{col.length}</span>
-                    {sum > 0 && <span className="faint"> · {moneyShort(sum)}</span>}
-                  </span>
-                </div>
+              })}>
+                <span className="truncate text-[13px] font-medium">{t(label)}</span>
+                <span className="num shrink-0 text-[12px]">
+                  <span className={col.length ? 'text-[var(--ink-2)]' : 'faint'}>{col.length}</span>
+                  {sum > 0 && <span className="faint"> · {moneyShort(sum)}</span>}
+                </span>
               </div>
-              <div className="space-y-2" style={{ minHeight: 56 }}>
+              <div className="og-kz space-y-2" style={{ minHeight: 56 }}>
                 {col.slice(0, shown).map((o) => (
                   <div key={o.id} role="button" tabIndex={0}
                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(o) } }}
@@ -518,8 +624,7 @@ function Board({ orders, onOpen, onStage }) {
                     onClick={() => onOpen(o)}
                     aria-label={t('or.open_order', { title: o.title })}
                     title={o.title}
-                    className={`cursor-grab rounded-xl px-3 py-2.5 transition-opacity active:cursor-grabbing ${drag?.id === o.id ? 'opacity-50' : ''}`}
-                    style={{ background: o.overdue ? 'var(--neg-soft)' : 'var(--sf)', boxShadow: 'inset 0 0 0 1px var(--line)' }}>
+                    className={`og-kcard cursor-grab px-3 py-2.5 active:cursor-grabbing ${drag?.id === o.id ? 'dg' : ''} ${o.overdue ? 'og-over' : ''} ${landId === o.id ? 'land' : ''}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
                         <div className="truncate text-[13.5px] font-medium">{o.title}</div>
@@ -533,7 +638,7 @@ function Board({ orders, onOpen, onStage }) {
                       {o.revisions > 0 && <span className="warn">{t('or.rev', { n: o.revisions })}</span>}
                     </div>
                     {o.price > 0 && (
-                      <div className="mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
+                      <div className="og-pbar mt-1.5 h-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
                         <div className="h-full rounded-full" style={{ width: `${Math.min(100, Math.round((o.paid / o.price) * 100))}%`, background: 'var(--acc)' }} />
                       </div>
                     )}
@@ -546,7 +651,7 @@ function Board({ orders, onOpen, onStage }) {
                   </div>
                 ))}
                 {col.length === 0 && (
-                  <div className="rounded-xl px-3 py-4 text-center text-[12px] faint" style={{ border: '1px dashed var(--line)' }}>
+                  <div className="og-kp rounded-xl px-3 py-4 text-center text-[12px] faint" style={{ border: '1px dashed var(--line)' }}>
                     {t('or.drop_here')}
                   </div>
                 )}
@@ -671,41 +776,60 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
   )
 }
 
-/* Аналитика CRM: конверсия воронки и топ клиентов (read-only) */
-function AnalyticsBlock({ a }) {
+/* Аналитика CRM: конверсия воронки и топ клиентов (read-only).
+   Воронка — горизонтальные полосы (.fr2/.fb макета), цвет стадии смысловой
+   (зелёный = оплачено/сдано, янтарь = ждём, розовый = потеряно), клиенты —
+   строки (.kv: имя + сколько заказов слева, выручка справа), снизу — конверсия. */
+const TONE_COLOR = { warn: 'var(--warn)', pos: 'var(--pos)', neg: 'var(--neg)' }
+function AnalyticsBlock({ a, i = 0 }) {
   const { t } = useI18n()
   const phone = usePhone()
   const max = Math.max(1, ...a.funnel.map((f) => f.count))
+  // полосы «дорастают» до значения через transition — как в макете (.fb width)
+  const [grown, setGrown] = useState(false)
+  useEffect(() => { const id = setTimeout(() => setGrown(true), 60); return () => clearTimeout(id) }, [])
   return (
-    <Section className={sectionCls(phone)} title={t('or.an_title')} hint={t('or.an_hint')}>
-      <div className="space-y-2">
+    <Section className={sectionCls(phone)} title={t('or.an_title')} hint={t('or.an_hint')} i={i}>
+      <div className="og-fun">
         {a.funnel.map((f) => (
-          <div key={f.stage} className="flex items-center gap-3 text-[12.5px]">
-            <span className="w-[110px] shrink-0 muted">{t.sv(f.label) || f.label}</span>
-            <div className="h-2 flex-1 overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-              <div className="h-full rounded-full" style={{ width: `${Math.round((f.count / max) * 100)}%`, background: f.stage === 'paid' ? 'var(--pos)' : f.stage === 'lost' ? 'var(--neg)' : 'var(--acc)' }} />
+          <div key={f.stage} className="og-fr2">
+            <span className="muted trunc">{t.sv(f.label) || f.label}</span>
+            <div className="og-fb">
+              <i className="og-fbi" style={{ '--k': TONE_COLOR[ORDER_STAGE_TONE[f.stage]] || 'var(--acc)', width: grown ? `${Math.round((f.count / max) * 100)}%` : '0%' }} />
             </div>
-            <span className="num w-8 shrink-0 text-right">{f.count}</span>
+            <b className="num">{f.count}</b>
           </div>
         ))}
       </div>
-      <div className="mt-4 grid gap-x-6 gap-y-1 sm:grid-cols-2">
-        {a.top.map((c) => <div key={c.client_id ?? 'none'} className="flex items-center justify-between gap-3 text-[12.5px]"><span className="min-w-0 truncate">{c.client} <span className="faint">· {c.orders}</span></span><span className="num pos shrink-0">{money(c.revenue)}</span></div>)}
+      <div className="og-tc mt-4">
+        {a.top.map((c) => (
+          <div key={c.client_id ?? 'none'} className="og-kv">
+            <span className="min-w-0 trunc">{c.client}<small>{t('or.cc_orders_n', { count: c.orders })}</small></span>
+            <b className={`num ${c.revenue > 0 ? 'pos' : 'faint'}`}>{money(c.revenue)}</b>
+          </div>
+        ))}
       </div>
       <div className="muted mt-3 text-[12px]">{t('or.an_foot', { conv: a.conversion, won: a.won, total: a.total }) + (a.avg_check ? t('or.an_avg', { m: money(a.avg_check) }) : '')}</div>
     </Section>
   )
 }
 
-function StatsBlock({ stats, onUnpaid }) {
+/* «Как идут дела» (макет .mc/.bz): столбики дохода и фокуса растут от 3px до значения
+   после монтирования; в текущем месяце рядом со столбиком дохода — пунктирный
+   «ждём оплаты» (реальный неоплаченный остаток). Рядом с фокусом — пилюля таймера
+   (та же /api/orders/timer, что в строке заказа): запуск и стоп одним нажатием. */
+function StatsBlock({ stats, unpaid = 0, onUnpaid, timer = null, left = 0, onStart, onStop, i = 0 }) {
   const { t } = useI18n()
   const phone = usePhone()
   const [more, setMore] = useState(false)
+  const [grown, setGrown] = useState(false)
+  useEffect(() => { const id = setTimeout(() => setGrown(true), 60); return () => clearTimeout(id) }, [])
   const max = Math.max(1, ...stats.months.map((m) => m.income))
   const maxF = Math.max(1, ...stats.focus_days.map((d) => d.min))
   const lastMonth = stats.months.at(-1)?.month
+  const h = (v, m) => `${grown ? Math.min(96, Math.max(3, (v / m) * 92)) : 3}px`
   return (
-    <Section className={sectionCls(phone)} title={t('or.st_title')} hint={t('or.st_hint')}>
+    <Section className={sectionCls(phone)} title={t('or.st_title')} hint={t('or.st_hint')} i={i}>
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div>
           <div className="label mb-4">{t('or.st_income')}</div>
@@ -715,10 +839,10 @@ function StatsBlock({ stats, onUnpaid }) {
               return (
                 <div key={m.month} className="group flex flex-1 flex-col items-center gap-1.5">
                   <div className="num text-[12px] opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
-                  <div className="w-full rounded-t-md transition-all duration-700" style={{
-                    height: `${Math.max(3, (m.income / max) * 92)}px`,
-                    background: m.income ? (cur ? 'var(--acc)' : 'color-mix(in srgb, var(--acc) 38%, transparent)') : 'var(--fill-2)',
-                  }} />
+                  <div className="og-bz">
+                    {cur && unpaid > 0 && <div className="og-gh" style={{ height: h(unpaid, max) }} title={t('or.st_awaiting', { m: money(unpaid) })} aria-hidden="true" />}
+                    <div className={`og-b ${m.income ? 'og-p' : 'og-zero'}`} style={{ height: h(m.income, max) }} />
+                  </div>
                   <div className="faint num text-[12px]">{m.month.slice(5)}</div>
                 </div>
               )
@@ -726,14 +850,19 @@ function StatsBlock({ stats, onUnpaid }) {
           </div>
         </div>
         <div>
-          <div className="mb-4 flex items-baseline justify-between gap-3">
+          <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1.5">
             <div className="label">{t('or.st_focus')}</div>
-            <span className="muted text-[12px]">{stats.week_load_h ? t('or.st_week', { h: hours(stats.week_load_h) }) : t('or.st_no_timer')}</span>
+            <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5 text-[12px]">
+              <span className="muted">{timer?.active ? t('od.timer_running', { left: mmss(left) }) : stats.week_load_h ? t('or.st_week', { h: hours(stats.week_load_h) }) : t('or.st_no_timer')}</span>
+              <button type="button" className="pill og-tmr" onClick={timer?.active ? onStop : onStart}>
+                {timer?.active ? <><Square size={12} /> {t('pomo.stop_short')}</> : <><Play size={12} /> {t('pomo.start_short')}</>}
+              </button>
+            </span>
           </div>
           <div className="flex h-[120px] items-end gap-1">
             {stats.focus_days.map((d) => (
               <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5" title={t('or.st_day', { date: `${d.date.slice(8)}.${d.date.slice(5, 7)}`, min: d.min })}>
-                <div className="w-full rounded-t-md" style={{ height: `${Math.max(3, (d.min / maxF) * 92)}px`, background: d.min ? 'var(--pos)' : 'var(--fill-2)', opacity: d.min ? 0.9 : 1 }} />
+                <div className={`og-b ${d.min ? 'og-f' : 'og-zero'}`} style={{ height: h(d.min, maxF) }} />
                 <div className="faint num text-[12px]">{d.date.slice(8)}</div>
               </div>
             ))}

@@ -213,7 +213,7 @@ function HeadStatus({ live, busy }) {
         onKeyDown={onEnter(() => setPop((v) => !v))}
         title={st.text}
       >
-        <i className="dot" style={{ background: st.dot }}></i>
+        <i className="dot" style={{ background: st.dot, color: st.dot }}></i>
         {st.text}
       </span>
       {pop && <LivePopover live={live} onClose={() => setPop(false)} place="absolute right-0 top-[calc(100%+8px)]" />}
@@ -397,7 +397,7 @@ function InboxPanel({ inbox, onClose }) {
   }, [onClose])
   useEffect(() => { const t = setTimeout(inbox.markAll, 1200); return () => clearTimeout(t) }, []) // eslint-disable-line
   return (
-    <div ref={ref} className="elevated absolute right-0 top-[44px] z-[75] w-[340px] max-w-[calc(100vw-24px)] overflow-hidden !p-0" style={{ animation: 'rise .22s var(--ease-out)' }}>
+    <div ref={ref} className="elevated absolute right-5 top-[calc(100%+6px)] z-[75] w-[340px] max-w-[calc(100vw-24px)] overflow-hidden !p-0" style={{ animation: 'rise .22s var(--ease-out)' }}>
       <div className="flex items-center justify-between border-b hair px-4 py-2.5">
         <div className="text-[13px] font-medium">{t('inbox.title')}</div>
         {inbox.items.length > 0 && <button className="faint text-[12px] hover:text-accent" onClick={inbox.clear}>{t('inbox.clear')}</button>}
@@ -434,6 +434,11 @@ export function PageTransition({ children, pathKey }) {
   const hostRef = useRef(null)
   const first = useRef(true)
   const vtUsed = useRef(false)
+  /* Вход новой страницы ведёт либо CSS (.page-enter → pageIn), либо наш WAAPI
+     crossfadeIn — раньше они шли одновременно: два анимационных источника на
+     одних и тех же opacity/transform (WAAPI перекрывал CSS, вид не менялся,
+     а считались кадры оба). Теперь в WAAPI-ветке CSS-вариант выключен (page-cf). */
+  const cf = useRef(false)
 
   /* ref-колбэк ставит имя для View Transitions сразу на коммите — тогда и старый,
      и новый заголовок попадают в снимок и «морфятся» между разделами */
@@ -451,6 +456,7 @@ export function PageTransition({ children, pathKey }) {
     const swap = () => { if (alive) setShown(latest.current) }
     /* View Transitions срабатывают синхронно внутри вызова, поэтому флаг ставим заранее */
     vtUsed.current = !motionOff() && typeof document.startViewTransition === 'function'
+    cf.current = !vtUsed.current                // переход идёт без VT → ведёт WAAPI
     const vt = viewTransition(() => flushSync(swap))
     if (!vt.used) {
       vtUsed.current = false
@@ -470,7 +476,7 @@ export function PageTransition({ children, pathKey }) {
 
   const node = latest.current.key === shown.key ? latest.current.node : shown.node
   return (
-    <div ref={attach} key={shown.key} className="page-enter" data-page-root="">
+    <div ref={attach} key={shown.key} className={cf.current ? 'page-enter page-cf' : 'page-enter'} data-page-root="">
       {node}
     </div>
   )
@@ -667,7 +673,7 @@ export default function AppShell({
       {/* Единый фон всего приложения (фон везде един): спокойные пятна + орбы
           на всех страницах, не только на «сегодня». Локальный .liq-bg в Today.jsx
           скрыт в CSS, чтобы не двоилось. */}
-      <div className="aur" aria-hidden="true"><i></i><i></i><i></i><i className="liq-bl liq-b1" /><i className="liq-bl liq-b2" /><i className="liq-bl liq-b3" /><i className="liq-bl liq-b4" /><i className="liq-orb liq-o1" /><i className="liq-orb liq-o2" /></div>
+      <div className="aur" aria-hidden="true"><i></i><i></i><i></i><i className="liq-bl liq-b1" /><i className="liq-bl liq-b2" /><i className="liq-bl liq-b3" /><i className="liq-bl liq-b4" /><i className="liq-bl liq-b5" /><i className="liq-orb liq-o1" /><i className="liq-orb liq-o2" /></div>
       <div className="app">
         {/* Сайдбар монтируем только на телефоне (там его прячет CSS, но дерево нужно
             для e2e-хуков): на десктопе навигация — плавающий док, а скрытый aside
@@ -675,40 +681,55 @@ export default function AppShell({
         {phone ? <Sidebar live={live} busy={busy} hiddenNav={hiddenNav} /> : null}
 
         <main>
+          {/* Строка-шторка: всё её содержимое живёт в одной колонке .gt-in (max-width 1240,
+              margin auto, поля 20px — ровно как у .pg), поэтому дата/точки/кнопки выровнены
+              по краям контента, а не прижаты к углу экрана. Слева — слот компактного
+              заголовка (TitleHeader) поверх даты, справа — все прежние кнопки. */}
           <div className={`gt r ${gtSolid ? 'gt-solid' : ''}`} ref={headRef}>
-            <TopTimer />
-            {phone ? (
-              /* на телефоне поиск — строка в шторке «все разделы»: в шапке по макету
-                 только круглые кнопки, иначе они теснят дату и сжимаются в эллипсы */
-              null
-            ) : (
-              <>
+            <div className="gt-in">
+              <div className="gt-left">
+                <TitleHeader
+                  title={head.title ? t(head.title) : ''}
+                  sub={textOf(t, head.sub)}
+                  contentRef={contentRef}
+                  pathKey={pathKey}
+                />
                 <HeadDate />
-                <HeadAccents />
-                <HeadTheme mode={mode} onTheme={onTheme} />
-                <div className="search" onClick={onSearch} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
-                  aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSearch() } }}>
-                  <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m14 14 3.5 3.5"/></svg>
-                  {t('common.search')}<span className="kbd mono">{kb('K')}</span>
+              </div>
+              <div className="gt-right">
+                <TopTimer />
+                {phone ? (
+                  /* на телефоне поиск — строка в шторке «все разделы»: в шапке по макету
+                     только круглые кнопки, иначе они теснят дату и сжимаются в эллипсы */
+                  null
+                ) : (
+                  <>
+                    <HeadAccents />
+                    <HeadTheme mode={mode} onTheme={onTheme} />
+                    <div className="search" onClick={onSearch} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
+                      aria-label={t('common.search')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSearch() } }}>
+                      <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" aria-hidden="true"><circle cx="9" cy="9" r="6"/><path d="m14 14 3.5 3.5"/></svg>
+                      {t('common.search')}<span className="kbd mono">{kb('K')}</span>
+                    </div>
+                    <HeadPomo />
+                    <HeadStatus live={live} busy={busy} />
+                  </>
+                )}
+                <div className="ib" onClick={onInbox} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
+                  aria-label={t('inbox.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onInbox() } }}>
+                  <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 1.5h-13zM8.5 18h3"/></svg>
+                  {inbox.unread > 0 && <u></u>}
                 </div>
-                <HeadPomo />
-                <HeadStatus live={live} busy={busy} />
-              </>
-            )}
-            <div className="ib" onClick={onInbox} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
-              aria-label={t('inbox.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onInbox() } }}>
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 1.5h-13zM8.5 18h3"/></svg>
-              {inbox.unread > 0 && <u></u>}
+                {/* Чат — иконкой, а не кругом-профилем с инициалом: профилей у владельца нет */}
+                <button type="button" className="ib" onClick={onChat}
+                  aria-label={t('chat.title')} title={t('chat.title')}>
+                  <MessageCircle size={18} aria-hidden="true" />
+                </button>
+              </div>
+              {/* Центр уведомлений якорим на саму шторку: она липкая, и панель должна
+                  ездить вместе с кнопкой, а не отрываться от неё при прокрутке */}
+              {inboxOpen && <InboxPanel inbox={inbox} onClose={onInbox} />}
             </div>
-            {/* Чат — иконкой, а не кругом-профилем с инициалом: профилей у владельца нет */}
-            <button type="button" className="ib" onClick={onChat}
-              aria-label={t('chat.title')} title={t('chat.title')}>
-              <MessageCircle size={18} aria-hidden="true" />
-            </button>
-          </div>
-
-          <div className="relative">
-            {inboxOpen && <InboxPanel inbox={inbox} onClose={onInbox} />}
           </div>
 
           {health && !health.ok && (
@@ -724,7 +745,7 @@ export default function AppShell({
           <div className="relative" {...ptr.bind} ref={contentRef}>
             <div
               className="flex items-center justify-center gap-2 text-[12px] text-accent"
-              style={{ ...ptr.style, position: 'absolute', top: -(headH + 10), left: 0, right: 0 }}
+              style={{ ...ptr.style, position: 'absolute', top: -(headH + 10), left: 0, right: 0, zIndex: 45 }}
               aria-hidden="true"
             >
               <span className="grid h-5 w-5 place-items-center" style={ptr.ring}>

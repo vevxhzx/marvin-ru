@@ -1369,7 +1369,7 @@ export const DICT = {
   'or.on': { ru: 'на {m}', en: 'worth {m}' },
   'or.an_title': { ru: 'воронка и топ клиентов', en: 'Pipeline and top clients' },
   'or.an_hint': { ru: 'конверсия по стадиям и доход по клиентам — только чтение', en: 'conversion by stage and revenue by client — read only' },
-  'or.an_foot': { ru: 'конверсия {conv}% · выиграно {won} из {total}{chk}', en: 'conversion {conv}% · won {won} of {total}{chk}' },
+  'or.an_foot': { ru: 'конверсия {conv}% · выиграно {won} из {total}', en: 'conversion {conv}% · won {won} of {total}' },
   'or.an_avg': { ru: ' · средний чек {m}', en: ' · average spend {m}' },
   'or.st_title': { ru: 'как идут дела', en: 'How things are going' },
   'or.st_hint': { ru: 'доход по месяцам — только оплаты по заказам; часы — по таймеру', en: 'monthly income counts order payments only; hours come from the timer' },

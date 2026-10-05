@@ -51,9 +51,11 @@
 .mono { font-family: var(--font-ui); font-variant-numeric: tabular-nums; }
 .aur { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden; }
 .aur i { position: absolute; width: 70vmax; height: 70vmax; border-radius: 50%; background: radial-gradient(closest-side, var(--g1), transparent); animation: drift 24s ease-in-out infinite alternate; filter: blur(30px); }
-.aur i:nth-child(1) { left: -20vmax; top: -30vmax; }
-.aur i:nth-child(2) { right: -25vmax; bottom: -35vmax; background: radial-gradient(closest-side, var(--g2), transparent); animation-duration: 30s; animation-delay: -8s; }
-.aur i:nth-child(3) { left: 35vmax; top: 25vmax; width: 55vmax; height: 55vmax; background: radial-gradient(closest-side, color-mix(in srgb, var(--acc) 18%, transparent), transparent); animation: drift 36s ease-in-out infinite alternate-reverse; animation-delay: -14s; }
+.aur i:nth-child(1) { left: -26vmax; top: -32vmax; }
+.aur i:nth-child(2) { right: -28vmax; bottom: -34vmax; background: radial-gradient(closest-side, var(--g2), transparent); animation-duration: 30s; animation-delay: -8s; }
+/* третий уходит на ПРАВЫЙ край (был в центре): левый держат 1-й + liq-b1/b4,
+   правый — 2-й и этот, чтобы боковые поля колонки 1240 не пустовали */
+.aur i:nth-child(3) { left: auto; right: -24vmax; top: 22%; width: 58vmax; height: 58vmax; background: radial-gradient(closest-side, color-mix(in srgb, var(--acc) 20%, transparent), transparent); animation: drift 36s ease-in-out infinite alternate-reverse; animation-delay: -14s; }
 
 /* --app-pad — тот же отступ, но как переменная: доска считает от неё свою высоту.
    Высота оболочки — 100dvh (не 100vh): адресная строка iOS не должна срезать низ. */
@@ -1355,9 +1357,10 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --p2b: #c2ecd1;
   --p1i: #2a2470;
   --p2i: #0f5a2b;
-  /* Ореол фона (.aur) — лёгкий: базовый #eef0f5 макета должен ещё читаться */
-  --g1: color-mix(in srgb, var(--acc) 13%, transparent);
-  --g2: color-mix(in srgb, var(--ai) 10%, transparent);
+  /* Ореол фона (.aur) — заметный, но спокойный: заливка страницы остаётся
+     читаемой, цвет уходит преимущественно в боковые поля вокруг колонки 1240 */
+  --g1: color-mix(in srgb, var(--acc) 17%, transparent);
+  --g2: color-mix(in srgb, var(--ai) 13%, transparent);
 
   /* Оттенок поверхностей. hue/насыщенность пишутся из настроек (prefs.apply),
      0% означает «без подкраски» и даёт ровно те же цвета, что и базовые. */
@@ -1702,12 +1705,11 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --p2: #e3f7ea;
   --p2b: #c2ecd1;
   --spot: color-mix(in srgb, var(--acc) 7%, transparent);
-  --g1: color-mix(in srgb, var(--acc) 18%, transparent);
-  --g2: color-mix(in srgb, var(--ai) 16%, transparent);
   --p1i: #2a2470;
   --p2i: #0f5a2b;
-  --g1: color-mix(in srgb, var(--acc) 13%, transparent);
-  --g2: color-mix(in srgb, var(--ai) 10%, transparent);
+  /* светлый ореол мягче тёмного: на #e1e5fb 17% акцента давал сплошную сиреневую заливку */
+  --g1: color-mix(in srgb, var(--acc) 12%, transparent);
+  --g2: color-mix(in srgb, var(--ai) 9%, transparent);
   --bg: color-mix(in srgb, var(--tint-c-light) calc(var(--tint-s-light) * 1.7), #e1e5fb);
   --sf: color-mix(in srgb, var(--tint-c-light) var(--tint-s-light), #ffffff);
   --sf2: color-mix(in srgb, var(--tint-c-light) calc(var(--tint-s-light) * 1.4), #eef0fb);
@@ -1813,11 +1815,15 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
 /* ---------- поверхности ---------- */
 .hair { border-color: var(--line); }
 .rule { border-top: 1px solid var(--line); }
-.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); transition: transform var(--t-base) var(--ease-apple), box-shadow var(--t-base) var(--ease-apple), border-color var(--t-fast) ease; }
+/* .panel/.elevated стоят на непрозрачных --surface/--surface-2 (светлая #ffffff,
+   тёмная #0c1233) — их backdrop-filter ничего не показывал, но заставлял браузер
+   ПЕРЕСЧИТЫВАТЬ размытие фона под каждым блоком на каждом кадре появления
+   раздела, свайпа и прокрутки. Убрано: вид не изменился, кадры вернулись. */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-xl); transition: transform var(--t-base) var(--ease-apple), box-shadow var(--t-base) var(--ease-apple), border-color var(--t-fast) ease; }
 .card { @apply panel; }
 .card:hover { border-color: var(--line-2); }
 .card-solid { background: var(--surface); }
-.elevated { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-2); backdrop-filter: blur(24px); }
+.elevated { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--r-lg); box-shadow: var(--shadow-2); }
 .fill { background: var(--fill); }
 .soft-accent { background: var(--accent-soft); color: var(--accent); }
 /* Мягкая подложка макета + «плотный» текстовый стоп: 4.5:1 и выше в обеих темах. */
@@ -2054,11 +2060,16 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 }
 
 /* ---------- появление: страница и её части каскадом ---------- */
-@keyframes pageIn { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: none } }
 @keyframes pageOut { to { opacity: 0; transform: translateY(-6px) } }
 .page-enter { animation: pageIn .42s var(--ease-out) backwards; }
 .page-exit { animation: pageOut .16s var(--ease-io) both; pointer-events: none; }
 @keyframes pageIn { from { opacity: 0; transform: translateY(10px) scale(.995) } to { opacity: 1; transform: none } }
+/* Когда переход между разделами идёт через наш WAAPI crossfade (класс ставит
+   PageTransition), CSS pageIn на том же узле выключен: два анимационных источника
+   на одних opacity/transform — это второй полный кадровый цикл за кадр перехода,
+   причём бессмысленный (WAAPI всё равно перекрывает CSS-анимацию, вид не менялся).
+   Дочерние каскады (.animate-rise/.stagger/.h1) от класса .page-enter не зависят. */
+.page-enter.page-cf { animation: none; }
 
 /* дочерние .animate-rise внутри страницы стартуют по очереди (fill — см. правило .r) */
 .page-enter .animate-rise { animation: rise .55s var(--ease-out) backwards; }
@@ -2132,11 +2143,13 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 .nav-item svg { transition: transform var(--t-base) var(--ease-spring), color var(--t-base); }
 
 /* ---------- кнопки: пружина, подъём, свечение ---------- */
+/* will-change НЕ ставим: он вечно держит композитный слой у каждой кнопки/пилюли
+   (на странице их десятки — память + перекомпозиция при каждом кадре перехода).
+   Переходы короткие, браузер справляется без предварительного слоя. */
 .btn, .btn-icon, .pill, .chip, .seg > button {
   transition: transform var(--t-base) var(--ease-spring), background-color var(--t-base) var(--ease-out),
               color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out),
               box-shadow var(--t-base) var(--ease-out), filter var(--t-base) var(--ease-out);
-  will-change: transform;
 }
 .btn:hover { transform: translateY(-1px); }
 .btn:active, .btn-icon:active { transform: translateY(0) scale(.95); transition-duration: .08s; }
@@ -2251,7 +2264,11 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 /* overflow прячем только пока тянут/раскрыто — иначе тултипы кнопок внутри строки (таймер, приоритет) режутся по краю */
 .swipe { position: relative; touch-action: pan-y; margin: 0 -16px; padding: 0 16px; }
 .swipe.active, .swipe.open { overflow: hidden; }
-.swipe-fg { position: relative; will-change: transform; background: var(--sf); }
+.swipe-fg { position: relative; background: var(--sf); }
+/* will-change только пока строку тянут или она раскрыта: постоянный композитный
+   слой у КАЖДОЙ строки списка — это десятки слоёв на странице и лишняя
+   перекомпозиция при кадрах перехода между разделами */
+.swipe.active .swipe-fg, .swipe.open .swipe-fg { will-change: transform; }
 .swipe-bg { position: absolute; inset: 0; display: flex; align-items: stretch; opacity: 0; transition: opacity .12s, background-color .2s; color: #fff; overflow: hidden; }
 .swipe-bg.right { justify-content: flex-start; background: var(--pos-solid); }
 .swipe-bg.left  { justify-content: flex-end;   background: var(--neg-solid); }
@@ -3020,14 +3037,22 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
    удалён (правила перенесены, не скопированы); локальный .liq-bg в Today.jsx скрыт,
    чтобы не двоилось. Зерно (feTurbulence) удалено — не возвращать. */
 .aur { --liq-lime: #c8f23d; }
+/* Пятна обнимают края экрана: крупнее прежних, непрозрачность — через --bo (свой у каждого)
+   и --bm (усиление в тёмной теме, там нужен заметный цветной дым по краям). */
 .aur .liq-bl {
-  position: fixed; border-radius: 50%; filter: blur(130px); opacity: .22;
+  position: fixed; border-radius: 50%; filter: blur(120px); opacity: calc(var(--bo, .26) * var(--bm, 1));
   animation: liq-fl 36s ease-in-out infinite alternate; z-index: 0; pointer-events: none;
 }
-.aur .liq-b1 { width: 520px; height: 520px; background: var(--acc); top: -140px; left: -100px; }
-.aur .liq-b2 { width: 420px; height: 420px; background: color-mix(in srgb, var(--acc) 55%, #ffffff); top: 24%; right: -140px; animation-delay: -12s; opacity: .18; }
-.aur .liq-b3 { width: 260px; height: 260px; background: var(--liq-lime); opacity: .12; bottom: -100px; left: 38%; animation-delay: -20s; }
-.aur .liq-b4 { width: 220px; height: 220px; background: color-mix(in srgb, var(--acc) 45%, #ffffff); top: 58%; left: -80px; opacity: .14; animation-delay: -7s; }
+/* верх-лево (основной акцент) */
+.aur .liq-b1 { width: 640px; height: 640px; background: var(--acc); top: -190px; left: -180px; --bo: .32; }
+/* правый край, средина */
+.aur .liq-b2 { width: 540px; height: 540px; background: color-mix(in srgb, var(--acc) 55%, #ffffff); top: 30%; right: -190px; animation-delay: -12s; --bo: .28; }
+/* низ, чуть левее центра */
+.aur .liq-b3 { width: 330px; height: 330px; background: var(--liq-lime); bottom: -140px; left: 26%; animation-delay: -20s; --bo: .18; }
+/* левый край, низ-середина */
+.aur .liq-b4 { width: 300px; height: 300px; background: color-mix(in srgb, var(--acc) 45%, #ffffff); top: 64%; left: -130px; animation-delay: -7s; --bo: .24; }
+/* верх-право: закрывает угол, который раньше оставался пустым */
+.aur .liq-b5 { width: 380px; height: 380px; background: color-mix(in srgb, var(--acc) 60%, #ffffff); top: -150px; right: -130px; animation-delay: -16s; --bo: .26; }
 .aur .liq-orb {
   position: fixed; border-radius: 50%; z-index: 0; pointer-events: none; opacity: .5;
   filter: none;
@@ -3037,6 +3062,17 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 }
 .aur .liq-o1 { width: 170px; height: 170px; top: 9%; left: 41%; }
 .aur .liq-o2 { width: 110px; height: 110px; top: 62%; right: 6%; animation-delay: -5s; }
+/* светлая тема: те же пятна, но мягче — на #e1e5fb полные --bo заливали фон сиреневым
+   (в моках ver3/ver6 фон остаётся пастельным, цвет живёт только по краям) */
+:root[data-theme="light"] .aur .liq-bl, .light .aur .liq-bl { --bm: .62; }
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) .aur .liq-bl { --bm: .62; }
+}
+/* тёмная тема: те же пятна, но ярче — на #060919 приглушённые значения читались как грязь */
+:root[data-theme="dark"] .aur .liq-bl, .dark .aur .liq-bl { --bm: 1.4; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .aur .liq-bl { --bm: 1.4; }
+}
 /* локальный фон Today.jsx больше не нужен — общий уже в .aur; прячем, чтобы не двоилось */
 #p-today .liq-bg { display: none; }
 @keyframes liq-fl { to { transform: translate(70px, 50px) scale(1.15); } }
@@ -3262,7 +3298,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 /* ---------- меньше движения: глушим и liquid-слой (общее правило выше
    уже ставит .01ms всему, здесь — явный дубль для чек-листа мокапа) ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .aur .liq-bl, .aur .liq-orb,
+  .aur i, .aur .liq-bl, .aur .liq-orb,
   #p-today .home-hero::after, #p-today .liq-water, #p-today .liq-water svg,
   #p-today .liq-bub, #p-today .liq-sun, #p-today .liq-chip,
   #p-today .liq-debts .progress > div::after { animation: none; }
@@ -3448,3 +3484,184 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 }
 .gt-dot:hover { transform: scale(1.2); }
 .gt-dot.on { box-shadow: 0 0 0 2px var(--sf), 0 0 0 4px currentColor, 0 0 12px currentColor; }
+
+/* ---------- ШТОРКА ДЕСКТОПА: ОДНА СТЕКЛЯННАЯ ПОЛОСА В КОЛОНКЕ КОНТЕНТА ----------
+   Всё содержимое строки живёт в .gt-in: max-width 1240 + margin-inline auto +
+   padding-inline 20 — те же значения, что у .pg, поэтому левый край даты и правый
+   край кнопок совпадают с краями контента и не «уезжают в угол» широкого экрана.
+   Слева — слот компактного заголовка (TitleHeader, он же дубликат h1, поэтому
+   aria-hidden) поверх даты: пока герой на месте, видна дата; когда заголовок
+   страницы ушёл вверх, дата гаснет по --th-p и её место занимает компактный
+   заголовок раздела. Справа — все прежние кнопки (акценты, тема, поиск, помодоро,
+   статус, центр уведомлений, чат), переносов на рабочей ширине не нужно.
+   Полоса липкая: сверху — мягкая подложка, страница ушла под неё (класс .gt-solid
+   ставит AppShell при scrollY > 8) — стекло с размытием.
+   Телефон не трогаем: .gt там display:none (блок «ШАПКА ТЕЛЕФОНА»), поэтому весь
+   блок закрыт @media (min-width: 821px) — граница зеркалит usePhone. */
+@media (min-width: 821px) {
+  /* блок, а не флекс: иначе .gt-in (100%) сжимается по содержимому и уезжает
+     от центра — а его поля должны совпадать с полями .pg до пикселя */
+  .gt { display: block; position: sticky; top: 0; z-index: var(--z-topbar); }
+  .gt-in {
+    position: relative;
+    width: 100%;
+    max-width: 1240px;
+    /* вертикальные поля держат конечный радиус пилюли ≥26px: на голой высоте 44
+       радиус скатывается в полукруг и углы даты на 2px вылезали бы за кромку */
+    min-height: calc(var(--tap) + 12px);
+    margin-inline: auto;
+    padding: 6px 20px;
+    display: flex;
+    /* при переносе правой группы левый слот остаётся в первой строке, а не по центру
+       полосы; в одну строку все дети одинаковой высоты (44) — разницы нет */
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--s-3);
+    border-radius: var(--r-xl);
+    background: var(--glass-bg);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--glass-ring) 70%, transparent),
+      inset 0 0 0 1px color-mix(in srgb, var(--glass-ring) 45%, transparent);
+    transition: background-color var(--t-base) var(--e), box-shadow var(--t-base) var(--e);
+  }
+  /* страница ушла под шторку — подложка становится стеклом: текст под ней не просвечивает */
+  .gt.gt-solid .gt-in {
+    background: color-mix(in srgb, var(--bg) 90%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    backdrop-filter: blur(16px) saturate(160%);
+    box-shadow:
+      inset 0 1px 0 color-mix(in srgb, var(--glass-ring) 75%, transparent),
+      inset 0 0 0 1px color-mix(in srgb, var(--glass-ring) 50%, transparent),
+      0 24px 48px -34px rgba(6, 9, 26, 0.55);
+  }
+  /* левый слот: дата и компактный заголовок делят одну коробку */
+  .gt-left { position: relative; flex: 1 1 auto; min-width: 0; display: flex; align-items: center; gap: var(--s-3); }
+  .gt-left > .th { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; }
+  .gt-left .gt-date { opacity: calc(1 - var(--th-p, 0)); transition: opacity var(--t-fast) linear; }
+  .gt-right { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex: 0 1 auto; min-width: 0; flex-wrap: wrap; }
+  /* узкий десктоп (821–1240): поиск сжимается, чтобы вся группа осталась в одну строку */
+  .gt-right .search { width: clamp(150px, 18vw, 250px); }
+  /* PWA-оболочка добавляла бы отступ сверху самой .gt — при залипании под ним
+      был бы виден контент; отступ уходит внутрь стеклянной полосы */
+  html[data-pwa="standalone"] .gt { padding-top: 0; }
+  html[data-pwa="standalone"] .gt-in { padding-top: max(var(--safe-t), 10px); }
+}
+
+/* =====================================================================
+   АКЦЕНТНОЕ СВЕЧЕНИЕ · один язык для всего интерактива (мокап ver6:
+   .seg b.on, .btn, .ib:hover, .cp.on, .dock a.on — заливка акцента + ореол).
+   Всё считается от var(--acc)/var(--accent), поэтому следует за темой и за
+   сменой акцента из шапки; прозрачность — только через color-mix, радиус ≤ 26px,
+   чтобы и в светлой теме не было неона. «Прожектор за курсором» (.amb / --mx /
+   --my) из макета НЕ переносим: у карточек на hover — мягкий ВНЕШНИЙ ореол.
+   ===================================================================== */
+:root { --glow-acc: 0 0 24px -8px color-mix(in srgb, var(--accent) 55%, transparent); }
+
+/* --- кнопки: primary и акцентная .btn (обе залиты акцентом) --- */
+.btn-primary,
+.btn:not(.g):not(.btn-ghost):not(.btn-soft):not(.btn-dark):not(.btn-danger) {
+  box-shadow:
+    0 10px 26px -8px color-mix(in srgb, var(--accent) 55%, transparent),
+    inset 0 1px 1px color-mix(in srgb, #fff 45%, transparent);
+}
+.btn-primary:hover,
+.btn:not(.g):not(.btn-ghost):not(.btn-soft):not(.btn-dark):not(.btn-danger):hover {
+  box-shadow:
+    0 14px 30px -8px color-mix(in srgb, var(--accent) 70%, transparent),
+    inset 0 1px 1px color-mix(in srgb, #fff 60%, transparent);
+}
+
+/* --- активный сегмент: акцентная заливка + ореол (реф .seg b.on) --- */
+.seg > button.on,
+.sg span.on, .sg button.on, .sg span.active, .sg button.active {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--acc) 72%, #ffffff), var(--acc));
+  color: var(--accent-ink);
+  box-shadow:
+    0 0 20px color-mix(in srgb, var(--acc) 55%, transparent),
+    inset 0 1px 1px color-mix(in srgb, #fff 45%, transparent);
+}
+/* текстовые вкладки остаются с подчёркиванием — ореол вокруг текста им не нужен */
+.sg.tabs > .on { box-shadow: none; }
+.sg.tabs > .on::after { box-shadow: 0 0 10px color-mix(in srgb, var(--acc) 65%, transparent); }
+
+/* --- иконки шапки: заливка акцента под курсором, как .ib в макете --- */
+.ib {
+  transition: background-color var(--t-fast) var(--e), color var(--t-fast) var(--e),
+              box-shadow var(--t-fast) var(--e), transform var(--t-fast) var(--e);
+}
+.ib:hover {
+  background: var(--acc);
+  color: var(--accent-ink);
+  box-shadow: 0 0 18px -2px color-mix(in srgb, var(--acc) 60%, transparent);
+}
+
+/* --- чипы и переключатели --- */
+.chip.on { box-shadow: 0 0 16px -2px color-mix(in srgb, var(--accent) 55%, transparent); }
+.switch.on { box-shadow: 0 0 14px -3px color-mix(in srgb, var(--accent) 65%, transparent); }
+
+/* --- шкалы и кольца --- */
+.progress:not(.dark) > div { box-shadow: 0 0 10px -1px color-mix(in srgb, var(--accent) 70%, transparent); }
+.pomo-ring .fg, .ring .fg, .pomo-gauge .fg, .pomo-circle .fg {
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--ring-fg) 75%, transparent));
+}
+
+/* --- кружки-галочки и точки --- */
+.ck input:checked { box-shadow: 0 0 12px -3px color-mix(in srgb, var(--acc) 70%, transparent); }
+.ev-check:hover { box-shadow: 0 0 14px -4px color-mix(in srgb, var(--acc) 65%, transparent); }
+.ev-check.on { box-shadow: 0 0 14px -4px color-mix(in srgb, var(--pos) 70%, transparent); }
+.pa-dot { box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 20%, transparent), 0 0 10px -2px currentColor; }
+.dots i.on { box-shadow: 0 0 10px -1px color-mix(in srgb, var(--acc) 70%, transparent); }
+.logo i, .comp i, .cin i { box-shadow: 0 0 10px -1px color-mix(in srgb, var(--acc) 70%, transparent); }
+
+/* --- бейджи статуса/этапа --- */
+.badge.accent { box-shadow: 0 0 12px -4px color-mix(in srgb, var(--accent) 60%, transparent); }
+
+/* --- поля и композер --- */
+/* .err не трогаем: кольцо ошибки должно оставаться поверх акцентного (как и раньше) */
+.input:focus:not(.err), .dt-field:focus-within > .input:not(.err) {
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 18px -6px color-mix(in srgb, var(--accent) 55%, transparent);
+}
+.composer:focus-within {
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 22px -8px color-mix(in srgb, var(--accent) 55%, transparent), var(--shadow-1);
+}
+.send { box-shadow: 0 0 18px -4px color-mix(in srgb, var(--acc) 60%, transparent); }
+.range::-webkit-slider-thumb { box-shadow: 0 1px 3px rgba(0, 0, 0, .25), 0 0 10px -2px color-mix(in srgb, var(--accent) 70%, transparent); }
+.range::-moz-range-thumb { box-shadow: 0 1px 3px rgba(0, 0, 0, .25), 0 0 10px -2px color-mix(in srgb, var(--accent) 70%, transparent); }
+
+/* --- док: активный тайл телефона и «+» --- */
+.dock-item.on { box-shadow: 0 0 16px -4px color-mix(in srgb, var(--acc) 60%, transparent); }
+.dock-fab {
+  box-shadow:
+    0 8px 24px color-mix(in srgb, var(--acc) 35%, transparent),
+    0 0 18px -6px color-mix(in srgb, var(--acc) 65%, transparent);
+}
+
+/* --- точки приоритета (ui.jsx PRIORITY) и кнопка записи: цвет + свечение --- */
+.bg-red { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--neg-solid) 65%, transparent); }
+.bg-orange { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--warn-solid) 65%, transparent); }
+.bg-green { box-shadow: 0 0 10px -2px color-mix(in srgb, var(--pos-solid) 65%, transparent); }
+
+/* --- живое состояние помодоро и точка статуса в шапке --- */
+.pomo-head.live { box-shadow: 0 0 14px -6px color-mix(in srgb, var(--acc) 70%, transparent); }
+.st-head .dot { box-shadow: 0 0 8px -1px currentColor; }
+
+/* --- карточки: мягкий внешний ореол на hover (не прожектор за курсором) --- */
+.glass-card:hover { box-shadow: inset 0 0 0 1px var(--glass-ring), var(--shadow-2), var(--glow-acc); }
+a:hover > .panel, button:hover > .panel, .panel.hover:hover { box-shadow: var(--shadow-2), var(--glow-acc); }
+.panel.lift:hover { box-shadow: 0 14px 40px -18px rgba(0, 0, 0, .35), var(--glow-acc); }
+.car-active { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--acc) 45%, transparent), var(--shadow-2), var(--glow-acc); }
+@media (hover: hover) {
+  .c:hover { box-shadow: var(--card-shadow-hover), var(--glow-acc); }
+  .bento > .wsec:hover { box-shadow: var(--card-shadow-hover), var(--glow-acc); }
+  /* у Today стеклянные карточки заданы скоупом с ID (#p-today …) — он длиннее
+     общего .bento > .wsec:hover, поэтому ореол продублируем тем же скоупом */
+  #p-today .bento > .wsec:hover {
+    box-shadow:
+      inset 0 1px 1px var(--liq-hl),
+      inset 0 -1px 2px rgba(255, 255, 255, .1),
+      inset 0 0 40px rgba(255, 255, 255, .05),
+      0 30px 60px -28px var(--liq-sh),
+      var(--glow-acc);
+  }
+}
+
