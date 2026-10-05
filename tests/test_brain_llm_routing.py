@@ -472,3 +472,59 @@ def test_deepseek_temperature_is_stripped_on_400(monkeypatch):
     assert out == "Готово, ответил.", out
     assert calls["n"] == 2, "должен быть ровно один повтор без temperature"
     assert "temperature" in seen[0] and "temperature" not in seen[1]
+
+
+def test_truncated_reasoning_is_retried_with_bigger_limit(monkeypatch):
+    """Reasoning-модель съела весь max_tokens на скрытые мысли → пустой content.
+
+    Живой случай с openrouter/free: 988 из 1024 токенов ушли на размышления, content пуст —
+    ответ молча уходил локальной модели («две нейронки» и тупизм). Теперь один повтор с лимитом 4096."""
+    from core.brain import llm
+
+    seen: list[dict] = []
+    calls = {"n": 0}
+
+    class _Resp:
+        status_code = 200
+        text = ""
+
+        def __init__(self, finish, content, reasoning=""):
+            self._d = {"choices": [{"finish_reason": finish,
+                                    "message": {"content": content, "reasoning": reasoning}}]}
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return self._d
+
+    async def fake_post(path, body, headers, timeout=45):
+        calls["n"] += 1
+        seen.append(dict(body))
+        if calls["n"] == 1:
+            return _Resp("length", "", "Here is what I should do next: analyze the message step by step")
+        return _Resp("stop", "Разобрал, 6 задач.")
+
+    monkeypatch.setattr(llm, "MODE", "hybrid")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "openrouter")
+    monkeypatch.setattr(llm, "CLOUD_KEY", "k")
+    monkeypatch.setattr(llm, "anonymize", lambda t: t)
+    monkeypatch.setattr(llm, "resolve_cloud_model", lambda force=False: asyncio.sleep(0, result="deepseek/deepseek-v4-pro"))
+    monkeypatch.setattr(llm, "_cloud_post", fake_post)
+    out = asyncio.run(llm.cloud_chat("system", "разбери список", None))
+    assert out == "Разобрал, 6 задач.", out
+    assert calls["n"] == 2, "должен быть один повтор с увеличенным лимитом"
+    assert seen[0]["max_tokens"] == 1024 and seen[1]["max_tokens"] == 4096
+
+
+def test_strip_think_rejects_english_thinking_dump():
+    """Мысли английскими в content (без маркера) — не ответ, человеку такое показывать нельзя."""
+    from core.brain import llm
+
+    dump = ("Here's a thinking process:\n\n1. **Analyze User Input:**\n"
+            "   - User says: \"Задачи на завтра: оформить карту…\"\n2. **Plan:** split into items")
+    assert llm.strip_think(dump) == ""
+    # обычные ответы не трогаем (короткую отговорку «Let me think…» отсекает детектор воды, а не здесь)
+    assert llm.strip_think("Let me think about this and then answer.") == "Let me think about this and then answer."
+    assert llm.strip_think("Привет! Как дела?") == "Привет! Как дела?"
+    assert llm.strip_think("<think>мысли</think> Ответ готов.") == "Ответ готов."

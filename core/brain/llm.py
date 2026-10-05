@@ -237,6 +237,11 @@ async def ollama_diagnose() -> str:
 _THINK_RX = re.compile(r"qwen3|gemma4|deepseek-r1|deepseek-reasoner|gpt-oss|magistral|phi4-reasoning", re.I)
 _THINK_BLOCK_RX = re.compile(r"<think>.*?</think>\s*", re.S | re.I)
 _THINK_OPEN_RX = re.compile(r"^\s*<think>", re.I)
+# Модель вываливает свои «мысли» в content английскими (без маркера), обычно обрезанные по лимиту:
+# «Here’s a thinking process: 1. Analyze User Input…». Это не ответ — раньше уходило человеку как есть.
+_THINK_EN_RX = re.compile(r"^\s*(?:here'?s\s+(?:a\s+|my\s+|the\s+)?thinking\s+process|thinking\s*:|"
+                          r"let(?:'|’)?s\s+(?:think|start\s+by|begin)|first[,\s]+let\s+(?:me\s+)?think|"
+                          r"the\s+user\s+(?:wants|asks|is\s+asking|needs)|i\s+(?:need|should)\s+to\s+(?:analyze|consider|think))\b", re.I)
 
 
 def strip_think(text: str | None) -> str:
@@ -245,6 +250,9 @@ def strip_think(text: str | None) -> str:
     if not text:
         return ""
     t = _THINK_BLOCK_RX.sub("", text)
+    if _THINK_EN_RX.match(t):
+        # сплошные мысли английским в content: отдавать человеку такое нельзя — пусть ответит другой путь
+        return ""
     if _THINK_OPEN_RX.match(t):
         # незакрытый <think>: модель не успела ответить — берём последний абзац, который похож на ответ
         body = t.split("<think>", 1)[1]
@@ -898,6 +906,18 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 body["model"] = main_model
                 body["max_tokens"] = 1024
                 body.pop("reasoning_effort", None)
+                r = await _cloud_post("/chat/completions", body, headers)
+                r.raise_for_status()
+                data = r.json()
+                msg = (data.get("choices") or [{}])[0].get("message") or {}
+                text = strip_think(msg.get("content") or "")
+                _reasoning_only = not text and bool((msg.get("reasoning") or msg.get("reasoning_content") or "").strip())
+            if not text and (data.get("choices") or [{}])[0].get("finish_reason") == "length":
+                # Reasoning-модель съела ВЕСЬ лимит на скрытые мысли (живой случай: 988 из 1024 токенов
+                # на «размышления», content пуст → ответ уходил локальной модели). Один раз даём лимит покрупнее.
+                log.warning("%s: пустой ответ из-за обрезки по max_tokens (всё ушло в размышления) — повторяю с лимитом 4096",
+                            cloud_title())
+                body["max_tokens"] = 4096
                 r = await _cloud_post("/chat/completions", body, headers)
                 r.raise_for_status()
                 data = r.json()
