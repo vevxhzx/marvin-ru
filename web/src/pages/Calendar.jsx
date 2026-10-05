@@ -4,6 +4,7 @@ import { Sheet, Field, DateTimeField, Empty, useToast, ListSkeleton } from '../c
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, Settings2 } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
+import '../cal-glass.css'
 import { usePageAccent } from '../lib/prefs'
 import { usePhone } from '../lib/motion'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
@@ -390,6 +391,13 @@ export default function Calendar() {
     const d = new Date(e.start)
     return d.getMonth() === cursor.getMonth() && d.getFullYear() === cursor.getFullYear()
   }).length
+  /* Glass nearest strip: node positions derived from the existing upcoming order —
+     visual only, no new data or strings */
+  const calgNodes = upcoming.map((e, i) => ({
+    e,
+    x: upcoming.length === 1 ? 58 : 24 + (i * (66 / Math.max(1, upcoming.length - 1))),
+  }))
+  const calgFill = calgNodes.length ? calgNodes[0].x : 44
 
   /** Ячейки, которые реально нарисованы в сетке месяца (35 или 42 дня) */
   const gridCells = cells.slice(0, cells[35]?.isOut ? 35 : 42)
@@ -501,7 +509,7 @@ export default function Calendar() {
           <h1 className="r" style={{ '--i': 0 }}>{headTitle}</h1>
           <p className="sub r" style={{ '--i': 1 }}>{view === 'week' ? weekRange : cursor.getFullYear()}</p>
         </div>
-        <div className="flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
+        <div className="calg-tb flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
           <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
             <button
               type="button"
@@ -590,7 +598,7 @@ export default function Calendar() {
                         role="button"
                         aria-current={c.isToday ? 'date' : undefined}
                         aria-label={`${c.num}, ${c.events.length ? c.events.map((e) => e.title).join(', ') : t('cal.no_events')}`}
-                        className={`${c.isOut ? 'o' : ''} ${c.isToday ? 't' : ''} ${c.isSel && !c.isToday ? 'is-sel' : ''}`}
+                        className={`calg-dy ${c.isOut ? 'o' : ''} ${c.isToday ? 't' : ''} ${c.isSel && !c.isToday ? 'is-sel' : ''}`}
                         style={{ '--k': c.key, minWidth: 0 }}
                         onClick={() => setSelected(c.date)}
                         onKeyDown={(e) => dayKeyDown(e, i)}
@@ -639,6 +647,15 @@ export default function Calendar() {
                 <h2>{isSameDay(selected, today) ? t('common.today') : dayLabel(selected)}</h2>
                 <small className={SMALL_M}>{shortDate(selected)} · {t('cal.events_n', { count: dayEvents.length })}</small>
               </div>
+              {/* Side header: big gradient date (ref .big2) + weekday note — visual only,
+                  same info as .hd above, hidden from screen readers to avoid duplication */}
+              <div className="calg-side-top" aria-hidden="true">
+                <div className="calg-big">{selected.getDate()}</div>
+                <div className="calg-side-note">
+                  <span className="calg-side-wd">{selected.toLocaleDateString(localeOf(), { weekday: 'long' })}</span>
+                  <span className="calg-side-mo">{MONTHS_GEN[selected.getMonth()]} {selected.getFullYear()}</span>
+                </div>
+              </div>
               <div className="flex-1 overflow-y-auto" style={{ overscrollBehavior: 'contain', paddingRight: 2 }}>
                 {!loaded ? (
                   <ListSkeleton n={4} rowH={58} />
@@ -673,6 +690,12 @@ export default function Calendar() {
                     </div>
                   ))
                 )}
+              </div>
+              {/* Side footer: accent create button reusing the existing create handler */}
+              <div className="calg-side-foot">
+                <button type="button" className="calg-btn" onClick={() => setSheet('new')}>
+                  <Plus size={14} strokeWidth={2.4} aria-hidden="true" /> {t('cal.add_event')}
+                </button>
               </div>
             </section>
           </>
@@ -780,6 +803,18 @@ export default function Calendar() {
             <h2 className="h3">{t('nextup.title')}</h2>
             <small className={SMALL_M}>{t('cal.upcoming_note', { all: upcomingAll.length, shown: upcoming.length })}</small>
           </div>
+          {/* Nearest strip: now-node + event nodes over existing upcoming data
+              (ref .tr/.nd) — visual only, rows below stay the interactive source */}
+          {loaded && calgNodes.length > 0 && (
+            <div className="calg-tr" aria-hidden="true" style={{ '--calg-fill': `${calgFill}%` }}>
+              <div className="calg-nd calg-now" style={{ '--x': '3%' }}><span>{t('mem.t_short')}</span></div>
+              {calgNodes.map(({ e, x }) => (
+                <div key={e.id} className="calg-nd" style={{ '--x': `${x}%` }}>
+                  <span>{e.title}<small>{shortDate(e.start)} · {hhmm(e.start)}</small></span>
+                </div>
+              ))}
+            </div>
+          )}
           {!loaded ? (
             <ListSkeleton n={3} rowH={58} />
           ) : upcoming.length === 0 ? (

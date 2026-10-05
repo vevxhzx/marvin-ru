@@ -177,8 +177,8 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
           {/* линия нуля — подписана, чтобы «точка выше пунктира» читалось однозначно */}
           <line x1="0" x2={W} y1={geo.zero} y2={geo.zero} stroke={geo.negative ? 'var(--neg)' : 'var(--ink3)'} strokeWidth="1" strokeDasharray="3 5" opacity="0.8" vectorEffect="non-scaling-stroke" />
           <path d={geo.fill} fill="url(#cc-fill)" />
-          <path d={geo.fact} fill="none" stroke={cashFact(isDark())} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
-          <path d={geo.future} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" />
+          <path d={geo.fact} fill="none" stroke={cashFact(isDark())} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{ filter: 'drop-shadow(0 0 6px rgba(255,159,92,.55))' }} />
+          <path d={geo.future} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" style={{ filter: 'drop-shadow(0 0 6px var(--acc))' }} />
           {/* маркер «сегодня» — последняя точка факта, а не первый день прогноза */}
           <line x1={geo.X(todayIdx)} x2={geo.X(todayIdx)} y1="0" y2={H} stroke="var(--ink3)" strokeWidth="1" strokeDasharray="4 6" opacity="0.45" vectorEffect="non-scaling-stroke" />
           {sel != null && sel !== todayIdx && (

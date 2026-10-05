@@ -145,7 +145,8 @@ export default function Dock({ tabs, more, pathname, compact, onMore, onAdd }) {
   }
   const slot = (s) => renderSlot(s, s.to === activeTo)
   /* Десктоп: та же разметка (NavLink + href — e2e clickTab её находит), активный
-     считается по полному списку разделов; подпись скрыта CSS (.dock.desk .dock-l). */
+     считается по полному списку разделов; подписи (.dock-l) на десктопе — тултипы
+     над пилюлей через CSS (.dock.desk .dock-l: активный виден всегда, остальные по hover). */
   const deskSlot = (s) => renderSlot(s, s.to === deskActiveTo)
   const fab = (
     <button

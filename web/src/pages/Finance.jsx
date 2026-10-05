@@ -24,6 +24,8 @@ import { useCardLayout, CardCtl } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 import { usePhone } from '../lib/motion'
+// Overview-only glass reskin lives here (NOT in index.css — owned by another agent).
+import '../fin-glass.css'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
@@ -458,7 +460,7 @@ export default function Finance() {
           {/* Переключатель периода — в шапке: период режет данные ВСЕХ вкладок (обзор, операции,
               счета, долги), а не только списка операций. Тот же сегмент .sg в .top, что на
               задачах и календаре — и по нему ходят проверки e2e (#p-fin .top .sg[title^="период"]). */}
-          <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('fin.period_tip')} title={t('fin.period_tip')}>
+          <div className={`sg fg-seg ${SEG_ROW_M}`} role="group" aria-label={t('fin.period_tip')} title={t('fin.period_tip')}>
             {[[7, 'mem.d7'], [30, 'mem.d30'], [90, 'fin.d90'], [0, 'fin.d_all']].map(([v, key]) => (
               <button key={v} type="button" className={days === v ? 'on' : ''} aria-pressed={days === v} onClick={() => setDays(v)}>
                 {t(key)}
@@ -484,7 +486,7 @@ export default function Finance() {
           {/* На ПК добавление в шапке; на телефоне — «+» в доке */}
           <button
             type="button"
-            className="btn btn-sm head-primary max-[820px]:!hidden"
+            className="btn btn-sm head-primary fg-add max-[820px]:!hidden"
             title={t('fin.add_entry')}
             aria-label={t('fin.add_entry')}
             onClick={addForTab}
@@ -498,7 +500,7 @@ export default function Finance() {
 
       {/* Вкладки разделов — прямой ребёнок .pg (без обёртки): на них завязаны проверки e2e
           (#p-fin > .sg). Спокойный сегмент, активная вкладка читается заливкой. */}
-      <div className={`sg mt-3 ${SEG_ROW_M}`} role="group" aria-label={t('nav.finance')}>
+      <div className={`sg fg-seg fg-tabs mt-3 ${SEG_ROW_M}`} role="group" aria-label={t('nav.finance')}>
         {[['overview', 'fin.tab_overview'], ['txs', 'fin.tab_txs'], ['accounts', 'fin.tab_accounts'], ['debts', 'fin.tab_debts'],
           ['recurring', 'fin.tab_recurring'], ['goals', 'goals.title'], ['techniques', 'tech.title']].map(([k, key]) => (
             <button key={k} type="button" className={tab === k ? 'on' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>
@@ -516,7 +518,7 @@ export default function Finance() {
           {/* Герой: баланс крупно и три строки мелким под ним — без карточек на каждое число */}
           {/* Герой: баланс крупно и три строки мелким под ним — на телефоне и на ПК
               одна и та же акцентная карточка (герой везде акцентный). */}
-          <section className={`c hero col-span-12 min-[821px]:col-span-6 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
+          <section className={`c hero fg-hero col-span-12 min-[821px]:col-span-7 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.c_balance')}</h2></div>
               <small className={`trunc ${SMALL_M}`}>{t('fin.all_accounts')}</small>
@@ -528,7 +530,7 @@ export default function Finance() {
             {regCounted && (
               <div className="mt-1 text-[length:var(--fs-md)] opacity-75">{t('reg.spent_by_regime')}</div>
             )}
-            <div className="mt-3" style={{ borderTop: '1px solid var(--hero-ink-16)', paddingTop: 'var(--s-2)' }}>
+            <div className="fg-stats mt-3" style={{ borderTop: '1px solid var(--hero-ink-16)', paddingTop: 'var(--s-2)' }}>
               <HeroLine label={`${t('fin.c_free')} / ${t('td.per_month').toLowerCase()}`} value={fmt.money(cf.free || 0)} />
               {daysLeft != null && (
                 <HeroLine
@@ -542,8 +544,46 @@ export default function Finance() {
             </div>
           </section>
 
+          {/* Запас хода: кольцо тиков из референса (30 тиков, статичный инлайн-SVG).
+              Значения переиспользуются: дни — forecast.runway_days, сумма — balance. */}
+          <section className={`c fg-card fg-runway col-span-12 min-[821px]:col-span-5 ${CARD_M_LIGHT}`} data-reveal>
+            <div className="hd flex-wrap">
+              <div className="min-w-0"><h2 className="trunc">{t('tech.tab_runway')}</h2></div>
+              <small className="trunc">{forecast?.runway_days != null ? t('td.to_zero', { n: forecast.runway_days }) : t('fc.by_pace')}</small>
+            </div>
+            <div
+              className="fg-ringw"
+              role="img"
+              aria-label={forecast?.runway_days != null ? t('td.to_zero', { n: forecast.runway_days }) : t('fc.by_pace')}
+            >
+              <svg viewBox="0 0 300 300" aria-hidden="true">
+                {Array.from({ length: 30 }, (_, i) => {
+                  const a = (i / 30) * Math.PI * 2 - Math.PI / 2
+                  const lit = forecast?.runway_days != null
+                    && i < Math.min(30, Math.max(0, Math.round(forecast.runway_days)))
+                  return (
+                    <line
+                      key={i}
+                      className={lit ? 'fg-tk-lit' : 'fg-tk'}
+                      x1={150 + Math.cos(a) * 118}
+                      y1={150 + Math.sin(a) * 118}
+                      x2={150 + Math.cos(a) * 140}
+                      y2={150 + Math.sin(a) * 140}
+                    />
+                  )
+                })}
+              </svg>
+              <div className="fg-ct">
+                <div className="fg-ring-num num">
+                  {forecast?.runway_days != null ? `~${t('run.days_n', { count: forecast.runway_days })}` : '—'}
+                </div>
+                <span className="fg-ring-note">{t('fin.all_accounts')} · {fmt.money(balance)}</span>
+              </div>
+            </div>
+          </section>
+
           {/* Один график на экран: касса на N дней, интерактивный, с подсказками ChartTip */}
-          <section className={`c chart mt-4 ${CARD_M_LIGHT} col-span-12 min-[821px]:col-span-6`} data-reveal>
+          <section className={`c chart fg-card fg-cash mt-4 ${CARD_M_LIGHT} col-span-12`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0">
                 <h2 className="trunc">{t('fin.cash_on', { n: days || t('common.all'), days: t('run.days_n', { count: days }) })}</h2>
@@ -589,7 +629,7 @@ export default function Finance() {
               /* Поток денег: четыре строки-числа и полоса долей */
               if (id === 'flow') {
                 return (
-                  <section key="flow" data-reveal className={`relative col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="flow" data-reveal className={`relative fg-card fg-flow col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.flow_month')}</h2></div>
@@ -624,7 +664,7 @@ export default function Finance() {
               /* Лимиты по категориям: строки с полосками */
               if (id === 'budgets') {
                 return (
-                  <section key="budgets" data-reveal className={`relative col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="budgets" data-reveal className={`relative fg-card fg-limits col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.budgets_month')}</h2></div>
@@ -663,7 +703,7 @@ export default function Finance() {
                               <span className="trunc text-[length:var(--fs-base)]">{b.icon} {b.name}</span>
                               <span className="num shrink-0 text-[length:var(--fs-md)] text-[var(--ink-2)]">{fmt.nb(`${money(b.spent)} / ${money(b.budget)}`)}</span>
                             </div>
-                            <div className="progress mt-2">
+                            <div className="progress fg-gau mt-2">
                               <div style={{ width: `${Math.min(100, Math.round((b.pct || 0) * 100))}%`, background: b.status === 'over' ? 'var(--neg)' : b.status === 'warn' ? 'var(--warn)' : 'var(--accent)' }} />
                             </div>
                           </button>
@@ -678,9 +718,14 @@ export default function Finance() {
                 )
               }
 
-              /* Ближайшие платежи: строки с датой и суммой */
+              /* Ближайшие платежи: строки с датой и суммой + strip на 30 дней.
+                 Высоты — из тех же nextPayments/daysUntil (сумма дня относительно
+                 пикового дня); дней без платежей — плоские. Новых данных нет. */
+              const stripByDay = Array.from({ length: 30 }, (_, i) =>
+                nextPayments.reduce((s, r) => s + (daysUntil(r.on) === i ? Number(r.amount) || 0 : 0), 0))
+              const stripMax = Math.max(1, ...stripByDay)
               return (
-                <section key="upcoming" data-reveal className={`relative col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                <section key="upcoming" data-reveal className={`relative fg-card fg-upcoming col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                   {ctl}
                   <div className="hd flex-wrap">
                     <div className="min-w-0"><h2 className="trunc">{t('fin.c_upcoming')}</h2></div>
@@ -697,6 +742,17 @@ export default function Finance() {
                       right={<span className="amt">{MINUS}{fmt.money(r.amount)}</span>}
                     />
                   ))}
+                  {nextPayments.length > 0 && (
+                    <div className="fg-strip" aria-hidden="true">
+                      {stripByDay.map((v, i) => (
+                        <i
+                          key={i}
+                          className={v > 0 ? 'fg-paid' : ''}
+                          style={v > 0 ? { height: `${Math.max(16, Math.round((v / stripMax) * 100))}%` } : undefined}
+                        />
+                      ))}
+                    </div>
+                  )}
                   {nextPayments.length > 0 && (
                     <div className="rule flex flex-wrap items-center justify-between gap-2 pt-3 text-[length:var(--fs-md)] text-[var(--ink-3)]">
                       <span>{t('fin.last7')} {fmt.money(nextPayments.filter((r) => daysUntil(r.on) <= 7).reduce((s, r) => s + (r.amount || 0), 0))}</span>
