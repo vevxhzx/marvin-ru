@@ -325,13 +325,21 @@
     height: 60px;
   }
 
-  #p-cal .calg-tr {
-    height: 104px;
-  }
+  /* Строка «ближайшее»: в одну линию не влезают чекбокс, время, заголовок и чип —
+     заголовок сжимался до ~50px и переносился по буквам (строка до 400px высотой).
+     Чип уезжает к времени на первую строку, заголовок получает всю ширину строки. */
+  #p-cal .cal-upcoming .rowi { flex-wrap: wrap; }
+  #p-cal .cal-upcoming .rowi .chip { order: 1; }
+  #p-cal .cal-upcoming .rowi .t { order: 2; flex: 1 1 100%; }
 
-  #p-cal .calg-nd > span {
-    max-width: 118px;
-    font-size: 11px;
+  /* Полоса ближайших: подписи узлов шириной 118px наезжают друг на друга (6 штук на
+     343px). На телефоне остаются точки линии и подпись «сейчас» — полный список
+     строками ниже, он и есть источник данных. */
+  #p-cal .calg-nd > span { display: none; }
+  #p-cal .calg-nd.calg-now > span { display: block; }
+
+  #p-cal .calg-tr {
+    height: 84px;
   }
 }
 

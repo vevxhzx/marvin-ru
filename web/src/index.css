@@ -1199,6 +1199,16 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .dock-fab:active { transform: scale(0.94); }
 /* настройка «компактная навигация»: только иконки, подписи не занимают место */
 .dock.compact .dock-l { display: none; }
+/* Узкий телефон (≤479px): пилюля активного пункта не влезает — строка долистывается
+   к активной вкладке и первые табы уходили за край («сегодня» и «задачи» пропадали).
+   Только иконки и плотнее шаг: все 5 пунктов + «+» видны целиком, без скролла. */
+@media (max-width: 479px) {
+  .dock-row { gap: 2px; }
+  .dock-item,
+  .dock-item.on { min-width: 44px; padding: 0 8px; }
+  .dock-item.on .dock-l, .dock-more.on .dock-l { max-width: 0; opacity: 0; }
+  .dock-fab { margin: 0 2px; }
+}
 
 /* =====================================================================
    ДИЗАЙН-СИСТЕМА КАРТОЧЕК ОТЧЁТОВ И ДАЙДЖЕСТОВ БОТА
@@ -3180,6 +3190,13 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   background: linear-gradient(160deg, rgba(80, 110, 255, .55), rgba(30, 30, 150, .35)) !important;
   -webkit-backdrop-filter: blur(26px) saturate(1.9) brightness(1.06);
   backdrop-filter: blur(26px) saturate(1.9) brightness(1.06);
+}
+/* Светлая тема: полупрозрачный синий на белом фоне выцветает — карточка выгладела
+   так же, как в тёмной, и не реагировала на смену темы. Здесь берём системный
+   акцентный градиент (--hero-grad, как у всех .hero): краска и светлая/тёмная
+   разница --acc идут из темы, текст остаётся белым (≥ 4.5:1 на акцентах палитры). */
+:root[data-theme="light"] #p-today .home-hero {
+  background: var(--hero-grad) !important;
 }
 /* вращающаяся conic-рамка (мокап .hero:after). Без @property --liq-a вторая
    декларация фона невалидна и остаётся первая — статичный градиент. */

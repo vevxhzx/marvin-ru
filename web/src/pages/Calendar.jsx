@@ -811,8 +811,9 @@ export default function Calendar() {
           </section>
         )}
 
-        {/* Карточка: Ближайшие события (s12) */}
-        <section className={`c s12 r ${CARD_M_LIGHT}`} style={{ '--i': 5, ...cardSt('upcoming') }}>
+        {/* Карточка: Ближайшие события (s12) — класс cal-upcoming: на телефоне строки
+            перекладываем в две линии (см. cal-glass.css), список «Сегодня» не трогаем */}
+        <section className={`c s12 r ${CARD_M_LIGHT} cal-upcoming`} style={{ '--i': 5, ...cardSt('upcoming') }}>
           {cardCtl('upcoming')}
           <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
             <h2 className="h3">{t('nextup.title')}</h2>

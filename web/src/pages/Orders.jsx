@@ -266,7 +266,7 @@ export default function Orders() {
         <div className="hc-label og-hh">
           <b>{t('or.v_unpaid')}</b>
           <button type="button" className="og-av" aria-label={`${t('st.status')}: ${t(AV_STATUS[avIdx][0])}`}
-            data-tip={t('st.status')} onClick={cycleAv}>
+            data-tip={t('st.status')} data-tip-side="bottom" onClick={cycleAv}>
             <i style={{ background: AV_STATUS[avIdx][1], color: AV_STATUS[avIdx][1] }} aria-hidden="true" />
             <span>{t(AV_STATUS[avIdx][0])}</span>
           </button>

@@ -63,6 +63,62 @@ test.describe('финансы: операции, фильтры, периоды,
     await diag.expectClean('операция: создание и удаление')
   })
 
+  test('перевод между счетами: кнопка в форме, деньги едут, строка «перевод» в истории', async ({ page }, testInfo) => {
+    const diag = watch(page, { ignore: IGNORE })
+    page.__e2eProject = testInfo.project
+    const AMOUNT = 700
+    const accounts = async () => (await page.evaluate(() => fetch('/api/finance/accounts').then((r) => r.json())))
+      .map((a) => ({ name: a.name, balance: a.balance }))
+
+    await openTab(page, 'finance', { testInfo })
+    await tabsOf(page).getByText('операции', { exact: true }).click()
+    await expect(rowsOf(page).first()).toBeVisible({ timeout: 15_000 })
+    const before = await accounts()
+    expect(before.length, 'для перевода нужно минимум два счёта').toBeGreaterThan(1)
+
+    await openAdd(page, { testInfo, label: '+ операция' })
+    const sheet = await expectSheet(page)
+    // третий тип операции — «перевод» (раньше его можно было сделать только из чата)
+    await sheet.locator('.seg button', { hasText: 'перевод' }).click()
+    // у перевода нет категории, зато есть счёт-получатель (и он не совпадает с источником)
+    await expect(sheet.locator('select.input')).toHaveCount(2)
+    await expect(sheet.getByLabel(/категория/i)).toHaveCount(0)
+
+    const srcName = await sheet.locator('select.input').nth(0).inputValue()
+    const dest = sheet.locator('select.input').nth(1)
+    await dest.selectOption({ index: 1 })
+    const destName = await dest.inputValue()
+    expect(srcName && destName && srcName !== destName, 'источник и получатель должны различаться').toBe(true)
+
+    await sheet.getByLabel(/сумма/).fill(String(AMOUNT))
+    const save = sheet.getByRole('button', { name: 'сохранить', exact: true })
+    await expect(save).toBeEnabled()   // без счёта-получателя кнопка неактивна — здесь уже выбран
+    await save.click()
+    await sheet.waitFor({ state: 'detached', timeout: 15_000 })
+    await shot(page, 'finance-tx-transfer', { testInfo })
+
+    // сумма ушла со счёта-источника и пришла на получателя, остальные счета не тронуты
+    const expected = before.map((a) => ({
+      name: a.name,
+      balance: a.balance + (a.name === srcName ? -AMOUNT : a.name === destName ? AMOUNT : 0),
+    }))
+    await expect.poll(async () => JSON.stringify(await accounts()), { timeout: 15_000 })
+      .toBe(JSON.stringify(expected))
+
+    // в истории это строка «перевод · откуда → куда»
+    await expect(rowsOf(page).filter({ hasText: 'перевод' }).filter({ hasText: String(AMOUNT) }).first())
+      .toBeVisible({ timeout: 15_000 })
+
+    // уборка за собой — чужие записи не трогаем
+    const row = rowsOf(page).filter({ hasText: 'перевод' }).filter({ hasText: String(AMOUNT) }).first()
+    await row.locator('button[title="Удалить"]').click()
+    await confirmSheet(page)
+    await expect.poll(async () => JSON.stringify(await accounts()), { timeout: 15_000 })
+      .toBe(JSON.stringify(before))
+
+    await diag.expectClean('перевод между счетами')
+  })
+
   test('нулевая сумма: форма не должна молча делать вид, что ничего не случилось', async ({ page }, testInfo) => {
     const diag = watch(page, { ignore: IGNORE })
     page.__e2eProject = testInfo.project

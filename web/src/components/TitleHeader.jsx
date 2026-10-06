@@ -62,19 +62,24 @@ export default function TitleHeader({ title, sub, contentRef, pathKey }) {
       st.p += (want - st.p) * (motionOff() ? 1 : LERP)
       if (Math.abs(want - st.p) < 0.002) st.p = want
       const v = Math.round(st.p * 100) / 100
-      if (v === last) return
-      last = v
-      const p = st.p
-      el.style.opacity = String(p)
-      el.style.transform = `translate3d(0, ${((1 - p) * 8).toFixed(2)}px, 0) scale(${(0.97 + 0.03 * p).toFixed(3)})`
-      /* прогресс уходит в слот шапки (.th-slot): по нему гаснет дата под заголовком */
-      el.parentElement?.style.setProperty('--th-p', String(v))
-      if (subRef.current) {
-        /* подзаголовок выезжает позже — он не должен спорить с заголовком */
-        const q = Math.min(1, Math.max(0, (p - 0.55) / 0.45))
-        subRef.current.style.opacity = String(q)
-        subRef.current.style.transform = `translate3d(0, ${((1 - q) * 6).toFixed(2)}px, 0)`
+      if (v !== last) {
+        last = v
+        const p = st.p
+        el.style.opacity = String(p)
+        el.style.transform = `translate3d(0, ${((1 - p) * 8).toFixed(2)}px, 0) scale(${(0.97 + 0.03 * p).toFixed(3)})`
+        /* прогресс уходит в слот шапки (.th-slot): по нему гаснет дата под заголовком */
+        el.parentElement?.style.setProperty('--th-p', String(v))
+        if (subRef.current) {
+          /* подзаголовок выезжает позже — он не должен спорить с заголовком */
+          const q = Math.min(1, Math.max(0, (p - 0.55) / 0.45))
+          subRef.current.style.opacity = String(q)
+          subRef.current.style.transform = `translate3d(0, ${((1 - q) * 6).toFixed(2)}px, 0)`
+        }
       }
+      /* Один кадр — один шаг lerp. Без доводки шапка после смены раздела замерала
+         между состояниями: титул полупрозрачный налезал на дату в слоте и так и
+         стоял — перерисовка есть только на скролле/ресайзе. Доводим до цели. */
+      if (st.p !== want) st.raf = requestAnimationFrame(paint)
     }
     const schedule = () => { if (!st.raf) st.raf = requestAnimationFrame(paint) }
 

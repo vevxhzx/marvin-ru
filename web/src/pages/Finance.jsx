@@ -11,7 +11,7 @@
    Все формы остались в шторках Sheet — меняется только вид. */
 
 import { useEffect, useMemo, useState, useRef, Children, cloneElement, useId } from 'react'
-import { api, money, shortDate, toLocalISO } from '../lib/api'
+import { api, money, shortDate, toLocalISO, catColor, catLabel, parseNum } from '../lib/api'
 import { Sheet, Field, Empty, Money, Rowi, Skeleton, useToast, Confirm } from '../components/ui'
 import { BigMoney, HeroLine, useNumFormats, useReveal } from '../components/Widgets'
 import CashChart from '../components/CashChart'
@@ -73,6 +73,12 @@ function goalEta(need) {
 
 /* Знак суммы: минус — типографский, разряды неразрывные (форматы даёт useNumFormats) */
 const MINUS = '−'
+
+/* Полоска расходов по категориям (вкладка «операции»).
+   i18n-raw: локальная пара ru/en внутри файла — новых ключей в i18n.js не заводим. */
+const CATBAR_REST = { ru: 'остальные', en: 'others' }
+const CATBAR_TOP = 5                       // подписей больше пяти — строка спорит с покоем вёрстки
+const pctText = (v) => `${v.toLocaleString(localeOf(), { maximumFractionDigits: 1 })} %`
 
 /* Раздел с данными: карточка на десктопе, плоский раздел с шапкой .hd и волосяными
    разделителями строк на телефоне (переключает CARD_M, логика одна).
@@ -424,11 +430,11 @@ export default function Finance() {
   const totalSpent = budgetItems.reduce((s, b) => s + (b.spent || 0), 0)
   const budgetLeft = totalBudget - totalSpent
 
-  // Фильтрация транзакций
-  const filteredTxs = useMemo(() => {
+  // Фильтрация транзакций: сперва общий срез (поиск + счёт) — его же рисует полоска
+  // категорий ниже, потом уже категория для самого списка операций.
+  const baseTxs = useMemo(() => {
     const q = txSearch.trim().toLowerCase()
     const list = txs.filter((t) => {
-      const matchCat = txCategory === 'all' || t.category === txCategory
       const matchAcc = txAccount === 'all' || t.account === txAccount
       const matchSearch = !q ||
         (t.title && t.title.toLowerCase().includes(q)) ||
@@ -436,14 +442,63 @@ export default function Finance() {
         (t.category && t.category.toLowerCase().includes(q)) ||
         (t.comment && t.comment.toLowerCase().includes(q)) ||
         (t.account && t.account.toLowerCase().includes(q))
-      return matchCat && matchAcc && matchSearch
+      return matchAcc && matchSearch
     })
     // сумма в БД всегда положительная, знак хранится в kind — иначе траты считались бы доходом
     const income = list.filter((t) => t.kind === 'income').reduce((s, t) => s + Number(t.amount), 0)
     const expense = list.filter((t) => t.kind === 'expense').reduce((s, t) => s + Number(t.amount), 0)
     return { list, income: Math.round(income), expense: Math.round(expense) }
-  }, [txs, txCategory, txAccount, txSearch])
+  }, [txs, txAccount, txSearch])
+
+  const filteredTxs = useMemo(() => {
+    // «без категории» — отдельный сегмент полоски: у него в БД category = null,
+    // поэтому сравниваем по факту, а не строкой
+    const list = baseTxs.list.filter((t) => txCategory === 'all'
+      || (txCategory === '__other' ? !t.category : t.category === txCategory))
+    const income = list.filter((t) => t.kind === 'income').reduce((s, t) => s + Number(t.amount), 0)
+    const expense = list.filter((t) => t.kind === 'expense').reduce((s, t) => s + Number(t.amount), 0)
+    return { list, income: Math.round(income), expense: Math.round(expense) }
+  }, [baseTxs, txCategory])
   const shownTxs = filteredTxs.list
+
+  // ПОЛОСКА РАСХОДОВ ПО КАТЕГОРИЯМ (мокап ver6): группы трат за период, отсортированы по
+  // сумме — ширина сегмента и есть ответ «куда уходит больше всего». Своя выборка без
+  // фильтра категории: полоска сравнивает категории между собой, а её сегмент как раз и
+  // ставит этот фильтр (повторный клик снимает).
+  const catBar = useMemo(() => {
+    const m = new Map()
+    for (const tx of baseTxs.list) {
+      if (tx.kind !== 'expense') continue
+      const key = tx.category || '__other'   // без категории — свой сегмент, не теряем его сумму
+      m.set(key, (m.get(key) || 0) + (Number(tx.amount) || 0))
+    }
+    let rows = [...m.entries()]
+      .map(([name, sum]) => ({
+        name,
+        sum,
+        // i18n-raw: подпись «без категории» берём из существующего ключа common.other
+        label: name === '__other' ? T('common.other') : catLabel(name),
+        color: catColor(name),
+      }))
+      .sort((a, b) => b.sum - a.sum)
+    const total = rows.reduce((s, r) => s + r.sum, 0)
+    if (!total) return { total: 0, items: [] }
+    // Хвост складываем в один нейтральный сегмент: иначе подписи разрастаются, а мелочь
+    // на полоске всё равно не читается. Он не кликается — фильтра по «остальным» нет.
+    if (rows.length > CATBAR_TOP) {
+      const rest = rows.slice(CATBAR_TOP)
+      rows = [...rows.slice(0, CATBAR_TOP), {
+        name: '__rest', rest: true,
+        label: CATBAR_REST[localeOf()] || CATBAR_REST.en,
+        color: catColor('__other'),   // тот же нейтральный серый, что у сегмента «Другое»
+        sum: rest.reduce((s, r) => s + r.sum, 0),
+      }]
+    }
+    return {
+      total,
+      items: rows.map((r) => ({ ...r, share: r.sum / total, pct: (r.sum / total) * 100 })),
+    }
+  }, [baseTxs])
 
   // СЧЕТА (visual-only): итог и поток ± за период по счёту — из уже загруженных
   // txs (период days), новых запросов нет. История балансов на счёте не хранится
@@ -909,6 +964,61 @@ export default function Finance() {
                 <b>{MINUS}{fmt.money(filteredTxs.expense)}</b>
               </span>
             </div>
+            {/* ПОЛОСКА РАСХОДОВ ПО КАТЕГОРИЯМ (мокап ver6, вкладка «операции»): сегмент ∝
+                доле трат за период, цвет — из CAT_COLORS. Клик по сегменту или подписи ставит
+                фильтр категории (повторно — снимает): выбранный горит акцентом, остальные
+                гаснут. Хвост «остальные» — нейтральный и не кликается, фильтра по нему нет. */}
+            {catBar.items.length > 0 && (
+              <div className="mt-3">
+                <div className="fg-catbar">
+                  {catBar.items.map((c) => {
+                    const on = txCategory === c.name
+                    const off = txCategory !== 'all' && !on
+                    const style = { '--c': c.color, flexGrow: c.share }
+                    const label = `${c.label} · ${money(c.sum)} · ${pctText(c.pct)}`
+                    return c.rest
+                      ? <i key={c.name} style={style} title={label} aria-hidden="true" />
+                      : (
+                        <button
+                          key={c.name}
+                          type="button"
+                          style={style}
+                          className={`${off ? ' off' : ''}${on ? ' on' : ''}`}
+                          title={label}
+                          aria-label={label}
+                          aria-pressed={on}
+                          onClick={() => setTxCategory(on ? 'all' : c.name)}
+                        />
+                      )
+                  })}
+                </div>
+                <div className="fg-cat-legend">
+                  {catBar.items.map((c) => {
+                    const on = txCategory === c.name
+                    const off = txCategory !== 'all' && !on
+                    const inner = (
+                      <>
+                        <i style={{ '--c': c.color }} aria-hidden="true" />
+                        <span className="trunc">{c.label}</span>
+                        <b>{money(c.sum)}</b>
+                        <em>{pctText(c.pct)}</em>
+                      </>
+                    )
+                    return c.rest
+                      ? <span key={c.name}>{inner}</span>
+                      : (
+                        <button
+                          key={c.name}
+                          type="button"
+                          className={`${off ? ' off' : ''}${on ? ' on' : ''}`}
+                          aria-pressed={on}
+                          onClick={() => setTxCategory(on ? 'all' : c.name)}
+                        >{inner}</button>
+                      )
+                  })}
+                </div>
+              </div>
+            )}
           </section>
 
           <Block
@@ -923,7 +1033,12 @@ export default function Finance() {
                 <time>{shortDate(tx.date || tx.created_at)}</time>
                 <span className="t">
                   <span className="clamp-2 block">{tx.title || tx.note || tx.category || t('fin.tx')}</span>
-                  <small>{[tx.category, tx.account, tx.comment].filter(Boolean).join(' · ')}</small>
+                  {/* перевод: подпись «перевод» и «откуда → куда» (ключи новые не заводим) */}
+                  <small>{[
+                    tx.kind === 'transfer' ? t.kind_transfer : tx.category,
+                    tx.kind === 'transfer' && tx.to_account ? `${tx.account || ''} → ${tx.to_account}` : tx.account,
+                    tx.comment,
+                  ].filter(Boolean).join(' · ')}</small>
                 </span>
                 {/* знак берём из kind: amount приходит из API положительным */}
                 <span className="amt" style={{ color: tx.kind === 'income' ? 'var(--pos)' : 'inherit' }}>
@@ -1360,6 +1475,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
   const [account, setAccount] = useState('')
   const [comment, setComment] = useState('')
   const [kind, setKind] = useState('expense')
+  const [to, setTo] = useState('')   // перевод: счёт-получатель (API: to_account)
   const [date, setDate] = useState('')
   const [saving, setSaving] = useState(false)
   const [amountErr, setAmountErr] = useState('')
@@ -1376,6 +1492,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
       setComment(item.comment || '')
       // переводы форма не редактирует — сохраняем их тип, иначе трата/доход «съест» перевод
       setKind(item.kind === 'income' ? 'income' : item.kind === 'transfer' ? 'transfer' : 'expense')
+      setTo(item.to_account || '')
       setDate(item.date ? item.date.slice(0, 10) : toLocalISO(new Date()).slice(0, 10))
     } else {
       setAmount('')
@@ -1384,6 +1501,7 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
       setAccount(accounts[0]?.name || '')
       setComment('')
       setKind('expense')
+      setTo('')
       setDate(toLocalISO(new Date()).slice(0, 10))
     }
     setAmountErr('')
@@ -1391,7 +1509,9 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
 
   const submit = async (e) => {
     if (e) e.preventDefault()
-    const a = parseFloat(amount.replace(/\s/g, ''))
+    // parseNum, а не parseFloat: поле Money на blur форматирует «18 000» (пробел/NBSP),
+    // parseFloat читает только «18» — сумма теряла разряды
+    const a = parseNum(amount)
     if (isNaN(a)) return
     // нулевая сумма не «тихая»: кнопка активна, поэтому объясняем прямо в форме (D3);
     // отрицательные и нечисловые значения ведут себя как раньше (Math.abs / игнор)
@@ -1403,9 +1523,11 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
       const payload = {
         amount: Math.abs(a),
         kind,
-        category: category.trim() || undefined,
+        category: kind === 'transfer' ? undefined : (category.trim() || undefined),
         note: [title.trim(), comment.trim()].filter(Boolean).join(' · ') || undefined,
         account: account.trim() || undefined,
+        // перевод: счёт-получатель; ядро переводит сумму между двумя счетами
+        to_account: kind === 'transfer' ? (to.trim() || undefined) : undefined,
         date: date ? `${date}T${item?.date ? item.date.slice(11, 19) : '12:00:00'}` : toLocalISO(new Date()).slice(0, 10),
       }
       if (isNew) {
@@ -1427,6 +1549,8 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
         <div className="seg">
           <button type="button" className={kind === 'expense' ? 'on' : ''} aria-pressed={kind === 'expense'} onClick={() => setKind('expense')}>{t('fin.expense')}</button>
           <button type="button" className={kind === 'income' ? 'on' : ''} aria-pressed={kind === 'income'} onClick={() => setKind('income')}>{t('fin.income')}</button>
+          {/* t.kind_transfer — существующий ключ SERVER («перевод»), новых ключей i18n не добавляем */}
+          <button type="button" className={kind === 'transfer' ? 'on' : ''} aria-pressed={kind === 'transfer'} onClick={() => { setKind('transfer'); if (!account && accounts[0]) setAccount(accounts[0].name) }}>{t.kind_transfer}</button>
         </div>
         <Field label={t('fin.amount_rub')} error={amountErr}>
           <Money value={amount} onChange={setAmount} min={0} placeholder="1000" autoFocus required />
@@ -1435,18 +1559,29 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
           <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('fin.desc_ph')} />
         </Field>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label={t('common.category')}>
-            <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder={t('fin.cat_ph')} list="cat-list" />
-            <datalist id="cat-list">
-              {categories.map(c => <option key={c.id || c.name || c} value={c.name || c} />)}
-            </datalist>
-          </Field>
+          {/* у перевода категории нет — ядро её всё равно обнуляет */}
+          {kind !== 'transfer' && (
+            <Field label={t('common.category')}>
+              <input className="input" value={category} onChange={(e) => setCategory(e.target.value)} placeholder={t('fin.cat_ph')} list="cat-list" />
+              <datalist id="cat-list">
+                {categories.map(c => <option key={c.id || c.name || c} value={c.name || c} />)}
+              </datalist>
+            </Field>
+          )}
           <Field label={t('graph.one_account')}>
             <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
               <option value="">{t('fin.not_set')}</option>
               {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
             </select>
           </Field>
+          {kind === 'transfer' && (
+            <Field label={t('or.to_account')}>
+              <select className="input" value={to} onChange={(e) => setTo(e.target.value)} required>
+                <option value="">{t('fin.not_set')}</option>
+                {accounts.filter((a) => a.name !== account).map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
+              </select>
+            </Field>
+          )}
         </div>
         <Field label={t('common.date')}>
           <input className="input" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
@@ -1460,7 +1595,12 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
           )}
           <div className="ml-auto flex gap-2">
             <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
-            <button type="submit" className="btn" disabled={saving || !amount}>{saving ? t('people.saving') : t('common.save')}</button>
+            <button
+              type="submit"
+              className="btn"
+              // перевод без получателя или «на тот же счёт» — ядро откажет, не даём отправить заранее
+              disabled={saving || !amount || (kind === 'transfer' && (!to || (!!account && to === account)))}
+            >{saving ? t('people.saving') : t('common.save')}</button>
           </div>
         </div>
       </form>
@@ -1494,7 +1634,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
     try {
       const payload = {
         name: name.trim(),
-        balance: parseFloat(balance) || 0,
+        balance: parseNum(balance) || 0,
         type,
         kind: type,   // сиды хранят kind, форма — type: держим оба, чтобы иконка и расчёты сходились
       }
@@ -1561,7 +1701,7 @@ function DebtSheet({ open, debt, onClose, onDone }) {
       const payload = {
         title: name.trim(),   // API ждёт `title`; `name` — устаревший алиас (422 «Field required»)
         creditor: creditor.trim() || undefined,
-        total: parseFloat(total) || 0,
+        total: parseNum(total) || 0,
       }
       if (isNew) {
         await api.addDebt(payload)
@@ -1610,7 +1750,7 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
 
   const submit = async (e) => {
     if (e) e.preventDefault()
-    const a = parseFloat(amount)
+    const a = parseNum(amount)
     if (!a || isNaN(a) || !debt?.id) return
     // PayIn принимает только amount/account/date: «не списывать» бэкенд не умеет,
     // а пустой счёт превратился бы в основной (деньги всё равно ушли бы) — просим выбрать честно
@@ -1675,7 +1815,7 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
     try {
       const payload = {
         title: name.trim(),   // API ждёт `title`; `name` — устаревший алиас (422 «Field required»)
-        amount: parseFloat(amount) || 0,
+        amount: parseNum(amount) || 0,
         category: category.trim() || undefined,
         day: parseInt(day, 10) || 1,
         kind,
@@ -1746,9 +1886,9 @@ function GoalSheet({ open, goal, onClose, onDone }) {
     try {
       const payload = {
         title: title.trim(),
-        target: parseFloat(target) || 0,
+        target: parseNum(target) || 0,
         // GoalIn/GoalPatch ждут saved: поле current бэкенд молча отбрасывал
-        saved: parseFloat(current) || 0,
+        saved: parseNum(current) || 0,
       }
       if (isNew) {
         await api.addGoal(payload)
@@ -1796,7 +1936,7 @@ function PutGoalSheet({ open, goal, accounts = [], onClose, onDone }) {
 
   const submit = async (e) => {
     if (e) e.preventDefault()
-    const a = parseFloat(amount)
+    const a = parseNum(amount)
     if (!a || isNaN(a) || !goal?.id) return
     setSaving(true)
     try {
