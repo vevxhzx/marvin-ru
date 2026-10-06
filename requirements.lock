@@ -1,6 +1,7 @@
 # requirements.lock — pinned snapshot for CI/reproducible installs.
 # Source of truth: requirements.txt (human-edited). Regenerate: pip freeze filtered to direct deps.
-# Do NOT edit by hand — edit requirements.txt then regenerate.
+# Do NOT bump pins by hand — edit requirements.txt then regenerate.
+# Единственное руками добавленное исключение — маркеры версии Python у numpy (см. ниже).
 aiogram==3.31.0
 aiohttp_socks==0.12.0
 APScheduler==3.11.3
@@ -11,7 +12,10 @@ fastapi==0.141.1
 faster-whisper==1.2.1
 httpx==0.28.1
 num2words==0.5.14
-numpy==2.5.2
+# numpy: одна строка на версию Python — 2.5.x требует 3.12+, а CI гоняет и 3.11.
+# Пределы берём из requirements.txt (numpy>=1.26); 2.4.6 — последнее, что ставится на 3.11.
+numpy==2.5.2 ; python_version >= "3.12"
+numpy==2.4.6 ; python_version < "3.12"
 openpyxl==3.1.5
 pdfplumber==0.11.10
 pillow==12.3.0

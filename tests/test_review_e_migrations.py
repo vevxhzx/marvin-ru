@@ -266,6 +266,10 @@ def _copy_real_db_to(dst: Path) -> None:
 
 
 def test_real_db_copy_survives_migration(tmp_path, monkeypatch):
+    if not REAL_DB.exists():
+        # CI и чистый клон: рабочей базы нет (data/ не в git) — здесь нечего проверять.
+        # В рабочей копии файла тест идёт как обычно, источник открывается только на чтение.
+        pytest.skip("data/jarvis.db нет (CI/чистый клон) — тест проверяет именно рабочую базу")
     stat_before = (REAL_DB.stat().st_size, REAL_DB.stat().st_mtime)
 
     copy = tmp_path / "jarvis_copy.db"
