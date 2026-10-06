@@ -184,6 +184,9 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "brain.cloud.model": ("str", "Модель облака (пусто — по умолчанию у провайдера)", False),
     "brain.cloud.base_url": ("str", "Адрес API (только для custom)", False),
     "brain.cloud.proxy": ("str", "Прокси для облака (обычно не нужен)", False),
+    "brain.cloud.reasoning": ("str", "Рассуждения облака: auto (минимум, как раньше) / off — не думать вообще, экономия токенов и времени / minimal / low / medium / high", False),
+    "brain.cloud.max_tokens": ("int", "Потолок ответа облака, токенов (1024; большие пачки — 2048–4096)", False),
+    "brain.cloud.timeout": ("int", "Секунд ждать ответ облака (45; длинным ответам — 60–90)", False),
     "brain.cloud.personal_tools": ("bool", "Режим «облако вместо ПК» (brain.mode=cloud): отдавать облачной модели личные данные — заметки, память, карточки людей, сводки по деньгам и заказам. Выключено = облако только пишет, но не читает ваши данные", False),
     "brain.gemini.auto": ("bool", "Разговор и общие вопросы — в облако (иначе только по слову «облако, …»)", False),
     "brain.gemini.api_key": ("str", "Ключ Google Gemini (только если провайдер gemini)", True),
@@ -259,7 +262,7 @@ def _get_path(raw: dict, path: str, default=None):
 
 # Значения по умолчанию для ключей, которых может не быть в config.yaml: read_settings показывает
 # именно то, что реально действует (иначе UI показывал бы выключенным включённое по умолчанию).
-SETTINGS_DEFAULTS = {"brain.gemini.anonymize": True}
+SETTINGS_DEFAULTS = {"brain.gemini.anonymize": True, "brain.cloud.max_tokens": 1024, "brain.cloud.timeout": 45}
 
 
 def read_settings() -> dict:

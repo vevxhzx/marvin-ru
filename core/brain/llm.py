@@ -677,13 +677,15 @@ def _cloud_client(timeout: float, proxy: str | None = None) -> httpx.AsyncClient
     return httpx.AsyncClient(**kw)
 
 
-async def _cloud_post(path: str, body: dict, headers: dict, timeout: float = 45) -> "httpx.Response":
+async def _cloud_post(path: str, body: dict, headers: dict, timeout: float | None = None) -> "httpx.Response":
     """POST в облако с перебором маршрутов при сетевых ошибках (ответ сервера, даже 4xx, — не повод менять маршрут).
 
     Повтор по маршруту НЕ удваивает оплату: тело запроса одно и то же, поэтому при гонке двух
     ответов берётся первый успешный, а не суммируется ничего. Если провайдер успел списать токены,
     а ответ не дошёл, повтор — это повтор, а не две оплаты за одну работу."""
     global _CLOUD_ROUTE_OK
+    if timeout is None:
+        timeout = cloud_timeout()   # brain.cloud.timeout: по умолчанию 45, поднимается под длинные ответы
     if _local_only_refuse():
         raise httpx.ConnectError("режим local: облако выключено")
     # Groq: у reasoning-моделей (qwen3.x, gpt-oss) просим спрятать «размышления», иначе <think> прилетает в текст
@@ -801,6 +803,59 @@ _NO_THINK_HINT = ("\nРАССУЖДЕНИЯ. Думай молча и отвеч
                   "и сразу отдай итог, одним ответом для хозяина.")
 
 
+# ------------------------------------------------------- настройки облака (читаются на каждый вызов
+# после смены на сайте работают без перезапуска; ключи объявлены в core/config.py → EDITABLE).
+#   brain.cloud.reasoning: auto | off | minimal | low | medium | high
+#     auto — как раньше (в чате effort=minimal + exclude, в инструментах только exclude);
+#     off  — effort=none, модель не думает вообще. Мысли у OpenRouter списываются как вывод и
+#            попадают в max_tokens: из-за них и получается «всё ушло в размышления» + повтор
+#            с лимитом 4096, а также многосекундное молчание на больших запросах.
+#   brain.cloud.max_tokens — потолок ответа (по умолчанию 1024), brain.cloud.timeout — ожидание (45 с).
+_REASON_VALUES = ("auto", "off", "none", "minimal", "low", "medium", "high")
+
+
+def _cloud_setting(key: str):
+    return getattr(getattr(getattr(cfg, "brain", None), "cloud", None), key, None)
+
+
+def reasoning_mode() -> str:
+    """Что просим у облака про «размышления»: auto / off / minimal / low / medium / high."""
+    v = str(_cloud_setting("reasoning") or "auto").strip().lower()
+    return v if v in _REASON_VALUES else "auto"
+
+
+def _reasoning_body(kind: str) -> dict:
+    """Параметр `reasoning` для OpenRouter (документация: /docs/guides/best-practices/reasoning-tokens).
+
+    kind: "chat" — ответ хозяину, "tools" — вызовы инструментов (там точность важнее скорости,
+    поэтому в auto режиме бюджет не режем — как и раньше). Явный уровень/off действует на оба пути.
+    """
+    mode = reasoning_mode()
+    if mode in ("off", "none"):
+        return {"effort": "none", "exclude": True}
+    if mode != "auto":
+        return {"effort": mode, "exclude": True}
+    return {"effort": "minimal", "exclude": True} if kind == "chat" else {"exclude": True}
+
+
+def cloud_max_tokens(default: int = 1024) -> int:
+    """Потолок ответа облака:0/мусор в настройке = значение по умолчанию."""
+    try:
+        v = int(str(_cloud_setting("max_tokens") or "").strip() or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return v if v > 0 else default
+
+
+def cloud_timeout(default: float = 45) -> float:
+    """Секунд ждать один ответ облака (0/мусор = по умолчанию)."""
+    try:
+        v = int(str(_cloud_setting("timeout") or "").strip() or 0)
+    except (TypeError, ValueError):
+        v = 0
+    return float(v if v > 0 else default)
+
+
 async def cloud_chat(system: str, user_text: str, history: list[dict] | None = None, _force_model: str | None = None,
                      temperature: float = 0.7) -> str | None:
     """Единая точка входа в облако. Провайдер — из настроек; Gemini — частный случай."""
@@ -840,12 +895,14 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
             model = "openai/gpt-oss-20b"   # compound ходит в интернет и думает 3–8 с; для голоса — быстрая
     # reasoning-модели тратят max_tokens и на скрытые размышления: 220 на голосовой ответ для gpt-oss/qwen3 — это пустой content
     short_max = 700 if _THINK_RX.search(model) else 220
-    body = {"model": model, "messages": messages, "temperature": temperature, "max_tokens": short_max if short_mode.get() else 1024}
+    body = {"model": model, "messages": messages, "temperature": temperature,
+            "max_tokens": short_max if short_mode.get() else cloud_max_tokens()}
     if CLOUD_PROVIDER == "openrouter":
-        # effort=minimal — мыслим коротко (~10% max_tokens, иначе размышления съедают лимит и content
-        # остаётся пустым), exclude — готовые мысли не возвращаем вообще. Если провайдер не принял
-        # параметр (400) — убираем его и повторяем один раз, см. ниже.
-        body["reasoning"] = {"effort": "minimal", "exclude": True}
+        # auto — effort=minimal (мыслим коротко, ~10% max_tokens, иначе content остаётся пустым) и
+        # exclude (готовые мысли не возвращаем); brain.cloud.reasoning: off — effort=none, не думаем
+        # совсем, явный уровень (low/medium/high) — как задан. Если провайдер не принял параметр
+        # (400) — убираем его и повторяем один раз, см. ниже.
+        body["reasoning"] = _reasoning_body("chat")
     r = None
     sink = token_sink.get()
     if sink is not None:
@@ -904,7 +961,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 fin = (data.get("choices") or [{}])[0].get("finish_reason")
                 log.warning("%s: %s вернула пустой ответ (finish_reason=%s) — повторяю основной моделью %s", cloud_title(), body["model"], fin, main_model)
                 body["model"] = main_model
-                body["max_tokens"] = 1024
+                body["max_tokens"] = cloud_max_tokens()
                 body.pop("reasoning_effort", None)
                 r = await _cloud_post("/chat/completions", body, headers)
                 r.raise_for_status()
@@ -912,11 +969,13 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 msg = (data.get("choices") or [{}])[0].get("message") or {}
                 text = strip_think(msg.get("content") or "")
                 _reasoning_only = not text and bool((msg.get("reasoning") or msg.get("reasoning_content") or "").strip())
-            if not text and (data.get("choices") or [{}])[0].get("finish_reason") == "length":
-                # Reasoning-модель съела ВЕСЬ лимит на скрытые мысли (живой случай: 988 из 1024 токенов
-                # на «размышления», content пуст → ответ уходил локальной модели). Один раз даём лимит покрупнее.
-                log.warning("%s: пустой ответ из-за обрезки по max_tokens (всё ушло в размышления) — повторяю с лимитом 4096",
-                            cloud_title())
+            if (data.get("choices") or [{}])[0].get("finish_reason") == "length" and body["max_tokens"] < 4096:
+                # Обрезка по лимиту. Два вида: либо reasoning-модель съела ВЕСЬ бюджет на скрытые мысли
+                # (живой случай: 988 из 1024 токенов, content пуст), либо ответ просто длинный и оборван
+                # — пачку «разбей на задачи» рвать нельзя. Один раз даём лимит покрупнее.
+                log.warning("%s: ответ оборван по max_tokens (%s, content %s) — повторяю с лимитом 4096",
+                            cloud_title(), "всё ушло в размышления" if not text else "длинный ответ",
+                            "пустой" if not text else "частичный")
                 body["max_tokens"] = 4096
                 r = await _cloud_post("/chat/completions", body, headers)
                 r.raise_for_status()
@@ -1017,16 +1076,25 @@ async def cloud_tools_chat(messages: list[dict], tools: list[dict], temperature:
         # сплошным разбором, а tool_calls — пустыми
         msgs[0] = {**msgs[0], "content": (msgs[0]["content"] or "") + _NO_THINK_HINT}
     body = {"model": model, "messages": msgs, "tools": tools, "tool_choice": "auto", "temperature": temperature,
-            "max_tokens": 160 if short_mode.get() else 700}
+            "max_tokens": 160 if short_mode.get() else max(700, cloud_max_tokens())}
     if CLOUD_PROVIDER == "openrouter":
-        body["reasoning"] = {"exclude": True}   # мысли не отдаём; бюджет не режем — здесь важна точность вызовов
+        # auto — мысли не отдаём, бюджет не режем (здесь важна точность вызовов); brain.cloud.reasoning
+        # (off / minimal / low / medium / high) действует и сюда — иначе на инструментах модель думает
+        # с провайдерским усилием, списывая мысли как вывод и живя по несколько секунд на вызов.
+        body["reasoning"] = _reasoning_body("tools")
     r = None
     try:
-        r = await _cloud_post("/chat/completions", body, headers, timeout=60)
+        r = await _cloud_post("/chat/completions", body, headers, timeout=max(60.0, cloud_timeout()))
+        if r.status_code == 400 and "reasoning" in body:
+            # модель/провайдер не принял параметр (например, у mandatory-модели нельзя выключить размышления) —
+            # один раз без него, иначе вызовы инструментов молчат (то же делает cloud_chat выше)
+            log.warning("%s: параметр reasoning не принят (%s) — повторяю без него", cloud_title(), r.text[:160])
+            body.pop("reasoning", None)
+            r = await _cloud_post("/chat/completions", body, headers, timeout=max(60.0, cloud_timeout()))
         if r.status_code == 404 and CLOUD_PROVIDER == "groq" and body["model"] == _GROQ_TOOLS_MODEL:
             # модель вывели из оборота прямо сейчас — перечитать список и повторить один раз
             body["model"] = await groq_tools_model(force=True)
-            r = await _cloud_post("/chat/completions", body, headers, timeout=60)
+            r = await _cloud_post("/chat/completions", body, headers, timeout=max(60.0, cloud_timeout()))
         r.raise_for_status()
         msg = (r.json().get("choices") or [{}])[0].get("message") or {}
         calls = []

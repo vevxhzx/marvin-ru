@@ -130,7 +130,7 @@ async def cmd_quick(m: Message):
         return
     typing = asyncio.create_task(_keep_typing(m))
     try:
-        r = await asyncio.wait_for(agent.handle(_QUICK_MAP[cmd].format(x=body), channel="tg"), timeout=HANDLE_TIMEOUT)
+        r = await asyncio.wait_for(agent.handle(_QUICK_MAP[cmd].format(x=body), channel="tg"), timeout=handle_timeout())
     finally:
         typing.cancel()
     await send_long(m, r.text or "…")
@@ -446,7 +446,18 @@ async def _send_card(m: Message, kind: str) -> None:
         log.debug("карточка команды %s: %s", kind, e)
 
 
-HANDLE_TIMEOUT = 120  # сек: дольше этого «печатает…» крутиться не будет — ответим, что зависли
+HANDLE_TIMEOUT = 120  # сек: минимум — дольше этого «печатает…» крутиться не будет — ответим, что зависли
+
+
+def handle_timeout() -> float:
+    """Секунд ждать ответ агента: не меньше HANDLE_TIMEOUT и вдвое дольше таймаута облака
+    (brain.cloud.timeout). Иначе большой запрос, ради которого этот таймаут подняли, всё равно
+    обрывался бы вот этим лимитом, и хозяин видел бы «Завис на этом вопросе»."""
+    try:
+        t = int(str(getattr(getattr(getattr(cfg, "brain", None), "cloud", None), "timeout", 45) or 45))
+    except (TypeError, ValueError):
+        t = 45
+    return float(max(HANDLE_TIMEOUT, t * 2))
 
 
 @router.message(F.text)
@@ -454,7 +465,7 @@ async def any_text(m: Message):
     log.info("← tg: %r", (m.text or "")[:80])
     typing = asyncio.create_task(_keep_typing(m))
     try:
-        r = await asyncio.wait_for(agent.handle(m.text, channel=_channel_for(m)), timeout=HANDLE_TIMEOUT)
+        r = await asyncio.wait_for(agent.handle(m.text, channel=_channel_for(m)), timeout=handle_timeout())
         typing.cancel()
         await send_long(m, r.text or "…")
         await _maybe_send_card(m, r)
@@ -464,8 +475,9 @@ async def any_text(m: Message):
     except asyncio.TimeoutError:
         typing.cancel()
         log.warning("handle timeout: %r", m.text[:80])
-        _record_error("tg: таймаут обработки (>%ds): %s" % (HANDLE_TIMEOUT, m.text[:80]))
-        msg = ("Завис на этом вопросе дольше двух минут, сэр. Скорее всего, облако или Ollama не отвечают — "
+        _lim = int(handle_timeout())
+        _record_error("tg: таймаут обработки (>%ds): %s" % (_lim, m.text[:80]))
+        msg = (f"Завис на этом вопросе дольше {_lim // 60} мин, сэр. Скорее всего, облако или Ollama не отвечают — "
                "загляните в ⚙ Настройки → состояние.")
         await _send(m, msg, msg)
     except Exception as e:
@@ -556,7 +568,7 @@ async def _run_voice_command(m: Message, text: str) -> None:
     from core.voice import tts
     typing = asyncio.create_task(_keep_typing(m))
     try:
-        r = await asyncio.wait_for(agent.handle(text, channel=_channel_for(m, "tg-voice")), timeout=HANDLE_TIMEOUT)
+        r = await asyncio.wait_for(agent.handle(text, channel=_channel_for(m, "tg-voice")), timeout=handle_timeout())
     finally:
         typing.cancel()
     # сверху — расшифровка ЦЕЛИКОМ (сворачиваемой цитатой), снизу — ответ; одно сообщение.
@@ -1011,7 +1023,7 @@ async def anything_else(m: Message):
     if m.caption:
         # подпись к фото/файлу — выполняем как текст
         log.info("← tg: но есть подпись — выполняю её: %r", m.caption[:60])
-        r = await asyncio.wait_for(agent.handle(m.caption, channel=_channel_for(m)), timeout=HANDLE_TIMEOUT)
+        r = await asyncio.wait_for(agent.handle(m.caption, channel=_channel_for(m)), timeout=handle_timeout())
         await send_long(m, r.text or "…")
         return
     await _send(m, txt, txt)
