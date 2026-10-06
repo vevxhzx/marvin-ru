@@ -1,8 +1,0 @@
-{
-  "name": "Marvin — Персональный ассистент",
-  "description": "Деньги, календарь, задачи, заказы и второй мозг — персональный ассистент Marvin",
-  "permissions": [],
-  "capabilities": [
-    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
-  ]
-}
