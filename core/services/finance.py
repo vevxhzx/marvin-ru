@@ -60,6 +60,17 @@ def _day(x) -> int:
     return d
 
 
+def _weekday(x) -> int:
+    """День недели для «каждую неделю»: 0 = понедельник … 6 = воскресенье."""
+    try:
+        d = int(x)
+    except (TypeError, ValueError):
+        raise FinanceError("День недели: число от 0 до 6")
+    if not 0 <= d <= 6:
+        raise FinanceError("День недели: число от 0 до 6")
+    return d
+
+
 def _rate(x) -> float:
     return _num(x if x not in (None, "") else 0, "Ставка", 0, 1000)
 
@@ -697,17 +708,19 @@ def _summary(days: int = 30) -> dict:
 
 # ---------- регулярные ----------
 def add_recurring(title: str, amount: float, day: int = 1, kind: str = "expense",
-                  category: str | None = None, period: str = "monthly", debt_id: int | None = None) -> Recurring:
+                  category: str | None = None, period: str = "monthly", debt_id: int | None = None,
+                  month: int | None = None) -> Recurring:
     title = _title(title)
     amount = _num(amount, "Сумма", 0, strict_min=True)
-    day = _day(day)
     if kind not in ("expense", "income"):
         raise FinanceError("Тип: expense / income")
     if period not in ("monthly", "weekly", "yearly"):
         period = "monthly"
+    # «каждую неделю» — день 0..6, у месяца/года — число 1..31
+    day = _weekday(day) if period == "weekly" else _day(day)
     with session() as s:
         r = Recurring(title=title, amount=amount, kind=kind, category=category or guess_category(title, kind),
-                      period=period, day=day, next_date=_next_date(day, period), debt_id=debt_id)
+                      period=period, day=day, next_date=_next_date(day, period, month=month), debt_id=debt_id)
         s.add(r)
         s.commit()
         s.refresh(r)
@@ -727,12 +740,19 @@ def update_recurring(rid: int, **fields) -> Recurring:
             r.title = _title(fields["title"])
         if fields.get("amount") is not None:
             r.amount = _num(fields["amount"], "Сумма", 0, strict_min=True)
-        if fields.get("day") is not None or fields.get("period"):
+        if fields.get("day") is not None or fields.get("period") or fields.get("month") is not None:
             if fields.get("period") in ("monthly", "weekly", "yearly"):
                 r.period = fields["period"]
             if fields.get("day") is not None:
-                r.day = _day(fields["day"])
-            r.next_date = _next_date(r.day, r.period)
+                r.day = _weekday(fields["day"]) if r.period == "weekly" else _day(fields["day"])
+            elif r.period == "weekly":
+                r.day = r.day % 7   # перешли на «каждую неделю» без дня — приводим 0..6
+            if r.period == "yearly":
+                # месяц хранится в next_date: без явного месяца держим прежний
+                m = fields.get("month") or (r.next_date.month if r.next_date else None)
+                r.next_date = _next_date(r.day, "yearly", month=m)
+            else:
+                r.next_date = _next_date(r.day, r.period)
         if fields.get("kind") in ("expense", "income") and not r.debt_id:
             r.kind = fields["kind"]
         if "category" in fields and not r.debt_id:
@@ -847,13 +867,15 @@ def list_recurring(active_only: bool = True) -> list[Recurring]:
         return list(s.exec(q.order_by(Recurring.next_date)))
 
 
-def _next_date(day: int, period: str, after: datetime | None = None) -> datetime:
+def _next_date(day: int, period: str, after: datetime | None = None, month: int | None = None) -> datetime:
     base = (after or datetime.now()).replace(hour=10, minute=0, second=0, microsecond=0)
     if period == "weekly":
         delta = (day - base.weekday()) % 7 or 7
         return base + timedelta(days=delta)
     if period == "yearly":
-        cand = base.replace(day=min(day, 28))
+        # месяц годового платежа: явный или из прошлой даты (next_date его хранит)
+        m = min(max(int(month or base.month), 1), 12)
+        cand = base.replace(month=m, day=min(day, 28))
         return cand if cand > base else cand + relativedelta(years=1)
     # monthly
     last_day = (base.replace(day=1) + relativedelta(months=1) - timedelta(days=1)).day

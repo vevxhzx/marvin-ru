@@ -628,7 +628,7 @@ export default function AppShell({
   }, [])
 
   /* Строка-статус телефона: слева дата («суббота · 3 октября»), справа иконки —
-     как в свежем макете владельца. Дата живёт здесь, а не в шапке страницы. */
+     как в свежем макете. Дата живёт здесь, а не в шапке страницы. */
   const dateLine = (() => {
     const now = new Date()
     return `${fmtWeekday(now, 'long')} · ${fmtDate(now, { day: 'numeric', month: 'long' })}`

@@ -302,7 +302,7 @@ def fin_recurring(all: bool = False):
 
 @router.post("/api/finance/recurring")
 def fin_recurring_add(r: RecurringIn):
-    return finance.add_recurring(r.title, r.amount, r.day, r.kind, r.category, r.period)
+    return finance.add_recurring(r.title, r.amount, r.day, r.kind, r.category, r.period, month=r.month)
 
 
 @router.put("/api/finance/recurring/{rid}")

@@ -38,7 +38,7 @@ export const FONT_SIZES = { sm: ['font.sm', 0.92], md: ['font.md', 1], lg: ['fon
 export const RADII = { soft: ['radius.soft', 1], sharp: ['radius.sharp', 0.45], strict: ['radius.sharp', 0.45], round: ['radius.round', 1.35] }
 
 const KEY = 'ui.prefs.v1'
-/* Акцент по умолчанию зависит от темы — так в макетах владельца:
+/* Акцент по умолчанию зависит от темы — так в макетах:
    ночь («вариант B») — лайм #c9f24a на тёмно-синем, день — синий #3458f5.
    Своя палитра пользователя (accentHex !== DEFAULTS) работает в обеих темах. */
 export const THEME_ACCENT = { light: '#3458f5', dark: '#c9f24a' }

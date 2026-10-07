@@ -256,6 +256,7 @@ class RecurringIn(BaseModel):
     kind: str = "expense"
     category: Optional[str] = None
     period: str = "monthly"
+    month: Optional[int] = None          # для period=yearly: месяц 1..12 (day — число)
 
     @model_validator(mode="before")
     @classmethod
@@ -273,6 +274,7 @@ class RecurringPatch(BaseModel):
     kind: Optional[str] = None
     category: Optional[str] = None
     period: Optional[str] = None
+    month: Optional[int] = None
     account: Optional[str] = None
     active: Optional[bool] = None
 

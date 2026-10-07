@@ -60,7 +60,7 @@ export function useBigSize(fs = 'var(--hero-fs)') {
   return phone ? `${BIG_PHONE_PX}px` : fs
 }
 
-/* Сумма одной строкой: число тянет на себя вес, ₽ — мельче и легче (макеты владельца).
+/* Сумма одной строкой: число тянет на себя вес, ₽ — мельче и легче (макеты).
    cur="accent" — знак ₽ акцентом (лайм ночью, синий днём), как на «финансах» макета. */
 export function BigMoney({ value, format, label, className = '', fs = 'var(--hero-fs)', cur = 'soft', duration = 900, delay = 0 }) {
   const size = useBigSize(fs)

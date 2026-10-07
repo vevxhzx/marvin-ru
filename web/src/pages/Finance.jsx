@@ -80,6 +80,21 @@ const CATBAR_REST = { ru: 'остальные', en: 'others' }
 const CATBAR_TOP = 5                       // подписей больше пяти — строка спорит с покоем вёрстки
 const pctText = (v) => `${v.toLocaleString(localeOf(), { maximumFractionDigits: 1 })} %`
 
+/* Локальные подписи финансов — i18n-raw: новых ключей в i18n.js не заводим.
+   Кредитка (счёт-долг), период регулярного платежа, группа «на паузе». */
+const FIN = {
+  ru: { credit_card: 'кредитка', debt_now: 'долг сейчас', debt: 'долг', period: 'период', monthly: 'месяц', weekly: 'неделя', yearly: 'год', day_of_week: 'день недели', month: 'месяц', amount: 'сумма, ₽', paused_section: 'на паузе', debt_hint: 'траты с неё растут в долг, перевод на неё — уменьшает' },   // i18n-raw
+  en: { credit_card: 'credit card', debt_now: 'debt now', debt: 'debt', period: 'period', monthly: 'month', weekly: 'week', yearly: 'year', day_of_week: 'weekday', month: 'month', amount: 'amount, ₽', paused_section: 'paused', debt_hint: 'spending grows the debt, a transfer to it pays it down' },
+}
+const WEEKDAYS = {
+  ru: ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'],   // i18n-raw
+  en: ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'],
+}
+const MONTHS = {
+  ru: ['январь', 'февраль', 'март', 'апрель', 'май', 'июнь', 'июль', 'август', 'сентябрь', 'октябрь', 'ноябрь', 'декабрь'],   // i18n-raw
+  en: ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'],
+}
+
 /* Раздел с данными: карточка на десктопе, плоский раздел с шапкой .hd и волосяными
    разделителями строк на телефоне (переключает CARD_M, логика одна).
    Объявлена на уровне модуля, чтобы React не пересоздавал поддерево на каждом рендере.
@@ -287,7 +302,8 @@ function CarRow({ count, label, children }) {
 }
 
 export default function Finance() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  const L = FIN[lang] || FIN.ru
   const fmt = useNumFormats()
   const [tab, setTab] = useState('overview') // 'overview' | 'txs' | 'accounts' | 'debts' | 'recurring' | 'goals' | 'techniques'
   const [days, setDays] = useState(30)
@@ -412,16 +428,84 @@ export default function Finance() {
   }, [recurring, now.getMonth(), now.getDate()])
 
   // Активные и «на паузе»: расчёт (сводка, прогноз) считает только активные —
-  // как и бэкенд (list_recurring(active_only=True)), но паузы показываем опционально
+  // как и бэкенд (list_recurring(active_only=True)). Паузы показываем отдельной
+  // группой ниже и НЕ прячем: выключенный тумблером платёж остаётся на месте
+  // (раньше он молча исчезал из списка — выглядело как удаление).
   const recActive = useMemo(() => recurring.filter((r) => r.active !== false), [recurring])
   const recPaused = useMemo(() => recurring.filter((r) => r.active === false), [recurring])
   const recExpense = recActive.filter((r) => r.kind !== 'income').reduce((s, r) => s + Number(r.amount || 0), 0)
   const recIncome = recActive.filter((r) => r.kind === 'income').reduce((s, r) => s + Number(r.amount || 0), 0)
-  const [showPaused, setShowPaused] = useState(false)
-  const recShown = showPaused ? recurring : recActive
   const toggleActive = async (r) => {
     try { await api.updateRecurring(r.id, { active: r.active === false }); load(); bump() } catch (e) { show.err(e) }
   }
+
+  // Когда платёж ждёт своё число: месяц — «{d} числа», неделя — день недели,
+  // год — «{d} {месяц}» из next_date (месяц годового хранится именно там).
+  const recWhen = (r) => {
+    if (r.period === 'weekly') return (WEEKDAYS[lang] || WEEKDAYS.ru)[Math.abs(Number(r.day) || 0) % 7]
+    if (r.period === 'yearly' && r.next_date) {
+      return new Date(r.next_date).toLocaleDateString(localeOf(), { day: 'numeric', month: 'short' })
+    }
+    return t('fin.day_of_month', { d: r.day || r.day_of_month || 1 })
+  }
+
+  // Карточка регулярного платежа — одна на активные и «на паузе» (вторая группа
+  // ниже): выключенный тумблером платёж остаётся видимым, просто приглушённым.
+  const recCard = (r) => (
+    <section
+      key={r.id}
+      data-car
+      className={`c s4 glass-card gc-subs ${CARD_M_LIGHT}`}
+      data-reveal
+      role="button"
+      tabIndex={0}
+      title={t('fin.edit_pay')}
+      aria-label={`${r.name || r.title} — ${t('fin.edit_pay')}`}
+      onClick={() => { setEditingItem(r); setSheet('recurring') }}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingItem(r); setSheet('recurring') } }}
+      style={{ cursor: 'pointer', opacity: r.active === false ? 0.5 : 1 }}
+    >
+      <div className="hd flex-wrap">
+        <span className="due-tag">{recWhen(r)}</span>
+        <span className="flex items-center gap-1">
+          <span className="num" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit', fontSize: 'var(--fs-lg)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>
+            {r.kind === 'income' ? '+' : MINUS}{fmt.money(r.amount)}
+          </span>
+          <ChevronRight size={15} aria-hidden="true" style={{ color: 'var(--ink-3)', flex: 'none' }} />
+        </span>
+      </div>
+      <div className="clamp-2" style={{ fontSize: 'var(--fs-base)', fontWeight: 600, color: 'var(--ink)' }}>{r.name || r.title}</div>
+      <div className="muted mt-1 trunc text-[length:var(--fs-xs)]" title={[r.category, r.account].filter(Boolean).join(' · ')}>
+        {[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}
+        {' · '}{r.active === false ? t('fin.paused') : t('fin.status_active')}
+      </div>
+      <div className="mt-3 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+        {/* Тап по карточке открывает RecurringSheet (правка полей); здесь только
+            тумблер паузы (тот же toggleActive) и удаление — иконок паузы больше нет. */}
+        <button
+          type="button"
+          role="switch"
+          aria-checked={r.active !== false}
+          className={`switch ${r.active === false ? '' : 'on'}`}
+          title={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
+          aria-label={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
+          onClick={() => toggleActive(r)}
+        />
+        <IconBtn
+          danger
+          title={t('fin.remove_pay')}
+          onClick={() => setAsk({
+            title: t('fin.del_rec_q_name', { name: r.name || r.title }),
+            text: t('fin.pause_note'),
+            msg: t('fin.paused'),
+            run: () => api.delRecurring(r.id),
+          })}
+        >
+          <X size={15} />
+        </IconBtn>
+      </div>
+    </section>
+  )
 
   const daysUntil = (d0) => Math.round((d0 - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 864e5)
   // API отдаёт список лимитов в поле budgets (категории с лимитом > 0)
@@ -503,7 +587,12 @@ export default function Finance() {
   // СЧЕТА (visual-only): итог и поток ± за период по счёту — из уже загруженных
   // txs (период days), новых запросов нет. История балансов на счёте не хранится
   // (Account: name/kind/balance) — спарклайна нет, опускаем.
-  const accTotal = accounts.reduce((s, a) => s + (Number(a.balance) || 0), 0)
+  // «Счета» — деньги на руках: счета-кредитки (debt_only) сюда не входят, у них
+  // отдельная строка «долг» ниже (как и в total_balance() на бэкенде).
+  const accCash = accounts.filter((a) => a.kind !== 'debt_only')
+  const accTotal = accCash.reduce((s, a) => s + (Number(a.balance) || 0), 0)
+  const accDebt = accounts.filter((a) => a.kind === 'debt_only')
+    .reduce((s, a) => s + Math.abs(Number(a.balance) || 0), 0)
   const accFlow = {}
   for (const tx of txs) {
     if (!tx.account) continue
@@ -1076,13 +1165,16 @@ export default function Finance() {
               <small className="trunc">{t('fin.n_accounts', { count: accounts.length })}</small>
             </div>
             <BigMoney value={accTotal} format={fmt.int} label={money(accTotal)} fs="clamp(28px, 3vw, 42px)" />
-            {accTotal > 0 && accounts.length > 0 && (
+            {accTotal > 0 && accCash.length > 0 && (
               <div className="fg-acc-bar mt-3" role="img" aria-label={t('fin.all_accounts')}>
-                {accounts.map((a) => {
+                {accCash.map((a) => {
                   const w = Math.max(0, (Number(a.balance) || 0) / accTotal) * 100
                   return w > 0 ? <i key={a.id || a.name} style={{ width: `${w}%` }} /> : null
                 })}
               </div>
+            )}
+            {accDebt > 0 && (
+              <div className="num mt-2 text-[length:var(--fs-md)]" style={{ color: 'var(--neg)' }}>{L.debt}: {fmt.money(accDebt)}</div>
             )}
             <div className="muted mt-2 text-[length:var(--fs-md)]">
               {t('fin.for_days', { n: days || t('common.all'), m: money(filteredTxs.expense) })}
@@ -1097,8 +1189,9 @@ export default function Finance() {
             <div className="fg-accts col-span-12">
               {accounts.map((a) => {
                 const atype = a.type || a.kind || 'bank'
-                const Icon = atype === 'card' ? CreditCard : atype === 'cash' ? Wallet : atype === 'crypto' ? PiggyBank : Landmark
-                const kindLabel = ({ card: t('acc.card'), cash: t('acc.cash2'), bank: t('graph.one_account'), savings: t('acc.deposit'), crypto: t('acc.crypto') })[atype] || t('graph.one_account')
+                const isDebt = atype === 'debt_only'
+                const Icon = (isDebt || atype === 'card') ? CreditCard : atype === 'cash' ? Wallet : atype === 'crypto' ? PiggyBank : Landmark
+                const kindLabel = isDebt ? L.credit_card : ({ card: t('acc.card'), cash: t('acc.cash2'), bank: t('graph.one_account'), savings: t('acc.deposit'), crypto: t('acc.crypto') })[atype] || t('graph.one_account')
                 const f = accFlow[a.name] || { in: 0, out: 0 }
                 return (
                   <section className={`c fg-card fg-acct ${CARD_M_LIGHT}`} data-reveal key={a.id || a.name}>
@@ -1124,7 +1217,11 @@ export default function Finance() {
                         </IconBtn>
                       </RowActions>
                     </div>
-                    <div className="num fg-big mt-2">{fmt.money(a.balance || 0)}</div>
+                    {/* у кредитки баланс отрицательный (долг) — показываем его суммой долга */}
+                    <div className="num fg-big mt-2" style={isDebt ? { color: 'var(--neg)' } : undefined} title={isDebt ? L.debt_hint : undefined}>
+                      {isDebt ? fmt.money(Math.abs(Number(a.balance) || 0)) : fmt.money(a.balance || 0)}
+                    </div>
+                    {isDebt && <div className="muted mt-1 text-[length:var(--fs-xs)]">{L.debt} · {L.debt_hint}</div>}
                     {(f.in > 0 || f.out > 0) && (
                       <div className="fg-delta">
                         {t('fin.for_days_short', { n: days || t('common.all') })}: <span className="pos">+{fmt.money(f.in)}</span> / <span>{MINUS}{fmt.money(f.out)}</span>
@@ -1228,74 +1325,28 @@ export default function Finance() {
             <div className="hd"><div className="min-w-0"><h2 className="trunc">{t('fin.c_recurring')}</h2></div></div>
             <div className="big num" style={{ fontSize: 'clamp(24px, 2.6vw, 34px)' }}>{fmt.money(recExpense)}</div>
             {recIncome > 0 && <div className="muted mt-1 text-[length:var(--fs-md)]">+{fmt.money(recIncome)}</div>}
-            {recPaused.length > 0 && (
-              <button type="button" className="btn-soft btn-sm mt-3" onClick={() => setShowPaused((v) => !v)} title={t('fin.paused_hint')}>
-                {showPaused ? t('fin.hide_paused') : t('fin.show_paused_n', { n: recPaused.length })}
-              </button>
-            )}
           </section>
-          {recShown.length === 0 ? (
+          {recActive.length === 0 ? (
             <section className={`c s8 ${CARD_M_LIGHT}`} data-reveal>
               <div className="muted text-[length:var(--fs-md)]">{recurring.length > 0 ? t('fin.all_paused') : t('fin.no_recurring')}</div>
             </section>
           ) : (
-            <CarRow count={recShown.length} label={t('fin.c_recurring')}>
-              {recShown.map((r) => (
-            <section
-              key={r.id}
-              data-car
-              className={`c s4 glass-card gc-subs ${CARD_M_LIGHT}`}
-              data-reveal
-              role="button"
-              tabIndex={0}
-              title={t('fin.edit_pay')}
-              aria-label={`${r.name || r.title} — ${t('fin.edit_pay')}`}
-              onClick={() => { setEditingItem(r); setSheet('recurring') }}
-              onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingItem(r); setSheet('recurring') } }}
-              style={{ cursor: 'pointer' }}
-            >
-              <div className="hd flex-wrap">
-                <span className="due-tag">{(r.day_of_month || r.day) ? t('fin.day_of_month', { d: r.day_of_month || r.day }) : t('fin.per_month_short')}</span>
-                <span className="flex items-center gap-1">
-                  <span className="num" style={{ color: r.kind === 'income' ? 'var(--pos)' : 'inherit', fontSize: 'var(--fs-lg)', fontWeight: 600, textAlign: 'right', whiteSpace: 'nowrap' }}>
-                    {r.kind === 'income' ? '+' : MINUS}{fmt.money(r.amount)}
-                  </span>
-                  <ChevronRight size={15} aria-hidden="true" style={{ color: 'var(--ink-3)', flex: 'none' }} />
-                </span>
-              </div>
-              <div className="clamp-2" style={{ fontSize: 'var(--fs-base)', fontWeight: 600, color: 'var(--ink)' }}>{r.name || r.title}</div>
-              <div className="muted mt-1 trunc text-[length:var(--fs-xs)]" title={[r.category, r.account].filter(Boolean).join(' · ')}>
-                {[r.category, r.account].filter(Boolean).join(' · ') || (r.kind === 'income' ? t('fin.inflow') : t('fin.outflow'))}
-                {' · '}{r.active === false ? t('fin.paused') : t('fin.status_active')}
-              </div>
-              <div className="mt-3 flex items-center justify-between gap-2" onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-                {/* Тап по карточке открывает RecurringSheet (правка полей); здесь только
-                    тумблер паузы (тот же toggleActive) и удаление — иконок паузы больше нет. */}
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={r.active !== false}
-                  className={`switch ${r.active === false ? '' : 'on'}`}
-                  title={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
-                  aria-label={r.active === false ? t('fin.resume_tip') : t('fin.pause_tip')}
-                  onClick={() => toggleActive(r)}
-                />
-                <IconBtn
-                  danger
-                  title={t('fin.remove_pay')}
-                  onClick={() => setAsk({
-                    title: t('fin.del_rec_q_name', { name: r.name || r.title }),
-                    text: t('fin.pause_note'),
-                    msg: t('fin.paused'),
-                    run: () => api.delRecurring(r.id),
-                  })}
-                >
-                  <X size={15} />
-                </IconBtn>
-              </div>
-            </section>
-          ))}
+            <CarRow count={recActive.length} label={t('fin.c_recurring')}>
+              {recActive.map(recCard)}
             </CarRow>
+          )}
+          {/* Паузы — отдельной группой и всегда видимые: тумблер выключает платёж,
+              а не убирает его (иначе казалось, что платёж просто удалился). */}
+          {recPaused.length > 0 && (
+            <>
+              <div className="s12 mt-1 flex items-center gap-2">
+                <span className="muted text-[length:var(--fs-md)]">{L.paused_section}</span>
+                <span className="num faint text-[length:var(--fs-xs)]">{recPaused.length}</span>
+              </div>
+              <CarRow count={recPaused.length} label={`${L.paused_section} · ${recPaused.length}`}>
+                {recPaused.map(recCard)}
+              </CarRow>
+            </>
           )}
         </div>
       )}
@@ -1612,7 +1663,8 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
 }
 
 function AccountSheet({ open, account, onClose, onDone }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  const L = FIN[lang] || FIN.ru
   const isNew = !account?.id
   const [name, setName] = useState('')
   const [balance, setBalance] = useState('')
@@ -1620,11 +1672,17 @@ function AccountSheet({ open, account, onClose, onDone }) {
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
+  const isDebt = type === 'debt_only'
+
   useEffect(() => {
     if (!open) return
+    const kind = account?.type || account?.kind || 'card'
     setName(account?.name || '')
-    setBalance(account?.balance != null ? String(account.balance) : '')
-    setType(account?.type || account?.kind || 'card')
+    // у кредитки баланс — долг: в поле показываем его положительной суммой
+    setBalance(account?.balance != null
+      ? String(kind === 'debt_only' ? Math.abs(account.balance) : account.balance)
+      : '')
+    setType(kind)
   }, [open, account])
 
   const submit = async (e) => {
@@ -1632,9 +1690,11 @@ function AccountSheet({ open, account, onClose, onDone }) {
     if (!name.trim()) return
     setSaving(true)
     try {
+      const amount = Math.abs(parseNum(balance) || 0)
       const payload = {
         name: name.trim(),
-        balance: parseNum(balance) || 0,
+        // кредитка хранит долг со знаком минус, чтобы траты его увеличивали
+        balance: type === 'debt_only' ? -amount : (parseNum(balance) || 0),
         type,
         kind: type,   // сиды хранят kind, форма — type: держим оба, чтобы иконка и расчёты сходились
       }
@@ -1657,7 +1717,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
         <Field label={t('acc.name')}>
           <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('acc.name_ph')} />
         </Field>
-        <Field label={t('acc.current_balance')}>
+        <Field label={isDebt ? L.debt_now : t('acc.current_balance')} hint={isDebt ? L.debt_hint : undefined}>
           <Money value={balance} onChange={setBalance} placeholder="0" />
         </Field>
         <Field label={t('acc.type')}>
@@ -1666,6 +1726,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
             <option value="cash">{t('acc.cash')}</option>
             <option value="bank">{t('acc.deposit')}</option>
             <option value="crypto">{t('acc.crypto_wallet')}</option>
+            <option value="debt_only">{L.credit_card}</option>
           </select>
         </Field>
         <div className="flex justify-end gap-2 pt-4">
@@ -1789,22 +1850,30 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
 }
 
 function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  const L = FIN[lang] || FIN.ru
   const isNew = !item?.id
   const [name, setName] = useState('')
   const [amount, setAmount] = useState('')
   const [category, setCategory] = useState('')
+  const [period, setPeriod] = useState('monthly')
   const [day, setDay] = useState('1')
+  const [month, setMonth] = useState('1')
   const [kind, setKind] = useState('expense')   // expense — списание, income — регулярный доход
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
   useEffect(() => {
     if (!open) return
+    const p = item?.period || 'monthly'
     setName(item?.name || item?.title || '')
     setAmount(item?.amount != null ? String(item.amount) : '')
     setCategory(item?.category || '')
-    setDay(item?.day ? String(item.day) : '1')
+    setPeriod(p)
+    setDay(item?.day != null ? String(item.day) : (p === 'weekly' ? '0' : '1'))
+    // месяц годового платежа хранится в next_date — берём его, иначе текущий
+    const m = item?.next_date ? new Date(item.next_date).getMonth() + 1 : new Date().getMonth() + 1
+    setMonth(String(m))
     setKind(item?.kind === 'income' ? 'income' : 'expense')
   }, [open, item])
 
@@ -1817,8 +1886,11 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
         title: name.trim(),   // API ждёт `title`; `name` — устаревший алиас (422 «Field required»)
         amount: parseNum(amount) || 0,
         category: category.trim() || undefined,
-        day: parseInt(day, 10) || 1,
+        period,
+        day: period === 'weekly' ? (parseInt(day, 10) || 0) : (parseInt(day, 10) || 1),
         kind,
+        // месяц имеет смысл только у годового платежа
+        month: period === 'yearly' ? (parseInt(month, 10) || 1) : undefined,
       }
       if (isNew) {
         await api.addRecurring(payload)
@@ -1834,6 +1906,8 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
   }
 
   const isIncome = kind === 'income'
+  const weekdays = WEEKDAYS[lang] || WEEKDAYS.ru
+  const months = MONTHS[lang] || MONTHS.ru
   return (
     <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={isNew ? t('fin.add_pay') : t('fin.edit_pay2')}>
       <form onSubmit={submit} className="space-y-4">
@@ -1846,12 +1920,36 @@ function RecurringSheet({ open, item, categories = [], onClose, onDone }) {
         <Field label={t('common.title')}>
           <input className="input" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder={t('fin.pay_ph2')} />
         </Field>
-        <Field label={t('fin.amount_month')}>
+        <Field label={L.amount}>
           <Money value={amount} onChange={setAmount} min={0} placeholder="499" required />
         </Field>
-        <Field label={t('fin.pay_day')}>
-          <input className="input" type="number" min="1" max="31" value={day} onChange={(e) => setDay(e.target.value)} />
+        {/* Период: месяц / неделя / год. Раньше форма умела только «каждый месяц» —
+            годовой платёж (сертификат, ОСАГО, налог) завести было нельзя. */}
+        <Field label={L.period}>
+          <div className="seg">
+            <button type="button" className={period === 'monthly' ? 'on' : ''} aria-pressed={period === 'monthly'} onClick={() => setPeriod('monthly')}>{L.monthly}</button>
+            <button type="button" className={period === 'weekly' ? 'on' : ''} aria-pressed={period === 'weekly'} onClick={() => setPeriod('weekly')}>{L.weekly}</button>
+            <button type="button" className={period === 'yearly' ? 'on' : ''} aria-pressed={period === 'yearly'} onClick={() => setPeriod('yearly')}>{L.yearly}</button>
+          </div>
         </Field>
+        {period === 'weekly' ? (
+          <Field label={L.day_of_week}>
+            <select className="input" value={day} onChange={(e) => setDay(e.target.value)}>
+              {weekdays.map((w, i) => <option key={i} value={String(i)}>{w}</option>)}
+            </select>
+          </Field>
+        ) : (
+          <Field label={t('fin.pay_day')}>
+            <input className="input" type="number" min="1" max="31" value={day} onChange={(e) => setDay(e.target.value)} />
+          </Field>
+        )}
+        {period === 'yearly' && (
+          <Field label={L.month}>
+            <select className="input" value={month} onChange={(e) => setMonth(e.target.value)}>
+              {months.map((m, i) => <option key={i} value={String(i + 1)}>{m}</option>)}
+            </select>
+          </Field>
+        )}
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
           <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? t('people.saving') : t('common.save')}</button>
