@@ -30,6 +30,10 @@ const CARD_M_FLAT = 'max-[820px]:!shadow-none max-[820px]:!rounded-[var(--r-lg)]
 /* Подстрока в серверном значении GPU (данные, не интерфейс) — i18n-raw */
 const SERVER_VRAM = 'целиком' // i18n-raw
 
+/* LM Studio: подписи роли и состояния — локальная пара ru/en, новых ключей в i18n.js не заводим. */
+const LMS_USE = { ru: { main: 'основные ответы', small: 'мини-задачи' }, en: { main: 'main answers', small: 'mini tasks' } } // i18n-raw
+const LMS_ROLE = { ru: { main: 'отвечает вместо модели Ollama', small: 'мини-задачи вместо малой модели', off: 'выключен — всё через Ollama' }, en: { main: 'answers instead of the Ollama model', small: 'mini tasks instead of the small model', off: 'off — everything via Ollama' } } // i18n-raw
+
 /* Версия веба — из package.json проекта (ядро приходит из /api/status → version) */
 const WEB_VER = pkg.version
 
@@ -73,7 +77,7 @@ const CATS = [
 ]
 
 export default function Settings({ health }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [data, setData] = useState(null)
   const [draft, setDraft] = useState({})
   const [status, setStatus] = useState(null)
@@ -84,6 +88,7 @@ export default function Settings({ health }) {
   const [notif, setNotif] = useState(notifyState())
   const [gem, setGem] = useState(null)
   const [small, setSmall] = useState(null)   // результат проверки малой модели
+  const [lms, setLms] = useState(null)       // результат проверки LM Studio
   const [llm, setLlm] = useState(null)       // внешняя модель из .env (если сервер её умеет)
   const [pcBusy, setPcBusy] = useState(false) // идёт запуск/перезапуск voice.bat
   // Ссылка вида /settings#<секция> открывает нужную раздел — и при прямом заходе, и при
@@ -208,6 +213,12 @@ export default function Settings({ health }) {
               line1={!status.ollama.small_model ? t('st.not_set') : small?.pending ? t('st.checking') : small ? (small.ok ? t('st.model_answers', { m: status.ollama.small_model }) : t('st.not_responding')) : status.ollama.small_ok ? status.ollama.small_model : t('st.not_in_ollama', { m: status.ollama.small_model })}
               line2={small && !small.pending ? (small.detail + (small.hint ? t('st.dot_join', { x: small.hint }) : '')) : !status.ollama.small_model ? t('st.small_model_hint') : !status.ollama.small_ok ? t('st.pull_in_cmd', { m: status.ollama.small_model }) : status.ollama.small_last ? t('st.small_last_task', { when: relTime(new Date(status.ollama.small_last.at * 1000).toISOString()), s: status.ollama.small_last.seconds, keep: status.ollama.small_keep_alive }) : t('st.small_never_called', { keep: status.ollama.small_keep_alive })}
               action={!!status.ollama.small_model && <button className="btn-ghost btn-sm" onClick={() => { setSmall({ pending: true }); api.post('/api/status/small').then(setSmall).catch((e) => setSmall({ ok: false, detail: e.message })) }}>{small?.pending ? t('st.checking') : t('st.check')}</button>} />
+            {status.lmstudio && (
+              <StatusCard ok={status.lmstudio.enabled && status.lmstudio.ok && lms?.ok !== false} warn={!status.lmstudio.enabled || (status.lmstudio.enabled && !status.lmstudio.ok)} title="LM Studio"
+                line1={!status.lmstudio.enabled ? t('st.off_short') : lms?.pending ? t('st.checking') : lms ? (lms.ok ? t('st.model_answers', { m: status.lmstudio.model }) : t('st.not_responding')) : status.lmstudio.ok ? status.lmstudio.model : t('st.not_responding')}
+                line2={lms && !lms.pending ? (lms.detail + (lms.hint ? t('st.dot_join', { x: lms.hint }) : '')) : (LMS_ROLE[lang] || LMS_ROLE.ru)[status.lmstudio.enabled ? status.lmstudio.use || 'main' : 'off']}
+                action={status.lmstudio.enabled && <button className="btn-ghost btn-sm" onClick={() => { setLms({ pending: true }); api.post('/api/status/lmstudio').then(setLms).catch((e) => setLms({ ok: false, detail: e.message })) }}>{lms?.pending ? t('st.checking') : t('st.check')}</button>} />
+            )}
             <StatusCard ok={status.telegram.running} warn={status.telegram.configured && !status.telegram.running} title="telegram"
               line1={!status.telegram.configured ? t('st.not_configured') : status.telegram.running ? t('st.bot_ok') : t('st.configured_not_running')}
               line2={status.telegram.last_message ? t('st.last_message', { when: relTime(status.telegram.last_message) }) : t('st.no_messages')} />
@@ -1348,7 +1359,7 @@ function SRow({ label, hint, wide, children }) {
 /* Одна настройка из config.yaml. Раскладка строки одинаковая для всех типов: переключатель,
    сегмент или поле — справа от подписи. */
 function SettingField({ it, value, onChange, providers }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const [reveal, setReveal] = useState(false)
   if (it.key === 'brain.cloud.provider') {
     return <SRow wide label={t('st.provider')}><Seg value={value || 'gemini'} onChange={onChange} options={['openrouter', 'groq', 'nvidia', 'deepseek', 'gemini', 'custom'].map((p) => [p, PROV_LABELS[p]])} /></SRow>
@@ -1374,6 +1385,10 @@ function SettingField({ it, value, onChange, providers }) {
         <input className="input mt-2" value={value ?? ''} onChange={(e) => onChange(e.target.value)} placeholder={t('st.model_name')} />
       </SRow>
     )
+  }
+  if (it.key === 'brain.lmstudio.use') {
+    const names = LMS_USE[lang] || LMS_USE.ru
+    return <SRow wide label={it.label}><Seg value={value || 'main'} onChange={onChange} options={[['main', names.main], ['small', names.small]]} /></SRow>
   }
   if (it.key === 'brain.vision.where') {
     return <SRow label={t('st.sees_images')}><Seg value={value || 'auto'} onChange={onChange} options={[['auto', t('st.pc_fallback')], ['cloud', t('st.g_cloud')], ['local', t('st.pc_only')]]} /></SRow>

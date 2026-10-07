@@ -30,6 +30,17 @@ OLLAMA_NUM_CTX = int(getattr(cfg.brain.ollama, "num_ctx", 8192) or 8192)
 # грузится по требованию и сама выгружается через small_keep_alive — не сидит в видеопамяти рядом с играми/рендером
 SMALL_MODEL = str(getattr(cfg.brain.ollama, "small_model", "") or "").strip()
 SMALL_KEEP_ALIVE = str(getattr(cfg.brain.ollama, "small_keep_alive", "5m") or "5m")
+# Второй локальный движок — LM Studio (OpenAI-совместимый /chat/completions). Работает одновременно
+# с Ollama: малая модель и эмбеддинги остаются там, а сюда отдаётся выбранное в brain.lmstudio.use
+# (main — основные ответы вместо модели Ollama, small — мини-задачи вместо малой модели).
+_lms = getattr(cfg.brain, "lmstudio", None)
+LMSTUDIO_ENABLED = bool(getattr(_lms, "enabled", False))
+LMSTUDIO_BASE = (str(getattr(_lms, "base_url", "") or "") or "http://127.0.0.1:1234/v1").strip().rstrip("/")
+LMSTUDIO_MODEL = (str(getattr(_lms, "model", "") or "") or "google/gemma-4-e4b").strip()
+LMSTUDIO_USE = (str(getattr(_lms, "use", "") or "") or "main").strip().lower()
+if LMSTUDIO_USE not in ("main", "small"):
+    LMSTUDIO_USE = "main"
+_LMS_AVAIL_CACHE: tuple[float, bool] = (0.0, False)
 _SMALL_MISSING: set[str] = set()   # модели, которых нет в Ollama — не долбить каждый раз
 _SMALL_SEEN: set[str] = set()      # чтобы «на месте» написать один раз, а не при каждой проверке   # 4096 не хватало: схемы инструментов + промпт + история ≈ 4.5–5k токенов → Ollama резала промпт и обрывала ответ
 # режим короткого ответа (голос): ограничение длины генерации — для TTS и восприятия на слух
@@ -267,10 +278,100 @@ def small_model_active() -> bool:
     return bool(SMALL_MODEL) and SMALL_MODEL not in _SMALL_MISSING
 
 
+def lmstudio_role() -> str:
+    """Какую работу отдать LM Studio: 'main', 'small' или '' (выключен)."""
+    if not LMSTUDIO_ENABLED:
+        return ""
+    return LMSTUDIO_USE if LMSTUDIO_USE in ("main", "small") else ""
+
+
+async def lmstudio_available(force: bool = False) -> bool:
+    """LM Studio отвечает по OpenAI-совместимому API (кэш 60 с)."""
+    global _LMS_AVAIL_CACHE
+    if not LMSTUDIO_ENABLED:
+        return False
+    ts, ok = _LMS_AVAIL_CACHE
+    if not force and time.monotonic() - ts < 60:
+        return ok
+    ok = False
+    try:
+        async with _local_client(5) as c:
+            r = await c.get(f"{LMSTUDIO_BASE}/models")
+            ok = r.status_code == 200
+    except Exception as e:
+        log.debug("lmstudio check failed: %s", e)
+    _LMS_AVAIL_CACHE = (time.monotonic(), ok)
+    return ok
+
+
+async def _lmstudio_chat(messages: list[dict], temperature: float = 0.3,
+                         json_mode: bool = False, num_predict: int = 512) -> dict:
+    """Запрос в LM Studio (OpenAI-формат /chat/completions).
+    Возврат — как у ollama_chat: {'content', 'tool_calls': []}. Инструменты
+    LM Studio не отдаём: вызовы функций идут только через Ollama."""
+    payload: dict[str, Any] = {"model": LMSTUDIO_MODEL, "messages": messages, "stream": False,
+                               "temperature": temperature, "max_tokens": num_predict}
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
+    t0 = time.monotonic()
+    async with _local_client(180) as c:
+        r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json=payload)
+        r.raise_for_status()
+        msg = ((r.json().get("choices") or [{}])[0].get("message") or {})
+        content = msg.get("content") or ""
+        if isinstance(content, list):  # content-блоки — склеиваем текст
+            content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
+    log.info("LM Studio %s ответил за %.1f с", LMSTUDIO_MODEL, time.monotonic() - t0)
+    return {"content": strip_think(str(content)).strip(), "tool_calls": []}
+
+
+async def lmstudio_check() -> dict:
+    """Живая проверка LM Studio для настроек: включён ли, отвечает ли, за сколько."""
+    if not LMSTUDIO_ENABLED:
+        return {"configured": False, "ok": False, "detail": "выключен — локальные ответы идут через Ollama",
+                "hint": "brain.lmstudio.enabled: true"}
+    if not await lmstudio_available(force=True):
+        return {"configured": True, "model": LMSTUDIO_MODEL, "ok": False,
+                "detail": f"LM Studio не отвечает ({LMSTUDIO_BASE})",
+                "hint": "запустите сервер в LM Studio (Start Server)"}
+    t0 = time.monotonic()
+    try:
+        out = await _lmstudio_chat([{"role": "user", "content": "Ответь строго: ok"}], temperature=0.1, num_predict=20)
+        dt = time.monotonic() - t0
+        ok = bool(out.get("content"))
+        return {"configured": True, "model": LMSTUDIO_MODEL, "ok": ok, "seconds": round(dt, 1),
+                "detail": f"ответил за {dt:.1f} с" if ok else "пустой ответ"}
+    except Exception as e:
+        return {"configured": True, "model": LMSTUDIO_MODEL, "ok": False, "detail": f"ошибка: {str(e)[:120]}"}
+
+
+def reload_lmstudio_settings() -> None:
+    """LM Studio меняется с сайта без перезапуска: перечитать адрес, модель и роль."""
+    global LMSTUDIO_ENABLED, LMSTUDIO_BASE, LMSTUDIO_MODEL, LMSTUDIO_USE, _LMS_AVAIL_CACHE
+    from .. import config as _c
+    _c.refresh()
+    lms = getattr(_c.cfg.brain, "lmstudio", None)
+    LMSTUDIO_ENABLED = bool(getattr(lms, "enabled", False))
+    LMSTUDIO_BASE = (str(getattr(lms, "base_url", "") or "") or "http://127.0.0.1:1234/v1").strip().rstrip("/")
+    LMSTUDIO_MODEL = (str(getattr(lms, "model", "") or "") or "google/gemma-4-e4b").strip()
+    LMSTUDIO_USE = (str(getattr(lms, "use", "") or "") or "main").strip().lower()
+    if LMSTUDIO_USE not in ("main", "small"):
+        LMSTUDIO_USE = "main"
+    _LMS_AVAIL_CACHE = (0.0, False)
+
+
 async def small_chat(system: str, user: str, json_mode: bool = True, num_predict: int = 200) -> str:
     """Мини-задача на маленькой локальной модели: короткий контекст (2048), без инструментов, выгружается через
     small_keep_alive. Если малая модель не задана или не скачана — та же задача на основной модели."""
     messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+    if lmstudio_role() == "small" and await lmstudio_available():
+        # мини-задачи отданы LM Studio: малая модель Ollama при этом не трогается
+        try:
+            out = await _lmstudio_chat(messages, temperature=0.1, json_mode=json_mode, num_predict=num_predict)
+            SMALL_LAST.update({"at": time.time(), "task": (system[:40] + "…") if len(system) > 40 else system})
+            return out.get("content") or ""
+        except Exception as e:
+            log.warning("LM Studio не ответил (%s) — мини-задача идёт в Ollama", str(e)[:120])
     if not small_model_active():
         out = await ollama_chat(messages, temperature=0.1, json_mode=json_mode)
         return strip_think(out.get("content") or "")
@@ -334,6 +435,18 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
     sink = token_sink.get()
     stream = bool(sink) and not json_mode
     num_predict = 160 if short_mode.get() else 512
+    if lmstudio_role() == "main" and not tools and await lmstudio_available():
+        # основные ответы отданы LM Studio — Ollama при этом не трогается
+        try:
+            out = await _lmstudio_chat(messages, temperature=temperature, json_mode=json_mode, num_predict=num_predict)
+            if sink and out.get("content"):
+                try:
+                    await sink(out["content"])   # стрим кусками здесь нет — отдаём ответ целиком
+                except Exception:  # pragma: no cover
+                    pass
+            return out
+        except Exception as e:
+            log.warning("LM Studio не ответил (%s) — иду в Ollama", str(e)[:120])
     # оценка размера запроса: если не влезает в num_ctx, Ollama молча отрежет начало (системный промпт!) и оборвёт ответ.
     # Лучше один раз перезагрузить модель с окном побольше, чем получить «Сэр,» вместо ответа.
     est = (sum(len(str(m.get("content") or "")) for m in messages) + (len(json.dumps(tools, ensure_ascii=False)) if tools else 0)) // 3 + 200
