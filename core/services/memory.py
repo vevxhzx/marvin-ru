@@ -74,6 +74,12 @@ PROMOTE_PROMPT = """Ниже факты о хозяине, записанные 
 "long" — это устойчивое и стоит помнить дальше; "archive" — было актуально пару дней и уже нет. Ответ строго JSON:
 {"keep": [<id>, ...]} — id тех, что оставить надолго. Остальные уйдут в архив."""
 
+IMPORTANCE_PROMPT = """Ниже — то, что ассистент знает о хозяине (id и текст). Выбери самое важное и устойчивое —
+то, что определяет человека и общение с ним годами: характер и стиль общения, вкусы и предпочтения,
+семья и близкие, здоровье, работа и устойчивые привычки. НЕ выбирай разовые эпизоды, временные
+состояния («простудился», «делаю ролик для X») и мелкий быт. Ответ строго JSON: {{"core": [<id>, ...]}} —
+id самых важных, не больше {n}. Если такого нет — {{"core": []}}."""
+
 
 # ---------------------------------------------------------------- настройки
 def enabled() -> bool:
@@ -894,9 +900,46 @@ async def nightly() -> dict:
                     archived += 1; faded += 1; stamp_archived.append(f.id)
     for fid in dict.fromkeys(stamp_archived):   # без дублей: факт мог попасть в два прохода
         set_fact_meta(fid, archived=now)
+    # разбор важности — внутри ночи, отдельной кнопки нет; счёт в логе, наружу не тянем
+    await review_importance()
     await rebuild_portrait()
     await rebuild_style()
     return {"promoted": promoted, "archived": archived}
+
+
+async def review_importance() -> int:
+    """Ночной разбор важности: нейронка смотрит живые факты и помечает ядром самые
+    устойчивые (предпочтения, люди, здоровье) — такие не гаснут никогда. Только
+    добавляет (свободные слоты до CORE_MAX), существующее ядро не трогает."""
+    if not enabled():
+        return 0
+    with session() as s:
+        core_now = [f for f in s.exec(select(Fact).where(Fact.layer != "archive", Fact.core == True)).all()]  # noqa: E712
+        cands = list(s.exec(select(Fact).where(Fact.layer != "archive", Fact.core == False)  # noqa: E712
+                            .order_by(Fact.created_at)).all())
+    free = CORE_MAX - len(core_now)
+    if free <= 0 or not cands:
+        return 0
+    lines = [f"[{f.id}] {f.text} ({f.category})" for f in cands[:60]]
+    d, via = await _ask(IMPORTANCE_PROMPT.format(n=min(free, 6)), "\n".join(lines))
+    want: list[int] = []
+    for x in (d.get("core") if isinstance(d, dict) else None) or []:
+        try:
+            want.append(int(str(x).strip("[] ")))
+        except ValueError:
+            continue
+    by_id = {f.id: f for f in cands}
+    n = 0
+    with session() as s:
+        for fid in want[:free]:
+            row = s.get(Fact, fid)
+            if row and not row.core and row.layer != "archive" and row.id in by_id:
+                row.core, row.updated_at = True, datetime.now()
+                s.add(row); n += 1
+        s.commit()
+    if n:
+        log.info("важность: ядром помечено %d фактов (%s)", n, via)
+    return n
 
 
 def stats() -> dict:
