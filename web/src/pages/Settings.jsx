@@ -222,7 +222,7 @@ export default function Settings({ health }) {
               action={!!status.ollama.small_model && <button className="btn-ghost btn-sm" onClick={() => { setSmall({ pending: true }); api.post('/api/status/small').then(setSmall).catch((e) => setSmall({ ok: false, detail: e.message })) }}>{small?.pending ? t('st.checking') : t('st.check')}</button>} />
             {status.lmstudio && (
               <StatusCard ok={status.lmstudio.enabled && status.lmstudio.ok && lms?.ok !== false} warn={!status.lmstudio.enabled || (status.lmstudio.enabled && !status.lmstudio.ok)} title="LM Studio"
-                line1={!status.lmstudio.enabled ? t('st.off_short') : lms?.pending ? t('st.checking') : lms ? (lms.ok ? t('st.model_answers', { m: status.lmstudio.model }) : t('st.not_responding')) : status.lmstudio.ok ? status.lmstudio.model : t('st.not_responding')}
+                line1={!status.lmstudio.enabled ? t('st.off_short') : lms?.pending ? t('st.checking') : lms ? (lms.ok ? t('st.model_answers', { m: status.lmstudio.active_model || status.lmstudio.model }) : t('st.not_responding')) : status.lmstudio.ok ? (status.lmstudio.active_model || status.lmstudio.model) : t('st.not_responding')}
                 line2={lms && !lms.pending ? (lms.detail + (lms.hint ? t('st.dot_join', { x: lms.hint }) : '')) : (LMS_ROLE[lang] || LMS_ROLE.ru)[status.lmstudio.enabled ? status.lmstudio.use || 'main' : 'off']}
                 action={status.lmstudio.enabled && <button className="btn-ghost btn-sm" onClick={() => { setLms({ pending: true }); api.post('/api/status/lmstudio').then(setLms).catch((e) => setLms({ ok: false, detail: e.message })) }}>{lms?.pending ? t('st.checking') : t('st.check')}</button>} />
             )}

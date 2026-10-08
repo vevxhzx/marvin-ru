@@ -28,11 +28,13 @@ class _Resp:
 class _FakeClient:
     """Заглушка httpx.AsyncClient: пишет, куда стучались, отвечает чем сказали."""
 
-    def __init__(self, seen, openai_text="Готово.", ollama_text="ОТВЕТ ОЛЛАМЫ", fail_openai=False):
+    def __init__(self, seen, openai_text="Готово.", ollama_text="ОТВЕТ ОЛЛАМЫ", fail_openai=False,
+                 models=None):
         self._seen = seen
         self._openai_text = openai_text
         self._ollama_text = ollama_text
         self._fail = fail_openai
+        self._models = [{"id": m} for m in (models if models is not None else ["google/gemma-4-e4b"])]
 
     async def __aenter__(self):
         return self
@@ -42,13 +44,17 @@ class _FakeClient:
 
     async def get(self, url, **kw):
         self._seen.append(("GET", url))
-        return _Resp({"data": [{"id": "google/gemma-4-e4b"}]})
+        return _Resp({"data": self._models})
 
     async def post(self, url, json=None, **kw):
         self._seen.append(("POST", url, json))
         if url.endswith("/chat/completions"):
             if self._fail:
                 raise ConnectionError("LM Studio молчит")
+            if (json or {}).get("tools"):
+                return _Resp({"choices": [{"message": {"content": "", "tool_calls": [
+                    {"id": "call_0", "type": "function",
+                     "function": {"name": "agenda", "arguments": '{"days": 1}'}}]}}]})
             return _Resp({"choices": [{"message": {"content": self._openai_text}}]})
         return _Resp({"message": {"content": self._ollama_text}})
 
@@ -66,6 +72,7 @@ def _lm_on(monkeypatch, use="main", client=None, seen=None):
     monkeypatch.setattr(llm, "LMSTUDIO_USE", use)
     monkeypatch.setattr(llm, "lmstudio_available", lambda force=False: asyncio.sleep(0, result=True))
     monkeypatch.setattr(llm, "_local_client", lambda timeout: client)
+    monkeypatch.setattr(llm, "_LMS_MODELS_CACHE", (0.0, []))
     return llm, seen
 
 
@@ -107,17 +114,20 @@ def test_main_answers_go_to_lmstudio(monkeypatch):
     assert len(posts) == 1 and posts[0][1].endswith("/chat/completions")
     body = posts[0][2]
     assert body["model"] == "google/gemma-4-e4b" and body["messages"][0]["content"] == "привет"
+    assert body.get("reasoning_effort") == "none"   # думы выключены: иначе ответ уходит в reasoning_content
 
 
-def test_tools_stay_on_ollama(monkeypatch):
-    """Вызовы функций — только через Ollama: LM Studio их не получает."""
+def test_tools_go_to_lmstudio_with_mapping(monkeypatch):
+    """use=main: вызовы функций — в LM Studio OpenAI-форматом, ответ маппится обратно."""
     llm, seen = _lm_on(monkeypatch, use="main")
     out = asyncio.run(llm.ollama_chat(
         [{"role": "user", "content": "потрать"}],
         tools=[{"type": "function", "function": {"name": "add_expense"}}]))
-    assert out["content"] == "ОТВЕТ ОЛЛАМЫ"
-    urls = [s[1] for s in seen if s[0] == "POST"]
-    assert urls and all(u.endswith("/api/chat") for u in urls)
+    assert out["tool_calls"] == [{"name": "agenda", "arguments": {"days": 1}}]
+    posts = [s for s in seen if s[0] == "POST"]
+    assert len(posts) == 1 and posts[0][1].endswith("/chat/completions")
+    body = posts[0][2]
+    assert body["tool_choice"] == "auto" and body["tools"][0]["function"]["name"] == "add_expense"
 
 
 def test_lmstudio_failure_falls_back_to_ollama(monkeypatch):
@@ -167,3 +177,85 @@ def test_base_url_normalized(raw, want):
     from core.brain import llm
 
     assert llm._norm_lms_base(raw) == want
+
+
+def test_uses_loaded_model_when_configured_missing(monkeypatch):
+    """Название сверять не нужно: отвечает уже загруженная модель."""
+    from core.brain import llm
+
+    seen: list = []
+    _lm_on(monkeypatch, use="main", client=_FakeClient(seen, models=["qwen/qwen3.5-9b"]), seen=seen)
+    out = asyncio.run(llm.ollama_chat([{"role": "user", "content": "привет"}]))
+    assert out["content"] == "Готово."
+    body = [s for s in seen if s[0] == "POST"][0][2]
+    assert body["model"] == "qwen/qwen3.5-9b"
+
+
+def test_tools_fallback_to_ollama_on_failure(monkeypatch):
+    """LM Studio упал посреди инструментов — зовём Ollama, а не ошибку."""
+    from core.brain import llm
+
+    seen: list = []
+    llm, seen = _lm_on(monkeypatch, use="main", client=_FakeClient(seen, fail_openai=True), seen=seen)
+    out = asyncio.run(llm.ollama_chat(
+        [{"role": "user", "content": "потрать"}],
+        tools=[{"type": "function", "function": {"name": "add_expense"}}]))
+    assert out["content"] == "ОТВЕТ ОЛЛАМЫ"
+
+
+def test_ollama_fallback_does_not_pin_memory(monkeypatch):
+    """Запасной путь в Ollama при основном на LM Studio — разовый (keep_alive=0), иначе
+    модель снова сядет в память на 2 часа и война за видеопамять вернётся."""
+    from core.brain import llm
+
+    seen: list = []
+    llm, seen = _lm_on(monkeypatch, use="main", client=_FakeClient(seen, fail_openai=True), seen=seen)
+    asyncio.run(llm.ollama_chat([{"role": "user", "content": "привет"}]))
+    bodies = [s[2] for s in seen if s[0] == "POST" and s[1].endswith("/api/chat")]
+    assert bodies and all(b.get("keep_alive") == "0" for b in bodies)
+
+
+def test_warm_skipped_when_lmstudio_main(monkeypatch):
+    """Прогрев не грузит модель Ollama заранее, если основное отвечает LM Studio."""
+    from core.brain import llm
+
+    seen: list = []
+    _lm_on(monkeypatch, use="main", seen=seen)
+    assert asyncio.run(llm.warm_ollama()) is False
+    assert not [s for s in seen if s[0] == "POST"]
+
+
+def test_evict_unloads_ollama_main():
+    """Выгрузка бьёт точно в основную модель Ollama с keep_alive=0 (малую не трогаем)."""
+    from core.brain import llm
+
+    seen: list = []
+
+    class _SyncResp:
+        status_code = 200
+
+    class _SyncClient:
+        def __init__(self, *a, **k):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def post(self, url, json=None, **kw):
+            seen.append((url, json))
+            return _SyncResp()
+
+    import httpx
+    real = httpx.Client
+    httpx.Client = _SyncClient
+    try:
+        assert llm.evict_ollama_main() is True
+    finally:
+        httpx.Client = real
+    assert len(seen) == 1
+    url, body = seen[0]
+    assert url == f"{llm.OLLAMA_URL}/api/generate"
+    assert body["model"] == llm.OLLAMA_MODEL and body["keep_alive"] == 0

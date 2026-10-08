@@ -216,6 +216,10 @@ def settings_put(p: SettingsIn):
     if any(k.startswith("brain.lmstudio.") for k in changed):
         from ...brain import llm
         llm.reload_lmstudio_settings()
+        if llm.lmstudio_role() == "main":
+            # основное уехало на LM Studio — выгружаем модель Ollama сразу, иначе две
+            # большие модели сидят в памяти одновременно и скорость падает
+            llm.evict_ollama_main()
     needs_restart = any(k.startswith(("telegram.", "backup.")) or (k.startswith("brain.ollama") and not k.startswith("brain.ollama.small_")) for k in changed)
     return {"changed": changed, "restart": needs_restart}
 
@@ -265,7 +269,8 @@ async def status():
                    "small_model": llm.SMALL_MODEL, "small_ok": llm.small_model_active(), "small_keep_alive": llm.SMALL_KEEP_ALIVE,
                    "small_last": llm.SMALL_LAST or None},
         "lmstudio": {"enabled": llm.LMSTUDIO_ENABLED, "ok": await llm.lmstudio_available(),
-                     "model": llm.LMSTUDIO_MODEL, "use": llm.LMSTUDIO_USE, "base_url": llm.LMSTUDIO_BASE},
+                     "model": llm.LMSTUDIO_MODEL, "use": llm.LMSTUDIO_USE, "base_url": llm.LMSTUDIO_BASE,
+                     "active_model": (await llm.lmstudio_active_model() if llm.LMSTUDIO_ENABLED else None)},
         "gemini": {"enabled": llm.cloud_enabled(), "provider": llm.CLOUD_PROVIDER or "gemini", "title": llm.cloud_title(),
                    "model": (llm._cloud_model() if llm.CLOUD_PROVIDER not in ("", "gemini") else (llm._RESOLVED_MODEL or llm.GEMINI_MODEL)),
                    "auto": llm.GEMINI_AUTO, "mode": llm.MODE,
