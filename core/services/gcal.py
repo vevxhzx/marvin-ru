@@ -1,13 +1,16 @@
-"""Google Календарь — синхронизация в одну сторону: ассистент → Google.
+"""Google Календарь — двусторонняя синхронизация: ассистент → Google и обратно.
 
 Всё, что появляется в календаре ассистента (с сайта, из Telegram, голосом), зеркалится в Google Календарь,
-чтобы видеть его на телефоне/часах/в любом приложении. Обратно из Google ничего не читаем — источник правды один.
+чтобы видеть его на телефоне/часах/в любом приложении. Обратно (google.pull): созданное в Google
+появляется у ассистента, правки зеркалятся (Google главнее), удаления зеркалятся тоже.
 
 Как устроено:
   • OAuth 2.0 «Desktop app» — свой client_id/secret в config.yaml (google.client_id / google.client_secret),
     кнопка «подключить» на сайте → браузер → Google → возврат на http://localhost:8765/api/google/callback.
   • refresh_token хранится в data/google_token.json (только на вашем ПК).
   • Каждое событие: event.google_id ↔ id события в Google. Создание / изменение / удаление / повторы → push.
+  • Pull идёт напрямую в базу (мимо calendar.add/update — те сами пушат в Google, было бы эхо).
+    Галочки и напоминания pull не трогает: done и reminded живут только локально.
   • Сеть недоступна — операция ставится в очередь (таблица settings: gcal_queue) и повторяется планировщиком.
   • Работает на чистом httpx: никакого тяжёлого google-api-python-client.
 
@@ -19,6 +22,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import secrets
 import time
 from datetime import datetime, timedelta
@@ -115,10 +119,17 @@ def status() -> dict:
     with session() as s:
         total = len(s.exec(select(Event)).all())
         synced = len(s.exec(select(Event).where(Event.google_id != None)).all())  # noqa: E711
-    return {"configured": bool(client_id() and client_secret()), "enabled": enabled(), "connected": connected(),
+    return {"configured": bool(client_id() and client_secret()), "enabled": enabled(), "pull": pull_enabled(),
+            "connected": connected(),
             "email": tok.get("email"), "calendar_id": calendar_id(), "redirect_uri": redirect_uri(),
-            "last_error": _state["last_error"], "last_sync": _state["last_sync"],
+            "last_error": _state["last_error"], "last_sync": _state["last_sync"], "last_pull": _state.get("last_pull"),
             "queued": len(_queue()), "synced": synced, "total": total, "proxy": bool(proxy())}
+
+
+def pull_enabled() -> bool:
+    """Забор из Google включён: вкл + подключено + google.pull (по умолчанию выкл — только отправка)."""
+    g = _g()
+    return bool(enabled() and connected() and getattr(g, "pull", False))
 
 
 # ---------------------------------------------------------------- OAuth
@@ -313,6 +324,127 @@ async def sync_all(days_back: int = 1) -> dict:
         elif _state["last_error"]:
             break
     return {"ok": True, "pushed": ok, "total": len(ids), "error": _state["last_error"]}
+
+
+# ---------------------------------------------------------------- pull (Google → ассистент)
+_GDAY = ("MO", "TU", "WE", "TH", "FR", "SA", "SU")
+
+
+def _parse_when(raw: dict | None, all_day_end: bool = False) -> datetime | None:
+    """dateTime с зоной → локальное наивное (как хранит БД); date → полночь (концу — 23:59)."""
+    if not raw:
+        return None
+    if raw.get("dateTime"):
+        dt = datetime.fromisoformat(str(raw["dateTime"]))
+        if dt.tzinfo is not None:
+            dt = dt.astimezone().replace(tzinfo=None)
+        return dt.replace(microsecond=0)
+    if raw.get("date"):
+        d = datetime.fromisoformat(str(raw["date"]))
+        return d.replace(hour=23, minute=59) if all_day_end else d.replace(hour=0, minute=0)
+    return None
+
+
+def _parse_rrule(recurrence: list | None) -> tuple[str, str, datetime | None]:
+    """RRULE из Google → (repeat, repeat_days, repeat_until). Не умеем (HOURLY…) — одиночное."""
+    rule = next((r for r in (recurrence or []) if str(r).startswith("RRULE:")), "")
+    m = re.search(r"FREQ=(DAILY|WEEKLY|MONTHLY|YEARLY)", rule)
+    if not m:
+        return "", "", None
+    rep = {"DAILY": "daily", "WEEKLY": "weekly", "MONTHLY": "monthly", "YEARLY": "yearly"}[m.group(1)]
+    days = ""
+    if rep == "weekly":
+        byday = re.search(r"BYDAY=([A-Z,]+)", rule)
+        if byday:
+            days = ",".join(str(_GDAY.index(d)) for d in byday.group(1).split(",") if d in _GDAY)
+    until = None
+    mu = re.search(r"UNTIL=(\d{8}T\d{6})Z?", rule)
+    if mu:
+        try:
+            until = datetime.strptime(mu.group(1)[:15], "%Y%m%dT%H%M%S")
+        except ValueError:
+            until = None
+    return rep, days, until
+
+
+async def pull() -> dict:
+    """Забрать события из Google: новые → создать, изменённые → обновить (Google главнее),
+    удалённые там → удалить и у себя. Пишем напрямую в базу (мимо calendar.add/update —
+    те сами пушат в Google, было бы эхо). Галочки и напоминания не трогаем."""
+    from ..db import remember
+    if not pull_enabled():
+        return {"ok": False, "error": "забор выключен (google.pull)"}
+    now = datetime.now()
+    params = {"timeMin": (now - timedelta(days=7)).isoformat() + "Z",
+              "timeMax": (now + timedelta(days=90)).isoformat() + "Z",
+              "singleEvents": "false", "showDeleted": "true", "maxResults": "250", "orderBy": "updated"}
+    try:
+        tok = await _token()
+        async with _client(30) as c:
+            r = await c.get(f"{API}/calendars/{calendar_id()}/events", headers={"Authorization": f"Bearer {tok}"},
+                            params=params)
+            if r.status_code >= 300:
+                raise RuntimeError(f"{r.status_code} {r.text[:200]}")
+            items = r.json().get("items", [])
+    except Exception as e:
+        _state["last_error"] = str(e)[:300]
+        log.warning("Google Календарь: не забрал события: %s", e)
+        return {"ok": False, "error": str(e)[:200]}
+    with session() as s:
+        by_gid = {e.google_id: e for e in s.exec(select(Event).where(Event.google_id != None)).all()}  # noqa: E711
+    created = updated = deleted = 0
+    with session() as s:
+        for it in items:
+            gid = it.get("id")
+            if not gid:
+                continue
+            if it.get("status") == "cancelled":
+                ev = by_gid.get(gid)
+                if ev:
+                    remember(s, "event", f"Удалено в Google — снёс и у себя: «{ev.title}» {ev.start:%d.%m %H:%M}", "event", ev.id, "gcal")
+                    s.delete(s.get(Event, ev.id))
+                    s.commit()
+                    deleted += 1
+                continue
+            title = (it.get("summary") or "Без названия").strip()
+            start = _parse_when(it.get("start"))
+            if not start:
+                continue
+            end = _parse_when(it.get("end"), all_day_end=True) or (start + timedelta(hours=1))
+            location = (it.get("location") or "").strip() or None
+            notes = (it.get("description") or "").strip() or None
+            rep, days, until = _parse_rrule(it.get("recurrence"))
+            ev = by_gid.get(gid)
+            if not ev:
+                ev = Event(title=title, start=start, end=end, location=location, notes=notes,
+                           remind_minutes=30, source="gcal", google_id=gid,
+                           repeat=rep, repeat_days=days, repeat_until=until)
+                s.add(ev); s.commit(); s.refresh(ev)
+                remember(s, "event", f"Из Google: «{title}» {start:%d.%m %H:%M}", "event", ev.id, "gcal")
+                s.commit()
+                created += 1
+                continue
+            row = s.get(Event, ev.id)
+            if not row:
+                continue
+            same = ((row.title or "").lstrip("✓ ") == title and row.start == start and row.end == end
+                    and (row.location or None) == location and (row.notes or None) == notes
+                    and row.repeat == rep and row.repeat_days == days and row.repeat_until == until)
+            if same:
+                continue
+            moved = row.start != start
+            row.title, row.start, row.end = title, start, end
+            row.location, row.notes, row.repeat, row.repeat_days, row.repeat_until = location, notes, rep, days, until
+            if moved:
+                row.reminded = False   # время уехало — напомнить заново
+            s.add(row)
+            remember(s, "event", f"Google обновил: «{title}» {start:%d.%m %H:%M}", "event", row.id, "gcal")
+            s.commit()
+            updated += 1
+    _state["last_error"], _state["last_pull"] = None, now.isoformat()
+    log.info("Google Календарь: забрал — новых %d, обновлено %d, удалено %d", created, updated, deleted)
+    return {"ok": True, "created": created, "updated": updated, "deleted": deleted,
+            "total": len(items)}
 
 
 # ---------------------------------------------------------------- хуки из calendar.py (не блокируют основной поток)

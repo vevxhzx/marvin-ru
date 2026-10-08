@@ -811,6 +811,17 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         except Exception as e:  # pragma: no cover
             log.warning("gcal flush failed: %s", e)
 
+    async def gcal_pull():
+        import importlib
+        gcal = importlib.import_module("core.services.gcal")
+        try:
+            res = await gcal.pull()
+            if res.get("ok") and (res.get("created") or res.get("updated") or res.get("deleted")):
+                log.info("Google Календарь: забрал — новых %d, обновлено %d, удалено %d",
+                         res.get("created"), res.get("updated"), res.get("deleted"))
+        except Exception as e:  # pragma: no cover
+            log.warning("gcal pull failed: %s", e)
+
     async def recurring():
         for r in finance.process_due_recurring():
             ping("recurring")
@@ -1194,6 +1205,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     add(compact_job, CronTrigger(day_of_week="sun", hour=4, minute=30), "db_compact")
     add(proactive_tick, "interval", "proactive", hours=1, next_run_time=_soon(300))
     add(gcal_flush, "interval", "gcal_flush", minutes=3, next_run_time=_soon(60))
+    add(gcal_pull, "interval", "gcal_pull", minutes=15, next_run_time=_soon(120))
     md = cfg.telegram.morning_digest
     if md:
         h, m = md.split(":")

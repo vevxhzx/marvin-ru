@@ -57,6 +57,7 @@ REMOTE_WRITE_401 = [
     ("POST", "/api/pc/launch", {"restart": False}),
     ("POST", "/api/game", {"on": True}),
     ("POST", "/api/google/disconnect", None),
+    ("POST", "/api/google/pull", None),
     ("POST", "/api/finance/transactions", {"amount": 100}),
     ("POST", "/api/orders", {"title": "x"}),
     ("POST", "/api/undo", None),

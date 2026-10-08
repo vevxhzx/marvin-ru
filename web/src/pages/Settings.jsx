@@ -855,8 +855,25 @@ function VoicePicker({ show }) {
 }
 
 
+/* Забор из Google: подписи кнопки и итога — локальная пара ru/en, новых ключей в i18n.js не заводим. */
+const GCAL_PULL = {
+  ru: {
+    pull_btn: 'забрать из Google', // i18n-raw
+    pull_hint: 'Созданное в Google появится у Марвина (автоматом — каждые 15 минут)', // i18n-raw
+    pull_fail: 'не забрал — смотри ошибку в статусе', // i18n-raw
+    pulled: (r) => `из Google: новых ${r.created || 0}, обновлено ${r.updated || 0}, удалено ${r.deleted || 0}`, // i18n-raw
+  },
+  en: {
+    pull_btn: 'pull from Google',
+    pull_hint: 'Events created in Google appear here (auto — every 15 minutes)',
+    pull_fail: 'pull failed — see status for the error',
+    pulled: (r) => `from Google: ${r.created || 0} new, ${r.updated || 0} updated, ${r.deleted || 0} deleted`,
+  },
+}
+
 function GoogleConnect({ show, dirty }) {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
+  const L = GCAL_PULL[lang] || GCAL_PULL.ru
   const [st, setSt] = useState(null)
   const [busy, setBusy] = useState(false)
   const [askOff, setAskOff] = useState(false) // подтверждение вместо нативного confirm()
@@ -876,6 +893,7 @@ function GoogleConnect({ show, dirty }) {
     } catch (e) { show.err(e); setBusy(false) }
   }
   const sync = () => { setBusy(true); api.post('/api/google/sync').then((r) => { show(t('st.pushed_out', { pushed: r.pushed, total: r.total }) + (r.error ? t('st.err_suffix5') + r.error : '')); load() }).catch(show.err).finally(() => setBusy(false)) }
+  const pull = () => { setBusy(true); api.post('/api/google/pull').then((r) => { show(r.ok ? L.pulled(r) : (r.error || L.pull_fail)); load() }).catch(show.err).finally(() => setBusy(false)) }
   const off = () => setAskOff(true)
   const doOff = () => {
     setAskOff(false)
@@ -899,6 +917,7 @@ function GoogleConnect({ show, dirty }) {
       <div className="flex items-center gap-2">
         {st.configured && !st.connected && <button className="btn-primary" disabled={busy || dirty} title={dirty ? t('st.save_settings_first') : ''} onClick={connect}>{busy ? t('st.opening_google') : t('st.connect')}</button>}
         {st.connected && <button className="btn-ghost" disabled={busy} onClick={sync}><RefreshCw size={15} /> {t('st.unload_all')}</button>}
+        {st.connected && st.pull && <button className="btn-ghost" disabled={busy} onClick={pull} title={L.pull_hint}><Download size={15} /> {L.pull_btn}</button>}
         {st.connected && <button className="btn-ghost" onClick={off}>{t('st.disconnect')}</button>}
       </div>
       <Confirm open={askOff} onClose={() => setAskOff(false)} title={t('st.gcal_off_q')}

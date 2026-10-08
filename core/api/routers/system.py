@@ -522,6 +522,15 @@ async def google_sync():
     return await gcal.sync_all(days_back=30)
 
 
+@router.post("/api/google/pull")
+async def google_pull():
+    """Ручной забор из Google (автоматом — каждые 15 минут планировщиком)."""
+    gcal = _gcal_reload()
+    if not gcal.connected():
+        raise HTTPException(400, "Google Календарь не подключён")
+    return await gcal.pull()
+
+
 @router.post("/api/google/disconnect")
 def google_disconnect():
     gcal = _gcal_reload()

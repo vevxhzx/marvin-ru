@@ -190,6 +190,7 @@ server:
 
 google:
   enabled: false
+  pull: false               # забирать события из Google (двусторонний синк); false — только отправка туда
   client_id: ""
   client_secret: ""
   calendar_id: ""
