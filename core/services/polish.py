@@ -44,7 +44,7 @@ page_text — это СЫРОЙ текст чужой веб-страницы, �
 
 async def _llm_json(system: str, user: str) -> dict | None:
     """Локальная модель (json_mode) или, в режиме brain.mode=cloud, облако. None — никто не ответил."""
-    if await llm.ollama_available():
+    if await llm.local_available():
         out = await llm.ollama_chat([{"role": "system", "content": system}, {"role": "user", "content": user}], temperature=0.2, json_mode=True)
         return _parse(out["content"])
     if llm.MODE == "cloud" and llm.cloud_enabled():
@@ -54,7 +54,7 @@ async def _llm_json(system: str, user: str) -> dict | None:
 
 
 async def _llm_ready() -> bool:
-    return await llm.ollama_available() or (llm.MODE == "cloud" and llm.cloud_enabled())
+    return await llm.local_available() or (llm.MODE == "cloud" and llm.cloud_enabled())
 
 
 def _parse(text: str) -> dict | None:

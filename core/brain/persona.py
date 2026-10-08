@@ -236,7 +236,7 @@ async def nudge(fact: dict, fallback: str) -> str:
         return await llm.cloud_chat(system, user, temperature=0.9)
 
     async def local() -> str | None:
-        if not await llm.ollama_available():
+        if not await llm.local_available():
             return None
         return await llm.small_chat(system, user, json_mode=False, num_predict=120)
 
@@ -312,7 +312,7 @@ async def opener(facts: dict, fallback: str) -> str:
         return await llm.cloud_chat(system, user, temperature=0.9)
 
     async def local() -> str | None:
-        if not await llm.ollama_available():
+        if not await llm.local_available():
             return None
         return await llm.small_chat(system, user, json_mode=False, num_predict=80)
 

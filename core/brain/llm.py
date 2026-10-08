@@ -38,15 +38,41 @@ _lms = getattr(cfg.brain, "lmstudio", None)
 
 def _norm_lms_base(raw: object) -> str:
     """Адрес LM Studio к виду под OpenAI-запросы: голый хост без пути сам
-    дополняется до /v1 (LM Studio слушает именно там), чужой путь не трогаем."""
+    дополняется до /v1 (LM Studio слушает именно там), хвосты /api и /api/v1
+    тоже чистятся в /v1. Чужой путь не трогаем."""
     from urllib.parse import urlsplit
     b = (str(raw or "") or "").strip().rstrip("/") or "http://127.0.0.1:1234/v1"
-    try:
-        if not urlsplit(b).path.strip("/"):
-            b += "/v1"
-    except Exception:
-        pass
+    low = b.lower()
+    if low.endswith("/api/v1"):
+        b = b[: -len("/api/v1")] + "/v1"
+    elif low.endswith("/api"):
+        b = b[: -len("/api")] + "/v1"
+    else:
+        try:
+            if not urlsplit(b).path.strip("/"):
+                b += "/v1"
+        except Exception:
+            pass
     return b
+
+
+_LMS_LAST_ERROR: str | None = None   # почему LM Studio не ответил в последний раз — для честных логов
+
+
+def _lms_fail(why: str) -> None:
+    global _LMS_LAST_ERROR
+    _LMS_LAST_ERROR = why
+    log.debug("LM Studio: %s", why)
+
+
+def _lms_ok() -> None:
+    global _LMS_LAST_ERROR
+    _LMS_LAST_ERROR = None
+
+
+def lms_last_error() -> str:
+    """Причина последнего сбоя LM Studio (пусто — сбоев не было)."""
+    return _LMS_LAST_ERROR or ""
 
 
 LMSTUDIO_ENABLED = bool(getattr(_lms, "enabled", False))
@@ -323,10 +349,33 @@ async def lmstudio_models(force: bool = False) -> list[str]:
             r = await c.get(f"{LMSTUDIO_BASE}/models")
             if r.status_code == 200:
                 ids = [str(d.get("id", "")) for d in (r.json().get("data") or []) if d.get("id")]
+            else:
+                _lms_fail(f"{LMSTUDIO_BASE}/models: http {r.status_code}")
     except Exception as e:
-        log.debug("lmstudio models failed: %s", e)
+        _lms_fail(_lms_why(e, LMSTUDIO_BASE))
     _LMS_MODELS_CACHE = (time.monotonic(), ids)
+    if ids:
+        _lms_ok()
     return ids
+
+
+def _lms_why(e: Exception, base: str) -> str:
+    """Человеческая причина сбоя: отказ соединения (сервер рестартует) / таймаут (модель грузится) / прочее."""
+    s = f"{type(e).__name__}: {e}".lower()
+    if "refused" in s or "connecterror" in s or "connect" in s:
+        return f"нет соединения с {base} — сервер LM Studio закрыт или перезапускается (смена модели)"
+    if "timeout" in s:
+        return f"{base} не ответил за таймаут — модель грузится или занят другим запросом"
+    return f"{base}: {str(e)[:120]}"
+
+
+async def local_available() -> bool:
+    """Есть ли хоть один локальный движок: LM Studio (если включён) или Ollama.
+    Использовать везде, где раньше спрашивали только Ollama, — иначе при основном
+    на LM Studio код думал, что локально никого нет."""
+    if LMSTUDIO_ENABLED and await lmstudio_available():
+        return True
+    return await ollama_available()
 
 
 async def lmstudio_active_model() -> str:
@@ -360,13 +409,18 @@ async def _lmstudio_chat(messages: list[dict], temperature: float = 0.3,
         payload["response_format"] = {"type": "json_object"}
     t0 = time.monotonic()
     async with _local_client(180) as c:
-        r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json=payload)
-        r.raise_for_status()
+        try:
+            r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json=payload)
+            r.raise_for_status()
+        except Exception as e:
+            _lms_fail(_lms_why(e, LMSTUDIO_BASE))
+            raise
         msg = ((r.json().get("choices") or [{}])[0].get("message") or {})
         content = msg.get("content") or ""
         if isinstance(content, list):  # content-блоки — склеиваем текст
             content = "".join(p.get("text", "") for p in content if isinstance(p, dict))
     log.info("LM Studio %s ответил за %.1f с", LMSTUDIO_MODEL, time.monotonic() - t0)
+    _lms_ok()
     return {"content": strip_think(str(content)).strip(), "tool_calls": []}
 
 
@@ -398,8 +452,12 @@ async def _lmstudio_tools_chat(messages: list[dict], tools: list[dict],
             "temperature": temperature, "max_tokens": num_predict, "reasoning_effort": "none"}
     t0 = time.monotonic()
     async with _local_client(180) as c:
-        r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json=body)
-        r.raise_for_status()
+        try:
+            r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json=body)
+            r.raise_for_status()
+        except Exception as e:
+            _lms_fail(_lms_why(e, LMSTUDIO_BASE))
+            raise
         msg = (r.json().get("choices") or [{}])[0].get("message") or {}
         calls = []
         for tc in msg.get("tool_calls") or []:
@@ -412,6 +470,7 @@ async def _lmstudio_tools_chat(messages: list[dict], tools: list[dict],
                     args = {}
             calls.append({"name": f.get("name"), "arguments": args})
     log.info("LM Studio %s: инструменты %s за %.1f с", model, "вызваны" if calls else "не вызваны", time.monotonic() - t0)
+    _lms_ok()
     return {"content": strip_think(str(msg.get("content") or "")).strip(), "tool_calls": calls}
 
 

@@ -74,8 +74,12 @@ def test_tools_kept_where_needed(text):
 
 def test_via_ollama_cuts_tools_for_chitchat(monkeypatch):
     """Сквозная: «привет» уходит модели почти без схем (ask_cloud — если облако есть)."""
-    from core.brain import agent
+    from core.brain import agent, llm
 
+    async def _up(*a, **k):
+        return True
+
+    monkeypatch.setattr(llm, "local_available", _up)
     seen: list = []
 
     async def fake_chat(messages, tools=None, **kw):
@@ -92,8 +96,12 @@ def test_via_ollama_cuts_tools_for_chitchat(monkeypatch):
 
 def test_via_ollama_keeps_tools_for_business(monkeypatch):
     """Сквозная: «покажи задачи» — полный набор, list_tasks на месте."""
-    from core.brain import agent
+    from core.brain import agent, llm
 
+    async def _up(*a, **k):
+        return True
+
+    monkeypatch.setattr(llm, "local_available", _up)
     seen: list = []
 
     async def fake_chat(messages, tools=None, **kw):

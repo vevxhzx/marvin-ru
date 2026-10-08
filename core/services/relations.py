@@ -124,7 +124,7 @@ async def _ask(text: str, cands: list[tuple[str, str]]) -> tuple[list[dict] | No
     user = "ЗАПИСЬ:\n" + text + "\n\nКАНДИДАТЫ:\n" + "\n".join(f"[{i}] {t}" for i, t in cands)
     msgs = [{"role": "system", "content": PROMPT}, {"role": "user", "content": user}]
     w = where()
-    cloud_ok, local_ok = llm.cloud_enabled(), await llm.ollama_available()
+    cloud_ok, local_ok = llm.cloud_enabled(), await llm.local_available()
 
     async def cloud():
         raw = await llm.cloud_chat(PROMPT + "\nТолько JSON, без markdown.", user) or ""

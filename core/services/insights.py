@@ -440,14 +440,14 @@ async def weekly_digest() -> str | None:
     from . import pulse
     tail = "".join("\n" + x for x in pulse.weekly_block())   # цифры фриланса — отдельными строками, модели не доверяем их пересказывать
     root = f"✨ **ИТОГИ НЕДЕЛИ** · по {datetime.now():%d.%m}"
-    if not await llm.ollama_available() and llm.MODE == "cloud" and llm.cloud_enabled():
+    if not await llm.local_available() and llm.MODE == "cloud" and llm.cloud_enabled():
         try:
             txt = await llm.cloud_chat(_weekly_prompt(), "\n".join(data))
             if txt:
                 return root + "\n" + txt.strip() + tail
         except Exception as e:
             log.warning("weekly digest (cloud) failed: %s", e)
-    if not await llm.ollama_available():
+    if not await llm.local_available():
         # без LLM — простой вариант
         tags: dict[str, int] = defaultdict(int)
         for n in notes:

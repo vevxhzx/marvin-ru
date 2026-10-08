@@ -57,7 +57,28 @@ class _SecretsFilter(logging.Filter):
 def _log_handler(h: logging.Handler) -> logging.Handler:
     h.setFormatter(logging.Formatter(_LOG_FMT, datefmt="%H:%M:%S"))
     h.addFilter(_SecretsFilter())
+    # фильтр шума — на хендлерах, а не на логгере uvicorn.access: dictConfig uvicorn
+    # при старте сервера сносит фильтры именованных логгеров, а корневые хендлеры не трогает
+    h.addFilter(_NoiseFilter())
     return h
+
+
+_NOISY_PATHS = ("/api/health", "/api/ping", "/api/pc/state", "/api/orders/timer")
+_ACCESS_RX = re.compile(r'"[A-Z]+ (\S+?)(?:\?\S*)? HTTP/[\d.]+" (\d{3})')
+
+
+class _NoiseFilter(logging.Filter):
+    """Тишина в консоли: успешные опросы (здоровье, пульс ПК, таймер) идут каждую секунду —
+    видеть их незачем. Ошибки (4xx/5xx) и остальные запросы проходят как раньше."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            m = _ACCESS_RX.search(record.getMessage())
+            if m and m.group(2).startswith(("2", "3")):
+                return not any(m.group(1) == p or m.group(1).startswith(p + "?") or m.group(1).startswith(p + "/") for p in _NOISY_PATHS)
+        except Exception:  # pragma: no cover — фильтр не должен ломать запись лога
+            pass
+        return True
 
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -135,15 +156,20 @@ async def main(with_tg: bool) -> None:
              f" · копия {label}" if label else "")
 
     from core.brain import llm
-    if await llm.ollama_available():
+    # провайдер теперь может быть не только Ollama: сначала спрашиваем выбранный движок
+    if llm.lmstudio_role() and await llm.lmstudio_available():
+        log.info("Мозг: LM Studio онлайн (%s), режим %s — основное отвечает он; Ollama заранее не гружу",
+                 await llm.lmstudio_active_model(), llm.MODE)
+    elif await llm.ollama_available():
         log.info("Мозг: Ollama онлайн (%s), режим %s — прогреваю модель (keep_alive %s)", llm.OLLAMA_MODEL, llm.MODE, llm.OLLAMA_KEEP_ALIVE)
         asyncio.get_event_loop().create_task(llm.warm_ollama())
     elif llm.MODE == "cloud" and llm.cloud_enabled():
-        log.info("Мозг: только облако (%s) — инструменты, заметки и память через него; Ollama не нужна.", llm.cloud_title())
+        log.info("Мозг: только облако (%s) — инструменты, заметки и память через него; локальные движки не нужны.", llm.cloud_title())
     else:
-        log.warning("Мозг: Ollama не отвечает — пока работают только команды-шаблоны.")
+        log.warning("Мозг: локально никто не отвечает (ни LM Studio, ни Ollama) — пока работают только команды-шаблоны.")
         log.warning("Диагностика: %s", await llm.ollama_diagnose())
-        log.warning("Как только Ollama поднимется, ассистент подхватит её сам, перезапуск не нужен.")
+        log.warning("LM Studio: %s", llm.lms_last_error() or "проверьте сервер и загруженную модель")
+        log.warning("Как только движок поднимется, ассистент подхватит его сам, перезапуск не нужен.")
     try:
         from core.voice import stt, tts
         if os.getenv("ASSISTANT_NO_VOICE_WARMUP") or os.getenv("JARVIS_NO_VOICE_WARMUP"):

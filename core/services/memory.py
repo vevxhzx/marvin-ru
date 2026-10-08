@@ -161,7 +161,7 @@ async def _ask(system: str, user: str) -> tuple[dict | None, str]:
     """Маршрут cloud / auto / local (как у сортировщика и связей). Текст в облако проходит анонимайзер в cloud_chat."""
     msgs = [{"role": "system", "content": system}, {"role": "user", "content": user}]
     w = where()
-    cloud_ok, local_ok = llm.cloud_enabled(), await llm.ollama_available()
+    cloud_ok, local_ok = llm.cloud_enabled(), await llm.local_available()
 
     async def cloud():
         return _parse(await llm.cloud_chat(system + "\nТолько JSON, без markdown.", user) or ""), "cloud"
@@ -740,7 +740,7 @@ async def rebuild_portrait(force: bool = False) -> str | None:
         return get_setting(PORTRAIT_KEY, "")
     user = "\n".join(f"— {f.text}" for f in facts)
     w = where()
-    cloud_ok, local_ok = llm.cloud_enabled(), await llm.ollama_available()
+    cloud_ok, local_ok = llm.cloud_enabled(), await llm.local_available()
     text = None
     order = []
     if w == "cloud":
@@ -789,7 +789,7 @@ async def rebuild_style(force: bool = False) -> str | None:
         return get_setting(STYLE_KEY, "")
     user = "\n".join(lines)
     w = where()
-    cloud_ok, local_ok = llm.cloud_enabled(), await llm.ollama_available()
+    cloud_ok, local_ok = llm.cloud_enabled(), await llm.local_available()
     order = ((["cloud"] if cloud_ok else []) + (["local"] if local_ok else [])) if w == "cloud" else \
             ((["local"] if local_ok else []) + (["cloud"] if cloud_ok else [])) if w == "auto" else (["local"] if local_ok else [])
     text = None

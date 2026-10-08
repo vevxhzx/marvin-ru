@@ -200,7 +200,7 @@ async def judge(text: str, allowed: tuple[str, ...] = KINDS) -> tuple[str, float
     text = _norm(text)
     user = f"Фраза: «{llm._hide_secrets(text)}»" + (f"\nВыбирай только из: {', '.join(allowed)}." if allowed != KINDS else "")
     w = where()
-    cloud_ok, local_ok = llm.cloud_enabled(), await llm.ollama_available()
+    cloud_ok, local_ok = llm.cloud_enabled(), await llm.local_available()
 
     async def local():
         return _parse(await llm.small_chat(PROMPT, user, json_mode=True, num_predict=60)), ("small" if llm.small_model_active() else "ollama")

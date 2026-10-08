@@ -1793,7 +1793,7 @@ async def _turn_context(text: str, with_lessons: bool = True) -> tuple[str, str]
 
 async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply | None:
     cloud_tools = _cloud_tools_mode()
-    if not cloud_tools and (llm.MODE == "cloud" or not await llm.ollama_available()):
+    if not cloud_tools and (llm.MODE == "cloud" or not await llm.local_available()):
         return None
     via = "gemini" if cloud_tools else "ollama"
     if not with_tools:
@@ -2503,7 +2503,7 @@ async def _handle(text: str, channel: str) -> Reply:
             log.info("[%s] СПИСОК → сортировщик: %r", channel, text[:60])
             r = await sorter.sort(text, channel, CONFIRM_AMOUNT)
             log.info("[%s] сортировщик %s за %.1f с", channel, "разобрал" if r else "не справился — обычный путь", time.monotonic() - t0)
-            if r is None and sorter.HARD_SPLIT_RX.search(text) and not llm.cloud_enabled() and not await llm.ollama_available():
+            if r is None and sorter.HARD_SPLIT_RX.search(text) and not llm.cloud_enabled() and not await llm.local_available():
                 # многострочный список, а разбирать некому — честно сказать, а не хватать первое время как одно событие
                 r = Reply("Вижу список из нескольких пунктов, но сейчас нет ни локальной модели, ни облака, чтобы его разобрать. "
                           "Включите Ollama или ключ облака в настройках — или пришлите пункты по одному.", [], "rules")
@@ -2541,7 +2541,8 @@ async def _handle(text: str, channel: str) -> Reply:
             (f"ЛОКАЛЬНО: LM Studio ({llm.LMSTUDIO_MODEL})" if _to_lms else f"ЛОКАЛЬНО: Ollama ({llm.OLLAMA_MODEL})")
         log.info("[%s] %s: %r", channel, who, text[:60])
         r = await via_ollama(text, channel, with_tools=not cloud_tried)
-        log.info("[%s] %s %s за %.1f с", channel, who, "ответил" if r else "недоступен", time.monotonic() - t1)
+        why = "" if r else (f": {llm.lms_last_error()}" if "LM Studio" in who and llm.lms_last_error() else "")
+        log.info("[%s] %s %s%s за %.1f с", channel, who, "ответил" if r else "недоступен", why, time.monotonic() - t1)
     if r is None:
         # моделей нет (Ollama спит после игры/сна ПК), а вопрос — о своих данных: инструмент отвечает и без модели
         forced = _forced_tool(text)

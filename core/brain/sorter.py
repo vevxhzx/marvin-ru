@@ -138,7 +138,7 @@ async def _ask_llm(text: str) -> tuple[list[dict] | None, str]:
     w = where()
     raw, via = "", "none"
     cloud_ok = llm.cloud_enabled()
-    local_ok = await llm.ollama_available()
+    local_ok = await llm.local_available()
     if w == "cloud" and cloud_ok:
         raw = await llm.cloud_chat(PROMPT + "\nТолько JSON, без markdown.", user) or ""
         via = "gemini"

@@ -115,8 +115,12 @@ def test_size_win_on_typical_phrases():
 
 def test_via_ollama_uses_router_for_business(monkeypatch):
     """Сквозная: «потратил 450 на такси» — компактный подбор с add_expense, не 46 схем."""
-    from core.brain import agent
+    from core.brain import agent, llm
 
+    async def _up(*a, **k):
+        return True
+
+    monkeypatch.setattr(llm, "local_available", _up)
     seen: list = []
 
     async def fake_chat(messages, tools=None, **kw):

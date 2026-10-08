@@ -550,7 +550,7 @@ async def _llm_paragraph(day: str, track: str) -> dict | None:
     try:
         from ..brain import llm
         raw = None
-        if await llm.ollama_available():
+        if await llm.local_available():
             out = await llm.ollama_chat([{"role": "system", "content": system}, {"role": "user", "content": user}],
                                        temperature=0.4, json_mode=True)
             raw = out.get("content") or ""
