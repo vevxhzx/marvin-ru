@@ -27,13 +27,21 @@ async def diagnose() -> dict:
     def add(level: str, what: str, fix: str = ""):
         items.append({"level": level, "what": what, "fix": fix})
 
-    # мозг
-    ollama = await llm.ollama_available(force=True)
-    if ollama:
-        add("ok", f"локальная модель {llm.OLLAMA_MODEL} на месте")
+    # мозг: отвечает выбранный движок — всё хорошо; иначе честно какой именно лежит
+    lms_role = llm.lmstudio_role()
+    lms_up = bool(lms_role) and await llm.lmstudio_available()
+    if lms_up:
+        add("ok", f"локально отвечает {await llm.lmstudio_active_model()} (LM Studio)")
     else:
-        diag = await llm.ollama_diagnose()
-        add("bad", "Ollama не отвечает", diag or "запусти Ollama (иконка в трее) или start.bat заново")
+        if lms_role:
+            add("warn", f"LM Studio не отвечает ({llm.lms_last_error() or 'сервер закрыт или модель не загружена'})",
+                "запустите сервер в LM Studio; пока отвечаю через запасной путь")
+        ollama = await llm.ollama_available(force=True)
+        if ollama:
+            add("ok", f"локальная модель {llm.OLLAMA_MODEL} на месте")
+        else:
+            diag = await llm.ollama_diagnose()
+            add("bad", "Ollama не отвечает", diag or "запусти Ollama (иконка в трее) или start.bat заново")
     if llm.cloud_enabled():
         if llm.LAST_CLOUD_ERROR:
             add("warn", f"облако ({llm.cloud_title()}): последний сбой — {llm.LAST_CLOUD_ERROR[:120]}",
@@ -42,7 +50,7 @@ async def diagnose() -> dict:
             add("ok", f"облако {llm.cloud_title()} подключено")
     elif llm.MODE != "local":
         add("warn", "облако не настроено — работает только локальная модель", "brain.cloud.key в config.yaml, если нужно")
-    if llm.SMALL_MODEL and not llm.small_model_active():
+    if llm.SMALL_MODEL and not llm.small_model_active() and not llm.lmstudio_role():
         add("warn", f"малая модель {llm.SMALL_MODEL} не найдена в Ollama — мини-задачи идут на основную (медленнее)",
             f"ollama pull {llm.SMALL_MODEL}")
 

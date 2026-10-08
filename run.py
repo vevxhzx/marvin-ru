@@ -63,7 +63,8 @@ def _log_handler(h: logging.Handler) -> logging.Handler:
     return h
 
 
-_NOISY_PATHS = ("/api/health", "/api/ping", "/api/pc/state", "/api/orders/timer")
+_NOISY_PATHS = ("/api/health", "/api/ping", "/api/pc/state", "/api/pc/ping",
+                 "/api/orders/timer", "/api/events/stream", "/api/diagnose")
 _ACCESS_RX = re.compile(r'"[A-Z]+ (\S+?)(?:\?\S*)? HTTP/[\d.]+" (\d{3})')
 
 

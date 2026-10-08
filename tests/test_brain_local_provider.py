@@ -87,6 +87,9 @@ def test_noise_filter_quiets_polling_but_keeps_errors():
     assert f.filter(rec('127.0.0.1:1 - "GET /api/health HTTP/1.1" 200')) is False
     assert f.filter(rec('127.0.0.1:1 - "GET /api/pc/state HTTP/1.1" 200')) is False
     assert f.filter(rec('127.0.0.1:1 - "GET /api/orders/timer HTTP/1.1" 200')) is False
+    assert f.filter(rec('127.0.0.1:1 - "POST /api/pc/ping HTTP/1.1" 200')) is False
+    assert f.filter(rec('127.0.0.1:1 - "GET /api/events/stream?client=pc HTTP/1.1" 200')) is False
+    assert f.filter(rec('127.0.0.1:1 - "GET /api/diagnose HTTP/1.1" 200')) is False
     assert f.filter(rec('127.0.0.1:1 - "GET /api/health HTTP/1.1" 500')) is True
     assert f.filter(rec('127.0.0.1:1 - "GET /api/finance/summary HTTP/1.1" 200')) is True
     assert f.filter(rec("обычная строка лога")) is True

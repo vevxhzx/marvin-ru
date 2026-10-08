@@ -289,6 +289,7 @@ SYSTEM_ROUTES = [
     ("GET", "/api/tg/miniapp"),
     ("POST", "/api/game"),
     ("POST", "/api/status/small"),
+    ("POST", "/api/status/lmstudio"),
     ("POST", "/api/status/gemini"),
     ("GET", "/api/google/status"),
     ("GET", "/api/google/connect"),
