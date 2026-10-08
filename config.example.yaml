@@ -196,6 +196,13 @@ google:
   calendar_id: ""
   proxy: ""
 
+news:
+  enabled: false            # RSS-дайджест: false — ничего не качает и не присылает
+  time: ""                 # во сколько присылать (ЧЧ:ММ, например "08:00"); пусто — только вручную (/news)
+  feeds: ""                # ленты по строкам «Название | https://…/rss», например:
+                           #   Хабр | https://habr.com/ru/rss/all/all/
+                           #   Ведомости | https://www.vedomosti.ru/rss/news
+
 backup:
   enabled: true
   dir: "./data/backups"

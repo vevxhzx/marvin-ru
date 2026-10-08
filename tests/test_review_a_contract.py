@@ -297,6 +297,7 @@ SYSTEM_ROUTES = [
     ("POST", "/api/google/sync"),
     ("POST", "/api/google/pull"),
     ("POST", "/api/google/disconnect"),
+    ("GET", "/api/news"),
     ("POST", "/api/backup"),
     ("GET", "/api/backups"),
     ("POST", "/api/backups/restore"),

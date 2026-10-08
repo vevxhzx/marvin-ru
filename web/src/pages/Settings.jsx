@@ -46,6 +46,7 @@ const GROUPS = [
   ['voice', T('st.g_voice'), T('st.d_voice')],
   ['cards', T('st.g_cards'), T('st.d_cards')],
   ['google', T('st.g_gcal'), T('st.d_gcal2')],
+  ['news', 'новости', 'RSS-ленты: утром присылаю сам, вручную — /news'], // i18n-raw
   ['backup', T('st.g_backups'), T('st.d_backups')],
   ['owner', T('st.g_owner'), ''],
   ['assistant', T('st.g_assistant'), T('st.d_name')],
@@ -73,7 +74,7 @@ const CATS = [
   { id: 'ai', label: T('st.g_brain'), caps: ['st.local_brain', 'st.g_cloud'], groups: ['brain', 'brain.cloud'] },
   { id: 'voice', label: T('st.g_voice2'), caps: ['st.g_voice3', 'st.organise'], groups: ['voice', 'cards'], extra: ['organizer'] },
   { id: 'memory', label: T('st.g_data'), caps: ['st.cloud_backups2'], groups: ['backup'], extra: ['data', 'cloud'] },
-  { id: 'integrations', label: T('st.g_integrations'), caps: ['st.tg_app5', 'st.g_gcal'], groups: ['telegram', 'google'] },
+  { id: 'integrations', label: T('st.g_integrations'), caps: ['st.tg_app5', 'st.g_gcal'], groups: ['telegram', 'google', 'news'] },
   { id: 'system', label: T('st.g_system'), caps: ['st.logs', 'st.status'], groups: ['server'], extra: ['status', 'diag'] },
 ]
 
@@ -167,7 +168,10 @@ export default function Settings({ health }) {
 
   const groupBlock = ([prefix, title, hint]) => {
     if (!data) return <ListSkeleton key={prefix} n={3} />
+    if (prefix === 'news') { const L = NEWS_L[lang] || NEWS_L.ru; title = L.title; hint = L.desc }
     let items = data.items.filter((it) => it.key.startsWith(prefix + '.'))
+    const feedsIt = prefix === 'news' ? data.items.find((it) => it.key === 'news.feeds') : null
+    if (prefix === 'news') items = items.filter((it) => it.key !== 'news.feeds')
     const provNow = val(data.items.find((it) => it.key === 'brain.cloud.provider')) || 'gemini'
     const CLOUD_EXTRA = ['brain.gemini.auto', 'brain.gemini.anonymize', 'brain.gemini.mark_source']
     if (prefix === 'brain') items = items.filter((it) => !it.key.startsWith('brain.cloud.') && !it.key.startsWith('brain.gemini.'))
@@ -188,6 +192,7 @@ export default function Settings({ health }) {
       <Section key={prefix} title={title} hint={hint}>
         {prefix === 'voice' && <VoicePicker show={show} />}
         {prefix === 'google' && <GoogleConnect show={show} dirty={dirty} />}
+        {prefix === 'news' && <NewsBlock show={show} value={val(feedsIt) || ''} onChange={(v) => setDraft((d) => ({ ...d, 'news.feeds': v }))} />}
         {prefix === 'telegram' && <MiniApp current={val(items.find((it) => it.key === 'telegram.webapp_url')) || ''} onUse={(u) => setDraft((d) => ({ ...d, 'telegram.webapp_url': u }))} />}
         {/* настройки — спокойными строками: подпись слева, значение справа, между строками волосок */}
         {prefix === 'brain' && <div className="faint" style={{ fontSize: 'var(--fs-xs)', padding: '2px 0 8px' }}>{LMS_TWO[lang] || LMS_TWO.ru}</div>}
@@ -869,6 +874,55 @@ const GCAL_PULL = {
     pull_fail: 'pull failed — see status for the error',
     pulled: (r) => `from Google: ${r.created || 0} new, ${r.updated || 0} updated, ${r.deleted || 0} deleted`,
   },
+}
+
+/* Новости: подписи раздела и блока лент — локальная пара ru/en, новых ключей в i18n.js не заводим. */
+const NEWS_L = {
+  ru: {
+    title: 'новости', // i18n-raw
+    desc: 'RSS-дайджест по выбранным лентам: утром присылаю сам, вручную — /news', // i18n-raw
+    feeds_label: 'Ленты — по строке «Название | ссылка на RSS»', // i18n-raw
+    feeds_ph: 'Хабр | https://habr.com/ru/rss/all/all/', // i18n-raw
+    refresh: 'обновить сейчас', // i18n-raw
+    refreshed: (r) => `свежак: ${r.total || 0} новостей`, // i18n-raw
+    refresh_fail: 'не забрал — смотри ошибку выше', // i18n-raw
+    not_configured: 'включите новости и добавьте хоть одну ленту', // i18n-raw
+  },
+  en: {
+    title: 'news',
+    desc: 'RSS digest from selected feeds: auto in the morning, manually via /news',
+    feeds_label: 'Feeds — one per line as "Name | RSS url"',
+    feeds_ph: 'Habr | https://habr.com/ru/rss/all/all/',
+    refresh: 'refresh now',
+    refreshed: (r) => `fresh: ${r.total || 0} stories`,
+    refresh_fail: 'fetch failed — see the error above',
+    not_configured: 'enable news and add at least one feed',
+  },
+}
+
+function NewsBlock({ show, value, onChange }) {
+  const { lang } = useI18n()
+  const L = NEWS_L[lang] || NEWS_L.ru
+  const [busy, setBusy] = useState(false)
+  const [res, setRes] = useState(null)
+  const refresh = () => {
+    setBusy(true)
+    api.get('/api/news').then((r) => { setRes(r); show(r.ok ? L.refreshed(r) : (r.text || L.refresh_fail)) }).catch((e) => { setRes(null); show.err(e) }).finally(() => setBusy(false))
+  }
+  return (
+    <div className="mb-4">
+      <SRow wide label={L.feeds_label}>
+        <textarea className="input min-h-[92px] font-mono" rows={4} value={value} onChange={(e) => onChange(e.target.value)} placeholder={L.feeds_ph} spellCheck={false} />
+      </SRow>
+      <div className="mt-2 flex items-center gap-2">
+        <button className="btn-ghost btn-sm" disabled={busy} onClick={refresh}><RefreshCw size={15} /> {L.refresh}</button>
+        {res && <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{res.ok ? L.refreshed(res) : (res.text || L.refresh_fail)}</span>}
+      </div>
+      {res && res.ok && !!res.total && (
+        <div className="faint mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap" style={{ fontSize: 'var(--fs-xs)' }}>{res.text}</div>
+      )}
+    </div>
+  )
 }
 
 function GoogleConnect({ show, dirty }) {

@@ -16,7 +16,7 @@ from apscheduler.triggers.cron import CronTrigger
 
 from ..config import DB_PATH, ROOT, cfg
 from ..brain.dates import is_all_day
-from ..services import calendar, finance, tasks
+from ..services import calendar, finance, news, tasks
 from ..services.finance import money
 from ..services.plural import days as _days_word
 from ..db import get_setting, set_setting
@@ -822,6 +822,19 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         except Exception as e:  # pragma: no cover
             log.warning("gcal pull failed: %s", e)
 
+    async def news_digest():
+        """Утренние новости по лентам из настроек (только непрочитанное, повторы не шлёт)."""
+        try:
+            if not news.enabled():
+                return
+            res = await news.fetch_digest(mark=True)
+            if res.get("total"):
+                await _notify(res["text"])
+            elif res.get("errors"):
+                log.warning("новости не забрались: %s", res["errors"])
+        except Exception as e:  # pragma: no cover
+            log.warning("news digest failed: %s", e)
+
     async def recurring():
         for r in finance.process_due_recurring():
             ping("recurring")
@@ -1210,4 +1223,11 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     if md:
         h, m = md.split(":")
         add(digest, CronTrigger(hour=int(h), minute=int(m)), "digest")
+    nt = news.digest_time()
+    if news.enabled() and nt:
+        try:
+            nh, nm = nt.split(":")
+            add(news_digest, CronTrigger(hour=int(nh), minute=int(nm)), "news_digest")
+        except ValueError:
+            log.warning("новости: кривое время «%s» — автоотправка выключена", nt)
     return sch

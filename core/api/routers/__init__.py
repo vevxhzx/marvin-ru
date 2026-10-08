@@ -55,11 +55,11 @@ def register(app) -> None:
     остаются в `core/api/app.py` до шага 7.6).
     Шаг 7.5b: подключён `pc` (14 роутов: `/api/pc/*`, `/api/screen`,
     `/api/vision/ask`, `/api/cloud/preview`, `/api/voice/*`).
-    Шаг 7.6 (финальный): подключён `system` (32 системных роута:
+    Шаг 7.6 (финальный): подключён `system` (33 системных роута:
     `/api/health`, `/api/dashboard`, `/api/state`, `/api/presence/events`,
     `/api/diagnose`, `/api/ui-prefs`, `/api/edition`, `/api/client/info`,
     `/api/llm`, `/api/settings`, `/api/status*`, `/api/phone*`, `/api/runs*`,
-    `/api/tg/*`, `/api/game`, `/api/google/*`, `/api/backup*`).
+    `/api/tg/*`, `/api/game`, `/api/google/*`, `/api/news`, `/api/backup*`).
     Позже добавлен домен `learn` (7 роутов: `/api/english/*` — блок обучения
     английскому в настройках). Он ставится ПЕРЕД `system`, чтобы тот остался последним.
     Оба SSE (`/api/events/stream`, `/api/chat/stream`) и статика/SPA остаются

@@ -44,6 +44,7 @@ REMOTE_GET_401 = [
     "/api/events",
     "/api/google/status",
     "/api/google/connect",
+    "/api/news",
     "/api/events/stream",     # SSE
     "/api/cards/nope.png",
 ]

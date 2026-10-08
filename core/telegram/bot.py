@@ -97,7 +97,7 @@ async def start(m: Message):
                    "• «заплатил Диме 2000», «перевёл 5000 на сбер», «снял 3000 наличных»\n"
                    "• «подписка яндекс плюс 399 25-го», «лимит на еду 20000»\n"
                    "• «отмени последнюю» — откатить трату\n"
-                   "• /summary — итог дня · /find — поиск по Мозгу · /exp 700 такси — трата одним тапом")
+                   "• /summary — итог дня · /find — поиск по Мозгу · /news — свежие новости · /exp 700 такси — трата одним тапом")
 
 
 _QUICK_HINT = {"расход": "700 такси", "доход": "15000 аванс", "задача": "сдать отчёт в пятницу", "встреча": "в среду в 15:00 с Димой"}
@@ -189,6 +189,30 @@ async def cmd_summary(m: Message):
                 await m.answer_photo(FSInputFile(str(path)))
         except Exception as e:  # pragma: no cover
             log.debug("итог card: %s", e)
+
+
+@router.message(Command("news", "новости"))
+async def news_cmd(m: Message):
+    """Свежие новости по лентам из настроек: /news или /news хабр."""
+    from core.services import news as _news
+    if not _news.configured():
+        await m.answer("Новости не настроены, сэр: включите их и добавьте ленты в настройках (интеграции → новости).")
+        return
+    parts = (m.text or "").split(maxsplit=1)
+    topic = parts[1].strip() if len(parts) > 1 else ""
+    typing = asyncio.create_task(_keep_typing(m))
+    try:
+        res = await asyncio.wait_for(_news.fetch_digest(topic=topic or None, mark=True), timeout=90)
+    except asyncio.TimeoutError:
+        await m.answer("Ленты отвечают медленно, сэр. Попробуйте ещё раз.")
+        return
+    except Exception as e:
+        log.warning("news cmd failed: %s", e)
+        await m.answer("Не забрал новости, сэр. Загляните в лог.")
+        return
+    finally:
+        typing.cancel()
+    await send_long(m, res.get("text") or "Нового нет, сэр — всё уже показывал.")
 
 
 @router.message(Command("today"))
