@@ -2481,7 +2481,10 @@ async def _handle(text: str, channel: str) -> Reply:
             r, cloud_tried = None, False   # облако отказалось: вопрос личный → локальная модель с инструментами
     if r is None:
         t1 = time.monotonic()
-        who = f"ОБЛАКО+инструменты: {llm.cloud_title()}" if _cloud_tools_mode() else f"ЛОКАЛЬНО: Ollama ({llm.OLLAMA_MODEL})"
+        # подпись честная: без инструментов при use=main отвечает LM Studio, с ними — Ollama
+        _to_lms = llm.lmstudio_role() == "main" and not cloud_tried
+        who = f"ОБЛАКО+инструменты: {llm.cloud_title()}" if _cloud_tools_mode() else \
+            (f"ЛОКАЛЬНО: LM Studio ({llm.LMSTUDIO_MODEL})" if _to_lms else f"ЛОКАЛЬНО: Ollama ({llm.OLLAMA_MODEL})")
         log.info("[%s] %s: %r", channel, who, text[:60])
         r = await via_ollama(text, channel, with_tools=not cloud_tried)
         log.info("[%s] %s %s за %.1f с", channel, who, "ответил" if r else "недоступен", time.monotonic() - t1)

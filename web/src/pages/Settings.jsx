@@ -33,6 +33,7 @@ const SERVER_VRAM = 'целиком' // i18n-raw
 /* LM Studio: подписи роли и состояния — локальная пара ru/en, новых ключей в i18n.js не заводим. */
 const LMS_USE = { ru: { main: 'основные ответы', small: 'мини-задачи' }, en: { main: 'main answers', small: 'mini tasks' } } // i18n-raw
 const LMS_ROLE = { ru: { main: 'отвечает вместо модели Ollama', small: 'мини-задачи вместо малой модели', off: 'выключен — всё через Ollama' }, en: { main: 'answers instead of the Ollama model', small: 'mini tasks instead of the small model', off: 'off — everything via Ollama' } } // i18n-raw
+const LMS_TWO = { ru: 'Два движка сразу: Ollama держит основную, малую и эмбеддинги — LM Studio забирает то, что отдашь ему ниже.', en: 'Two engines at once: Ollama keeps main, small and embeddings — LM Studio takes what you assign below.' } // i18n-raw
 
 /* Версия веба — из package.json проекта (ядро приходит из /api/status → version) */
 const WEB_VER = pkg.version
@@ -170,6 +171,11 @@ export default function Settings({ health }) {
     const provNow = val(data.items.find((it) => it.key === 'brain.cloud.provider')) || 'gemini'
     const CLOUD_EXTRA = ['brain.gemini.auto', 'brain.gemini.anonymize', 'brain.gemini.mark_source']
     if (prefix === 'brain') items = items.filter((it) => !it.key.startsWith('brain.cloud.') && !it.key.startsWith('brain.gemini.'))
+    if (prefix === 'brain') {
+      // LM Studio — сразу после режима: это второй движок, его не должно быть в самом низу
+      const rank = (k) => k === 'brain.mode' ? 0 : k.startsWith('brain.lmstudio.') ? 1 : 2
+      items = [...items].sort((a, b) => rank(a.key) - rank(b.key))
+    }
     if (prefix === 'brain.cloud') {
       items = data.items.filter((it) => it.key.startsWith('brain.cloud.') || CLOUD_EXTRA.includes(it.key) || (provNow === 'gemini' && it.key.startsWith('brain.gemini.') && !CLOUD_EXTRA.includes(it.key)))
       items = items.filter((it) => it.key !== 'brain.cloud.base_url' || provNow === 'custom')
@@ -184,6 +190,7 @@ export default function Settings({ health }) {
         {prefix === 'google' && <GoogleConnect show={show} dirty={dirty} />}
         {prefix === 'telegram' && <MiniApp current={val(items.find((it) => it.key === 'telegram.webapp_url')) || ''} onUse={(u) => setDraft((d) => ({ ...d, 'telegram.webapp_url': u }))} />}
         {/* настройки — спокойными строками: подпись слева, значение справа, между строками волосок */}
+        {prefix === 'brain' && <div className="faint" style={{ fontSize: 'var(--fs-xs)', padding: '2px 0 8px' }}>{LMS_TWO[lang] || LMS_TWO.ru}</div>}
         <div className="divide-y hair">
           {items.map((it) => <SettingField key={it.key} it={it} value={val(it)} onChange={(v) => setDraft((d) => ({ ...d, [it.key]: v }))} providers={status?.gemini?.providers} />)}
         </div>

@@ -152,3 +152,18 @@ def test_main_role_keeps_mini_tasks_on_ollama(monkeypatch):
     assert out == "Готово."
     urls = [s[1] for s in seen if s[0] == "POST"]
     assert urls and all(u.endswith("/chat/completions") for u in urls)
+
+
+@pytest.mark.parametrize("raw, want", [
+    ("http://127.0.0.1:1234", "http://127.0.0.1:1234/v1"),       # голый хост — /v1 дописывается сам
+    ("http://127.0.0.1:1234/", "http://127.0.0.1:1234/v1"),
+    ("http://127.0.0.1:1234/v1", "http://127.0.0.1:1234/v1"),   # хвост уже есть — не дублируем
+    ("http://127.0.0.1:1234/v1/", "http://127.0.0.1:1234/v1"),
+    ("", "http://127.0.0.1:1234/v1"),                            # пусто — адрес по умолчанию
+    ("http://10.0.0.5:8080/openai", "http://10.0.0.5:8080/openai"),  # чужой путь не трогаем
+])
+def test_base_url_normalized(raw, want):
+    """Адрес без /v1 чинится сам — LM Studio понимает только /v1/models и /v1/chat/completions."""
+    from core.brain import llm
+
+    assert llm._norm_lms_base(raw) == want

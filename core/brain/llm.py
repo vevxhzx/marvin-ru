@@ -34,8 +34,23 @@ SMALL_KEEP_ALIVE = str(getattr(cfg.brain.ollama, "small_keep_alive", "5m") or "5
 # с Ollama: малая модель и эмбеддинги остаются там, а сюда отдаётся выбранное в brain.lmstudio.use
 # (main — основные ответы вместо модели Ollama, small — мини-задачи вместо малой модели).
 _lms = getattr(cfg.brain, "lmstudio", None)
+
+
+def _norm_lms_base(raw: object) -> str:
+    """Адрес LM Studio к виду под OpenAI-запросы: голый хост без пути сам
+    дополняется до /v1 (LM Studio слушает именно там), чужой путь не трогаем."""
+    from urllib.parse import urlsplit
+    b = (str(raw or "") or "").strip().rstrip("/") or "http://127.0.0.1:1234/v1"
+    try:
+        if not urlsplit(b).path.strip("/"):
+            b += "/v1"
+    except Exception:
+        pass
+    return b
+
+
 LMSTUDIO_ENABLED = bool(getattr(_lms, "enabled", False))
-LMSTUDIO_BASE = (str(getattr(_lms, "base_url", "") or "") or "http://127.0.0.1:1234/v1").strip().rstrip("/")
+LMSTUDIO_BASE = _norm_lms_base(getattr(_lms, "base_url", ""))
 LMSTUDIO_MODEL = (str(getattr(_lms, "model", "") or "") or "google/gemma-4-e4b").strip()
 LMSTUDIO_USE = (str(getattr(_lms, "use", "") or "") or "main").strip().lower()
 if LMSTUDIO_USE not in ("main", "small"):
@@ -352,7 +367,7 @@ def reload_lmstudio_settings() -> None:
     _c.refresh()
     lms = getattr(_c.cfg.brain, "lmstudio", None)
     LMSTUDIO_ENABLED = bool(getattr(lms, "enabled", False))
-    LMSTUDIO_BASE = (str(getattr(lms, "base_url", "") or "") or "http://127.0.0.1:1234/v1").strip().rstrip("/")
+    LMSTUDIO_BASE = _norm_lms_base(getattr(lms, "base_url", ""))
     LMSTUDIO_MODEL = (str(getattr(lms, "model", "") or "") or "google/gemma-4-e4b").strip()
     LMSTUDIO_USE = (str(getattr(lms, "use", "") or "") or "main").strip().lower()
     if LMSTUDIO_USE not in ("main", "small"):
