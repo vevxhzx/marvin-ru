@@ -159,7 +159,7 @@ def main() -> int:
     code, out = ts("version")
     if code is None:
         print(f"  Tailscale не установлен. Поставьте с {DOWNLOAD}, войдите — и запустите снова.")
-        print(f"  На macOS бинарник лежит в /Applications/Tailscale.app/Contents/MacOS/Tailscale —")
+        print("  На macOS бинарник лежит в /Applications/Tailscale.app/Contents/MacOS/Tailscale —")
         print("  скрипт ищет его сам, в PATH добавлять ничего не нужно.")
         return 1
     code, out = ts("status", timeout=15)

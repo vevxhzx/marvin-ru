@@ -66,7 +66,6 @@ _LAST_MAX = 32
 
 def recall(channel: str) -> list[str]:
     """Группы прошлого хода этого канала (для select_tools)."""
-    import time
     item = _LAST.get(channel or "")
     if not item:
         return []
