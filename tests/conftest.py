@@ -28,6 +28,18 @@ def _assistant_test_env():
     yield
 
 
+@pytest.fixture(autouse=True)
+def _lmstudio_off(monkeypatch):
+    """LM Studio в тестах выключен: иначе на машине с включённым LM Studio тесты
+    ходили бы в живой сервер (маршрутизация читает настоящий config.yaml).
+    Тесты самого LM Studio включают его явно внутри теста (после фикстур)."""
+    try:
+        from core.brain import llm
+    except Exception:
+        return
+    monkeypatch.setattr(llm, "LMSTUDIO_ENABLED", False, raising=False)
+
+
 @pytest.fixture
 def fresh_db(tmp_path, monkeypatch):
     """Временная БД на всё теста: db.engine подменяется ДО init_db(), data/jarvis.db не трогается."""

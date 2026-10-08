@@ -176,7 +176,7 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "brain.ollama.embed_model": ("str", "Модель эмбеддингов (смысловой поиск)", False),
     "brain.ollama.small_model": ("str", "Малая модель для мини-задач (судья «трата или заказ», уборка памяти): qwen2.5:1.5b — пусто = основная", False),
     "brain.ollama.small_keep_alive": ("str", "Сколько малая модель живёт в видеопамяти после задачи (5m; 0 — выгружать сразу)", False),
-    "brain.ollama.vision_model": ("str", "Модель зрения (скриншоты, чеки): qwen2.5vl:3b / llava / moondream — пусто, если не ставили", False),
+    "brain.ollama.vision_model": ("str", "Модель зрения в Ollama: qwen2.5vl:3b / llava / moondream — пусто, если не ставили. При включённом LM Studio смотрит загруженная там, это поле не нужно", False),
     "brain.vision.where": ("str", "Где смотреть картинки: auto (ПК, при сбое — облако; чеки только ПК) / cloud (всегда облако, быстро) / local (только ПК)", False),
     "brain.vision.allow_cloud": ("bool", "Скриншоты «что на экране» можно отправлять в облако, если нет локальной модели зрения (чеки — никогда)", False),
     "brain.cloud.provider": ("str", "Провайдер облака", False),

@@ -1560,6 +1560,32 @@ async def _local_vision_available() -> bool:
     return bool(_VISION_LOCAL_OK)
 
 
+def _img_mime(image_b64: str) -> str:
+    """MIME по магическим байтам (LM Studio нужен точный data-URL: PNG как image/png)."""
+    try:
+        import base64 as _b64
+        head = _b64.b64decode((image_b64 or "")[:24])
+        if head[:8] == b"\x89PNG\r\n\x1a\n":
+            return "image/png"
+        if head[:2] == b"\xff\xd8":
+            return "image/jpeg"
+        if head[:4] in (b"GIF8",):
+            return "image/gif"
+        if head[:4] == b"RIFF":
+            return "image/webp"
+    except Exception:
+        pass
+    return "image/jpeg"
+
+
+def _lms_cached_models() -> list[str]:
+    """Модели LM Studio из свежего кэша (без сети — для синхронных мест вроде vision_status)."""
+    ts, ids = _LMS_MODELS_CACHE
+    if time.monotonic() - ts < 60 and ids:
+        return list(ids)
+    return []
+
+
 def vision_hint() -> str:
     """Что сделать, чтобы зрение заработало — одной фразой для пользователя."""
     if VISION_WHERE == "cloud" and not (cloud_enabled() and CLOUD_PROVIDER in CLOUD_VISION_MODELS):
@@ -1568,6 +1594,9 @@ def vision_hint() -> str:
         return LAST_CLOUD_ERROR
     if GAME_MODE and VISION_WHERE != "cloud":
         return "Игровой режим — мозг выгружен. Скажите «игра окончена» или переключите зрение на облако в настройках."
+    if LMSTUDIO_ENABLED and not _lms_cached_models():
+        return (f"LM Studio не отвечает или модель не загружена ({LMSTUDIO_BASE}). "
+                "Запустите сервер и загрузите зрячую модель — отвечает уже загруженная, название сверять не нужно.")
     if not VISION_MODEL:
         return ("Модель зрения не задана. Проще всего перейти на qwen3.5:4b — она сама видит картинки "
                 "(ollama pull qwen3.5:4b и указать её в Настройки → мозг → модель).")
@@ -1583,6 +1612,27 @@ async def describe_image(image_b64: str, question: str, private: bool = False, s
     # local-first: в режиме local картинка (это скриншот/фото хозяина) в облако не уходит НИКОГДА,
     # даже если в настройках стоит vision.where=cloud и есть ключ — иначе «local» перестал быть local
     cloud_possible = VISION_CLOUD_OK and not local_only() and cloud_enabled() and CLOUD_PROVIDER in CLOUD_VISION_MODELS
+    # LM Studio первым: включён — значит, выбран основным движком; отвечает уже загруженная
+    # модель, название сверять не нужно. В игровом режиме пропускаем, как и Ollama.
+    if VISION_WHERE != "cloud" and not GAME_MODE and await lmstudio_available():
+        try:
+            model = await lmstudio_active_model()
+            async with _local_client(180) as c:
+                r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json={
+                    "model": model, "stream": False, "temperature": 0.2,
+                    "max_tokens": 300 if short else 800, "reasoning_effort": "none",
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": question + hint},
+                        {"type": "image_url", "image_url": {"url": f"data:{_img_mime(image_b64)};base64,{image_b64}"}}]}]})
+                r.raise_for_status()
+                msg = (r.json().get("choices") or [{}])[0].get("message") or {}
+                txt = strip_think(str(msg.get("content") or "")).strip()
+                if txt:
+                    log.info("LM Studio %s: картинка разобрана", model)
+                    return txt
+                log.warning("LM Studio %s: пустой ответ на картинку — пробую дальше", model)
+        except Exception as e:
+            log.warning("LM Studio vision failed (%s) — %s", type(e).__name__, "пробую Ollama" if VISION_WHERE != "cloud" else "пробую облако")
     # где: cloud — сразу в облако; auto — локально, но если облако доступно, ждём локальную не дольше 40 с
     try_local = VISION_WHERE != "cloud" and await _local_vision_available()
     if try_local:
@@ -1636,6 +1686,10 @@ def vision_status() -> str:
     cm = _CLOUD_VISION_GOOD.get(CLOUD_PROVIDER) or (CLOUD_VISION_MODELS.get(CLOUD_PROVIDER) or ["?"])[0]
     if VISION_WHERE == "cloud":
         return f"через {cloud_title()} ({cm})" if cloud else "облако выбрано, но провайдер без зрения или ключ не задан"
+    if VISION_WHERE != "cloud" and LMSTUDIO_ENABLED and _lms_cached_models():
+        ids = _lms_cached_models()
+        active = LMSTUDIO_MODEL if LMSTUDIO_MODEL in ids else ids[0]
+        return f"локально (LM Studio: {active})" + (f", запасной путь {cloud_title()}" if cloud and VISION_WHERE == "auto" else "")
     if VISION_MODEL and _VISION_LOCAL_OK:
         return f"локально ({VISION_MODEL})" + (f", запасной путь {cloud_title()}" if cloud and VISION_WHERE == "auto" else "")
     if cloud and VISION_WHERE == "auto":
