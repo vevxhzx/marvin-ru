@@ -260,6 +260,38 @@ def _too_long_for_rules(text: str) -> bool:
     return words > 14 or (amounts >= 2 and words > 8)
 
 
+# Сигналы «модели точно понадобятся инструменты»: короткие команды и вопросы про дела,
+# деньги, людей и ПК, которые правилами не покрыты. Всё остальное из CORE-инструментов
+# (отмена, показать, напомнить, траты, задачи, встречи, заметки) — тоже здесь: пропустить
+# хоть один такой глагол — значит отнять у модели нужный инструмент, поэтому список широкий.
+_TALK_ACTION_RX = re.compile(
+    r"отмен|удали|убери|верни|закрой|перенеси|переимену|исправь|дополни|поменяй|покажи|напомни|"
+    r"запомни|запиши|добавь|создай|потратил|трат|купил|получил|доход|зарплат|денег|деньги|потрач|"
+    r"заплатил|заплатила|оплатил|сколько|баланс|хватит|задач|мои\s+дел|по\s+делам|с\s+делами|план|встреч|событи|календар|"
+    r"сегодня|завтра|недел|утром|вечером|заметк|мысл|мозг|иде[яю]|открой|закрой|найди|ютуб|браузер|включи|выключи|"
+    r"экран|файл|папк|громко|цель|доск|человек|клиент|таймер|отч[её]т|прогноз|разбери|посчитай",
+    re.I)
+
+
+def _plain_talk(text: str) -> bool:
+    """Обычная болтовня без дел и данных («привет», «спасибо», «что такое инфляция»):
+    модели хватит ответа словами — 19 схем инструментов не нужны, хватит ask_cloud.
+    Консервативно: любое сомнение — полные инструменты, как раньше."""
+    t = (text or "").strip()
+    if len(t.split()) > 12:
+        return False
+    if _asks_records(t) or sorter.looks_like_batch(t) or _is_analysis(t):
+        return False
+    if _forced_tool(text) is not None:
+        return False
+    if (registry.MONEY_RX.search(t) or registry.AIM_RX_T.search(t) or registry.BOARD_RX_T.search(t)
+            or registry.FREELANCE_RX.search(t.lower())):
+        return False
+    if _TALK_ACTION_RX.search(t):
+        return False
+    return True
+
+
 MEM_REMEMBER_RX = re.compile(r"^\s*запомни\s*[,:—-]?\s*(?:что\s+)?(.+)$", re.I | re.S)
 # «восстанови кота» / «верни то, что забыл» — вернуть факт из архива (find_fact с include_archived=True)
 MEM_RESTORE_RX = re.compile(r"^\s*(?:восстанови\w*|верн[ии]те?)\s*[,:]?\s*(?:мой\s+|свой\s+|снова\s+)?(.+)$", re.I | re.S)
@@ -1846,6 +1878,12 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                                 "no_repeat": _no_repeat_block() if (les_ctx or mem_ctx) else ""})
     messages.append({"role": "user", "content": (ctx_head + "\n" if ctx_head else "") + text + "\n" + now_line()})
     tools_now = registry.tools_schema(with_cloud=allow_cloud_pre and not cloud_tools, text=None if cloud_tools else text)
+    if not cloud_tools and _plain_talk(text):
+        # болтовня без дел: 19 схем (~2.5k токенов) не нужны — хватает ask_cloud (или вообще ничего).
+        # Модель отвечает словами за секунды вместо минуты чтения. Сомнительные случаи сюда не попадают
+        # (_plain_talk консервативен), а ретраи ниже при нужде поднимают полные инструменты.
+        tools_now = [t for t in tools_now if (t.get("function") or {}).get("name") == registry.CLOUD_TOOL]
+        log.info("[%s] болтовня без дел — инструменты срезаны до ask_cloud", channel)
     if not cloud_tools:
         messages = _fit_budget(messages, tools_now, channel)
     actions: list[str] = []
@@ -1876,11 +1914,14 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
             if not out["tool_calls"] and not actions and not results and _weak_answer(out.get("content") or "", text):
                 # «Чё там на сегодня? Запускаю мозги 🧠» — вода вместо ответа. Один жёсткий ретрай с прямым указанием:
                 # либо модель возьмёт инструмент (тогда путь ниже выполнит его), либо ответит по существу.
+                # Полный набор инструментов — даже если первый заход шёл на срезанном: воде нечем ответить.
                 log.warning("[%s] ответ модели без содержания (%r) — повторяю с указанием", channel, (out.get("content") or "")[:60])
                 try:
+                    full_now = registry.tools_schema(with_cloud=allow_cloud_pre and not cloud_tools,
+                                                     text=None if cloud_tools else text)
                     out2 = await _chat(messages + [
                         {"role": "assistant", "content": out.get("content") or ""},
-                        {"role": "user", "content": _NO_WATER}], tools_now if allow_cloud == allow_cloud_pre
+                        {"role": "user", "content": _NO_WATER}], full_now if allow_cloud == allow_cloud_pre
                         else registry.tools_schema(with_cloud=False, text=None if cloud_tools else text))
                     if out2 and (out2.get("tool_calls") or not _weak_answer(out2.get("content") or "", text)):
                         out = out2
@@ -1894,9 +1935,13 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                 log.warning("[%s] просят записать, инструментов нет (%r) — повторяю с указанием", channel, (out.get("content") or "")[:60])
                 retried = True
                 try:
+                    # ретрай «дай инструменты» — полный набор, даже если первый заход шёл на срезанном
+                    # (болтовня оказалась делом): иначе повтору нечем звать
+                    full_now = registry.tools_schema(with_cloud=allow_cloud_pre and not cloud_tools,
+                                                     text=None if cloud_tools else text)
                     out2 = await _chat(messages + [
                         {"role": "assistant", "content": out.get("content") or ""},
-                        {"role": "user", "content": _NO_TOOLS}], tools_now if allow_cloud == allow_cloud_pre
+                        {"role": "user", "content": _NO_TOOLS}], full_now if allow_cloud == allow_cloud_pre
                         else registry.tools_schema(with_cloud=False, text=None if cloud_tools else text))
                     if out2 and (out2.get("tool_calls") or (not _claims_saved(out2.get("content") or "")
                                                             and not _weak_answer(out2.get("content") or "", text))):
