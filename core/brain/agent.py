@@ -23,6 +23,7 @@ from ..services import brain_notes, calendar, finance, judge, memory, tasks, tra
 from ..services.calendar import fmt_dt, fmt_due, fmt_repeat
 from ..services.finance import money
 from ..tools import registry
+from ..tools import router as tool_router
 from ..services import bulk, insights, pc
 from . import budget, llm, quick, sorter
 from .dates import ambiguous_night_hour, first_occurrence, parse_amount, parse_datetime, parse_datetime_ex, parse_repeat, task_due
@@ -1884,6 +1885,14 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
         # (_plain_talk консервативен), а ретраи ниже при нужде поднимают полные инструменты.
         tools_now = [t for t in tools_now if (t.get("function") or {}).get("name") == registry.CLOUD_TOOL]
         log.info("[%s] болтовня без дел — инструменты срезаны до ask_cloud", channel)
+    elif not cloud_tools:
+        # дело или вопрос про данные: роутер отдаёт ядро + 1–3 тематические группы из компактных
+        # схем (6–19 инструментов вместо 46). Группы прошлого хода — для коротких реплик-продолжений.
+        tools_now, _hit = tool_router.select_tools(
+            text, prev_groups=tool_router.recall(channel),
+            with_cloud=allow_cloud_pre)
+        tool_router.remember(channel, _hit)
+        log.info("[%s] роутер инструментов: группы %s, схем %d", channel, _hit or "—", len(tools_now))
     if not cloud_tools:
         messages = _fit_budget(messages, tools_now, channel)
     actions: list[str] = []

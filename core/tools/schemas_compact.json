@@ -1,0 +1,1013 @@
+[
+ {
+  "type": "function",
+  "function": {
+   "name": "add_event",
+   "description": "Добавить событие в календарь",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "start": {
+      "type": "string",
+      "description": "ISO YYYY-MM-DDTHH:MM"
+     },
+     "duration_min": {
+      "type": "integer",
+      "description": "мин, по умолч. 60"
+     },
+     "location": {
+      "type": "string"
+     },
+     "repeat": {
+      "type": "string",
+      "enum": [
+       "daily",
+       "weekly",
+       "monthly",
+       "yearly"
+      ]
+     },
+     "repeat_days": {
+      "type": "array",
+      "items": {
+       "type": "integer"
+      },
+      "description": "0=пн…6=вс"
+     }
+    },
+    "required": [
+     "title",
+     "start"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "move_event",
+   "description": "Перенести/переименовать событие",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "id или часть названия"
+     },
+     "start": {
+      "type": "string",
+      "description": "новое время ISO"
+     },
+     "title": {
+      "type": "string",
+      "description": "новое название"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "undo_last",
+   "description": "Отменить последнее действие",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_events",
+   "description": "События на N дней вперёд",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "days": {
+      "type": "integer",
+      "description": "по умолч. 7"
+     }
+    }
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "delete_event",
+   "description": "Удалить событие",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "id или часть названия"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_task",
+   "description": "Добавить задачу",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "due": {
+      "type": "string",
+      "description": "ISO или словами («завтра в 15:00»); только дата = на весь день"
+     },
+     "priority": {
+      "type": "integer",
+      "description": "1 высокий, 2 обычный, 3 низкий"
+     }
+    },
+    "required": [
+     "title"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_aim",
+   "description": "Долгосрочная цель (месяцы). Не задача и не конверт",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "why": {
+      "type": "string"
+     },
+     "due": {
+      "type": "string",
+      "description": "словами: «к декабрю»"
+     }
+    },
+    "required": [
+     "title"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_aims",
+   "description": "Долгосрочные цели и прогресс",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "board_note",
+   "description": "Стикер на доску/раскадровку («на доску: …»)",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string"
+     },
+     "board": {
+      "type": "string",
+      "description": "название доски"
+     }
+    },
+    "required": [
+     "text"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "board_show",
+   "description": "Показать доску/раскадровку; без названия — список досок",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "board": {
+      "type": "string"
+     }
+    }
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "focus_today",
+   "description": "1–3 шага на сегодня ради целей",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "link_task_to_aim",
+   "description": "Привязать задачу к цели",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "task": {
+      "type": "string"
+     },
+     "aim": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "task",
+     "aim"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "remember_fact",
+   "description": "Запомнить факт о хозяине (семья, питомцы, вкусы, привычки). Не задачи/траты/пароли",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string",
+      "description": "одной фразой в 3-м лице"
+     }
+    },
+    "required": [
+     "text"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_tasks",
+   "description": "Открытые задачи",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "complete_task",
+   "description": "Отметить задачу выполненной",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "id или название"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_expense",
+   "description": "Записать трату",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "amount": {
+      "type": "number"
+     },
+     "note": {
+      "type": "string",
+      "description": "на что"
+     },
+     "category": {
+      "type": "string"
+     },
+     "account": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "amount"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_income",
+   "description": "Записать доход",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "amount": {
+      "type": "number"
+     },
+     "note": {
+      "type": "string"
+     },
+     "category": {
+      "type": "string"
+     },
+     "account": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "amount"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "finance_summary",
+   "description": "Сводка: баланс, траты, категории, долги",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "days": {
+      "type": "integer",
+      "description": "по умолч. 30"
+     }
+    }
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "spent",
+   "description": "Сколько потрачено/заработано за период или по категории",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "category": {
+      "type": "string",
+      "description": "пусто — все"
+     },
+     "days": {
+      "type": "integer",
+      "description": "по умолч. с начала месяца"
+     },
+     "kind": {
+      "type": "string",
+      "enum": [
+       "expense",
+       "income"
+      ]
+     }
+    }
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "transfer",
+   "description": "Перевод между счетами / снятие наличных (to_account=Наличные)",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "amount": {
+      "type": "number"
+     },
+     "to_account": {
+      "type": "string"
+     },
+     "from_account": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "amount",
+     "to_account"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "agenda",
+   "description": "План на день/период: события, дедлайны, платежи",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "date": {
+      "type": "string",
+      "description": "YYYY-MM-DD или сегодня/завтра"
+     },
+     "days": {
+      "type": "integer",
+      "description": "по умолч. 1"
+     }
+    },
+    "required": [
+     "date"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "stop_recurring",
+   "description": "Остановить подписку/регулярный платёж",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "set_budget",
+   "description": "Месячный лимит на категорию (0 — снять)",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "category": {
+      "type": "string"
+     },
+     "amount": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "category",
+     "amount"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "set_balance",
+   "description": "Установить точный баланс счёта",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "account": {
+      "type": "string"
+     },
+     "balance": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "account",
+     "balance"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_debt",
+   "description": "Добавить долг/кредит",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "total": {
+      "type": "number"
+     },
+     "payment": {
+      "type": "number",
+      "description": "в месяц"
+     },
+     "pay_day": {
+      "type": "integer",
+      "description": "день месяца"
+     },
+     "rate": {
+      "type": "number",
+      "description": "% годовых"
+     }
+    },
+    "required": [
+     "title",
+     "total"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "pay_debt",
+   "description": "Платёж по долгу",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "debt": {
+      "type": "string",
+      "description": "название или id"
+     },
+     "amount": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "debt",
+     "amount"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_debts",
+   "description": "Долги и прогноз закрытия",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_recurring",
+   "description": "Регулярный платёж (подписка, аренда)",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "amount": {
+      "type": "number"
+     },
+     "day": {
+      "type": "integer",
+      "description": "день месяца"
+     }
+    },
+    "required": [
+     "title",
+     "amount"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_note",
+   "description": "Сохранить мысль/идею/факт во второй мозг, когда хозяин делится, а не спрашивает. Текст дословно",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "text": {
+      "type": "string"
+     },
+     "tags": {
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     }
+    },
+    "required": [
+     "text"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "edit_note",
+   "description": "Исправить/дополнить заметку. query — 1–3 слова для поиска; text — переписать целиком; append — дописать",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     },
+     "text": {
+      "type": "string"
+     },
+     "append": {
+      "type": "string"
+     },
+     "title": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "search_notes",
+   "description": "Поиск по памяти (заметки, ссылки, журнал): «что я говорил про…», «найди»",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "1–3 слова"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "today_briefing",
+   "description": "Сводка на сегодня: события, задачи, платежи, баланс",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "cash_forecast",
+   "description": "Прогноз денег на 30 дней: хватит ли до зарплаты, когда возможен минус",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "find_subscriptions",
+   "description": "Найти скрытые подписки и повторяющиеся списания",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_order",
+   "description": "Новый заказ (фриланс): «заказ: …», «взял заказ …». Все детали в одном вызове",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "client": {
+      "type": "string"
+     },
+     "price": {
+      "type": "number",
+      "description": "₽"
+     },
+     "deadline": {
+      "type": "string",
+      "description": "ISO"
+     },
+     "notes": {
+      "type": "string"
+     },
+     "estimate_h": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "title"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "person_card",
+   "description": "Карточка человека/клиента: заказы, оплаты, долги, встречи, заметки («что по Ване»)",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_person",
+   "description": "Завести человека (не клиента): друг, родня, подрядчик. Клиент — через add_order",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "name": {
+      "type": "string"
+     },
+     "notes": {
+      "type": "string"
+     },
+     "contact": {
+      "type": "string"
+     },
+     "aliases": {
+      "type": "string",
+      "description": "через запятую"
+     },
+     "birthday": {
+      "type": "string",
+      "description": "12.03"
+     },
+     "tags": {
+      "type": "string",
+      "description": "через запятую"
+     },
+     "kind": {
+      "type": "string",
+      "description": "family|friend|client|company|своё слово"
+     }
+    },
+    "required": [
+     "name"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "list_orders",
+   "description": "Заказы: в работе, дедлайны, неоплаченные, часы и ставка («кто мне должен»)",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "late_payments",
+   "description": "Кто задерживает оплату по сданным заказам",
+   "parameters": {
+    "type": "object",
+    "properties": {}
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "update_order",
+   "description": "Изменить заказ. «сдал»→done, «правки»→review, «отменили»→cancelled",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "номер/название/клиент"
+     },
+     "status": {
+      "type": "string",
+      "enum": [
+       "new",
+       "work",
+       "review",
+       "done",
+       "paid",
+       "cancelled"
+      ]
+     },
+     "price": {
+      "type": "number"
+     },
+     "deadline": {
+      "type": "string"
+     },
+     "client": {
+      "type": "string"
+     },
+     "notes": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "query"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "order_payment",
+   "description": "Оплата/аванс по заказу (деньги пришли от клиента)",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string",
+      "description": "заказ или клиент"
+     },
+     "amount": {
+      "type": "number"
+     },
+     "account": {
+      "type": "string"
+     }
+    },
+    "required": [
+     "query",
+     "amount"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "pomodoro",
+   "description": "Таймер-помодоро / учёт времени по заказу",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "action": {
+      "type": "string",
+      "enum": [
+       "start",
+       "break",
+       "stop",
+       "status"
+      ]
+     },
+     "query": {
+      "type": "string",
+      "description": "заказ (для start)"
+     },
+     "minutes": {
+      "type": "integer"
+     }
+    },
+    "required": [
+     "action"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "add_goal",
+   "description": "Цель-накопление (конверт): «подушка 300к к марту»",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "title": {
+      "type": "string"
+     },
+     "target": {
+      "type": "number"
+     },
+     "due": {
+      "type": "string",
+      "description": "ISO"
+     }
+    },
+    "required": [
+     "title",
+     "target"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "save_to_goal",
+   "description": "Отложить деньги в цель/конверт; отрицательная сумма — взять",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "query": {
+      "type": "string"
+     },
+     "amount": {
+      "type": "number"
+     }
+    },
+    "required": [
+     "query",
+     "amount"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "finance_report",
+   "description": "Финансовый отчёт",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "kind": {
+      "type": "string",
+      "enum": [
+       "goals",
+       "buckets",
+       "compare",
+       "runway",
+       "payments"
+      ]
+     }
+    },
+    "required": [
+     "kind"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "ask_cloud",
+   "description": "Общий вопрос облачной модели (объяснить, написать, придумать, посоветовать), если не нужны личные данные. Не для команд и не про его деньги/встречи/планы",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "question": {
+      "type": "string",
+      "description": "без имён и личных деталей"
+     }
+    },
+    "required": [
+     "question"
+    ]
+   }
+  }
+ }
+]
