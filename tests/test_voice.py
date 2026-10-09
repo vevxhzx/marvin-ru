@@ -73,3 +73,50 @@ def test_tts_cache_key_depends_on_voice(monkeypatch, tmp_path):
     monkeypatch.setattr(tts, "SPEAKER", "aidar")
     b = tts._cache_path("привет", ".ogg")
     assert a != b   # другой голос — другой кэш
+
+
+def test_voice_demo_uses_requested_speaker(tmp_path, monkeypatch):
+    """Демо silero идёт запрошенным голосом, даже если настроен edge: раньше общий
+    speak_to_file молча озвучивал демо текущим движком — все карточки звучали одинаково."""
+    from pathlib import Path
+
+    from core import config
+    from core.voice import tts
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(tts, "ENGINE", "edge")   # настроен edge — демо silero всё равно Байей
+    monkeypatch.setattr(tts, "EDGE_VOICE", "ru-RU-DmitryNeural")
+    monkeypatch.setattr(tts, "silero_available", lambda: True)
+    before = tts.SPEAKER
+    seen = {}
+
+    def fake_synth(text, path):
+        seen["speaker"] = tts.SPEAKER
+        Path(path).write_bytes(b"RIFFfake")
+        return Path(path)
+    monkeypatch.setattr(tts, "_silero_to_file", fake_synth)
+    # наследие бага: старый кривой файл удаляется, вместо него — свежий
+    demo_dir = tmp_path / "voice_demo"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+    (demo_dir / "silero_baya.wav").write_bytes(b"OLD")
+    from fastapi.testclient import TestClient
+    from core.api.app import app
+    r = TestClient(app, client=("127.0.0.1", 5555), base_url="http://testserver").get(
+        "/api/voice/demo", params={"engine": "silero", "voice": "baya"})
+    assert r.status_code == 200, r.text
+    assert seen.get("speaker") == "baya", "демо озвучилось не тем голосом"
+    assert tts.SPEAKER == before, "глобальный голос после демо не вернулся"
+    assert not (demo_dir / "silero_baya.wav").exists(), "старый кривой файл остался"
+    assert (demo_dir / "silero_baya_v2.wav").exists()
+
+
+def test_voice_demo_silero_missing_errors_honestly(tmp_path, monkeypatch):
+    """Без Silero — честная 500, а не тихое демо чужим движком."""
+    from core import config
+    from core.voice import tts
+    monkeypatch.setattr(config, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(tts, "silero_available", lambda: False)
+    from fastapi.testclient import TestClient
+    from core.api.app import app
+    r = TestClient(app, client=("127.0.0.1", 5555), base_url="http://testserver").get(
+        "/api/voice/demo", params={"engine": "silero", "voice": "baya"})
+    assert r.status_code == 500

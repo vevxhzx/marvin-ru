@@ -209,20 +209,31 @@ async def voice_list():
 
 @router.get("/api/voice/demo")
 async def voice_demo(engine: str = "silero", voice: str = "eugene"):
-    """Пример голоса (кэшируется в data/voice_demo)."""
+    """Пример голоса (кэшируется в data/voice_demo).
+
+    Синтезируем напрямую запрошенным голосом, а не через общий speak_to_file: тот выбирает
+    движок по текущей настройке и молча озвучивал демо чужим голосом (все silero-демо звучали
+    настроенным edge — и кэшировались под чужим именем навсегда)."""
+    import asyncio as _asyncio
+
     from fastapi.responses import FileResponse
     from ...config import DATA_DIR
     from ...voice import tts
     if not any(v["engine"] == engine and v["id"] == voice for v in VOICES):
         raise HTTPException(400, "unknown voice")
-    out = DATA_DIR / "voice_demo" / f"{engine}_{voice}.{'wav' if engine == 'silero' else 'mp3'}"
+    out = DATA_DIR / "voice_demo" / f"{engine}_{voice}_v2.{'wav' if engine == 'silero' else 'mp3'}"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    # наследие бага (демо чужим голосом) — файлы со старыми именами удаляем, перегенерируются сами
+    for old in out.parent.glob(f"{engine}_{voice}.???"):
+        old.unlink(missing_ok=True)
     if not out.exists():
-        out.parent.mkdir(parents=True, exist_ok=True)
         if engine == "silero":
+            if not tts.silero_available():
+                raise HTTPException(500, "Silero не установлен — запустите install_voice.bat (пункт Silero)")
             prev = tts.SPEAKER
             tts.SPEAKER = voice
             try:
-                ok = await tts.speak_to_file(DEMO_TEXT, out)
+                ok = await _asyncio.to_thread(tts._silero_to_file, tts.prepare(DEMO_TEXT), out)
             finally:
                 tts.SPEAKER = prev
         else:
