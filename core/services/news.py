@@ -338,10 +338,12 @@ async def fetch_digest(topic: str | None = None, limit: int = 7, mark: bool = Fa
         if it["feed"] != cur_feed:
             cur_feed = it["feed"]
             lines.append(f"\n**{cur_feed}**")
-        lines.append(f"— {it.get('line') or it['title']}")
+        body = it.get("line") or it["title"]
         if not it.get("line") and it["desc"]:
-            lines.append(f"  {it['desc']}")
-        lines.append(f"  {it['link']}")
+            lines.append(f"> {body}")
+            lines.append(f"> {it['desc']} — [читать]({it['link']})")
+        else:
+            lines.append(f"> {body} — [читать]({it['link']})")
     if errors:
         lines.append(f"\n_Не ответили: {', '.join(errors)}_")
     return {"ok": True, "text": "\n".join(lines), "feeds": out, "errors": errors, "total": total}

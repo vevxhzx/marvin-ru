@@ -4,6 +4,7 @@ import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Sma
 import { playChime } from '../lib/sound'
 import { api, relTime, kb } from '../lib/api'
 import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm, useSheetPresence, Pressable } from '../components/ui'
+import { renderMd } from '../components/Chat'
 import { useSheetDrag, SHEET_SNAPS, SNAP_RATIO } from '../lib/gestures'
 import { useMedia } from '../lib/motion'
 import { enableNotifications, disableNotifications, notifyEnabled, notifyState } from '../lib/notify'
@@ -927,7 +928,7 @@ function NewsBlock({ show, value, onChange }) {
         {res && <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{res.ok ? L.refreshed(res) : (res.text || L.refresh_fail)}</span>}
       </div>
       {res && res.ok && !!res.total && (
-        <div className="faint mt-2 max-h-56 overflow-y-auto whitespace-pre-wrap" style={{ fontSize: 'var(--fs-xs)' }}>{res.text}</div>
+        <div className="md faint mt-2 max-h-64 overflow-y-auto whitespace-pre-wrap" style={{ fontSize: 'var(--fs-xs)' }}>{renderMd(res.text)}</div>
       )}
     </div>
   )

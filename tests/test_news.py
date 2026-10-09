@@ -242,3 +242,24 @@ def test_bare_link_strips_from_rss():
 
     assert news._bare_link("https://vc.ru/x/1?from=rss") == "https://vc.ru/x/1"
     assert news._bare_link("https://vc.ru/x/1?from=rss&y=2") == "https://vc.ru/x/1?y=2"
+
+
+def test_to_html_quote_and_link():
+    from core.telegram.bot import _to_html
+
+    out = _to_html("> Важное — [читать](https://example.com/1)")
+    assert "<blockquote>Важное — " in out
+    assert '<a href="https://example.com/1">читать</a>' in out
+    assert _to_html("a > b") == "a &gt; b", "стрелка в середине строки — не цитата"
+    out2 = _to_html("```\n> не цитата\n```\n> цитата")
+    assert "<blockquote>цитата</blockquote>" in out2
+    assert "&gt; не цитата" in out2, "внутри кода цитат нет"
+
+
+def test_digest_markdown_format(monkeypatch):
+    from core.services import news
+
+    news2 = _news(monkeypatch, {"https://example.com/rss": RSS.encode()})
+    res = asyncio.run(news2.fetch_digest(limit=5))
+    assert "> Релиз Марвина 1.0" in res["text"]
+    assert "[читать](https://example.com/1)" in res["text"]

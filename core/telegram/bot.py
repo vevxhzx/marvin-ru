@@ -379,6 +379,8 @@ def _to_html(text: str) -> str:
     Экранируем всё, а простые **жирный** и `код` переводим в теги."""
     t = _html.escape(localize(text), quote=False)
     t = _re.sub(r"```[a-zA-Z]*\n?(.*?)```", lambda mm: f"<pre>{mm.group(1)}</pre>", t, flags=_re.S)
+    t = _re.sub(r"!\[([^\]\n]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', t)
+    t = _re.sub(r"\[([^\]\n]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', t)
     t = _re.sub(r"`([^`\n]+)`", r"<code>\1</code>", t)
     t = _re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", t, flags=_re.S)
     t = _re.sub(r"(?<![\w*])\*(?!\s)([^*\n]+?)(?<!\s)\*(?![\w*])", r"<i>\1</i>", t)
@@ -387,8 +389,30 @@ def _to_html(text: str) -> str:
     t = _re.sub(r"^[ \t]*[\*\-][ \t]+", "— ", t, flags=_re.M)
     t = _re.sub(r"^[ \t]*(\d+)[.)][ \t]+", r"\1. ", t, flags=_re.M)
     t = _re.sub(r"^[ \t]*[-*_]{3,}[ \t]*$", "", t, flags=_re.M)   # горизонтальные линии
+    t = _quote_lines(t)
     t = _re.sub(r"\n{3,}", "\n\n", t).strip()
     return t
+
+
+def _quote_lines(t: str) -> str:
+    """Строки '> …' — в <blockquote> (Telegram умеет). Внутри <pre> не трогаем."""
+    parts = _re.split(r"(<pre>.*?</pre>)", t, flags=_re.S)
+    for i in range(0, len(parts), 2):
+        lines = parts[i].split("\n")
+        out, buf = [], []
+        for ln in lines:
+            m = _re.match(r"^&gt;[ \t]?(.*)$", ln)
+            if m:
+                buf.append(m.group(1))
+            else:
+                if buf:
+                    out.append("<blockquote>" + "\n".join(buf) + "</blockquote>")
+                    buf = []
+                out.append(ln)
+        if buf:
+            out.append("<blockquote>" + "\n".join(buf) + "</blockquote>")
+        parts[i] = "\n".join(out)
+    return "".join(parts)
 
 
 def _to_html_cap(text: str, limit: int = 1000) -> str:

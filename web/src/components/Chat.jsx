@@ -313,24 +313,30 @@ export function renderMd(text) {
   return blocks.map((b, bi) => {
     if (/^```/.test(b)) return <pre key={bi}><code>{b.replace(/^```[a-z]*\n?/, '').replace(/```$/, '')}</code></pre>
     const lines = b.split('\n')
-    const out = []; let list = null
+    const out = []; let list = null; let quotes = null
     const flush = () => { if (list) { out.push(<ul key={out.length}>{list}</ul>); list = null } }
+    const flushQ = () => { if (quotes) { out.push(<blockquote key={out.length}>{quotes}</blockquote>); quotes = null } }
     lines.forEach((ln, li) => {
+      const q = ln.match(/^\s*>\s?(.*)$/)
+      if (q) { flush(); (quotes ||= []).push(<span key={li}>{inline(q[1])}{li < lines.length - 1 ? '\n' : ''}</span>); return }
+      flushQ()
       const m = ln.match(/^\s*(?:[-•*]|\d+[.)])\s+(.*)$/)
       if (m) { (list ||= []).push(<li key={li}>{inline(m[1])}</li>); return }
       flush()
       out.push(<span key={li}>{inline(ln)}{li < lines.length - 1 ? '\n' : ''}</span>)
     })
-    flush()
+    flush(); flushQ()
     return <span key={bi}>{out}</span>
   })
 }
 function inline(text) {
-  const parts = String(text).split(/(\*\*[^*]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\n]+\*(?![\w*])|https?:\/\/[^\s)]+)/g)
+  const parts = String(text).split(/(\*\*[^*]+\*\*|`[^`\n]+`|(?<![\w*])\*[^*\n]+\*(?![\w*])|!?\[[^\]\n]+\]\(https?:\/\/[^)\s]+\)|https?:\/\/[^\s)]+)/g)
   return parts.map((p, i) => {
     if (/^\*\*[^*]+\*\*$/.test(p)) return <b key={i} className="font-semibold">{p.slice(2, -2)}</b>
     if (/^`[^`]+`$/.test(p)) return <code key={i}>{p.slice(1, -1)}</code>
     if (/^\*[^*]+\*$/.test(p)) return <i key={i}>{p.slice(1, -1)}</i>
+    const lm = p.match(/^!?\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)$/)
+    if (lm) return <a key={i} href={lm[2]} target="_blank" rel="noreferrer">{lm[1]}</a>
     if (/^https?:\/\//.test(p)) return <a key={i} href={p} target="_blank" rel="noreferrer">{p.replace(/^https?:\/\//, '').slice(0, 48)}</a>
     return p
   })

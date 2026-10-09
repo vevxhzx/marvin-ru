@@ -2058,6 +2058,7 @@ select.input { appearance: none; }
 .md ul { margin: .35em 0; padding-left: 1.2em; list-style: disc; }
 .md li + li { margin-top: .15em; }
 .md a { color: var(--accent); text-decoration: underline; text-underline-offset: 2px; }
+.md blockquote { margin: .4em 0; padding: .35em .8em; border-left: 3px solid var(--accent); border-radius: 0 var(--r-sm) var(--r-sm) 0; background: color-mix(in srgb, currentColor 6%, transparent); }
 /* мигающий курсор стрима */
 .cursor::after { content: ''; display: inline-block; width: 7px; height: 1em; margin-left: 2px; vertical-align: -2px; background: var(--accent); border-radius: 2px; animation: blink 1s steps(2) infinite; }
 @keyframes blink { 50% { opacity: 0 } }
