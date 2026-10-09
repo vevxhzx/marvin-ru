@@ -1591,7 +1591,7 @@ if VISION_WHERE not in ("auto", "cloud", "local"):
     VISION_WHERE = "auto"
 # Провайдеры отключают модели зрения каждые полгода — держим список, пробуем по очереди, рабочую запоминаем
 CLOUD_VISION_MODELS = {"groq": ["qwen/qwen3.6-27b", "qwen/qwen3.8-27b", "meta-llama/llama-4-scout-17b-16e-instruct", "meta-llama/llama-4-maverick-17b-128e-instruct"],
-                       "openrouter": ["qwen/qwen2.5-vl-72b-instruct:free", "google/gemma-3-27b-it:free", "meta-llama/llama-4-scout:free"],
+                       "openrouter": ["google/gemma-4-26b-a4b-it:free", "google/gemma-4-31b-it:free", "dots-studio/dots-3-note-preview:free"],
                        "nvidia": ["meta/llama-4-scout-17b-16e-instruct", "qwen/qwen2.5-vl-72b-instruct"]}
 _CLOUD_VISION_GOOD: dict[str, str] = {}
 _VISION_LOCAL_OK: bool | None = None
@@ -1719,9 +1719,13 @@ async def describe_image(image_b64: str, question: str, private: bool = False, s
         body = {"model": model, "temperature": 0.2, "max_tokens": 400 if short else 900,
                 "messages": [{"role": "user", "content": [{"type": "text", "text": question + hint},
                                                            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}]}]}
+        if CLOUD_PROVIDER == "openrouter":
+            # думающим моделям (dots, nemotron) запрещаем размышления: иначе весь max_tokens
+            # уходит в поле reasoning, а в content приезжает пустота
+            body["reasoning"] = {"effort": "none", "exclude": True}
         try:
             r = await _cloud_post("/chat/completions", body, headers, timeout=60)
-            if r.status_code in (400, 404, 410, 422) and re.search(r"decommission|not found|does not exist|deprecated|unsupported|invalid model", r.text, re.I):
+            if r.status_code in (400, 404, 410, 422) and re.search(r"decommission|not found|does not exist|no endpoints found|deprecated|unsupported|invalid model", r.text, re.I):
                 last = f"{model}: снята с поддержки"; continue
             r.raise_for_status()
             msg = (r.json().get("choices") or [{}])[0].get("message") or {}
