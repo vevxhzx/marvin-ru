@@ -1457,6 +1457,9 @@ def _destructive_question(name: str, args: dict) -> str:
     return f"Точно {what}" + (f" «{target}»" if target else "") + "? Это не отменить одной кнопкой — скажите «да» или «нет», сэр."
 
 
+_PLACEHOLDER_RX = re.compile(r"\[[^\]\n]*?(результат|данн\w*|сумм\w*|числ\w*|встав\w*|пример)[^\]\n]*?\]", re.I)
+
+
 def _truth_gate(answer: str, results: list["registry.ToolResult"]) -> str:
     """Последняя проверка перед тем, как отдать ответ человеку.
 
@@ -1468,6 +1471,14 @@ def _truth_gate(answer: str, results: list["registry.ToolResult"]) -> str:
     # «не разобрал дату» → модель прислала ISO → записано. Человеку про первую попытку знать незачем.
     failed = [r for r in results if not r.ok and not any(s.ok and s.name == r.name for s in results)]
     if not failed:
+        # читающие инструменты отработали, а маленькая модель вместо цифр вставила плейсхолдеры
+        # («[Результат инструмента]») — отдаём настоящие данные напрямую, а не её фантазию
+        if any(r.ok for r in results):
+            naked = re.sub(r"\[[^\]\n]+\]\([^)\s]+\)", "", answer)  # markdown-ссылки — не плейсхолдеры
+            if _PLACEHOLDER_RX.search(naked):
+                real = "\n".join(r.text for r in results if r.ok and r.text)
+                log.warning("модель вставила плейсхолдеры вместо данных — отдаю цифры напрямую")
+                return real or answer
         return answer
     why = "; ".join(_FAIL_WHY.get(r.name, "не выполнено") for r in failed[:2])
     failed_writes = [r for r in failed if r.risk != "read"]

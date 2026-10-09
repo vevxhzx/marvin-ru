@@ -177,6 +177,27 @@ def test_truth_gate_keeps_partial_success_honest():
     assert "не всё" in out.lower()
 
 
+def test_truth_gate_replaces_placeholders_with_real_data():
+    """Модель вставила «[Результат инструмента]» вместо цифр — отдаём настоящие данные."""
+    from core.brain import agent
+    from core.tools import registry
+
+    ok = registry.ToolResult("finance_summary", ok=True, risk="read", text="Баланс 100 500 ₽")
+    out = agent._truth_gate("Общий баланс: [Результат инструмента]", [ok])
+    assert out == "Баланс 100 500 ₽"
+    assert "Результат инструмента" not in out
+
+
+def test_truth_gate_keeps_markdown_links():
+    """Ссылки [читать](url) — не плейсхолдеры, ответ не трогаем."""
+    from core.brain import agent
+    from core.tools import registry
+
+    ok = registry.ToolResult("agenda", ok=True, risk="read", text="встреч нет")
+    ans = "Смотри [отчёт](https://example.com/1), встреч нет."
+    assert agent._truth_gate(ans, [ok]) == ans
+
+
 # ============================================================ 3. затухшие факты
 def test_memory_block_marks_current_layer():
     """Факты слоя «сейчас» помечены — модель не должна выдавать их за вечные."""
