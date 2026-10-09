@@ -106,13 +106,55 @@ def _clean(text: str, limit: int = 180) -> str:
 
 
 def _bare_link(url: str) -> str:
-    """Ссылка без utm-хвостов (ленты любят приклеивать utm_source=rss — в дайджесте мусор)."""
+    """Ссылка без мусорных хвостов (utm_* и from=rss — в дайджесте мусор)."""
     try:
         p = urlsplit(url.strip())
-        q = [(k, v) for k, v in parse_qsl(p.query) if not k.lower().startswith("utm_")]
+        q = [(k, v) for k, v in parse_qsl(p.query)
+             if not k.lower().startswith("utm_") and not (k.lower() == "from" and v.lower() == "rss")]
         return urlunsplit((p.scheme, p.netloc, p.path, urlencode(q), ""))
     except Exception:
         return url
+
+
+_STOPWORDS = frozenset("это как так уже всего самый новый время год после между который можно "
+                      "россии российский российская российские сегодня вчера завтра просто очень "
+                      "будет было есть нет да для при без под над".split())
+
+
+def _story_words(title: str) -> frozenset:
+    """Значимые основы слов заголовка (первая находка дублей: одна история разными словами)."""
+    words = re.findall(r"[а-яёa-z0-9]{4,}", (title or "").lower().replace("ё", "е"))
+    out = set()
+    for w in words:
+        if w in _STOPWORDS:
+            continue
+        out.add(w if len(w) <= 5 else w[:6])
+    return frozenset(out)
+
+
+def dedupe_stories(items: list[dict]) -> list[dict]:
+    """Склейка дублей: одна история в разных лентах — остаётся первая, остальные выкидываем.
+    Считаем дублем ≥4 общих основы при жаккаре ≥0.22 (проверено на паре «сбой Яндекса»:
+    общие {бпла, дата, центр, яндекс, работе} — жаккар 0.28)."""
+    kept: list[dict] = []
+    for it in items:
+        words = _story_words(it.get("title", ""))
+        dupe = False
+        for k in kept:
+            inter = words & k["_words"]
+            union = words | k["_words"]
+            if len(inter) >= 4 and union and len(inter) / len(union) >= 0.22:
+                dupe = True
+                break
+        if not dupe:
+            it = dict(it)
+            it["_words"] = words
+            kept.append(it)
+    for it in kept:
+        it.pop("_words", None)
+    if len(kept) != len(items):
+        log.info("новости: склеил дублей %d", len(items) - len(kept))
+    return kept
 
 
 def parse_feed(data: bytes, source: str = "") -> list[dict]:
@@ -198,7 +240,9 @@ CAND_PER_FEED = 5  # сколько тянем с ленты как кандид
 
 _SELECT_SYSTEM = ("Ты — редактор утреннего дайджеста. Отбери самое важное для человека, "
     "который следит за ИИ, технологиями и деньгами: прорывы, деньги, то, что влияет на жизнь. "
-    "Проходняк и рекламу выкидывай, дубли одной новости из разных лент слей в один пункт. "
+    "Проходняк и рекламу выкидывай. ЖЕЛЕЗНОЕ ПРАВИЛО: одно событие — один пункт. Если две новости "
+    "про одно и то же (совпадают место, компания или суть — хоть и разными словами), оставь ОДНУ "
+    "с самой понятной формулировкой, вторую выкинь. "
     "Верни СТРОГО JSON: {\"picks\": [{\"i\": номер новости, \"line\": \"суть одной строкой по-русски\"}]}.")
 
 
@@ -275,7 +319,7 @@ async def fetch_digest(topic: str | None = None, limit: int = 7, mark: bool = Fa
             for it in items[:CAND_PER_FEED]:
                 it["feed"] = name
             out.append({"name": name, "url": url, "items": items[:CAND_PER_FEED]})
-    cands = [it for f in out for it in f["items"]]
+    cands = dedupe_stories([it for f in out for it in f["items"]])
     shown = await select_top(cands, limit)
     if mark and shown:
         mark_seen(shown)

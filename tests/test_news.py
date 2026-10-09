@@ -211,3 +211,34 @@ def test_select_top_bad_json_fallback(monkeypatch):
     monkeypatch.setattr(_llm, "small_chat", garbage)
     picks = asyncio.run(news.select_top(_cands(6), 2))
     assert len(picks) == 2 and "line" not in picks[0]
+
+
+def test_dedupe_merges_same_story():
+    from core.services import news
+
+    items = [
+        {"feed": "3DNews", "title": "Масштабный сбой в работе российских IT-сервисов (Яндекс, VK) произошел из-за атаки БПЛА на дата-центр «Яндекса»", "link": "https://3dnews.ru/1", "desc": ""},
+        {"feed": "Т—Ж", "title": "Атака БПЛА на дата-центр «Яндекса» привела к массовым сбоям в работе сайтов и банковских приложений", "link": "https://t-j.ru/2", "desc": ""},
+        {"feed": "iXBT", "title": "Atari воскресила компьютер 43-летней давности — 800XL вернулся с картриджами", "link": "https://ixbt.com/3", "desc": ""},
+    ]
+    out = news.dedupe_stories(items)
+    assert len(out) == 2, "одна история — один пункт"
+    assert out[0]["feed"] == "3DNews", "остаётся первая"
+    assert any("Atari" in o["title"] for o in out)
+
+
+def test_dedupe_keeps_different_stories():
+    from core.services import news
+
+    items = [
+        {"feed": "A", "title": "Anthropic ужесточила правила для Claude: бойкот за грубость", "link": "https://a/1", "desc": ""},
+        {"feed": "B", "title": "Google представила Gemini Agent — ИИ-сотрудника для автономных задач", "link": "https://b/2", "desc": ""},
+    ]
+    assert len(news.dedupe_stories(items)) == 2
+
+
+def test_bare_link_strips_from_rss():
+    from core.services import news
+
+    assert news._bare_link("https://vc.ru/x/1?from=rss") == "https://vc.ru/x/1"
+    assert news._bare_link("https://vc.ru/x/1?from=rss&y=2") == "https://vc.ru/x/1?y=2"
