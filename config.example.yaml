@@ -201,7 +201,12 @@ news:
   time: ""                 # во сколько присылать (ЧЧ:ММ, например "08:00"); пусто — только вручную (/news)
   feeds: ""                # ленты по строкам «Название | https://…/rss», например:
                            #   Хабр | https://habr.com/ru/rss/all/all/
-                           #   Ведомости | https://www.vedomosti.ru/rss/news
+                           #   3DNews | https://3dnews.ru/news/rss/
+                           #   Т—Ж | https://t-j.ru/feed/
+
+weather:
+  enabled: false            # краткий прогноз на день: верхом в новостной дайджест + команда /weather
+  city: "Липецк"            # город (координаты подберу сам и запомню)
 
 backup:
   enabled: true

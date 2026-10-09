@@ -827,7 +827,9 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         try:
             if not news.enabled():
                 return
-            res = await news.fetch_digest(mark=True)
+            from . import weather as _weather
+            header = await _weather.today()
+            res = await news.fetch_digest(mark=True, max_per=3, header=header)
             if res.get("total"):
                 await _notify(res["text"])
             elif res.get("errors"):

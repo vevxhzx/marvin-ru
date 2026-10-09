@@ -97,7 +97,7 @@ async def start(m: Message):
                    "• «заплатил Диме 2000», «перевёл 5000 на сбер», «снял 3000 наличных»\n"
                    "• «подписка яндекс плюс 399 25-го», «лимит на еду 20000»\n"
                    "• «отмени последнюю» — откатить трату\n"
-                   "• /summary — итог дня · /find — поиск по Мозгу · /news — свежие новости · /exp 700 такси — трата одним тапом")
+                   "• /summary — итог дня · /find — поиск по Мозгу · /news — свежие новости · /weather — погода · /exp 700 такси — трата одним тапом")
 
 
 _QUICK_HINT = {"расход": "700 такси", "доход": "15000 аванс", "задача": "сдать отчёт в пятницу", "встреча": "в среду в 15:00 с Димой"}
@@ -213,6 +213,17 @@ async def news_cmd(m: Message):
     finally:
         typing.cancel()
     await send_long(m, res.get("text") or "Нового нет, сэр — всё уже показывал.")
+
+
+@router.message(Command("weather", "погода"))
+async def weather_cmd(m: Message):
+    """Краткий прогноз на день."""
+    from core.services import weather as _weather
+    if not _weather.enabled():
+        await m.answer("Погода выключена, сэр: включается в настройках (интеграции → погода).")
+        return
+    txt = await _weather.today()
+    await m.answer(txt or "Прогноз не забрался, сэр. Загляните в лог.")
 
 
 @router.message(Command("today"))

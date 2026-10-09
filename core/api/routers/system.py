@@ -535,9 +535,13 @@ async def google_pull():
 async def news_digest_api(topic: str = "", limit: int = 5):
     """Свежие новости по лентам из настроек. Чистое чтение — прочитанное не отмечает (это делает планировщик)."""
     from ...services import news as _news
+    from ...services import weather as _weather
     if not _news.configured():
         raise HTTPException(400, "Новости не настроены: включите их и добавьте ленты в настройках (интеграции → новости)")
-    return await _news.fetch_digest(topic=topic or None, max_per=max(1, min(limit or 5, 10)))
+    header = await _weather.today()
+    res = await _news.fetch_digest(topic=topic or None, max_per=max(1, min(limit or 5, 10)), header=header)
+    res["weather"] = header
+    return res
 
 
 @router.post("/api/google/disconnect")

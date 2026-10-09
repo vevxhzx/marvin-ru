@@ -120,10 +120,13 @@ def test_digest_unknown_topic(monkeypatch):
     assert res["ok"] is False and "спорт" in res["text"]
 
 
-def test_api_requires_config(fresh_db):
+def test_api_requires_config(fresh_db, monkeypatch):
     from fastapi.testclient import TestClient
 
     from core.api.app import app
+    from core.services import news
+
+    monkeypatch.setattr(news, "enabled", lambda: False)
 
     r = TestClient(app, client=("127.0.0.1", 5555), base_url="http://testserver").get("/api/news")
     assert r.status_code == 400, "без лент — подсказка, а не пустота"
@@ -146,8 +149,9 @@ def test_scheduler_registers_only_when_on(fresh_db, monkeypatch):
     async def notify(text, buttons=None):
         pass
 
+    monkeypatch.setattr(news, "enabled", lambda: False)
     assert "news_digest" not in {j.id for j in scheduler.build(notify).get_jobs()}, \
-        "по умолчанию (выкл) задачи нет"
+        "когда выключено — задачи нет"
     monkeypatch.setattr(news, "enabled", lambda: True)
     monkeypatch.setattr(news, "digest_time", lambda: "08:00")
     jobs = {j.id: j for j in scheduler.build(notify).get_jobs()}

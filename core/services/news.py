@@ -194,8 +194,10 @@ def _only_new(items: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------- дайджест
-async def fetch_digest(topic: str | None = None, max_per: int = 5, mark: bool = False) -> dict:
-    """Собрать дайджест. topic — подстрока названия ленты (пусто — все). mark — отметить показанное."""
+async def fetch_digest(topic: str | None = None, max_per: int = 5, mark: bool = False,
+                     header: str | None = None) -> dict:
+    """Собрать дайджест. topic — подстрока названия ленты (пусто — все). mark — отметить показанное.
+    header — строка верхом (прогноз погоды)."""
     max_per = max(1, min(max_per or 5, 10))
     feeds = feed_list()
     if topic:
@@ -229,6 +231,8 @@ async def fetch_digest(topic: str | None = None, max_per: int = 5, mark: bool = 
     if not total:
         return {"ok": True, "text": "Нового нет, сэр — всё уже показывал.", "feeds": out, "errors": errors, "total": 0}
     lines = [f"📰 **НОВОСТИ** · {datetime.now():%d.%m %H:%M}"]
+    if header:
+        lines.append(header)
     for f in out:
         if not f["items"]:
             continue

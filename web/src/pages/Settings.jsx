@@ -47,6 +47,7 @@ const GROUPS = [
   ['cards', T('st.g_cards'), T('st.d_cards')],
   ['google', T('st.g_gcal'), T('st.d_gcal2')],
   ['news', 'новости', 'RSS-ленты: утром присылаю сам, вручную — /news'], // i18n-raw
+  ['weather', 'погода', 'краткий прогноз: утром в дайджесте, вручную — /weather'], // i18n-raw
   ['backup', T('st.g_backups'), T('st.d_backups')],
   ['owner', T('st.g_owner'), ''],
   ['assistant', T('st.g_assistant'), T('st.d_name')],
@@ -74,7 +75,7 @@ const CATS = [
   { id: 'ai', label: T('st.g_brain'), caps: ['st.local_brain', 'st.g_cloud'], groups: ['brain', 'brain.cloud'] },
   { id: 'voice', label: T('st.g_voice2'), caps: ['st.g_voice3', 'st.organise'], groups: ['voice', 'cards'], extra: ['organizer'] },
   { id: 'memory', label: T('st.g_data'), caps: ['st.cloud_backups2'], groups: ['backup'], extra: ['data', 'cloud'] },
-  { id: 'integrations', label: T('st.g_integrations'), caps: ['st.tg_app5', 'st.g_gcal'], groups: ['telegram', 'google', 'news'] },
+  { id: 'integrations', label: T('st.g_integrations'), caps: ['st.tg_app5', 'st.g_gcal'], groups: ['telegram', 'google', 'news', 'weather'] },
   { id: 'system', label: T('st.g_system'), caps: ['st.logs', 'st.status'], groups: ['server'], extra: ['status', 'diag'] },
 ]
 
@@ -169,6 +170,7 @@ export default function Settings({ health }) {
   const groupBlock = ([prefix, title, hint]) => {
     if (!data) return <ListSkeleton key={prefix} n={3} />
     if (prefix === 'news') { const L = NEWS_L[lang] || NEWS_L.ru; title = L.title; hint = L.desc }
+    if (prefix === 'weather') { const L = WEATHER_L[lang] || WEATHER_L.ru; title = L.title; hint = L.desc }
     let items = data.items.filter((it) => it.key.startsWith(prefix + '.'))
     const feedsIt = prefix === 'news' ? data.items.find((it) => it.key === 'news.feeds') : null
     if (prefix === 'news') items = items.filter((it) => it.key !== 'news.feeds')
@@ -898,6 +900,12 @@ const NEWS_L = {
     refresh_fail: 'fetch failed — see the error above',
     not_configured: 'enable news and add at least one feed',
   },
+}
+
+/* Погода: подписи раздела — локальная пара ru/en, новых ключей в i18n.js не заводим. */
+const WEATHER_L = {
+  ru: { title: 'погода', desc: 'краткий прогноз: утром в дайджесте, вручную — /weather' }, // i18n-raw
+  en: { title: 'weather', desc: 'brief forecast: in the morning digest, manually via /weather' },
 }
 
 function NewsBlock({ show, value, onChange }) {

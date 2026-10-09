@@ -242,6 +242,8 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "news.enabled": ("bool", "Новости: забирать RSS-ленты и присылать дайджест (ленты — строкой ниже)", False),
     "news.time": ("str", "Новости: во сколько присылать дайджест (ЧЧ:ММ, пусто — только вручную)", False),
     "news.feeds": ("str", "Новости: ленты по строкам «Название | https://…/rss» (# — комментарий)", False),
+    "weather.enabled": ("bool", "Погода: краткий прогноз на день верхом в новостной дайджест и по /weather", False),
+    "weather.city": ("str", "Погода: город (координаты подберу сам и запомню)", False),
     "backup.enabled": ("bool", "Ежедневный бэкап базы", False),
     "backup.dir": ("str", "Папка бэкапов", False),
     "backup.extra_dir": ("str", "Вторая копия (другой диск / папка Яндекс.Диска)", False),
@@ -344,6 +346,13 @@ def write_settings(changes: dict[str, object]) -> list[str]:
                 break  # вышли из секции — ключа нет
             i += 1
         rendered = f"{'  ' * (len(parts) - 1)}{parts[-1]}: {_yaml_scalar(val, typ)}"
+        # многострочная строка (ленты новостей) — блочным скаляром, иначе переводы строк
+        # схлопнутся в пробелы и построчный формат потеряется при следующем чтении
+        block: list[str] = []
+        if typ == "str" and "\n" in str(val or ""):
+            indent = "  " * len(parts)
+            block = [f"{'  ' * (len(parts) - 1)}{parts[-1]}: |"]
+            block += [f"{indent}{ln}" if ln.strip() else "" for ln in str(val).splitlines()]
         if idx >= 0:
             old = lines[idx]
             comment = ""
@@ -351,7 +360,18 @@ def write_settings(changes: dict[str, object]) -> list[str]:
             m = __import__("re").search(r'\s+#.*$', old.split('"')[-1] if old.count('"') % 2 == 0 else "")
             if m:
                 comment = m.group(0)
-            lines[idx] = rendered + comment
+            # стираем хвост старого значения, но только если оно было блочным скаляром (|):
+            # обычные скаляры вложенных строк не имеют, а чужие комментарии/ключи трогать нельзя
+            if old.rstrip().endswith("|"):
+                key_indent = len(old) - len(old.lstrip(" "))
+                j = idx + 1
+                while j < len(lines) and lines[j].strip() and len(lines[j]) - len(lines[j].lstrip(" ")) > key_indent:
+                    del lines[j]
+            if block:
+                lines[idx] = block[0] + comment
+                lines[idx + 1:idx + 1] = block[1:]
+            else:
+                lines[idx] = rendered + comment
         else:
             # ключа нет (старый config.yaml без новой настройки) — спускаемся по секциям, недостающие создаём,
             # значение ставим в конец самой глубокой. Работает на любую глубину: voice.pc.screen_time.enabled — 4 уровня
@@ -379,7 +399,10 @@ def write_settings(changes: dict[str, object]) -> list[str]:
             ins = sec_end
             while ins > sec_start + 1 and not lines[ins - 1].strip():
                 ins -= 1
-            lines.insert(ins, rendered)
+            if block:
+                lines[ins:ins] = block
+            else:
+                lines.insert(ins, rendered)
         changed.append(key)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return changed
