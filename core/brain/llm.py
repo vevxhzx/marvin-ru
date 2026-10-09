@@ -411,6 +411,11 @@ async def _lmstudio_chat(messages: list[dict], temperature: float = 0.3,
     async with _local_client(180) as c:
         try:
             r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json=payload)
+            if r.status_code == 400 and json_mode and "response_format" in r.text:
+                # свежий LM Studio не принимает json_object (только json_schema/text) —
+                # повторяем обычным текстом: в системном промпте и так «строго JSON»
+                del payload["response_format"]
+                r = await c.post(f"{LMSTUDIO_BASE}/chat/completions", json=payload)
             r.raise_for_status()
         except Exception as e:
             _lms_fail(_lms_why(e, LMSTUDIO_BASE))

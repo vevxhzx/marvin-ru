@@ -193,12 +193,65 @@ def _only_new(items: list[dict]) -> list[dict]:
     return [it for it in items if _key(it) not in seen]
 
 
+# ---------------------------------------------------------------- умный отбор
+CAND_PER_FEED = 5  # сколько тянем с ленты как кандидатов (показываем меньше — топ)
+
+_SELECT_SYSTEM = ("Ты — редактор утреннего дайджеста. Отбери самое важное для человека, "
+    "который следит за ИИ, технологиями и деньгами: прорывы, деньги, то, что влияет на жизнь. "
+    "Проходняк и рекламу выкидывай, дубли одной новости из разных лент слей в один пункт. "
+    "Верни СТРОГО JSON: {\"picks\": [{\"i\": номер новости, \"line\": \"суть одной строкой по-русски\"}]}.")
+
+
+def top_n() -> int:
+    n = _n()
+    try:
+        return max(3, min(int(getattr(n, "top", 7) or 7), 12))
+    except (TypeError, ValueError):
+        return 7
+
+
+async def select_top(cands: list[dict], top: int) -> list[dict]:
+    """Топ важных из кандидатов: спрашиваем малую локальную модель, наружу ничего не уходит.
+    Не вышло (нет модели, битый JSON) — по кругу из разных лент, чтобы не было 7 новостей с одного Хабра."""
+    if len(cands) <= top:
+        return cands
+    numbered = "\n".join(f"{k + 1}. [{c['feed']}] {c['title'][:100]} — {c.get('desc', '')[:100]}"
+                         for k, c in enumerate(cands))
+    try:
+        from ..brain import llm as _llm
+        raw = await _llm.small_chat(_SELECT_SYSTEM, f"Новостей: {len(cands)}, отобрать {top}:\n{numbered}",
+                                    json_mode=True, num_predict=600)
+        data = json.loads(re.search(r"\{.*\}", raw, re.S).group(0))
+        picks, seen = [], set()
+        for p in (data.get("picks") or [])[:top]:
+            i = int(p.get("i", 0)) - 1
+            line = str(p.get("line") or "").strip()
+            if 0 <= i < len(cands) and i not in seen and line:
+                seen.add(i)
+                picks.append({**cands[i], "line": line[:200]})
+        if picks:
+            log.info("новости: отобрал %d из %d", len(picks), len(cands))
+            return picks
+        log.warning("новости: модель вернула пустой отбор — даю первые")
+    except Exception as e:
+        log.warning("новости: отбор не сработал (%s) — даю первые", str(e)[:100])
+    by_feed: dict[str, list[dict]] = {}
+    for c in cands:
+        by_feed.setdefault(c["feed"], []).append(c)
+    out: list[dict] = []
+    for row in zip(*by_feed.values()):
+        out.extend(row)
+        if len(out) >= top:
+            break
+    return out[:top]
+
+
 # ---------------------------------------------------------------- дайджест
-async def fetch_digest(topic: str | None = None, max_per: int = 5, mark: bool = False,
+async def fetch_digest(topic: str | None = None, limit: int = 7, mark: bool = False,
                      header: str | None = None) -> dict:
-    """Собрать дайджест. topic — подстрока названия ленты (пусто — все). mark — отметить показанное.
-    header — строка верхом (прогноз погоды)."""
-    max_per = max(1, min(max_per or 5, 10))
+    """Собрать дайджест. topic — подстрока названия ленты (пусто — все). limit — максимум новостей
+    (умный отбор топа, см. select_top). mark — отметить показанное. header — строка верхом (погода)."""
+    limit = max(1, min(limit or 7, 12))
     feeds = feed_list()
     if topic:
         low = topic.strip().lower()
@@ -219,8 +272,11 @@ async def fetch_digest(topic: str | None = None, max_per: int = 5, mark: bool = 
             if mark:
                 fresh = _only_new(items)
                 items = fresh if fresh else items[:0]
-            out.append({"name": name, "url": url, "items": items[:max_per]})
-    shown = [it for f in out for it in f["items"]]
+            for it in items[:CAND_PER_FEED]:
+                it["feed"] = name
+            out.append({"name": name, "url": url, "items": items[:CAND_PER_FEED]})
+    cands = [it for f in out for it in f["items"]]
+    shown = await select_top(cands, limit)
     if mark and shown:
         mark_seen(shown)
     total = len(shown)
@@ -230,18 +286,18 @@ async def fetch_digest(topic: str | None = None, max_per: int = 5, mark: bool = 
                 "feeds": out, "errors": errors, "total": 0}
     if not total:
         return {"ok": True, "text": "Нового нет, сэр — всё уже показывал.", "feeds": out, "errors": errors, "total": 0}
-    lines = [f"📰 **НОВОСТИ** · {datetime.now():%d.%m %H:%M}"]
+    lines = [f"📰 **НОВОСТИ · ТОП-{total}** · {datetime.now():%d.%m %H:%M}"]
     if header:
         lines.append(header)
-    for f in out:
-        if not f["items"]:
-            continue
-        lines.append(f"\n**{f['name']}**")
-        for it in f["items"]:
-            lines.append(f"— {it['title']}")
-            if it["desc"]:
-                lines.append(f"  {it['desc']}")
-            lines.append(f"  {it['link']}")
+    cur_feed = None
+    for it in shown:
+        if it["feed"] != cur_feed:
+            cur_feed = it["feed"]
+            lines.append(f"\n**{cur_feed}**")
+        lines.append(f"— {it.get('line') or it['title']}")
+        if not it.get("line") and it["desc"]:
+            lines.append(f"  {it['desc']}")
+        lines.append(f"  {it['link']}")
     if errors:
         lines.append(f"\n_Не ответили: {', '.join(errors)}_")
     return {"ok": True, "text": "\n".join(lines), "feeds": out, "errors": errors, "total": total}

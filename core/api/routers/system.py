@@ -539,7 +539,7 @@ async def news_digest_api(topic: str = "", limit: int = 5):
     if not _news.configured():
         raise HTTPException(400, "Новости не настроены: включите их и добавьте ленты в настройках (интеграции → новости)")
     header = await _weather.today()
-    res = await _news.fetch_digest(topic=topic or None, max_per=max(1, min(limit or 5, 10)), header=header)
+    res = await _news.fetch_digest(topic=topic or None, limit=max(1, min(limit or 7, 12)), header=header)
     res["weather"] = header
     return res
 

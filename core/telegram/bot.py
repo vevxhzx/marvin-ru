@@ -202,7 +202,7 @@ async def news_cmd(m: Message):
     topic = parts[1].strip() if len(parts) > 1 else ""
     typing = asyncio.create_task(_keep_typing(m))
     try:
-        res = await asyncio.wait_for(_news.fetch_digest(topic=topic or None, mark=True), timeout=90)
+        res = await asyncio.wait_for(_news.fetch_digest(topic=topic or None, limit=_news.top_n(), mark=True), timeout=120)
     except asyncio.TimeoutError:
         await m.answer("Ленты отвечают медленно, сэр. Попробуйте ещё раз.")
         return

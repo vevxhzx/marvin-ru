@@ -166,3 +166,48 @@ def test_editable_keys():
     assert EDITABLE["news.enabled"][0] == "bool"
     assert EDITABLE["news.time"][0] == "str"
     assert EDITABLE["news.feeds"][0] == "str"
+    assert EDITABLE["news.top"][0] == "int"
+
+
+def _cands(n=10):
+    return [{"feed": f"Лента{i % 3}", "title": f"Новость {i}", "desc": f"Суть {i}",
+             "link": f"https://example.com/{i}"} for i in range(n)]
+
+
+def test_select_top_uses_model(monkeypatch):
+    import json as _json
+
+    from core.brain import llm as _llm
+    from core.services import news
+
+    async def fake_small(system, user, json_mode=True, num_predict=200):
+        assert "отобрать 3" in user
+        return _json.dumps({"picks": [{"i": 5, "line": "Главное дня"}, {"i": 2, "line": "Второе важное"},
+                                       {"i": 9, "line": "Третье"}]})
+    monkeypatch.setattr(_llm, "small_chat", fake_small)
+    picks = asyncio.run(news.select_top(_cands(), 3))
+    assert [p["line"] for p in picks] == ["Главное дня", "Второе важное", "Третье"]
+    assert picks[0]["link"] == "https://example.com/4", "ссылки — из оригинала"
+
+
+def test_select_top_fallback_round_robin(monkeypatch):
+    from core.brain import llm as _llm
+    from core.services import news
+
+    async def boom(*a, **k):
+        raise RuntimeError("модели нет")
+    monkeypatch.setattr(_llm, "small_chat", boom)
+    picks = asyncio.run(news.select_top(_cands(9), 4))
+    assert [p["title"] for p in picks] == ["Новость 0", "Новость 1", "Новость 2", "Новость 3"], \
+        "без модели — по кругу из разных лент"
+
+
+def test_select_top_bad_json_fallback(monkeypatch):
+    from core.brain import llm as _llm
+    from core.services import news
+
+    async def garbage(*a, **k):
+        return "не json вообще"
+    monkeypatch.setattr(_llm, "small_chat", garbage)
+    picks = asyncio.run(news.select_top(_cands(6), 2))
+    assert len(picks) == 2 and "line" not in picks[0]
