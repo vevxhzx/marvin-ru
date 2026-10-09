@@ -259,3 +259,43 @@ def test_evict_unloads_ollama_main():
     url, body = seen[0]
     assert url == f"{llm.OLLAMA_URL}/api/generate"
     assert body["model"] == llm.OLLAMA_MODEL and body["keep_alive"] == 0
+
+
+def _tools():
+    return [{"type": "function", "function": {"name": "finance_summary"}},
+            {"type": "function", "function": {"name": "agenda"}}]
+
+
+def test_text_tool_call_parses():
+    """Вызов текстом: имя + пусто/JSON в скобках или без — понимаем, мусор — нет."""
+    from core.brain.llm import _text_tool_call as p
+
+    assert p("finance_summary{}", _tools()) == {"name": "finance_summary", "arguments": {}}
+    assert p("agenda", _tools()) == {"name": "agenda", "arguments": {}}
+    assert p('agenda({"days": 3})', _tools()) == {"name": "agenda", "arguments": {"days": 3}}
+    assert p("agenda{", _tools()) is None, "битый JSON — не вызов"
+    assert p("unknown_tool{}", _tools()) is None, "чужое имя — не вызов"
+    assert p("посмотри finance_summary{}", _tools()) is None, "текст вокруг — не вызов"
+    assert p("надо вызвать finance_summary и agenda", _tools()) is None
+    assert p("", _tools()) is None
+
+
+def test_text_tool_call_end_to_end(monkeypatch):
+    """Gemma вместо tool_calls пишет finance_summary{} в content — выполняем, в чат не отдаём."""
+    from core.brain import llm
+
+    seen = []
+
+    class _TextClient(_FakeClient):
+        async def post(self, url, json=None, **kw):
+            self._seen.append(("POST", url, json))
+            if url.endswith("/chat/completions") and (json or {}).get("tools"):
+                return _Resp({"choices": [{"message": {"content": "finance_summary{}", "tool_calls": []}}]})
+            return await super().post(url, json, **kw)
+
+    _lm_on(monkeypatch, use="main", client=_TextClient(seen))
+    out = asyncio.run(llm.ollama_chat(
+        [{"role": "user", "content": "сколько денег"}],
+        tools=[{"type": "function", "function": {"name": "finance_summary"}}]))
+    assert out["tool_calls"] == [{"name": "finance_summary", "arguments": {}}]
+    assert out["content"] == "", "текст вызова в чат не уходит"

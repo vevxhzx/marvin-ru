@@ -429,6 +429,24 @@ async def _lmstudio_chat(messages: list[dict], temperature: float = 0.3,
     return {"content": strip_think(str(content)).strip(), "tool_calls": []}
 
 
+def _text_tool_call(content: str, tools: list[dict]) -> dict | None:
+    """Вызов, написанный текстом: слабые модели (Gemma) вместо tool_calls отвечают
+    `finance_summary{}` прямо в content — и команда утекает в чат. Распознаём строго:
+    весь ответ — известное имя + JSON-аргументы (или пусто). Иначе None."""
+    names = {t.get("function", {}).get("name") for t in tools or []}
+    m = re.fullmatch(r"\s*([A-Za-z_]\w*)\s*(\((\{.*\})?\)|\{(.*)\})?\s*", content or "", re.S)
+    if not m or m.group(1) not in names:
+        return None
+    raw_args = m.group(3) if m.group(3) is not None else m.group(4)
+    args: dict = {}
+    if raw_args:
+        try:
+            args = json.loads(raw_args)
+        except json.JSONDecodeError:
+            return None
+    return {"name": m.group(1), "arguments": args if isinstance(args, dict) else {}}
+
+
 async def _lmstudio_tools_chat(messages: list[dict], tools: list[dict],
                                temperature: float = 0.2, num_predict: int = 700) -> dict:
     """Вызовы функций через LM Studio (OpenAI-формат — тот же, что cloud_tools_chat).
@@ -474,9 +492,16 @@ async def _lmstudio_tools_chat(messages: list[dict], tools: list[dict],
                 except json.JSONDecodeError:
                     args = {}
             calls.append({"name": f.get("name"), "arguments": args})
+        content = strip_think(str(msg.get("content") or "")).strip()
+        if not calls:
+            pseudo = _text_tool_call(content, tools)
+            if pseudo:
+                log.info("LM Studio %s: вызов текстом — понял как %s", model, pseudo["name"])
+                calls = [pseudo]
+                content = ""
     log.info("LM Studio %s: инструменты %s за %.1f с", model, "вызваны" if calls else "не вызваны", time.monotonic() - t0)
     _lms_ok()
-    return {"content": strip_think(str(msg.get("content") or "")).strip(), "tool_calls": calls}
+    return {"content": content, "tool_calls": calls}
 
 
 async def lmstudio_check() -> dict:
