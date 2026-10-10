@@ -52,19 +52,18 @@
 <p align="center">
   <img src="docs/img/settings.png" alt="Настройки: разделы открываются шторкой" width="430">
 </p>
-<details>
-<summary><b>Телефон</b></summary>
-
+<p align="center">
+  <b>Телефон</b>
+</p>
 <p align="center">
   <img src="docs/img/mobile-home.png" alt="Телефон: главная" width="210">
   <img src="docs/img/mobile-finance.png" alt="Телефон: финансы" width="210">
   <img src="docs/img/mobile-tasks.png" alt="Телефон: задачи" width="210">
   <img src="docs/img/mobile-orders.png" alt="Телефон: заказы" width="210">
   <img src="docs/img/mobile-mind.png" alt="Телефон: мозг" width="210">
+  <img src="docs/img/mobile-calendar.png" alt="Телефон: календарь" width="210">
   <img src="docs/img/mobile-settings.png" alt="Телефон: настройки" width="210">
 </p>
-
-</details>
 
 </details>
 

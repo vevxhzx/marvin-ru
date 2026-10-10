@@ -79,8 +79,8 @@ brain:
     enabled: true             # память о вас: факты из разговора, портрет, подтягивание нужного в ответы
     where: "cloud"            # кто извлекает и обобщает факты: cloud — облако, при сбое ПК | auto | local. Поиск по памяти — всегда ПК
     short_days: 7             # сколько дней факт живёт в «сейчас», прежде чем стать постоянным или уйти в архив
-    suggest: true             # предлагать новые факты из разговора: в ответе чата приходит suggest_fact,
-                              # на сайте — тост «Запомнить?» с кнопками да/нет (да = подтвердить, нет = не сохранять больше)
+    suggest: false            # батч 4: память молча — новые факты из разговора пишутся без тоста «Запомнить?»;
+                              # true — вернуть старое: в ответе чата suggest_fact, на сайте тост с да/нет
     suggest_timeout: 20       # сек: сколько ждать извлечение фактов ради тоста; дольше — уходит в фон, ответ не задерживаем
     decay_half_life_days: 90  # затухание неподтверждённых фактов: exp(-дней/полу-период) режет их шанс всплыть в ответе
     decay_days: 365           # за столько дней неподтверждённый и почти не упоминавшийся факт уходит ночью в архив («затухло»)
@@ -139,6 +139,7 @@ cards:
 finance:
   currency: "RUB"
   main_account: "Основной"    # название главного счёта (мастер спросит)
+  allow_overdraft: true       # false — трата/перевод в минус отклоняется («не хватает»); true — пишем + предупреждаем
 
 files:
   index_dirs: []
@@ -154,9 +155,11 @@ voice:
     # false — всегда локально. В режиме local облако не используется никогда.
     cloud: false
   tts:
-    engine: "edge"            # edge (онлайн, голоса Microsoft) / silero (офлайн, silero.bat) / off
+    engine: "edge"            # edge (онлайн, голоса Microsoft) / silero (офлайн, silero.bat) / piper (офлайн, CPU, естественнее silero) / off
     speaker: "eugene"         # silero: eugene, aidar (муж.), baya, kseniya, xenia (жен.)
     edge_voice: "ru-RU-DmitryNeural"
+    piper_voice: "ru_RU-denis-medium"  # piper: denis / dmitri (муж.), irina / ruslan (жен.), качество medium
+    piper_model: ""           # свой .onnx Piper; пусто — скачается сам в data/models/piper/
     reply_in_telegram: "voice"  # voice — голосом отвечать на голосовые (по умолчанию) · always — на всё · never — только текст
   pc:
     # api: "http://192.168.1.10:8765"   # если ядро крутится на другой машине (по умолчанию — этот же ПК)
