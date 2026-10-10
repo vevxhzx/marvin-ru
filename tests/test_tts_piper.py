@@ -1,8 +1,12 @@
-"""Piper TTS — третий движок озвучки (офлайн, CPU). TDD: сначала падают."""
+"""Piper TTS — третий движок озвучки (офлайн, CPU)."""
 import asyncio
 import os
 
+import pytest
+
 os.environ.setdefault("JARVIS_TEST", "1")
+
+piper = pytest.importorskip("piper")
 
 
 def test_resolve_engine_piper_stays_in_local(monkeypatch):

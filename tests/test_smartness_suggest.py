@@ -64,13 +64,21 @@ def test_reply_has_suggest_field():
 
 
 # ------------------------------------------------------------------ инжектор ответов
-def test_patch_json_adds_suggest_fact():
+def test_patch_json_adds_suggest_fact(monkeypatch):
     msgs = [
         {"type": "http.response.start", "status": 200,
          "headers": [(b"content-type", b"application/json"), (b"content-length", b"2")]},
         {"type": "http.response.body", "body": b'{"text": "ok"}'},
     ]
+    # выключено по умолчанию — тело не трогаем вообще (молча)
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: False)
     memory.clear_suggest()
+    assert chat_router._patch_json(msgs) == msgs
+    memory.set_suggest({"text": "пельмени люблю", "category": "предпочтение"}, "web")
+    assert chat_router._patch_json(msgs) == msgs
+    memory.clear_suggest()
+
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: True)
     out = chat_router._patch_json(msgs)
     body = b"".join(m["body"] for m in out if m["type"] == "http.response.body")
     assert json.loads(body) == {"text": "ok", "suggest_fact": None}
@@ -97,9 +105,17 @@ def test_patch_json_adds_suggest_fact():
     memory.clear_suggest()                                    # слот общий: не тащим в другие тесты
 
 
-def test_patch_sse_adds_suggest_fact():
+def test_patch_sse_adds_suggest_fact(monkeypatch):
     done = b'event: done\ndata: {"text": "ok", "actions": []}\n\n'
+    # выключено по умолчанию — всегда None (молча)
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: False)
     memory.clear_suggest()
+    assert chat_router._patch_sse(done) is None
+    memory.set_suggest({"text": "пельмени люблю", "category": "предпочтение"}, "web")
+    assert chat_router._patch_sse(done) is None
+    memory.clear_suggest()
+
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: True)
     patched = json.loads(chat_router._patch_sse(done).decode("utf-8").split("data: ", 1)[1])
     assert patched["suggest_fact"] is None and patched["text"] == "ok"
 
@@ -115,15 +131,23 @@ def test_patch_sse_adds_suggest_fact():
 
 # ------------------------------------------------------------------ HTTP: /api/chat
 def test_chat_json_carries_suggest_fact(_client, monkeypatch):
-    """Ответ /api/chat всегда содержит ключ suggest_fact (null, если предлагать нечего)."""
+    """Выключено по умолчанию — ключа suggest_fact в ответе нет вообще.
+    Включено — ключ есть всегда (null, если предлагать нечего) + инжектор вшивает слот."""
     _offline(monkeypatch)
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: False)
     memory.clear_suggest()
+    r = _client.post("/api/chat", json={"text": "что ты обо мне знаешь?", "channel": "web"})
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert "text" in data and "suggest_fact" not in data
+    assert data["via"] == "rules"
+
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: True)
     r = _client.post("/api/chat", json={"text": "что ты обо мне знаешь?", "channel": "web"})
     assert r.status_code == 200, r.text
     data = r.json()
     assert "text" in data and "suggest_fact" in data
     assert data["suggest_fact"] is None
-    assert data["via"] == "rules"
 
     # агент положил предложение в слот → инжектор вшивает его в JSON
     async def fake_handle(text, channel="tg"):
@@ -134,12 +158,19 @@ def test_chat_json_carries_suggest_fact(_client, monkeypatch):
     r2 = _client.post("/api/chat", json={"text": "привет", "channel": "web"})
     assert r2.status_code == 200
     assert r2.json()["suggest_fact"] == {"text": "пельмени люблю", "category": "предпочтение", "fact_id": 7}
+    memory.clear_suggest()                                    # слот общий: не тащим в другие тесты
 
 
 def test_chat_stream_done_carries_suggest_fact(_client, monkeypatch):
-    """Финальное SSE-событие `done` тоже содержит suggest_fact."""
+    """Финальное SSE-событие `done`: выключено — без ключа, включено — с ключом."""
     _offline(monkeypatch)
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: False)
     memory.clear_suggest()
+    r = _client.post("/api/chat/stream", json={"text": "что ты обо мне знаешь?", "channel": "web"})
+    assert r.status_code == 200, r.text
+    assert "suggest_fact" not in _done_json(r.text)
+
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: True)
     r = _client.post("/api/chat/stream", json={"text": "что ты обо мне знаешь?", "channel": "web"})
     assert r.status_code == 200, r.text
     done = _done_json(r.text)
@@ -177,8 +208,10 @@ def test_confirm_dismiss_endpoints(_client, monkeypatch):
 
 # ------------------------------------------------------------------ извлечение после ответа
 def test_memory_after_reply_web_sync(fresh_db, monkeypatch):
-    """На сайте предложение собирается синхронно: первый факт → suggest_fact и в слот."""
+    """На сайте предложение собирается синхронно: первый факт → suggest_fact и в слот.
+    (Предложения включаем явно — по умолчанию они выключены.)"""
     _offline(monkeypatch)
+    monkeypatch.setattr(memory, "suggest_enabled", lambda: True)
     f = memory.add_fact_sync("пельмени люблю с мясом", category="предпочтение")
     assert f is not None
 

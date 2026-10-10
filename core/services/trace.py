@@ -142,7 +142,12 @@ def mark_corrected(channel: str | None = None, text: str | None = None, within_m
             if key:
                 target = next((r for r in rows if _key(r.text) == key or _key(r.text).startswith(key)), None)
             else:
-                target = next((r for r in rows if r.actions or r.tools), None)
+                # последний ход, который что-то записал: голые уточнения («календарь или задача?»,
+                # «отменить …? да/нет») пропускаем — иначе помечаем сам вопрос, а не неверную запись
+                def _did(r) -> bool:
+                    acts = [a for a in (r.actions or "").split(",") if a]
+                    return bool((acts and any(a != "clarify" for a in acts)) or (r.tools or "").strip())
+                target = next((r for r in rows if _did(r)), None)
             if target:
                 target.corrected = True
                 s.add(target)

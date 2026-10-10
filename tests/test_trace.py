@@ -112,7 +112,9 @@ def test_undo_marks_previous_run_as_corrected(monkeypatch):
     from core.brain import agent
     asyncio.run(agent.handle("потратил 700 на такси", "web"))
     assert trace.recent()[0]["corrected"] is False
-    asyncio.run(agent.handle("отмени", "web"))
+    r = asyncio.run(agent.handle("отмени", "web"))
+    assert "clarify" in r.actions   # спрашиваем что именно, молча не сносим
+    asyncio.run(agent.handle("да", "web"))
     corrected = [r for r in trace.recent() if r["corrected"]]
     assert len(corrected) == 1
     assert "такси" in corrected[0]["text"]
@@ -196,7 +198,9 @@ def test_weekly_block_is_silent_on_a_calm_week(monkeypatch):
     assert trace.weekly_block() == []   # всё прошло гладко — докладывать не о чем
 
     asyncio.run(agent.handle("потратил 700 на такси", "web"))
-    asyncio.run(agent.handle("отмени", "web"))
+    r = asyncio.run(agent.handle("отмени", "web"))
+    assert "clarify" in r.actions
+    asyncio.run(agent.handle("да", "web"))
     assert trace.weekly_block()         # появилось исправление — доклад есть
 
 

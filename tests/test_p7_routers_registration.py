@@ -46,6 +46,8 @@ FINANCE_ROUTES = [
     ("POST", "/api/finance/accounts"),
     ("PUT", "/api/finance/accounts/{aid}"),
     ("DELETE", "/api/finance/accounts/{aid}"),
+    ("POST", "/api/finance/accounts/{aid}/link-debt"),
+    ("DELETE", "/api/finance/accounts/{aid}/link-debt"),
     ("GET", "/api/finance/debts"),
     ("POST", "/api/finance/debts"),
     ("POST", "/api/finance/debts/{debt_id}/pay"),
@@ -217,10 +219,10 @@ def _router_routes(name):
 
 
 def test_finance_router_has_exactly_48_routes():
-    # 42 роута шага 7.0 + 6 роутов режима жизни (services/regime.py) — только добавление
+    # 42 роута шага 7.0 + 6 роутов режима жизни (services/regime.py) + 2 связки долг↔кредитка — только добавление
     got = _router_routes("finance")
     want = sorted((p, (m,)) for m, p in FINANCE_ROUTES)
-    assert len(got) == 48
+    assert len(got) == 50
     assert got == want
 
 
