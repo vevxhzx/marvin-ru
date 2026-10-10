@@ -214,6 +214,8 @@ def test_order_payment_closes_and_card_reflects(monkeypatch):
     _handle("клиент: Пётр")
     _handle("заказ: сайт для Петра 40к")
     r = _handle("пришло 20000 от Петра")
+    assert "clarify" in r.actions and "заказ" in r.text.lower() and "доход" in r.text.lower()
+    r = _handle("заказ")
     assert "order_payment" in r.actions and "Осталось 20 000" in r.text
     r = _handle("что по Петру")
     assert "person_card" in r.actions and "ждёт оплаты 20 000" in r.text

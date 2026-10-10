@@ -20,7 +20,7 @@ from sqlmodel import select
 
 from ..db import ChatMessage, get_setting, session, set_setting
 from ..services import brain_notes, calendar, finance, judge, memory, tasks, trace, undo, screen
-from ..services.calendar import fmt_dt, fmt_due, fmt_repeat
+from ..services.calendar import fmt_dt, fmt_due, fmt_repeat, fmt_task_due
 from ..services.finance import money
 from ..tools import registry
 from ..tools import router as tool_router
@@ -55,6 +55,22 @@ MOVE_RX = re.compile(r"^\s*(перенеси|передвинь|сдвинь|п�
 RENAME_RX = re.compile(r"^\s*(переименуй|назови)\s+(.+?)\s+(?:в|на|как)\s+[«\"']?(.+?)[»\"']?\s*$", re.I | re.S)
 DELETE_RX = re.compile(r"^\s*(удали|убери|отмени|снеси|сотри)\s+(задачу|событие|встречу|напоминание|заметку|мысль|ссылку)?\s*(?:про|о|об|с|на)?\s*(.+)$", re.I | re.S)
 SKIP_RX = re.compile(r"^\s*(сегодня|завтра)\s+(.+?)\s+не\s+будет\s*[.!]?\s*$", re.I)
+# автоперенос задачи: «… каждый день переноси», «… с автопереносом» → вкл; «… без автопереноса», «убери автоперенос …» → выкл
+AUTO_ROLL_ON_RX = re.compile(
+    r"^\s*(?:(?:задача|задачу)\s+)?(.+?)\s+(?:каждый\s+день\s+переноси(?:ть)?|переноси\s+каждый\s+день|"
+    r"с\s+автопереносом|с\s+автоматическим\s+переносом|пусть\s+сама?\s+переносится|переноси\s+автоматически|"
+    r"автоперенос\s+(?:вкл(?:ючи)?|нужен|надо))\s*[.!]?\s*$", re.I | re.S)
+AUTO_ROLL_ON_PRE_RX = re.compile(
+    r"^\s*(?:поставь|включи|добавь)\s+автоперенос\s+(?:на|для|у|задаче?)\s+(.+?)\s*[.!]?\s*$", re.I | re.S)
+AUTO_ROLL_OFF_RX = re.compile(
+    r"^\s*(?:(?:задача|задачу)\s+)?(.+?)\s+(?:без\s+автопереноса|без\s+автоматического\s+переноса|"
+    r"автоперенос\s+(?:выкл(?:ючи)?|не\s+нужен|не\s+надо)|не\s+переноси\s+автоматически)\s*[.!]?\s*$", re.I | re.S)
+AUTO_ROLL_OFF_PRE_RX = re.compile(
+    r"^\s*(?:убери|сними|отключи|выключи)\s+автоперенос\s+(?:у|для|на|с|задаче?)?\s*(.+?)\s*[.!]?\s*$", re.I | re.S)
+# маркер в тексте новой задачи: «задача купить молоко с автопереносом завтра в 10» → флаг + чистый текст
+AUTO_ROLL_MARK_RX = re.compile(
+    r"\s*,?\s*(?:с\s+автопереносом|с\s+автоматическим\s+переносом|каждый\s+день\s+переноси(?:ть)?|"
+    r"пусть\s+сама?\s+переносится|автоперенос(?:\s+вкл(?:ючи)?)?)\s*", re.I)
 # дело без времени: «надо починить полку», «починить полку», «купить молоко», «позвонить маме»
 ACTION_VERB_RX = re.compile(r"^\s*(?:надо|нужно|не забыть|надо бы|стоит|пора)?\s*(?:бы\s+)?"
                             r"(почини\w*|сдела\w*|сда\w*|отда\w*|куп\w*|позвон\w*|написа\w*|отправ\w*|забра\w*|отвез\w*|отнес\w*|оплат\w*|заплат\w*|продл\w*|"
@@ -231,6 +247,44 @@ def _strip_fillers(t: str) -> str:
     return t.strip(" ,.-—:")
 
 
+def _pull_account(rest: str, with_na: bool = False) -> tuple[str | None, str]:
+    """«потратил 700 с кубышки / со сбера / с карты Т-Банк» → (имя счёта, остаток текста).
+
+    Счётом считаем только то, что нашлось в базе (find_account) — «на такси»
+    и «с марса» счётом не станут, фраза идёт как раньше. with_na — ещё и «на <счёт>»
+    (для доходов: «зп на сбер»); для трат «на» — территория категорий, не трогаем."""
+    pat = (r"(?:\bсо?\s+(?:сч[её]та?|сч[ёе]ту|карты|карточки)\s+|\bсо?\s+"
+           + (r"|\bна\s+" if with_na else "") + r")([а-яёa-z][а-яёa-z0-9\- ]+)")
+    m = re.search(pat, rest, re.I)
+    if not m:
+        return None, rest
+    cand = m.group(1).strip()
+    cand = re.sub(r"\s+(вчера|позавчера|сегодня)$", "", cand, flags=re.I).strip()
+    if not cand:
+        return None, rest
+    try:
+        acc = finance.find_account(cand)
+    except Exception:
+        acc = None
+    if acc is None:
+        return None, rest
+    left = (rest[:m.start()] + " " + rest[m.end():])
+    return acc.name, re.sub(r"\s{2,}", " ", left).strip()
+
+
+def _overdraft_tail(account_name: str | None) -> str:
+    """Хвост-предупреждение, если счёт после операции ушёл в минус (кредитки не касаемся)."""
+    if not account_name:
+        return ""
+    try:
+        acc = finance.find_account(account_name)
+    except Exception:
+        return ""
+    if acc is None or acc.kind == "debt_only" or acc.balance >= 0:
+        return ""
+    return f" Осторожно: «{acc.name}» ушёл в минус ({money(acc.balance)})."
+
+
 _Q = r"^\s*(?:а\s+)?(?:что|чё|че|как|какие|каков\w*)\s+(?:там\s+)?(?:у\s+меня\s+)?(?:сегодня\s+|сейчас\s+)?"
 FIN_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:финанс\w*|деньг\w*|денежк\w*|баланс\w*|бюджет\w*|кошельк\w*|бабк\w*|касс\w*)\W*$", re.I)
 TASK_REPORT_RX = re.compile(_Q + r"(?:по\s+|с\s+|со\s+)?(?:мои\w*\s+)?(?:задач\w*|делам|дела)\W*$", re.I)
@@ -364,7 +418,7 @@ def _write_as(kind: str, text: str, channel: str) -> Reply | None:
     """Записать фразу заданным типом (после судьи, урока или исправления). None — не смог разобрать (нет суммы и т.п.)."""
     t = text.strip()
     if kind in ("expense", "income"):
-        amount, rest = parse_amount(re.sub(r"^\s*(потратил\w*|получил\w*|отдал\w*|заплатил\w*|пришл[оа])\s*", "", t, flags=re.I))
+        amount, rest = parse_amount(re.sub(r"^\s*(потратил\w*|получил\w*|отдал\w*|заплатил\w*|пришл[оа]|перевёл|перевел|перекинул\w*|закинул\w*|скинул\w*)\s*", "", t, flags=re.I))
         if amount is None:
             return None
         when, rest = _past_date(rest)
@@ -376,7 +430,7 @@ def _write_as(kind: str, text: str, channel: str) -> Reply | None:
         amount, rest = parse_amount(t)
         if amount is None:
             return None
-        title = _strip_fillers(re.sub(r"^\s*(долг|должен|должна|отдал\w*|дал\w*|занял\w*|взял\w*)\s*", "", rest, flags=re.I)) or "Долг"
+        title = _strip_fillers(re.sub(r"^\s*(долг|должен|должна|отдал\w*|дал\w*|занял\w*|взял\w*|одолжил\w*|перевёл|перевел|перекинул\w*|закинул\w*|скинул\w*)\s*", "", rest, flags=re.I)) or "Долг"
         d = finance.add_debt(title[0].upper() + title[1:], amount)
         return Reply(f"Долг «{d.title}» на {money(d.remaining)} записан.", ["add_debt"])
     if kind == "order":
@@ -394,11 +448,13 @@ def _write_as(kind: str, text: str, channel: str) -> Reply | None:
         o = orders.add_order(title[0].upper() + title[1:], amount or 0, client, dt, source=channel)
         return Reply(f"Заказ #{o.id} «{o.title}»" + (f" · {money(o.price)}" if o.price else " · сумму уточним") + ". В работе.", ["add_order"])
     if kind == "task":
+        auto_roll = bool(AUTO_ROLL_MARK_RX.search(t))
+        t = AUTO_ROLL_MARK_RX.sub(" ", t).strip() if auto_roll else t
         due, body, time_set = parse_datetime_ex(t)
         due = task_due(due, time_set)
         body = re.sub(r"^\s*(задача|надо\s+бы|надо|нужно|не\s+забыть)\s*[:\-—]?\s*", "", body, flags=re.I).strip() or t
-        tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel)
-        return Reply(say("task", title=tk.title) + fmt_due(due), ["add_task"])
+        tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel, auto_roll=auto_roll)
+        return Reply(say("task", title=tk.title) + fmt_due(due) + (" · автоперенос вкл" if auto_roll else ""), ["add_task"])
     if kind == "event":
         dt, rest = parse_datetime(t)
         if not dt:
@@ -471,6 +527,82 @@ def _resolve_judge(text: str, channel: str) -> Reply | None:
     return r
 
 
+def _resolve_pay_ask(text: str, channel: str) -> Reply | None:
+    """Батч 1: ответ на «оплата по заказу [кандидат] или обычный доход?».
+    «заказ» → платёж по заказу-кандидату (заказ не выдумываем);
+    «доход» → обычный доход; «нет» — не пишем. Чужой слот не трогаем."""
+    p = _pending_consume(channel, prefix="pay_ask|")   # TTL + one-shot; чужой слот цел
+    if not p:
+        return None
+    orig, _ts = p
+    try:
+        d = json.loads(orig[8:])
+    except (ValueError, IndexError):
+        return None
+    amount = d.get("amount")
+    q = (d.get("q") or "").strip()
+    oid = d.get("oid")
+    try:
+        pay_date = datetime.fromisoformat(d["date"]) if d.get("date") else None
+    except ValueError:
+        pay_date = None
+    if re.match(r"^\s*(?:это\s+)?(заказ|по\s+заказу|оплата(?:\s+по\s+заказу)?|аванс(?:\s+по\s+заказу)?)\s*[.!]*\s*$", text, re.I):
+        from ..services import orders
+        o = None
+        if oid:
+            try:
+                o = orders.get_order(oid)
+            except Exception:
+                o = None
+        if o is None and q:
+            o = orders.find_order(q)
+        if o is None:
+            return Reply(f"Заказ{(' «' + q + '»') if q else ''} не нашёл, сэр — не выдумываю. "
+                         f"Скажите «заказ: …», чтобы завести, или «доход», чтобы записать {money(amount)} как обычный доход.", [])
+        return _record_order_payment(o.id if hasattr(o, "id") else o["id"], amount, channel, pay_date)
+    if re.match(r"^\s*(?:это\s+)?(доход|обычный\s+доход)\s*[.!]*\s*$", text, re.I):
+        try:
+            tx = finance.add_transaction(amount, "income", None, (q or "доход"), source=channel, date=pay_date)
+        except finance.FinanceError as e:
+            return Reply(f"Не записал: {e}", [], "rules")
+        s = finance.summary(1)
+        return Reply(say("income", amount=money(tx.amount), category=tx.category, balance=money(s["total_balance"])), ["add_income"])
+    if NO_RX.match(text):
+        return Reply("Ок, не записываю.", [])
+    # «это заказ кот прод» / «заказ кот прод» / голое имя заказа — платёж к нему.
+    # Раньше такое падало мимо всех веток: слот снимался, а 10к терялись (жалоба с «Кот прод»).
+    name = None
+    m = re.search(r"заказ\s*[:\-—]?\s*(.+)", text, re.I)
+    if m:
+        name = m.group(1).strip(" .!?«»\"'")
+    else:
+        cand = text.strip(" .!?")
+        if cand and len(cand.split()) <= 6:
+            from ..services import orders as _ox
+            if _ox.find_order(cand):
+                name = cand
+    if name:
+        from ..services import orders
+        o = orders.find_order(name)
+        if o is None:
+            return Reply(f"Заказ «{name}» не нашёл, сэр — не выдумываю. "
+                         f"Скажите «заказ: …», чтобы завести, или «доход», чтобы записать {money(amount)} как обычный доход.", [])
+        return _record_order_payment(o.id if hasattr(o, "id") else o["id"], amount, channel, pay_date)
+    return None   # заговорили о другом — вопрос уже снят (consume), ничего не пишем
+
+
+def _record_order_payment(oid: int, amount: float, channel: str, pay_date) -> Reply:
+    """Платёж по заказу + честный ответ. Заказ не выдумываем — его ищет вызывающий."""
+    from ..services import orders
+    try:
+        orders.add_payment(oid, amount, source=channel, date=pay_date)
+    except Exception as e:
+        return Reply(f"Не записал: {e}", [], "rules")
+    v = orders.order_view(orders.get_order(oid))
+    return Reply(f"Оплата {money(amount)} по «{v['title']}» — в доходах" + (f" за {pay_date:%d.%m}" if pay_date else "") + "."
+                 + (f" Осталось {money(v['left'])}." if v["left"] > 0 else " Заказ закрыт как оплаченный ✓"), ["order_payment"])
+
+
 def _judge_question(orig: str, channel: str, options: tuple[str, ...]) -> Reply:
     _pending_set(channel, "judge|" + orig)
     names = [judge.KIND_RU[k].split()[0] for k in options]
@@ -485,26 +617,38 @@ def _disputed(t: str) -> tuple[str, ...] | None:
     if n > 12 or _looks_like_question(t) or "\n" in t:
         return None
     amount, _rest = parse_amount(t)
+    # «3 монтажа подряд», «12 марта», «2 раза» — число меньше 10 без «руб/к» или число, ушедшее в дату, — не сумма
+    has_amount = amount is not None and (amount >= 10 or re.search(r"\d\s*(?:р\b|руб|₽|к\b|тыс)", low)) \
+        and not (parse_datetime(t)[0] is not None and not re.search(r"\d", parse_datetime(t)[1]))
+    # «отдал Ване 2000», «перевёл Ване 2000», «перевёл 5000 маме» — трата, долг или доход?
+    # Проверяем ДО точных шаблонов: TRANSFER_RX («перевёл…») иначе гасит спор и пишет
+    # трату наугад, хотя счетов в фразе нет (spec: перевод без счетов — всегда вопрос).
+    # Батч 1: проверяем ДО общего «сумма+слово», иначе «дал маме» уходило в generic.
+    # Имена и после «у» тоже неоднозначны («маме» строчными, «у Пети»),
+    # а «отдал за аренду» — не человек (предлог), остаётся тратой.
+    if has_amount and re.match(r"^\s*(отдал\w*|дал\w*|занял\w*|одолжил\w*|скинул\w*|перекинул\w*|закинул\w*|перевёл|перевел)\s+(у\s+)?(?!(?:за|на|в|во|по|для|про|о|об|с|со|к|до|от|под|над)\b)[А-ЯЁа-яё]", t):
+        return ("expense", "debt", "income")
+    # «перевёл 5000 маме» — имя после суммы, счетов нет: тоже спор
+    # (а «перевёл 5000 со сбера / на сбер» — предлог счёта, остаётся переводом ниже).
+    if has_amount and re.match(r"^\s*(перевёл|перевел|перекинул\w*|закинул\w*|скинул\w*)\s+\d[\d\s.,]*\s*(?:к|тыс\w*)?\s*(?:руб\w*|р\.?|₽)?\s*(?!(?:за|на|в|во|по|для|про|о|об|с|со|к|до|от|под|над|руб\w*|р\b)\b)[А-ЯЁа-яё]", t):
+        return ("expense", "debt", "income")
     # Точные шаблоны однозначны — судья им не нужен и только ломал разбор:
     # «снял 3000 наличных» (снятие/перевод), «цель: подушка 300к к марту» (конверт),
     # «отложил 10к в копилку», «пришёл аванс 10000 за ролик» (оплата заказа),
     # «50/30/20» (разбор бюджета), «заказ: …» — у всех есть точный шаблон.
     # Без этой проверки судья записывал их как доход/трату вместо своего правила.
+    # То же для «баланс т-банк 10000», «долг Сберу 120к», «мысль: …»:
+    # при запущенной Ollama судья отвечал уверенно и уводил точную команду не туда
+    # (флакающий test_core::test_expense_income_balance).
     if quick.CASH_RX.match(t) or quick.TRANSFER_RX.match(t) or GOAL_RX.match(t) or SAVE_RX.match(t) or PAYMENT_RX.match(t) \
-            or FIN_TECH_RX.match(t) or ORDER_RX.match(t):
+            or FIN_TECH_RX.match(t) or ORDER_RX.match(t) or BALANCE_RX.match(t) or DEBT_RX.match(t) or NOTE_RX.match(t):
         return None
-    # «3 монтажа подряд», «12 марта», «2 раза» — число меньше 10 без «руб/к» или число, ушедшее в дату, — не сумма
-    has_amount = amount is not None and (amount >= 10 or re.search(r"\d\s*(?:р\b|руб|₽|к\b|тыс)", low)) \
-        and not (parse_datetime(t)[0] is not None and not re.search(r"\d", parse_datetime(t)[1]))
     # «сайт 15000», «логотип для Кати 8к», «пятёрочка 25к» — сумма + слово без глагола: трата, доход или заказ?
     if has_amount and n <= 6 and not EXPENSE_RX.match(t) and not INCOME_RX.match(t) and not DEBT_RX.match(t) and not re.search(r"[:.]\d{2}\b|\b(в|к|до|через)\s+\d", low):
         rest = parse_amount(t)[1]
         if rest.strip() and finance.guess_category(rest, "expense") in ("Другое", "Долги"):
             from ..services import pulse
             return ("expense", "income", "order") if pulse.enabled() else ("expense", "income", "debt")
-    # «отдал Ване 2000», «дал маме 5к», «занял у Пети 3000» — трата или долг?
-    if has_amount and re.match(r"^\s*(отдал\w*|дал\w*|занял\w*|одолжил\w*|скинул\w*|перевёл|перевел)\s+[А-ЯЁ]", t):
-        return ("expense", "debt", "income")
     return None
 
 
@@ -548,7 +692,7 @@ def rules(text: str, channel: str) -> Reply | None:
     if pc.TIDY_RX.match(t) or pc.TIDY_UNDO_RX.match(t) or pc.ORGANIZE_RX.match(t) or pc.ORGANIZE_UNDO_RX.match(t):   # файловые операции — только через план и подтверждение
         cmd = pc.parse(t)
         return Reply(pc.dispatch(cmd, channel), [f"pc_{cmd.action}"])
-    r_fix = _resolve_judge(t, channel) or _fix_rule(t, channel)
+    r_fix = _resolve_judge(t, channel) or _resolve_pay_ask(t, channel) or _fix_rule(t, channel)
     if r_fix:
         return r_fix
     mr = _memory_rules(t, channel)
@@ -563,8 +707,10 @@ def rules(text: str, channel: str) -> Reply | None:
                 brain_notes.add_note(body, source=channel)
                 return Reply(say("note"), ["add_note"])
         if UNDO_RX.match(low):
-            msg = sorter.undo_batch(channel) or undo.undo_last(channel)
-            return Reply(msg or "Отменять нечего, сэр.", ["undo"] if msg else [])
+            r_undo = _undo_ask(t, channel)
+            if r_undo is not None:
+                return r_undo
+            return _edit_note_rule(t, channel)
         return _edit_note_rule(t, channel)
 
     # ---- ссылки: приоритет, если в сообщении есть URL ----
@@ -658,8 +804,9 @@ def rules(text: str, channel: str) -> Reply | None:
     if r_o:
         return r_o
     if UNDO_RX.match(low):
-        msg = sorter.undo_batch(channel) or undo.undo_last(channel)
-        return Reply(msg or "Отменять нечего, сэр.", ["undo"] if msg else [])
+        r_undo = _undo_ask(t, channel)
+        if r_undo is not None:
+            return r_undo
 
     # ---- быстрые справки и деньги без LLM: «сколько потратил на еду», «что завтра», «заплатил Ване 2000», «подписка …» ----
     q = quick.run(t, channel)
@@ -685,20 +832,31 @@ def rules(text: str, channel: str) -> Reply | None:
         amount, rest = parse_amount(t[m.end():])
         if amount is not None:
             when, rest = _past_date(rest)
+            acc_name, rest = _pull_account(rest)
             note = _strip_fillers(rest) or None
-            tx = finance.add_transaction(amount, "expense", None, note, source=channel, date=when)
+            try:
+                tx = finance.add_transaction(amount, "expense", None, note, account=acc_name, source=channel, date=when)
+            except finance.FinanceError as e:
+                return Reply(f"Не записал: {e}", [], "rules")
             s = finance.summary(1)
             txt = say("expense", amount=money(tx.amount), category=tx.category, balance=money(s["total_balance"]))
+            if tx.account != finance.main_account_name():
+                txt += f" · со счёта «{tx.account}»"
             if when:
                 txt += f" (за {when:%d.%m})"
+            txt += _overdraft_tail(tx.account)
             return Reply(txt, ["add_expense"])
     m = INCOME_RX.match(t)
     if m:
         amount, rest = parse_amount(t[m.end():])
         if amount is not None:
             when, rest = _past_date(rest)
+            acc_name, rest = _pull_account(rest, with_na=True)
             note = _strip_fillers(rest) or m.group(1)
-            tx = finance.add_transaction(amount, "income", None, note, source=channel, date=when)
+            try:
+                tx = finance.add_transaction(amount, "income", None, note, account=acc_name, source=channel, date=when)
+            except finance.FinanceError as e:
+                return Reply(f"Не записал: {e}", [], "rules")
             s = finance.summary(1)
             return Reply(say("income", amount=money(tx.amount), category=tx.category, balance=money(s["total_balance"])), ["add_income"])
 
@@ -800,6 +958,15 @@ def rules(text: str, channel: str) -> Reply | None:
     av = ACTION_VERB_RX.match(t)
     action_task = bool(av and re.search(r"(?:ть|ти|чь|и|й|ю)$", av.group(1).lower())   # «купить/купи/куплю», но не «сдача»
                        and not EVENT_NOUN_RX.search(low) and not m and not re.match(r"^\s*напомни", low))
+    # Батч 2: ночь 0-5 без маркера — уточнять, а не гадать. Только голая цифра без контекста
+    # («в 3»): у «встречи в 4» / «позвонить маме в 5» / «напомни в 3» контекст есть — идут как раньше (PM).
+    nh = ambiguous_night_hour(t)
+    if nh is not None and 0 <= nh <= 5 and dt is not None and not m \
+            and not EVENT_NOUN_RX.search(low) and not ACTION_VERB_RX.search(t) \
+            and not re.match(r"^\s*напомни\b", low):
+        _pending_set(channel, "nighthour|" + json.dumps({"orig": t, "hour": nh}, ensure_ascii=False))
+        return Reply(f"«В {nh}» — это ночью в {nh:02d}:00 или днём в {nh + 12:02d}:00? "
+                     f"Ответьте «ночью» или «днём», сэр.", ["clarify"])
     if dt and not is_deadline and not explicit_task and not action_task and (m or EVENT_NOUN_RX.search(low) or (has_clock and len(rest.split()) <= 8)):
         title = re.sub(r"^(напомни(?:\s+мне)?|у меня|мне)\s+", "", rest, flags=re.I)
         # «напомни … что надо не забыть вычесть жкх» → «вычесть жкх»
@@ -822,6 +989,9 @@ def rules(text: str, channel: str) -> Reply | None:
         if what:
             _pending_set(channel, "remind|" + what)
             return Reply(f"Напомнить «{what}» — когда, сэр? Например: «завтра в 10» или «через час».", ["clarify"])
+        # Батч 2: голое «напомни» — тоже спрашиваем (что и когда), а не молчим.
+        _pending_set(channel, "remind|")
+        return Reply("Что напомнить и когда, сэр? Например: «напомни завтра в 10 позвонить маме».", ["clarify"])
 
     # ---- задача ----
     m = TASK_RX.match(t)
@@ -831,13 +1001,17 @@ def rules(text: str, channel: str) -> Reply | None:
         m = re.match(r"^\s*(?:надо бы|стоит|пора)?\s*", t, re.I)  # «починить полку» / «позвонить маме завтра»
     if m:
         body = t[m.end():].strip()
+        auto_roll = bool(AUTO_ROLL_MARK_RX.search(t))
+        body = AUTO_ROLL_MARK_RX.sub(" ", body).strip() if auto_roll else body
         due, body, time_set = parse_datetime_ex(body)
         due = task_due(due, time_set)   # «сегодня» / «через 3 дня» без времени = задача на весь день
         if body:
             from ..services import aims
             body, link = aims.split_link(body)
-            tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel)
+            tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel, auto_roll=auto_roll)
             hint = aims.attach_hint(tk, link)
+            if auto_roll:
+                hint += " Автоперенос вкл: не закроете — переедет на завтра."
             if due and (nh := ambiguous_night_hour(t)) is not None and due.hour == nh + 12:
                 hint += f" «В {nh}» понял как {due:%H:%M}; если имелось в виду {nh:02d}:00 — скажите «в {nh} утра»."
             return Reply(say("task", title=tk.title) + fmt_due(due) + hint, ["add_task"])
@@ -922,9 +1096,14 @@ def _people_rules(t: str, channel: str) -> Reply | None:
     from ..services import people
     m = PERSON_Q_RX.match(t)
     if m:
-        c = people.find_person(m.group(1))
-        if c:
-            return Reply(people.card_text(people.card(c)), ["person_card"])
+        q = m.group(1).strip()
+        cands = people.find_candidates(q)
+        if len(cands) >= 2:
+            # тёзки: молча никого не выбираем — спрашиваем одним словом (батч 4)
+            shown = " или ".join(f"«{c.name}»" for c in cands[:3])
+            return Reply(f"Какой {q}: {shown}? Уточните, сэр.", ["clarify"])
+        if cands:
+            return Reply(people.card_text(people.card(cands[0])), ["person_card"])
         return None   # неизвестное имя — пусть решает модель/память
     m = PERSON_ADD_RX.match(t)
     if m:
@@ -1034,12 +1213,33 @@ def _orders_rules(t: str, low: str, channel: str) -> Reply | None:
                 oid = o["id"]
             else:
                 oid = None
+            if amount >= CONFIRM_AMOUNT:
+                return None   # крупная сумма — через модель с подтверждением
+            # Батч 1: входящие «пришёл аванс 10к за ролик» / «получил 15000» — ВСЕГДА спрашиваем
+            # «оплата по заказу [кандидат] или обычный доход?», заказ не выдумываем.
+            # Исходящие «заплатил/оплатил» — как раньше (трата, заказ только если точно найден).
+            if not re.match(r"^\s*(?:пришл[аои]|приш[её]л|получил\w*|перевели)", t, re.I):
+                if oid:
+                    orders.add_payment(oid, amount, source=channel, date=pay_date)
+                    v = orders.order_view(orders.get_order(oid))
+                    return Reply(f"Оплата {money(amount)} по «{v['title']}» — в доходах" + (f" за {pay_date:%d.%m}" if pay_date else "") + "." + (f" Осталось {money(v['left'])}." if v["left"] > 0 else " Заказ закрыт как оплаченный ✓"), ["order_payment"])
+                return None
+            _pending_set(channel, "pay_ask|" + json.dumps(
+                {"amount": amount, "q": q, "oid": oid,
+                 "date": pay_date.isoformat() if pay_date else None}, ensure_ascii=False))
             if oid:
-                if amount >= CONFIRM_AMOUNT:
-                    return None   # крупная сумма — через модель с подтверждением
-                orders.add_payment(oid, amount, source=channel, date=pay_date)
-                v = orders.order_view(orders.get_order(oid))
-                return Reply(f"Оплата {money(amount)} по «{v['title']}» — в доходах" + (f" за {pay_date:%d.%m}" if pay_date else "") + "." + (f" Осталось {money(v['left'])}." if v["left"] > 0 else " Заказ закрыт как оплаченный ✓"), ["order_payment"])
+                try:
+                    v = orders.order_view(orders.get_order(oid))
+                    title = v["title"]
+                except Exception:
+                    title = q or "заказ"
+                return Reply(f"«{t.strip()}» — это оплата по заказу «{title}» ({money(amount)}) или обычный доход? "
+                             f"Ответьте «заказ» или «доход», сэр.", ["clarify"])
+            if q:
+                return Reply(f"Заказа «{q}» не нашёл, сэр — не выдумываю. "
+                             f"Записать {money(amount)} как обычный доход? Ответьте «доход» или «нет».", ["clarify"])
+            return Reply(f"«{t.strip()}» — это оплата по заказу или обычный доход? "
+                         f"Ответьте «заказ» или «доход», сэр.", ["clarify"])
     m = ORDER_RX.match(t)
     if m and not _too_long_for_rules(t):
         body = m.group(1).strip()
@@ -1060,8 +1260,36 @@ def _orders_rules(t: str, low: str, channel: str) -> Reply | None:
     return None
 
 
+def _auto_roll_rule(t: str, channel: str) -> Reply | None:
+    """«задача X каждый день переноси» / «X с автопереносом» → флаг вкл (сама переедет на завтра);
+    «X без автопереноса» / «убери автоперенос у X» → флаг выкл (вечером спросит обзор)."""
+    want: bool | None = None
+    what: str | None = None
+    for rx, flag in ((AUTO_ROLL_OFF_RX, False), (AUTO_ROLL_OFF_PRE_RX, False),
+                     (AUTO_ROLL_ON_RX, True), (AUTO_ROLL_ON_PRE_RX, True)):
+        m = rx.match(t)
+        if m:
+            want, what = flag, m.group(1).strip(" .!«»\"'")
+            break
+    if want is None or not what:
+        return None
+    what = re.sub(r"^(задачу|задача|дело)\s+(про|о|об)?\s*", "", what, flags=re.I).strip() or what
+    tk = tasks.find_task(what)
+    if tk is None and what.isdigit():
+        tk = tasks.find_task(int(what))
+    if tk is None:
+        return Reply(f"Не нашёл задачу «{what}», сэр.", [])
+    tasks.update_task(tk.id, auto_roll=want)
+    if want:
+        return Reply(f"Включил автоперенос «{tk.title}»: не закроете — сама переедет на завтра.", ["update_task"])
+    return Reply(f"Выключил автоперенос «{tk.title}»: вечером спрошу, перенести ли.", ["update_task"])
+
+
 def _edit_rules(t: str, channel: str) -> Reply | None:
     """«перенеси ужин на 8», «переименуй встречу в созвон», «удали задачу про полку», «сегодня тренировки не будет»."""
+    r = _auto_roll_rule(t, channel)
+    if r is not None:
+        return r
     m = SKIP_RX.match(t)
     if m:
         ev = calendar.find_event(m.group(2).strip())
@@ -1092,7 +1320,7 @@ def _edit_rules(t: str, channel: str) -> Reply | None:
         tk = tasks.find_task(what)
         if tk:
             tasks.update_task(tk.id, due=dt)
-            return Reply(f"Дедлайн «{tk.title}» теперь {fmt_dt(dt)}.", ["update_task"])
+            return Reply(f"Дедлайн «{tk.title}» теперь {fmt_task_due(dt)}.", ["update_task"])
         return Reply(f"Не нашёл «{what}» ни в календаре, ни в задачах, сэр.")
 
     m = RENAME_RX.match(t)
@@ -1185,13 +1413,46 @@ def _resolve_bulk(text: str, channel: str) -> Reply | None:
     return None
 
 
+_NIGHT_WORD_RX = re.compile(r"ноч|утр[оа]|утром|будильник|разбуди|\bam\b", re.I)
+_DAY_WORD_RX = re.compile(r"дн[её]м|дня|вечер|после\s+обед|\bpm\b", re.I)
+
+
+def _resolve_nighthour(text: str, channel: str) -> Reply | None:
+    """Батч 2: ответ на ««В 3» — ночью в 03:00 или днём в 15:00?».
+
+    Разрешённый ответ дописываем маркером («ночи»/«дня») и отдаём в обычный разбор —
+    дальше работают те же ветки задач/событий. Не ответ на вопрос — слот уже снят
+    (consume), фраза идёт обычным путём как новая."""
+    p = _pending_consume(channel, prefix="nighthour|")   # TTL + one-shot; чужой слот цел
+    if not p:
+        return None
+    orig, _ = p
+    try:
+        d = json.loads(orig[10:])
+        o, h = d.get("orig", ""), int(d.get("hour", -1))
+    except (ValueError, TypeError):
+        return None
+    if NO_RX.match(text):
+        return Reply("Понял, забыли.", [])
+    night = bool(_NIGHT_WORD_RX.search(text or "")) or bool(re.search(r"\b0?%d:00\b" % h, text or ""))
+    day = bool(_DAY_WORD_RX.search(text or "")) or bool(re.search(r"\b%d:00\b|\b%d\b" % (h + 12, h + 12), text or ""))
+    if night and not day:
+        return rules(o + " ночи", channel)
+    if day and not night:
+        return rules(o + " дня", channel)
+    return None
+
+
 def _resolve_pending(text: str, channel: str) -> Reply | None:
     """Ответ на уточняющий вопрос: «календарь» / «задача» / «заметка» / «нет»."""
+    r_nh = _resolve_nighthour(text, channel)
+    if r_nh is not None:
+        return r_nh
     p = _pending_get(channel)
     if not p:
         return None
     orig, ts = p
-    if orig.startswith(("bulk|", "confirm|", "sorter|")):
+    if orig.startswith(("bulk|", "confirm|", "sorter|", "pay_ask|", "judge|", "undo|")):
         return None
     if (datetime.now() - ts).total_seconds() > PENDING_TTL_SEC:
         _pending_clear(channel)
@@ -1206,15 +1467,18 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
             return Reply("Оставил как есть.", [])
         return None
     if orig.startswith("remind|"):
-        what = orig[7:]
+        what = orig[7:].strip()
         if re.match(r"^\s*(нет|не надо|отмена|забудь|отбой|никогда)\b", text, re.I):
             _pending_clear(channel)
+            if not what:
+                return Reply("Понял, без напоминания.", [])
             return Reply("Понял, без напоминания. Тогда просто задача.", []) if not tasks.add_task(what[0].upper() + what[1:], None, source=channel) else Reply(f"Хорошо, без времени. «{what[0].upper() + what[1:]}» — в задачах.", ["add_task"])
-        dt, _ = parse_datetime(text)
+        dt, rest2 = parse_datetime(text)
         if not dt:
             return None   # это не ответ на вопрос — обычная фраза
         _pending_clear(channel)
-        title = what[0].upper() + what[1:]
+        title = (what or rest2.strip() or text.strip())
+        title = title[0].upper() + title[1:]
         ev = calendar.add_event(title, dt, remind_minutes=0 if re.search(r"через", text, re.I) else 10, source=channel)
         return Reply(say("event", title=ev.title, when=fmt_dt(ev.start)), ["add_event"])
     m = CLARIFY_RX.match(text)
@@ -1240,7 +1504,8 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
 
 # Суммы от этого порога, пришедшие из инструмента LLM (не из правил-шаблонов, где цифру написал сам человек),
 # записываем только после «да»: маленькая модель путает 15 000 и 150 000, а откатывать потом — лишняя работа.
-CONFIRM_AMOUNT = 100_000
+# Батч 1: порог 50 000 (переводы/долги/баланс/удаления — через pending «да/нет»).
+CONFIRM_AMOUNT = 50_000
 _CONFIRM_TOOLS = {"add_expense": "amount", "add_income": "amount", "transfer": "amount", "pay_debt": "amount", "set_balance": "balance", "order_payment": "amount", "save_to_goal": "amount"}
 
 
@@ -1295,6 +1560,94 @@ def _resolve_confirm(text: str, channel: str) -> Reply | None:
         _pending_clear(channel)
         return Reply("Отбой, ничего не делаю.", [], "rules")
     _pending_clear(channel)   # заговорили о другом — вопрос снимается, ничего не записано
+    return None
+
+
+def _undo_ask(text: str, channel: str) -> Reply | None:
+    """Батч 3: «отмени» не откатывает молча — показывает ЧТО и ждёт «да»/«нет».
+
+    Пачка сортировщика — целиком («да» откатит всё) или по пунктам
+    («удали задачу …» одну). Одиночное действие — с названием.
+    Чужой канал не трогаем: undo ищет только свой channel."""
+    if not UNDO_RX.match(text.strip().lower()):
+        return None
+    bi = sorter.batch_info(channel)
+    if bi is not None:
+        n, titles = bi
+        _pending_set(channel, "undo|batch")
+        tail = f" ({'; '.join(titles[:5])})" if titles else ""
+        return Reply(f"Отменить всю пачку — {n} {_plural_ru(n, 'запись', 'записи', 'записей')}{tail}? "
+                     "«да» — целиком, или скажите что именно («удали задачу …» одну).", ["clarify"])
+    a = undo.last_action(channel)
+    if a is None:
+        other = undo.last_action_any()
+        if other is not None and other.channel != channel:
+            # одного хозяина — одна история: предлагаем отменить глобально последнее,
+            # с пометкой где оно было, а не отфутболиваем «отмените там»
+            label = undo._LABEL.get(other.kind, other.kind)
+            _pending_set(channel, f"undo|single-any:{other.id}")
+            return Reply(f"В этом канале записей не было, сэр. Но последнее действие было в другом канале — "
+                         f"{label} «{other.title}» ({_channel_where(other.channel)}). Отменить его? «да»/«нет».", ["clarify"])
+        return Reply("Отменять нечего, сэр.", [])
+    _pending_set(channel, "undo|single")
+    label = undo._LABEL.get(a.kind, a.kind)
+    return Reply(f"Отменить {label} «{a.title}»? Скажите «да» или «нет», сэр.", ["clarify"])
+
+
+def _channel_where(channel: str | None) -> str:
+    """Человеческое «где было действие» для глобальной отмены."""
+    return {"tg": "в Telegram", "web": "на сайте", "tg-voice": "в голосовом",
+            "voice": "в голосовом", "system": "в системе"}.get(channel or "", f"в канале {channel}")
+
+
+def _plural_ru(n: int, one: str, few: str, many: str) -> str:
+    n = abs(n) % 100
+    if 11 <= n <= 19:
+        return many
+    n %= 10
+    return one if n == 1 else few if 2 <= n <= 4 else many
+
+
+def _resolve_undo(text: str, channel: str) -> Reply | None:
+    """Ответ «да»/«нет» на вопрос «отменить …?». Чужой слот не трогаем."""
+    p = _pending_consume(channel, prefix="undo|")   # TTL + one-shot; чужой слот цел
+    if not p:
+        return None
+    orig, _ = p
+    if YES_RX.match(text):
+        if orig == "undo|batch":
+            msg = sorter.undo_batch(channel)
+            if msg:
+                return Reply(msg, ["undo"])
+            a = undo.last_action(channel)   # пачка протухла/уже не последняя — откатываем по одному
+            msg2 = undo.undo_last(channel) if a else None
+            return Reply(msg2 or "Отменять уже нечего, сэр.", ["undo"] if msg2 else [])
+        if orig.startswith("undo|single-any:"):
+            # глобальная отмена: действие из другого канала, обновляем по id (могло уже отмениться)
+            from ..db import ActionLog
+            try:
+                aid = int(orig.split(":", 1)[1])
+            except (IndexError, ValueError):
+                aid = None
+            with session() as s:
+                target = s.get(ActionLog, aid) if aid else None
+                title = target.title if target else ""
+                kind = target.kind if target else ""
+                ch = target.channel if target else ""
+                gone = target is None or bool(target.undone)
+            if gone:
+                return Reply("Это действие уже отменено или пропало, сэр.", [])
+            ok = undo.undo_one(target)
+            if not ok:
+                return Reply("Не получилось отменить, сэр — запись уже исчезла.", [])
+            label = undo._LABEL.get(kind, kind)
+            return Reply(f"Отменил {label} «{title}» (было {_channel_where(ch)}). Как будто и не было.", ["undo"])
+        msg = undo.undo_last(channel)
+        return Reply(msg or "Отменять уже нечего, сэр.", ["undo"] if msg else [])
+    if NO_RX.match(text):
+        _pending_clear(channel)
+        return Reply("Оставил как есть, ничего не отменяю.", [])
+    _pending_clear(channel)   # заговорили о другом — вопрос снимается, ничего не откачено
     return None
 
 
@@ -1860,6 +2213,8 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                  "• Есть конкретное время или дата («ужин в 7 вечера», «завтра в 10 зубной») → add_event на ЭТО время; "
                  "без даты «сегодня» считай, что речь о сегодня (если время ещё не прошло) или завтра.\n"
                  "• Дело без времени («починить полку», «купить молоко») → add_task. С «до пятницы» — add_task с due.\n"
+                 "• «Каждый день переноси», «с автопереносом» у задачи → add_task с auto_roll=true (сама переедет на завтра); "
+                 "«без автопереноса» → auto_roll=false (вечером спросит обзор).\n"
                  "• Фриланс: «заказ/проект/взял монтаж … для … за … до …» → add_order (все детали одним вызовом, даже надиктованные вразнобой); "
                  "«сдал/правки/отменили …» → update_order; «пришёл аванс/оплата от …» → order_payment (НЕ add_income); "
                  "«помодоро/таймер/стоп/сколько работал» → pomodoro; «заказы/кто должен» → list_orders.\n"
@@ -2150,13 +2505,30 @@ def _cache_key(text: str, channel: str) -> str | None:
 
 
 def _mark(r: Reply) -> Reply:
-    """Пометка источника ответа + обращение к хозяину как в настройках (owner.name)."""
+    """Пометка источника ответа + обращение к хозяину как в настройках (owner.name).
+
+    Маркер — тихой последней строкой курсивом (форматтер Telegram сделает из неё
+    <i>…</i>), а не инлайновым значком в конце фразы. Так ответ читается чисто,
+    а источник виден внизу и не мешает. Дубли убираем."""
     r.text = localize(r.text)
     if not llm.MARK_SOURCE:
         return r
-    tag = {"gemini": "☁️", "ollama": "🧠", "rules": "⚡", "none": ""}.get(r.via, "")
-    if tag and not r.text.rstrip().endswith(tag):
-        r.text = r.text.rstrip() + f"  {tag}"
+    tag = {"gemini": ("☁️", "облако"), "ollama": ("🧠", "локально"),
+           "rules": ("⚡", "правила"), "none": ("", "")}.get(r.via, ("", ""))
+    if not tag[0]:
+        return r
+    t = r.text.rstrip()
+    # убрать старый инлайновый хвост «  ☁️» и старую тихую строку, чтобы не двоилось
+    # (☁️ = U+2601 + VS16, поэтому \uFE0F? после эмодзи)
+    t = re.sub(r"[ \t]+[⚡🧠☁]\uFE0F?\s*$", "", t).rstrip()
+    t = re.sub(r"\n\n_[⚡🧠☁]\uFE0F?[^_]*_\s*$", "", t).rstrip()
+    t = re.sub(r"\n\n<i>[⚡🧠☁]\uFE0F?[^<>]*</i>\s*$", "", t).rstrip()
+    t = re.sub(r"\n\n[⚡🧠☁]\uFE0F?(?:\s+[а-яёa-z]+)?\s*$", "", t).rstrip()
+    if tag[0] not in t[-120:]:
+        # тихая последняя строка обычным текстом: сайт показывает как есть,
+        # Telegram-форматтер сделает из неё курсив (<i>) при отправке
+        t = f"{t}\n\n{tag[0]} {tag[1]}"
+    r.text = t
     return r
 
 
@@ -2383,6 +2755,12 @@ async def handle(text: str, channel: str = "tg") -> Reply:
     memory.clear_suggest()       # предложение «запомнить?» живёт один ход чата — не тащим в следующий ответ
     try:
         r = await _handle(text, channel)
+        try:
+            from ..voice import tts as _tts
+            if _tts.voice_is_feminine():
+                r.text = persona.feminize(r.text)
+        except Exception:  # pragma: no cover
+            pass
         trace.finish(r.via, r.actions, ok=r.via != "none")
         return r
     except Exception as e:  # noqa: BLE001 — последний рубеж: каналы (TG/сайт/голос) не должны падать из-за одной фразы
@@ -2491,6 +2869,8 @@ async def _handle(text: str, channel: str) -> Reply:
         if r is None:
             r = _resolve_confirm(text, channel)
         if r is None:
+            r = _resolve_undo(text, channel)
+        if r is None:
             r = _resolve_pending(text, channel)
         if r is None:
             r = _bulk_rule(text, channel)
@@ -2598,13 +2978,18 @@ async def _handle(text: str, channel: str) -> Reply:
 
 async def _judge_disputed(text: str, channel: str) -> Reply | None:
     """Спорная фраза («сайт 15000») → урок или судья решают тип до того, как шаблон схватит её как трату.
-    Судья не уверен — один вопрос с вариантами. Судьи нет (ни модели, ни облака) — поведение как раньше (шаблон)."""
+    Судья не уверен — один вопрос с вариантами.
+    Батч 1: денежные неоднозначности (трата/долг/доход) спрашиваем ВСЕГДА,
+    даже когда решать некому (офлайн): наугад не пишем, ждём одно слово."""
     options = _disputed(text)
     if not options:
         return None
     kind, via = await judge.decide(text, options)
     if kind is None:
         if via == "none":
+            if options == ("expense", "debt", "income"):
+                log.info("[%s] СУДЬЯ недоступен, деньги — спрашиваю: %r", channel, text[:60])
+                return _judge_question(text.strip(), channel, options)
             return None   # судья выключен или решать некому — шаблон работает, как до судьи
         log.info("[%s] СУДЬЯ не уверен (%s) → спрашиваю: %r", channel, via, text[:60])
         return _judge_question(text.strip(), channel, options)

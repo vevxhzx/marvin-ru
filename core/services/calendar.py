@@ -42,6 +42,16 @@ def fmt_due(dt: datetime | None) -> str:
     return f" Дедлайн {fmt_dt(dt)}."
 
 
+def fmt_task_due(dt: datetime | None) -> str:
+    """Срок задачи для списков: весь день (23:59) — только день («сегодня»/«завтра»/дата) без времени;
+    со временем — как fmt_dt. Хранение due=23:59 не меняет, только отображение."""
+    if not dt:
+        return ""
+    if dt.hour == 23 and dt.minute == 59:
+        return fmt_day(dt)
+    return fmt_dt(dt)
+
+
 def fmt_repeat(ev: Event) -> str:
     if not ev.repeat:
         return ""

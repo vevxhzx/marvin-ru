@@ -29,7 +29,7 @@ from . import plural
 log = logging.getLogger("jarvis.proactive")
 
 STALE_TASK_DAYS = 5
-HEALTH_RX = re.compile(r"болe|боле|просту|температур|давлени|самочувств|лечит|таблетк|врач|плохо\s+себя|устал|не\s+спал|бессонниц", re.I)
+HEALTH_RX = re.compile(r"боле|боли|болит|просту|температур|давлени|самочувств|чувству|неважно|мне\s+плохо|плохо\s+себя|тошн|лечит|таблетк|врач|устал|не\s+спал|бессонниц", re.I)
 PLAN_RX = re.compile(r"\b(надо|нужно|собирается|планирует|хочет|думает)\s+\w+", re.I)
 COUNT_KEY = "proactive.count"   # "YYYY-MM-DD|n"
 
@@ -213,9 +213,26 @@ async def phrase(c: dict) -> str:
         return c["text"]
 
 
+def quiet_now(now: datetime | None = None) -> bool:
+    """Тихие часы notifications.quiet_from/quite_to: ночью сам не пишем."""
+    n = getattr(cfg, "notifications", None)
+    try:
+        start = int(getattr(n, "quiet_from", 23) if getattr(n, "quiet_from", 23) is not None else 23) % 24
+        end = int(getattr(n, "quiet_to", 8) if getattr(n, "quiet_to", 8) is not None else 8) % 24
+    except (TypeError, ValueError):
+        start, end = 23, 8
+    h = (now or datetime.now()).hour
+    if start == end:
+        return False
+    return (h >= start or h < end) if start > end else (start <= h < end)
+
+
 async def tick(now: datetime | None = None, quiet: bool = False) -> dict | None:
     """Один проход планировщика: выбрать один повод и вернуть {text, buttons, key} — или None. Отправку делает scheduler."""
     if not enabled() or quiet:
+        return None
+    # Явное now (прямые вызовы/тесты) — тоже уважаем тихие часы; планировщик шлёт quiet-флаг отдельно.
+    if now is not None and quiet_now(now):
         return None
     if _today_count() >= per_day():
         return None

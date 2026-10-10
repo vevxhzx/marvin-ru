@@ -161,6 +161,8 @@ def test_chat_rules_orders_goals():
     o = orders.list_orders()[0]
     assert o["title"] == "Ролик" and o["price"] == 25000 and o["deadline"] is not None
     r = _say("пришёл аванс 10000 за ролик")
+    assert "clarify" in r.actions and "заказ" in r.text.lower() and "доход" in r.text.lower()
+    r = _say("заказ")
     assert "order_payment" in r.actions and orders.list_orders()[0]["left"] == 15000
     assert "list_orders" in _say("заказы").actions
     assert "pomodoro" in _say("таймер на ролик").actions and orders.timer_state()["active"]
@@ -318,6 +320,9 @@ def test_chat_payment_with_past_date():
     from core.brain.agent import _orders_rules
     o = orders.add_order("Логотип", 5000, "Ромашка", status="done")
     t = "пришло 5000 за логотип 3 сентября"; rep = _orders_rules(t, t.lower(), "web")
+    assert rep and "clarify" in rep.actions, rep and rep.text
+    from core.brain.agent import _resolve_pay_ask
+    rep = _resolve_pay_ask("заказ", "web")
     assert rep and "в доходах за 03.09" in rep.text, rep and rep.text
     p = orders.payments_for(o.id)[0]
     assert p.date.month == 9 and p.date.day == 3 and p.date <= datetime.now()

@@ -98,9 +98,10 @@ def test_mixed_message_lands_everywhere(monkeypatch):
     day = datetime.now() + timedelta(days=1)
     assert [e.title for e in calendar.list_events(day.replace(hour=0, minute=0), day.replace(hour=23, minute=59))] == ["Зубной"]
 
-    # откат всей пачки
+    # откат всей пачки (двухшаговый: «отмени» спрашивает, «да» сносит)
     r = asyncio.run(agent.handle("отмени", "t-mix"))
     assert "всю пачку" in r.text
+    r = asyncio.run(agent.handle("да", "t-mix"))
     assert not orders.list_orders(include_closed=True) and not finance.list_debts() and not goals.list_goals()
     assert "Купить ванну" not in [t.title for t in tasks.list_tasks()]
 

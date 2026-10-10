@@ -820,7 +820,7 @@ def for_result(actions, text: str = "") -> Path | None:
             ts = tasks.list_tasks(limit=1)
             if ts:
                 t = ts[0]
-                when = (f"{t.due:%d.%m}" if is_all_day(t.due) else f"{t.due:%d.%m %H:%M}") if getattr(t, "due", None) else ""
+                when = (calendar.fmt_day(t.due) if is_all_day(t.due) else f"{t.due:%d.%m %H:%M}") if getattr(t, "due", None) else ""
                 return task_card(t.title, when)
         if "add_event" in acts and should_send("event"):
             evs = calendar.events_today() or []
@@ -893,9 +893,9 @@ def tasks_card(path: Path | None = None) -> Path | None:
                     if d.date() < now.date():
                         right, urgent = f"просрочено · {d:%d.%m}", True
                     elif d.date() == now.date():
-                        right = f"до {d:%H:%M}"
+                        right = "сегодня" if is_all_day(d) else f"до {d:%H:%M}"
                     else:
-                        right = f"{d:%d.%m}"
+                        right = calendar.fmt_day(d) if is_all_day(d) else f"{d:%d.%m}"
                 c.check_row(t.title, right, right_color=RED if urgent else INK_2, urgent=urgent)
         else:
             c.empty("открытых задач нет. подозрительно.")

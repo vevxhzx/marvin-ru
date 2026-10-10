@@ -6,7 +6,7 @@ import { useI18n } from '../lib/i18n'
 
 /* Task form — the only task form in the app: new (task=null) and edit an existing one.
    Due date in three ways: no date · on a day (23:59, no "in an hour" reminders) · at a time.
-   TaskPatch accepts title/due/priority/project/blocked_by — nothing else is in the form
+   TaskPatch accepts title/due/priority/project/blocked_by/auto_roll — nothing else is in the form
    (the backend rejects note/repeat/tags).
 
    Sheet gives the three phone snaps (peek / half / full), the draggable grip and
@@ -22,7 +22,7 @@ const BIG_FIELD = { minHeight: 'var(--tap-lg)' }
 
 export default function TaskSheet({ open, task, onClose, onDone, onErr }) {
   const { t } = useI18n()
-  const blank = { title: '', when: 'none', day: '', time: '', priority: 2, project: '', blocked: '' }
+  const blank = { title: '', when: 'none', day: '', time: '', priority: 2, project: '', blocked: '', autoRoll: false }
   const [f, setF] = useState(blank)
   const [busy, setBusy] = useState(false)
   const [askDel, setAskDel] = useState(false)
@@ -38,6 +38,7 @@ export default function TaskSheet({ open, task, onClose, onDone, onErr }) {
       priority: task.priority || 2,
       project: task.project || '',
       blocked: task.blocked_by || '',
+      autoRoll: !!task.auto_roll,
     })
   }, [open, task])
 
@@ -53,10 +54,10 @@ export default function TaskSheet({ open, task, onClose, onDone, onErr }) {
     try {
       const due = dueOf()
       if (task) {
-        await api.patchTask(task.id, { title: f.title, due, clear_due: !due, priority: Number(f.priority), project: f.project || '', blocked_by: f.blocked || '' })
+        await api.patchTask(task.id, { title: f.title, due, clear_due: !due, priority: Number(f.priority), project: f.project || '', blocked_by: f.blocked || '', auto_roll: !!f.autoRoll })
         onDone(t('task.updated'))
       } else {
-        await api.addTask({ title: f.title, due, priority: Number(f.priority), project: f.project || null })
+        await api.addTask({ title: f.title, due, priority: Number(f.priority), project: f.project || null, auto_roll: !!f.autoRoll })
         onDone(t('task.added'))
       }
     } catch (err) { onErr?.(err) } finally { setBusy(false) }
@@ -190,6 +191,19 @@ export default function TaskSheet({ open, task, onClose, onDone, onErr }) {
             />
           </Field>
         )}
+
+        <Field label={t('task.auto_roll')} hint={t('task.auto_roll_hint')}>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={!!f.autoRoll}
+            className={`pill ${f.autoRoll ? 'on' : ''}`}
+            style={PILL}
+            onClick={() => setF({ ...f, autoRoll: !f.autoRoll })}
+          >
+            {f.autoRoll ? '🔁 ✓' : '🔁'}
+          </button>
+        </Field>
 
         <div className="flex items-center gap-2">
           {task && (

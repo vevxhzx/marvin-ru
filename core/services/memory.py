@@ -137,10 +137,14 @@ def decay_max_mentions() -> int:
 
 # ---------------------------------------------------------------- предложения фактов (тост «Запомнить?»)
 def suggest_enabled() -> bool:
-    """Предлагать новые факты из разговора в ответе чата (кнопки «да/нет» на сайте)."""
+    """Предлагать новые факты из разговора в ответе чата (кнопки «да/нет» на сайте).
+
+    Батч 4: по умолчанию ВЫКЛЮЧЕНО — память работает молча (extract пишет факты
+    без тостов). Включить — явно: brain.memory.suggest: true. Список отклонённых
+    фраз (memory.dismissed) при этом живёт независимо и дальше фильтрует extract."""
     from .. import config as _c
     node = getattr(getattr(_c.cfg, "brain", None), "memory", None)
-    return bool(getattr(node, "suggest", True))
+    return bool(getattr(node, "suggest", False))
 
 
 def suggest_timeout() -> float:

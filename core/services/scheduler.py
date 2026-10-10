@@ -857,11 +857,20 @@ def build(notify: Notifier) -> AsyncIOScheduler:
         from . import cards, insights
         from ..brain import persona
         try:
+            rolled = await asyncio.to_thread(tasks.rollover_overdue)
+        except Exception as e:  # pragma: no cover — перенос не должен ронять дайджест
+            log.warning("task rollover before digest failed: %s", e); rolled = []
+        try:
             head = await persona.opener(morning_facts(), "")
         except Exception as e:  # pragma: no cover
             log.debug("morning opener: %s", e); head = ""
         bd = insights.upcoming_birthdays(0)
         extra = ("🎂 Сегодня " + ", ".join(b["title"] for b in bd) + "!") if bd else None
+        if rolled:
+            line = "🔁 Автоперенос на сегодня: " + ", ".join(f"«{t.title}»" for t in rolled[:3])
+            if len(rolled) > 3:
+                line += f" …и ещё {len(rolled) - 3}"
+            extra = (extra + "\n" + line) if extra else line
         text = morning_digest_text(head or None, extra=extra)
         # пишем в общую историю чата: сайт по строке «доброе утро» рисует свою карточку — и цифры там те же,
         # что в Telegram (дайджест из базы), а не захардкоженные
@@ -1218,6 +1227,20 @@ def build(notify: Notifier) -> AsyncIOScheduler:
     # ночная надёжность: уборка каждый день, компактификация — раз в неделю
     add(nightly_maintenance, CronTrigger(hour=4, minute=20), "retention")
     add(compact_job, CronTrigger(day_of_week="sun", hour=4, minute=30), "db_compact")
+
+    @_state.tracked("автоперенос задач")
+    async def task_rollover():
+        """00:10 — задачи с флагом auto_roll, не закрытые вчера, молча переезжают на сегодня.
+        Днём то же самое делает утренний дайджест (идемпотентно) — джоб нужен, чтобы перенос
+        случился даже при выключенном дайджесте; вечерний обзор задачи с флагом не спрашивает
+        (они сами уедут ночью — см. tasks.evening_review)."""
+        try:
+            moved = await asyncio.to_thread(tasks.rollover_overdue)
+        except Exception as e:  # pragma: no cover
+            log.warning("task rollover failed: %s", e); return
+        if moved:
+            log.info("автоперенос задач: %d (%s)", len(moved), ", ".join(t.title for t in moved[:5]))
+    add(task_rollover, CronTrigger(hour=0, minute=10), "task_rollover")
     add(proactive_tick, "interval", "proactive", hours=1, next_run_time=_soon(300))
     add(gcal_flush, "interval", "gcal_flush", minutes=3, next_run_time=_soon(60))
     add(gcal_pull, "interval", "gcal_pull", minutes=15, next_run_time=_soon(120))

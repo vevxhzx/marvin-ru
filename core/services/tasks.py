@@ -10,7 +10,7 @@ from . import coord
 
 
 def add_task(title: str, due: datetime | None = None, priority: int = 2,
-             project: str | None = None, source: str = "tg") -> Task:
+             project: str | None = None, source: str = "tg", auto_roll: bool = False) -> Task:
     with session() as s:
         # дубль открытой задачи с тем же названием — не плодим.
         # Итоговое сравнение осталось в Python (там же trim/lower), но выборка теперь
@@ -23,7 +23,8 @@ def add_task(title: str, due: datetime | None = None, priority: int = 2,
                 if due and not d.due:
                     d.due = due; s.add(d); s.commit()
                 return d
-        t = Task(title=title, due=due, priority=priority, project=project, source=source)
+        t = Task(title=title, due=due, priority=priority, project=project, source=source,
+                 auto_roll=bool(auto_roll))
         s.add(t)
         s.commit()
         s.refresh(t)
@@ -52,7 +53,7 @@ def update_task(task_id: int, **fields) -> Task | None:
         if not t:
             return None
         before = {"title": t.title, "due": t.due, "priority": t.priority, "project": t.project, "done": t.done,
-                  "blocked_by": t.blocked_by, "aim_id": t.aim_id, "milestone_id": t.milestone_id}
+                  "blocked_by": t.blocked_by, "aim_id": t.aim_id, "milestone_id": t.milestone_id, "auto_roll": t.auto_roll}
         if fields.get("title") is not None:
             t.title = fields["title"].strip() or t.title
         if "due" in fields:
@@ -71,9 +72,11 @@ def update_task(task_id: int, **fields) -> Task | None:
             t.aim_id = fields["aim_id"] or None
         if "milestone_id" in fields:
             t.milestone_id = fields["milestone_id"] or None
+        if "auto_roll" in fields:
+            t.auto_roll = bool(fields["auto_roll"])
         s.add(t)
         after = {"title": t.title, "due": t.due, "priority": t.priority, "project": t.project, "done": t.done,
-                 "blocked_by": t.blocked_by, "aim_id": t.aim_id, "milestone_id": t.milestone_id}
+                 "blocked_by": t.blocked_by, "aim_id": t.aim_id, "milestone_id": t.milestone_id, "auto_roll": t.auto_roll}
         changes = diff_text({k: v for k, v in before.items() if k in ("title", "due", "priority", "project", "done")},
                             {k: v for k, v in after.items() if k in ("title", "due", "priority", "project", "done")},
                             {"title": "название", "due": "срок", "priority": "приоритет", "project": "проект", "done": "сделано"})
@@ -82,6 +85,8 @@ def update_task(task_id: int, **fields) -> Task | None:
             extra.append(f"блок: {after['blocked_by']}" if after["blocked_by"] else "блок снят")
         if (before["aim_id"], before["milestone_id"]) != (after["aim_id"], after["milestone_id"]):
             extra.append("привязка к цели" if after["aim_id"] else "отвязана от цели")
+        if before["auto_roll"] != after["auto_roll"]:
+            extra.append("автперенос вкл" if after["auto_roll"] else "автперенос выкл")
         changes = ", ".join([c for c in [changes] if c] + extra)
         if changes:   # пустой PUT (ничего не поменялось) в ленту не пишем
             remember(s, "task", f"Изменена задача «{t.title}»: {changes}", "task", t.id)
@@ -201,11 +206,14 @@ def delete_task(task_id: int) -> bool:
 
 def evening_review() -> list[Task]:
     """Что не закрыто к вечеру: дедлайн был сегодня или раньше (просрочено), задача открыта.
-    Только для вечернего вопроса «перенести на завтра?» — ничего не меняет."""
+    Только для вечернего вопроса «перенести на завтра?» — ничего не меняет.
+    Задачи с флагом auto_roll сюда не попадают: они сами уедут ночью (rollover_overdue),
+    спрашивать «перенести?» про них не нужно."""
     nw = now()
     end_today = nw.replace(hour=23, minute=59, second=59)
     with session() as s:
-        rows = s.exec(select(Task).where(Task.done == False, Task.due != None, Task.due <= end_today)  # noqa: E711,E712
+        rows = s.exec(select(Task).where(Task.done == False, Task.due != None, Task.due <= end_today,  # noqa: E711,E712
+                                          Task.auto_roll == False)  # noqa: E712
                       .order_by(Task.priority, Task.due)).all()
         return list(rows)
 
@@ -219,3 +227,46 @@ def postpone_to_tomorrow(task_id: int, hour: int = 10) -> Task | None:
     tmr = now() + timedelta(days=1)
     tmr = tmr.replace(hour=23, minute=59, second=0, microsecond=0) if is_all_day(t.due) else tmr.replace(hour=hour, minute=0, second=0, microsecond=0)
     return update_task(task_id, due=tmr)
+
+
+def rollover_overdue(now: datetime | None = None) -> list[Task]:
+    """Ночной автоперенос: открытые задачи с флагом auto_roll, чей дедлайн — вчера или раньше,
+    переезжают на завтра. Сегодняшние (даже вечерние) не трогаем — они ещё не просрочены.
+
+    «На весь день» (23:59) остаётся на весь день, задача со временем keeps time (тот же час:мин завтра).
+    remind_stage сбрасывается в 0 (новый день — новые напоминания). В журнал — «автоперенос».
+    Идемпотентна: повторный прогон в те же сутки ничего не находит (due уже завтра) и возвращает [].
+    Закрытые (done) не едут."""
+    from ..brain.dates import is_all_day
+    from ..db import log_action, remember
+    from ..db import now as _now
+    nw = now or _now()
+    day_start = nw.replace(hour=0, minute=0, second=0, microsecond=0)
+    cutoff = day_start - timedelta(seconds=1)   # конец вчерашнего дня: due <= cutoff = вчера и раньше
+    tomorrow = (nw + timedelta(days=1)).date()
+    moved: list[Task] = []
+    with session() as s:
+        rows = s.exec(select(Task).where(Task.done == False, Task.due != None,  # noqa: E711,E712
+                                         Task.due <= cutoff, Task.auto_roll == True)  # noqa: E712
+                      .order_by(Task.priority, Task.due)).all()
+        for t in rows:
+            old = t.due
+            if is_all_day(old):
+                t.due = datetime(tomorrow.year, tomorrow.month, tomorrow.day, 23, 59)
+            else:
+                t.due = datetime(tomorrow.year, tomorrow.month, tomorrow.day,
+                                 old.hour, old.minute, second=0, microsecond=0)
+            t.remind_stage = 0
+            s.add(t)
+            remember(s, "task", f"Автоперенос задачи «{t.title}»: {old:%d.%m %H:%M} → {t.due:%d.%m %H:%M}", "task", t.id)
+            log_action(s, "update_task", "task", t.id, f"автоперенос: {t.title}", "system")
+        s.commit()
+        for t in rows:
+            s.refresh(t)
+            moved.append(t)
+    for t in moved:      # срок поменяли — переносим привязанную встречу (как update_task при смене due)
+        try:
+            coord.sync_from_task(t.id)
+        except Exception:  # pragma: no cover — уборка не должна ронять перенос
+            pass
+    return moved

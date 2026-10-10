@@ -215,7 +215,7 @@ def get_task(task_id: int):
 
 @router.post("/api/tasks")
 def create_task(t: TaskIn):
-    return tasks.add_task(t.title, t.due, t.priority, t.project, "web")
+    return tasks.add_task(t.title, t.due, t.priority, t.project, "web", auto_roll=t.auto_roll)
 
 
 @router.put("/api/tasks/{task_id}")

@@ -17,7 +17,7 @@ from datetime import datetime, timedelta
 
 from ..db import get_setting, set_setting
 from ..services import calendar, finance, regime, tasks
-from ..services.calendar import fmt_dt
+from ..services.calendar import fmt_dt, fmt_task_due
 from ..services.finance import money
 from ..services.plural import days as _days_word
 from .dates import is_all_day, parse_amount, parse_datetime
@@ -306,8 +306,8 @@ def agenda(text: str) -> Result | None:
     for e in evs:
         lines.append(f"— **{fmt_dt(e.start) if multi else e.start.strftime('%H:%M')}** {'✓ ' if calendar.is_done(e) else ''}{e.title}" + (f" · {e.location}" if e.location else ""))
     for t in due:
-        tail = fmt_dt(t.due) if multi else ('' if is_all_day(t.due) else t.due.strftime('%H:%M'))
-        lines.append(f"— ✅ {t.title}" + (f" · до {tail}" if tail else ""))
+        tail = fmt_task_due(t.due) if multi else ('' if is_all_day(t.due) else t.due.strftime('%H:%M'))
+        lines.append(f"— ✅ {t.title}" + (f" · до {tail}" if tail and not is_all_day(t.due) else (f" · {tail}" if tail else "")))
     for p in pays:
         lines.append(f"— 💳 {p.title} {money(p.amount)}" + (f" · {p.next_date:%d.%m}" if multi else ""))
     return "\n".join(lines), ["agenda"]
@@ -424,7 +424,10 @@ def transfers(text: str, channel: str) -> Result | None:
             if re.match(r"^\s*(переведи|перекинь)\b", text, re.I):
                 return (f"Переводить деньги я не умею, сэр, — только вести учёт. Если уже перевели, скажите «перевёл {int(amount)} {who or 'на сбер'}»."), []
             if not who:
-                return None
+                # Батч 1: сумма есть, счетов нет — не гадаем, спрашиваем «с какого на какой».
+                # Между своими счетами это transfer, а не трата.
+                return (f"Перевод {money(amount)} — с какого на какой счёт, сэр? "
+                        f"Например: «перевёл {int(amount)} со сбера на наличные»."), ["clarify"]
             d = finance.find_debt(who)
             if d:
                 try:

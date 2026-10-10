@@ -16,7 +16,14 @@ _LABEL = {"add_event": "событие", "add_task": "задачу", "add_expens
 def last_action(channel: str | None = None, max_age_min: int = 24 * 60) -> ActionLog | None:
     with session() as s:
         q = select(ActionLog).where(ActionLog.undone == False, ActionLog.created_at >= datetime.now() - timedelta(minutes=max_age_min))  # noqa: E712
+        if channel:
+            q = q.where(ActionLog.channel == channel)
         return s.exec(q.order_by(ActionLog.id.desc())).first()
+
+
+def last_action_any(max_age_min: int = 24 * 60) -> ActionLog | None:
+    """Последнее действие по всем каналам (для честного «это было в другом канале»)."""
+    return last_action(None, max_age_min)
 
 
 def undo_ids(ids: list[int]) -> int:

@@ -48,8 +48,10 @@ def mentions(text: str | None, c: Client) -> bool:
         st = _name_stems(name)
         if not st:
             continue
-        # «Иван Петров»: хватит одного имени («созвон с Иваном») или фамилии — но не коротких («Ли», «Ян»)
-        variants = [st] + ([[st[0]] if len(st[0]) >= 4 else []] if len(st) > 1 else []) + ([[st[-1]] if len(st[-1]) >= 5 else []] if len(st) > 1 else [])
+        # «Иван Петров»: хватит одного имени («созвон с Иваном») или фамилии — но не коротких («Ли», «Ян»).
+        # Порог имени — 3 основы («дим» у «Димы Иванова»): короткие идут строгой проверкой по падежам
+        # в _match_parts («Диме» — он, «диван»/«ванна» — нет), поэтому «ванну починить» по-прежнему мимо.
+        variants = [st] + ([[st[0]] if len(st[0]) >= 3 else []] if len(st) > 1 else []) + ([[st[-1]] if len(st[-1]) >= 5 else []] if len(st) > 1 else [])
         if any(_match_parts(v, words, word_stems) for v in variants if v):
             return True
     return False
@@ -74,6 +76,37 @@ def _match_parts(st: list[str], words: set[str], word_stems: set[str]) -> bool:
 
 # что остаётся после грубого стемминга у падежных форм: Иваном → «иваном» = иван + ом. «Иванов»/«Ивановка» — другие люди/места
 _CASE_TAILS = {"", "ом", "ем", "ём", "ым", "им", "ой", "ей", "ах", "ям", "ами", "ями", "ах", "ях"}
+
+
+def find_candidates(query: str, limit: int = 5) -> list[Client]:
+    """Все похожие люди под запрос — для уточнения «какой Дима: X или Y?».
+
+    Та же логика, что у find_person (точное совпадение, иначе все слова
+    запроса основами в имени/псевдониме), но возвращает ВСЕХ, а не первого.
+    Пусто — никого нет; один — однозначно; 2+ — спросить у хозяина,
+    молча никого не выбирать и не склеивать.
+    """
+    q = (query or "").strip(" «»\"'?.!,")
+    if not q:
+        return []
+    with session() as s:
+        people = list(s.exec(select(Client)))
+    ql = q.lower().replace("ё", "е")
+    exact = [c for c in people if any(n.lower().replace("ё", "е") == ql for n in names_of(c))]
+    if exact:
+        return exact[:limit]
+    qs = tokens(q)
+    if not qs:
+        return []
+    out = []
+    for c in people:
+        for name in names_of(c):
+            ns = _name_stems(name)
+            hit = sum(1 for t in qs if any(t == n or (len(t) >= 3 and (n.startswith(t) or t.startswith(n))) for n in ns))
+            if hit and hit == len(qs):
+                out.append(c)
+                break
+    return out[:limit]
 
 
 def find_person(query: str) -> Client | None:

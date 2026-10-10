@@ -213,13 +213,20 @@ async def apply_items(items: list[dict], channel: str, confirm_amount: float = 1
     done: dict[str, list[str]] = {}
     skipped: list[str] = []
     actions: list[str] = []
+    _KNOWN = {"task", "event", "order", "order_payment", "person", "family", "friend",
+              "client", "company", "debt", "goal", "recurring", "expense", "income",
+              "link", "note", "done"}
 
     def ok(kind: str, line: str, action: str | None = None):
         done.setdefault(kind, []).append(line)
         actions.append(action or f"add_{kind}")
 
+    def nope(line: str):
+        skipped.append(line)
+
     for it in items[:40]:
         if not isinstance(it, dict):
+            nope(f"«{it}» — не понял вот это, пропустил")
             continue
         title = _s(it.get("title")) or ""
         kind = str(it.get("kind") or "task").lower().strip()
@@ -231,6 +238,10 @@ async def apply_items(items: list[dict], channel: str, confirm_amount: float = 1
             when = fix_night_hour(when, f"{title} {note or ''} {it.get('when') or ''}")
         url = _s(it.get("url"))
         if not title and not url:
+            nope("пустой пункт — не понял вот это, пропустил")
+            continue
+        if kind not in _KNOWN:
+            nope(f"«{title or url}» — не понял вот это (вид «{kind}»), пропустил")
             continue
         if title:
             title = title[0].upper() + title[1:]
@@ -280,17 +291,21 @@ async def apply_items(items: list[dict], channel: str, confirm_amount: float = 1
                 v = orders.order_view(orders.get_order(o.id))
                 ok("order_payment", f"{v['title']} — {money(amount)}" + (f" за {pay_date:%d.%m}" if pay_date else "") + (" · заказ закрыт" if v["status"] == "paid" else f" · осталось {money(v['left'])}"), "order_payment")
             elif kind == "debt" and amount:
-                d = finance.add_debt(title, amount, creditor=note, pay_day=int(it.get("day") or 1))
+                d = finance.add_debt(title, amount, creditor=note, pay_day=int(it.get("day") or 1), source=channel)
                 ok("debt", f"{d.title} — {money(d.remaining)}" + (f" ({note})" if note else ""))
             elif kind == "goal" and amount:
                 g = goals.add_goal(title, amount, when, source=channel)
                 ok("goal", f"{g.title} — {money(g.target)}" + (f" к {when:%d.%m.%Y}" if when else ""))
             elif kind == "recurring" and amount:
-                r = finance.add_recurring(title, amount, int(it.get("day") or 1), "expense")
+                r = finance.add_recurring(title, amount, int(it.get("day") or 1), "expense", source=channel)
                 ok("recurring", f"{r.title} — {money(r.amount)} {r.day}-го")
             elif kind == "link" and url:
                 lk = await brain_notes.add_link(url, note or (title if title != url else None), source=channel)
                 ok("link", lk.title or url)
+            elif kind == "link":
+                nope(f"«{title}» — не понял вот это (ссылка без адреса), пропустил")
+            elif kind in ("order_payment", "debt", "goal", "recurring") and not amount:
+                nope(f"«{title}» — не понял вот это (нет суммы), пропустил")
             else:
                 # задача; дата без времени → дедлайн конец дня, чтобы не сыпались напоминания «через час»
                 due = when.replace(hour=23, minute=59) if when and not (when.hour or when.minute) else when
@@ -304,6 +319,9 @@ async def apply_items(items: list[dict], channel: str, confirm_amount: float = 1
                 ok("task", tk.title + (f" — до {fmt_dt(due)}" if due and (due.hour, due.minute) != (23, 59) else ""))
         except (finance.FinanceError, orders.OrderError) as e:
             skipped.append(f"{title or url}: {e}")
+        except Exception as e:  # один битый пункт не роняет всю пачку
+            log.warning("sorter: пункт «%s» не разобрался: %s", title or url, e)
+            skipped.append(f"«{title or url}» — не понял вот это ({e}), пропустил")
     return done, skipped, actions
 
 
@@ -339,6 +357,11 @@ async def commit(items: list[dict], channel: str, via: str, confirm_amount: floa
         last = s.exec(select(ActionLog.id).order_by(ActionLog.id.desc())).first() or 0
     done, skipped, actions = await apply_items(items, channel, confirm_amount)
     if not done:
+        if skipped:
+            lines = ["Не понял вот это — ничего не записал:"]
+            lines += [f"• {x}" for x in skipped]
+            lines.append("Пришлите пункты по одному, сэр.")
+            return Reply("\n".join(lines), [], via)
         return None
     with session() as s:
         ids = [i for i in s.exec(select(ActionLog.id).where(ActionLog.id > last)).all()]
@@ -400,8 +423,38 @@ def undo_batch(channel: str) -> str | None:
     last = undo.last_action(channel)
     if not last or last.id != max(id_list):
         return None   # после пачки что-то ещё записали — откатываем по одному, как обычно
+    with session() as s:
+        titles = [t for t in (s.get(ActionLog, i).title if s.get(ActionLog, i) else "" for i in sorted(id_list)) if t]
     n = undo.undo_ids(id_list)
-    return f"Отменил всю пачку — {n} {_plural(n, 'запись', 'записи', 'записей')}. Как будто и не было." if n else None
+    if not n:
+        return None
+    tail = f" ({'; '.join(titles[:5])})" if titles else ""
+    return f"Отменил всю пачку — {n} {_plural(n, 'запись', 'записи', 'записей')}{tail}. Как будто и не было." if n else None
+
+
+def batch_info(channel: str) -> tuple[int, list[str]] | None:
+    """Что откатит «отмени» для пачки, не трогая состояние. None — пачки нет / протухла / уже не последняя."""
+    raw = get_setting(f"batch:{channel}")
+    if not raw or "|" not in raw:
+        return None
+    ts, ids = raw.split("|", 1)
+    try:
+        fresh = (datetime.now() - datetime.fromisoformat(ts)).total_seconds() < BATCH_TTL_H * 3600
+    except ValueError:
+        return None
+    id_list = [int(x) for x in ids.split(",") if x.strip().isdigit()]
+    if not fresh or not id_list:
+        return None
+    last = undo.last_action(channel)
+    if not last or last.id != max(id_list):
+        return None
+    with session() as s:
+        titles = []
+        for i in sorted(id_list):
+            a = s.get(ActionLog, i)
+            if a and not a.undone and a.title:
+                titles.append(a.title)
+    return len(id_list), titles
 
 
 def _plural(n: int, one: str, few: str, many: str) -> str:

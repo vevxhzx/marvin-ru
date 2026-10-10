@@ -176,7 +176,9 @@ def parse_datetime_ex(text: str, now: datetime | None = None) -> tuple[datetime 
         if m:
             wd = WEEKDAYS[m.group(1)]
             delta = (wd - now.weekday()) % 7
-            if delta == 0 and (time_set and (hour, minute) <= (now.hour, now.minute) or not time_set and now.hour >= 20):
+            # Тот же день недели: «сегодня», пока время (явное или дефолтные 10:00) не прошло;
+            # прошло — следующая неделя. Иначе ставим событие в прошлое (голден 232).
+            if delta == 0 and (hour, minute) <= (now.hour, now.minute):
                 delta = 7
             date = now + timedelta(days=delta)
             t = t.replace(m.group(0), " ")

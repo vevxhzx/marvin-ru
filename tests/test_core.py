@@ -64,6 +64,8 @@ def test_expense_income_balance():
     assert s["total_balance"] == 14300
     assert s["by_category"] == {"Транспорт": 700}
     run("отмени последнюю")
+    r = run("да")
+    assert "undo" in r.actions
     assert finance.summary(1)["total_balance"] == 9300
 
 
@@ -229,9 +231,13 @@ def test_undo_any_action():
     run("задача протестировать откат")
     assert tasks.find_task("протестировать откат")
     r = run("не то, удали")
+    assert "clarify" in r.actions
+    r = run("да")
     assert "undo" in r.actions and tasks.find_task("протестировать откат") is None
     r = run("завтра в 9 планёрка")
     r = run("отмена")
+    assert "clarify" in r.actions and "Планёрка" in r.text
+    r = run("да")
     assert "undo" in r.actions and "Планёрка" in r.text
 
 
@@ -326,6 +332,8 @@ def test_bulk_delete_is_confirmed_and_undoable():
     assert finance.summary(1)["total_balance"] != b0
     assert not [t for t in finance.list_transactions(3) if t.note == "bulk тест"]
     r = asyncio.run(agent.handle("отмена", ch))
+    assert "clarify" in r.actions
+    r = asyncio.run(agent.handle("да", ch))
     assert "Вернул" in r.text
     assert finance.summary(1)["total_balance"] == b0
     # «нет» — ничего не трогаем; точечное «удали задачу про …» не считается массовым
@@ -635,6 +643,8 @@ def test_batch_sorter_splits_and_undoes(monkeypatch):
 
     r = asyncio.run(agent.handle("отмени", ch))
     assert "всю пачку" in r.text and "4" in r.text
+    r = asyncio.run(agent.handle("да", ch))
+    assert "undo" in r.actions
     assert not tasks.list_tasks() and not brain_notes.list_notes(10)
 
 
