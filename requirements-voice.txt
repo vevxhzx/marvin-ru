@@ -10,3 +10,5 @@ sounddevice>=0.4.6
 pystray>=0.19
 pillow>=10
 keyboard>=0.13
+piper-tts>=1.2                # офлайн-озвучка Piper (CPU, onnxruntime) — третий движок tts.engine=piper
+onnxruntime>=1.17             # рантайм моделей Piper (только CPU, cuda-флаги не используем)

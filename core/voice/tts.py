@@ -1,8 +1,11 @@
-"""Синтез речи. Основной — Silero v4 (офлайн, русский, голос «eugene»), запасной — Edge TTS (Microsoft, онлайн).
+"""Синтез речи. Основной — Silero v4 (офлайн, русский, голос «eugene»), новее — Piper
+(офлайн, CPU, естественнее Silero, голос «denis»), запасной — Edge TTS (Microsoft, онлайн).
 
 Silero: одна модель ~40 МБ (data/models/v4_ru.pt), качается сама при первом запуске. Работает на CPU,
-10 секунд речи ≈ 2–3 с. Текст подготавливается: числа → слова, ₽ → рублей, эмодзи/markdown вырезаются.
-Выход — ogg/opus (то, что Telegram показывает как голосовое) или wav.
+10 секунд речи ≈ 2–3 с. Piper: голос ~60 МБ (data/models/piper/*.onnx + .json), качается сам
+при первом запуске, синтез через `python -m piper` (пакет piper-tts + onnxruntime, только CPU),
+wav 22050 Гц → ресемпл в SAMPLE_RATE. Текст подготавливается: числа → слова, ₽ → рублей,
+эмодзи/markdown вырезаются. Выход — ogg/opus (то, что Telegram показывает как голосовое) или wav.
 """
 from __future__ import annotations
 
@@ -22,6 +25,27 @@ _TTS = getattr(_VOICE, "tts", None)
 ENGINE = str(getattr(_TTS, "engine", "silero") or "silero")          # silero / edge / off
 SPEAKER = str(getattr(_TTS, "speaker", "eugene") or "eugene")        # silero: aidar, baya, kseniya, xenia, eugene
 EDGE_VOICE = str(getattr(_TTS, "edge_voice", "ru-RU-DmitryNeural") or "ru-RU-DmitryNeural")
+PIPER_VOICE = str(getattr(_TTS, "piper_voice", "ru_RU-denis-medium") or "ru_RU-denis-medium")  # piper: ru_RU-denis/dmitri/irina/ruslan-medium
+PIPER_MODEL = str(getattr(_TTS, "piper_model", "") or "")  # свой .onnx; пусто — data/models/piper/<голос>.onnx
+
+# Голоса, за которыми — «она»: тексты бота о себе идут в женском роде («записала»).
+# Список по VOICES (routers/pc.py): piper denis/dmitri — м, irina — ж, ruslan — м.
+FEMININE_IDS = frozenset({
+    "ru_RU-irina-medium", "baya", "kseniya", "xenia", "ru-RU-SvetlanaNeural",
+})
+
+
+def voice_is_feminine() -> bool:
+    """Текущий голос женский? ENGINE/SPEAKER/PIPER_VOICE читаем живьём (выбор с сайта применяется без перезапуска)."""
+    try:
+        eng = resolve_engine()
+        if eng == "piper":
+            return PIPER_VOICE in FEMININE_IDS
+        if eng == "silero":
+            return SPEAKER in FEMININE_IDS
+        return EDGE_VOICE in FEMININE_IDS
+    except Exception:
+        return False
 REPLY_VOICE = str(getattr(_TTS, "reply_in_telegram", "voice") or "voice")  # never — только текст · voice — голосом на голосовые (по умолчанию) · always — на всё
 
 MODEL_URL = "https://models.silero.ai/models/tts/ru/v4_ru.pt"
@@ -51,6 +75,7 @@ def resolve_engine(configured: str | None = None) -> str:
     В `local`-режиме `edge` запрещён молча уходить в облако: принудительно `silero`
     (офлайн; если torch нет — порядок fallback в speak_to_file всё равно попробует edge,
     но уже с предупреждением в логе). `hybrid`/`cloud` не трогаем. `off` остаётся `off`.
+    `piper` — офлайн (CPU), поэтому в `local` НЕ форсится и остаётся `piper`.
     """
     global _LOCAL_EDGE_NOTICE_DONE
     eng = (configured if configured is not None else ENGINE).strip().lower() or "silero"
@@ -273,6 +298,131 @@ def _silero_to_file(text: str, path: Path) -> Path:
     return path
 
 
+# ------------------------------------------------------------------ Piper (офлайн, CPU)
+# Голос — два файла: <голос>.onnx + <голос>.onnx.json в DATA_DIR/models/piper/.
+# Качаются с HuggingFace (rhasspy/piper-voices) при первом запуске, как модель Silero.
+PIPER_DIR = DATA_DIR / "models" / "piper"
+PIPER_SR = 22050  # частота, на которой поют русские голоса Piper
+_PIPER_HF = "https://huggingface.co/rhasspy/piper-voices/resolve/main/ru/ru_RU"
+
+
+def _piper_parts(voice: str) -> tuple[str, str]:
+    """ru_RU-denis-medium → (denis, medium)."""
+    bits = str(voice or "").split("-")
+    speaker = bits[1] if len(bits) > 1 and bits[1] else "denis"
+    quality = bits[2] if len(bits) > 2 and bits[2] else "medium"
+    return speaker, quality
+
+
+def _piper_model_paths() -> tuple[Path, Path]:
+    """Пара (onnx, json). PIPER_MODEL задан — берём его (json рядом, с суффиксом .json)."""
+    if PIPER_MODEL:
+        onnx = Path(PIPER_MODEL)
+        return onnx, Path(str(onnx) + ".json")
+    name = PIPER_VOICE
+    return PIPER_DIR / f"{name}.onnx", PIPER_DIR / f"{name}.onnx.json"
+
+
+def _download_piper_model() -> None:
+    import httpx
+    from .fetch import verify_file
+    onnx, js = _piper_model_paths()
+    if onnx.exists() and js.exists():
+        return
+    speaker, quality = _piper_parts(PIPER_VOICE)
+    onnx.parent.mkdir(parents=True, exist_ok=True)
+    for dest in (onnx, js):
+        if dest.exists():
+            continue
+        url = f"{_PIPER_HF}/{speaker}/{quality}/{dest.name}"
+        if PIPER_MODEL:  # свой путь задан, но файла нет — качать нечего, честно падаем
+            raise RuntimeError(f"модель Piper не найдена: {dest}")
+        tmp = dest.with_suffix(dest.suffix + ".part")
+        log.info("Скачиваю голос Piper %s (~60 МБ) → %s", dest.name, dest)
+        with httpx.Client(timeout=300, follow_redirects=True) as c, c.stream("GET", url) as r:
+            r.raise_for_status()
+            with open(tmp, "wb") as f:
+                for chunk in r.iter_bytes(1 << 16):
+                    f.write(chunk)
+        try:
+            verify_file(tmp, url)
+        except Exception:
+            tmp.unlink(missing_ok=True)
+            raise
+        tmp.replace(dest)
+
+
+def _piper_available() -> bool:
+    """Пакет piper-tts стоит (модуль `piper`) или бинарь `piper` в PATH."""
+    try:
+        import importlib.util as _ilu
+        if _ilu.find_spec("piper") is not None:
+            return True
+    except Exception:
+        pass
+    import shutil
+    return shutil.which("piper") is not None
+
+
+_PIPER_VOICES: dict[str, object] = {}  # onnx-путь → загруженный PiperVoice (модель ~60 МБ, грузим раз)
+
+
+def _piper_voice():
+    """Загруженный голос (кэш на процесс). CLI `python -m piper` больше не используем:
+    на Windows он молча отдавал пустой wav (wave.Error: channels not specified)."""
+    from piper.voice import PiperVoice
+
+    _download_piper_model()
+    onnx, _ = _piper_model_paths()
+    key = str(onnx)
+    v = _PIPER_VOICES.get(key)
+    if v is None:
+        with _lock:
+            v = _PIPER_VOICES.get(key)
+            if v is None:
+                v = PiperVoice.load(key)
+                _PIPER_VOICES[key] = v
+                log.info("Голос Piper готов (%s)", PIPER_VOICE)
+    return v
+
+
+def _piper_wave(text: str):
+    """Текст → float32 mono на SAMPLE_RATE через PiperVoice.synthesize_wav (CPU, без cuda-флагов)."""
+    import tempfile
+    import wave as wavmod
+    import numpy as np
+    voice = _piper_voice()
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_wav = tmp.name
+    try:
+        with wavmod.open(tmp_wav, "wb") as w:
+            voice.synthesize_wav(text, w)
+        with wavmod.open(tmp_wav, "rb") as w:
+            n, sw, ch, sr = w.getnframes(), w.getsampwidth(), w.getnchannels(), w.getframerate()
+            if n == 0:
+                raise RuntimeError("piper отдал пустой wav — не озвучилось")
+            raw = w.readframes(n)
+        if sw == 2:
+            wave = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+        elif sw == 4:
+            wave = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
+        else:
+            raise RuntimeError(f"piper отдал wav с разрядностью {sw * 8} бит — не умею")
+        if ch > 1:
+            wave = wave.reshape(-1, ch).mean(axis=1).astype(np.float32)
+        if sr != SAMPLE_RATE:  # 22050 → SAMPLE_RATE линейной интерполяцией (без scipy)
+            idx = np.linspace(0, len(wave) - 1, int(round(len(wave) * SAMPLE_RATE / sr)))
+            wave = np.interp(idx, np.arange(len(wave)), wave).astype(np.float32)
+        return wave
+    finally:
+        Path(tmp_wav).unlink(missing_ok=True)
+
+
+def _piper_to_file(text: str, path: Path) -> Path:
+    _write_audio(_piper_wave(text), path)
+    return path
+
+
 # ------------------------------------------------------------------ Edge TTS (запасной, онлайн)
 async def _edge_to_file(text: str, path: Path) -> Path:
     import edge_tts
@@ -304,13 +454,29 @@ def enabled() -> bool:
 
 CACHE_DIR = DATA_DIR / "voice_cache"   # одинаковые фразы («готово», приветствие, напоминания) не синтезируем дважды
 CACHE_KEEP = 400                        # последние N файлов; старые чистим, чтобы папка не росла бесконечно
+_CACHE_VERSION = "v2"                   # v1 отравлен: упавший piper кэшировал чужой (мужской silero) звук под piper-ключом
 
 
-def _cache_path(spoken: str, suffix: str) -> Path:
+def _cache_path(spoken: str, suffix: str, engine: str | None = None) -> Path:
     import hashlib
-    eng = resolve_engine()  # local+edge → silero: кэш не должен отдавать чужой движок
-    key = f"{eng}|{SPEAKER}|{EDGE_VOICE}|{SAMPLE_RATE}|{suffix}|{spoken}".encode("utf-8")
+    eng = resolve_engine(engine)  # local+edge → silero: кэш не должен отдавать чужой движок
+    key = f"{_CACHE_VERSION}|{eng}|{SPEAKER}|{EDGE_VOICE}|{PIPER_VOICE}|{PIPER_MODEL}|{SAMPLE_RATE}|{suffix}|{spoken}".encode("utf-8")
     return CACHE_DIR / (hashlib.sha1(key).hexdigest()[:20] + (suffix or ".ogg"))
+
+
+def _ensure_cache_version() -> None:
+    """Одноразовая чистка отравленного v1-кэша (файлы без маркера версии). Сам кэш — expendable."""
+    try:
+        marker = CACHE_DIR / ".cache_v2"
+        if marker.exists():
+            return
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        for old in CACHE_DIR.glob("*"):
+            if old.is_file() and not old.name.startswith("."):
+                old.unlink(missing_ok=True)
+        marker.write_text("v2", encoding="utf-8")
+    except Exception:  # pragma: no cover
+        pass
 
 
 def _cache_prune() -> None:
@@ -333,44 +499,65 @@ async def speak_to_file(text: str, path: str | Path) -> Path | None:
     spoken = prepare(text)
     if not spoken:
         return None
-    cached = _cache_path(spoken, path.suffix or ".ogg")
-    if cached.exists() and cached.stat().st_size > 0:
-        try:
-            import shutil
-            shutil.copyfile(cached, path)   # копию отдаём вызывающему: он вправе её удалить, кэш остаётся
-            return path
-        except Exception as e:  # pragma: no cover
-            log.debug("tts cache read: %s", e)
-    order = ["silero", "edge"] if resolve_engine() == "silero" else ["edge", "silero"]
+    _ensure_cache_version()
+    suffix = path.suffix or ".ogg"
+    eng_resolved = resolve_engine()
+    if eng_resolved == "piper":
+        order = ["piper", "silero", "edge"]
+    else:
+        order = ["silero", "edge"] if eng_resolved == "silero" else ["edge", "silero"]
+    import shutil
     result = None
     for eng in order:
+        # кэш — строго своего движка: чужой звук под чужим ключом (баг v1) больше не оседает
+        hit = _cache_path(spoken, suffix, eng)
+        if hit.exists() and hit.stat().st_size > 0:
+            try:
+                shutil.copyfile(hit, path)   # копию отдаём вызывающему: он вправе её удалить, кэш остаётся
+                return path
+            except Exception as e:  # pragma: no cover
+                log.debug("tts cache read: %s", e)
         try:
-            if eng == "silero":
+            if eng == "piper":
+                if not _piper_available():
+                    continue
+                result = await asyncio.to_thread(_piper_to_file, spoken, path)
+            elif eng == "silero":
                 if not silero_available():
                     continue
                 result = await asyncio.to_thread(_silero_to_file, spoken, path)
             else:
                 result = await _edge_to_file(spoken, path)
-            break
         except Exception as e:
             LAST_ERROR = f"{eng}: {e}"
             log.warning("TTS %s не сработал: %s", eng, e)
+            continue
+        try:
+            dest = _cache_path(spoken, suffix, eng)
+            if not dest.exists() or dest.stat().st_size == 0:
+                CACHE_DIR.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(path, dest)
+                _cache_prune()
+        except Exception as e:  # pragma: no cover
+            log.debug("tts cache write: %s", e)
+        break
     if not result:
         return None
-    try:
-        if not cached.exists() or cached.stat().st_size == 0:
-            CACHE_DIR.mkdir(parents=True, exist_ok=True)
-            import shutil
-            shutil.copyfile(path, cached)
-            _cache_prune()
-    except Exception as e:  # pragma: no cover
-        log.debug("tts cache write: %s", e)
     return result
 
 
 def warmup() -> None:
     if ENGINE == "silero" and silero_available():
         threading.Thread(target=lambda: _safe(), daemon=True, name="silero-warmup").start()
+    elif ENGINE == "piper" and _piper_available():
+        threading.Thread(target=lambda: _safe_piper(), daemon=True, name="piper-warmup").start()
+
+
+def _safe_piper():
+    try:
+        _download_piper_model()  # только докачать голос заранее; синтез — по факту (CLI, CPU)
+    except Exception as e:  # pragma: no cover
+        log.warning("Прогрев Piper не удался: %s", e)
 
 
 def _safe():

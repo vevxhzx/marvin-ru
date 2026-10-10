@@ -56,6 +56,8 @@ def test_tts_cache_returns_copy(monkeypatch, tmp_path):
     from core.voice import tts
     monkeypatch.setattr(tts, "ENGINE", "silero")
     monkeypatch.setattr(tts, "CACHE_DIR", tmp_path / "cache")
+    (tmp_path / "cache").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "cache" / ".cache_v2").write_text("v2", encoding="utf-8")  # кэш уже версии v2
     text = "готово, сэр"
     spoken = tts.prepare(text)
     cp = tts._cache_path(spoken, ".ogg")
@@ -64,6 +66,22 @@ def test_tts_cache_returns_copy(monkeypatch, tmp_path):
     out = tmp_path / "out.ogg"
     r = asyncio.run(tts.speak_to_file(text, out))
     assert r == out and out.read_bytes() == b"OGGDATA"
+
+
+def test_tts_cache_v1_purged_once(monkeypatch, tmp_path):
+    """Отравленный v1-кэш (чужой звук под чужим ключом) чистится один раз по маркеру."""
+    import asyncio
+
+    from core.voice import tts
+    monkeypatch.setattr(tts, "ENGINE", "silero")
+    monkeypatch.setattr(tts, "CACHE_DIR", tmp_path / "cache")
+    (tmp_path / "cache").mkdir(parents=True, exist_ok=True)
+    (tmp_path / "cache" / "deadbeef1234567890ab.ogg").write_bytes(b"POISON")
+    out = tmp_path / "out.ogg"
+    asyncio.run(tts.speak_to_file("готово, сэр", out))
+    leftovers = [p.name for p in (tmp_path / "cache").glob("*") if p.is_file() and not p.name.startswith(".")]
+    assert not any(n.startswith("deadbeef") for n in leftovers)
+    assert (tmp_path / "cache" / ".cache_v2").exists()
 
 
 def test_tts_cache_key_depends_on_voice(monkeypatch, tmp_path):

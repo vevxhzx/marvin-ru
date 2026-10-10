@@ -194,6 +194,10 @@ VOICES = [
     {"engine": "silero", "id": "baya", "name": "Бая", "kind": "женский · мягкий"},
     {"engine": "silero", "id": "kseniya", "name": "Ксения", "kind": "женский · нейтральный"},
     {"engine": "silero", "id": "xenia", "name": "Ксения-2", "kind": "женский · звонче"},
+    {"engine": "piper", "id": "ru_RU-denis-medium", "name": "Денис (Piper)", "kind": "мужской · офлайн, CPU"},
+    {"engine": "piper", "id": "ru_RU-dmitri-medium", "name": "Дмитрий (Piper)", "kind": "мужской · офлайн, CPU"},
+    {"engine": "piper", "id": "ru_RU-irina-medium", "name": "Ирина (Piper)", "kind": "женский · офлайн, CPU"},
+    {"engine": "piper", "id": "ru_RU-ruslan-medium", "name": "Руслан (Piper)", "kind": "мужской · офлайн, CPU"},
     {"engine": "edge", "id": "ru-RU-DmitryNeural", "name": "Дмитрий (Microsoft)", "kind": "мужской · онлайн, самый естественный"},
     {"engine": "edge", "id": "ru-RU-SvetlanaNeural", "name": "Светлана (Microsoft)", "kind": "женский · онлайн"},
 ]
@@ -203,8 +207,8 @@ DEMO_TEXT = "Доброе утро, сэр. Минус семьсот рубле
 @router.get("/api/voice/voices")
 async def voice_list():
     from ...voice import tts
-    return {"voices": VOICES, "current": {"engine": tts.ENGINE, "speaker": tts.SPEAKER, "edge_voice": tts.EDGE_VOICE, "reply": tts.REPLY_VOICE},
-            "silero": tts.silero_available()}
+    return {"voices": VOICES, "current": {"engine": tts.ENGINE, "speaker": tts.SPEAKER, "edge_voice": tts.EDGE_VOICE, "piper_voice": tts.PIPER_VOICE, "reply": tts.REPLY_VOICE},
+            "silero": tts.silero_available(), "piper": tts._piper_available()}
 
 
 @router.get("/api/voice/demo")
@@ -221,12 +225,13 @@ async def voice_demo(engine: str = "silero", voice: str = "eugene"):
     from ...voice import tts
     if not any(v["engine"] == engine and v["id"] == voice for v in VOICES):
         raise HTTPException(400, "unknown voice")
-    out = DATA_DIR / "voice_demo" / f"{engine}_{voice}_v2.{'wav' if engine == 'silero' else 'mp3'}"
+    out = DATA_DIR / "voice_demo" / f"{engine}_{voice}_v2.{'mp3' if engine == 'edge' else 'wav'}"
     out.parent.mkdir(parents=True, exist_ok=True)
     # наследие бага (демо чужим голосом) — файлы со старыми именами удаляем, перегенерируются сами
     for old in out.parent.glob(f"{engine}_{voice}.???"):
         old.unlink(missing_ok=True)
-    if not out.exists():
+    if not out.exists() or out.stat().st_size == 0:
+        out.unlink(missing_ok=True)   # битый/пустой демо-файл не отдаём — перегенерируем ниже
         if engine == "silero":
             if not tts.silero_available():
                 raise HTTPException(500, "Silero не установлен — запустите install_voice.bat (пункт Silero)")
@@ -236,6 +241,15 @@ async def voice_demo(engine: str = "silero", voice: str = "eugene"):
                 ok = await _asyncio.to_thread(tts._silero_to_file, tts.prepare(DEMO_TEXT), out)
             finally:
                 tts.SPEAKER = prev
+        elif engine == "piper":
+            if not tts._piper_available():
+                raise HTTPException(500, "Piper не установлен — запустите install_voice.bat (пункт Piper)")
+            prev = tts.PIPER_VOICE
+            tts.PIPER_VOICE = voice
+            try:
+                ok = await _asyncio.to_thread(tts._piper_to_file, tts.prepare(DEMO_TEXT), out)
+            finally:
+                tts.PIPER_VOICE = prev
         else:
             import edge_tts
             try:
@@ -260,8 +274,11 @@ async def voice_pick(body: VoicePick):
     if body.engine == "silero":
         tts.SPEAKER = body.voice
         changes["voice.tts.speaker"] = body.voice
+    elif body.engine == "piper":
+        tts.PIPER_VOICE = body.voice
+        changes["voice.tts.piper_voice"] = body.voice
     else:
         tts.EDGE_VOICE = body.voice
         changes["voice.tts.edge_voice"] = body.voice
     write_settings(changes)
-    return {"ok": True, "engine": tts.ENGINE, "speaker": tts.SPEAKER, "edge_voice": tts.EDGE_VOICE}
+    return {"ok": True, "engine": tts.ENGINE, "speaker": tts.SPEAKER, "edge_voice": tts.EDGE_VOICE, "piper_voice": tts.PIPER_VOICE}

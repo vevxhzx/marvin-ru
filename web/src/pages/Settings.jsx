@@ -189,7 +189,7 @@ export default function Settings({ health }) {
       if (provNow === 'gemini') items = items.filter((it) => !['brain.cloud.api_key', 'brain.cloud.model', 'brain.cloud.proxy'].includes(it.key))
       items.sort((a, b) => (a.key === 'brain.cloud.provider' ? -1 : b.key === 'brain.cloud.provider' ? 1 : 0))
     }
-    if (prefix === 'voice') items = items.filter((it) => !['voice.tts.engine', 'voice.tts.speaker', 'voice.tts.edge_voice'].includes(it.key))
+    if (prefix === 'voice') items = items.filter((it) => !['voice.tts.engine', 'voice.tts.speaker', 'voice.tts.edge_voice', 'voice.tts.piper_voice', 'voice.tts.piper_model'].includes(it.key))
     if (!items.length) return null
     return (
       <Section key={prefix} title={title} hint={hint}>
@@ -829,7 +829,7 @@ function VoicePicker({ show }) {
   const load = () => api.get('/api/voice/voices').then(setData).catch(() => setData({ voices: [], current: {} }))
   useEffect(() => { load(); return () => audio?.pause() }, [])
   if (!data) return <Skeleton h={120} />
-  const isCur = (v) => data.current.engine === v.engine && (v.engine === 'silero' ? data.current.speaker === v.id : data.current.edge_voice === v.id)
+  const isCur = (v) => data.current.engine === v.engine && (v.engine === 'silero' ? data.current.speaker === v.id : v.engine === 'piper' ? data.current.piper_voice === v.id : data.current.edge_voice === v.id)
   const play = async (v) => {
     if (!audio) return
     if (playing === v.id) { audio.pause(); setPlaying(null); return }
@@ -851,7 +851,7 @@ function VoicePicker({ show }) {
             </button>
             <div className="min-w-0 flex-1">
               <div className="h4 truncate">{v.name}{cur && <span className="ml-2 text-[11px] font-normal text-accent">{t('st.selected')}</span>}</div>
-              <div className="muted truncate text-[12px]">{v.kind}{v.engine === 'silero' ? t('st.offline') : ''}</div>
+              <div className="muted truncate text-[12px]">{v.kind}{(v.engine === 'silero' || v.engine === 'piper') ? t('st.offline') : ''}</div>
             </div>
             {!cur && <button className="btn-ghost !py-1 !text-[12px]" onClick={() => pick(v)}>{t('common.select')}</button>}
           </Card>
