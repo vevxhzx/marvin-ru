@@ -64,6 +64,7 @@ class Task(SQLModel, table=True):
     aim_id: Optional[int] = Field(default=None, index=True)        # 0.10: задача двигает долгосрочную цель (Aim)
     milestone_id: Optional[int] = Field(default=None, index=True)  # …и конкретную веху в ней
     blocked_by: str = ""                                            # что мешает («жду исходники от клиента») — пусто = не заблокирована
+    auto_roll: bool = Field(default=False)                          # автоперенос: не закрылась — сама едет на завтра (иначе спрашивает вечерний обзор)
 
 
 # ---------- Цели (долгосрочные; денежные конверты — Goal ниже) ----------
@@ -106,6 +107,7 @@ class Account(SQLModel, table=True):
     balance: float = 0.0
     is_main: bool = False
     currency: str = "RUB"
+    debt_id: Optional[int] = Field(default=None, index=True)  # связка 1-к-1 с долгом (только debt_only): баланс = -remaining
 
 
 class Category(SQLModel, table=True):

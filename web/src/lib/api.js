@@ -75,6 +75,8 @@ export const api = {
   addAccount: (a) => req('POST', '/api/finance/accounts', a),
   updateAccount: (id, a) => req('PUT', `/api/finance/accounts/${id}`, a),
   delAccount: (id) => req('DELETE', `/api/finance/accounts/${id}`),
+  linkDebtAccount: (accountId, debtId) => req('POST', `/api/finance/accounts/${accountId}/link-debt`, { debt_id: debtId }),
+  unlinkDebtAccount: (accountId) => req('DELETE', `/api/finance/accounts/${accountId}/link-debt`),
   debts: () => req('GET', '/api/finance/debts'),
   addDebt: (d) => req('POST', '/api/finance/debts', d),
   payDebt: (id, amount, extra = {}) => req('POST', `/api/finance/debts/${id}/pay`, { amount, ...extra }),

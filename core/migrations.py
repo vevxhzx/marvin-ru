@@ -238,6 +238,25 @@ def _v10_drop_stray_schemaversion(conn) -> None:
         log.warning("миграция v10: таблица schemaversion не пуста (%s строк) — не трогаю", n)
 
 
+def _v11_task_auto_roll(conn) -> None:
+    """Задачи: флаг автопереноса `task.auto_roll` (BOOLEAN DEFAULT 0).
+
+    Только ADD COLUMN со значением по умолчанию — данные не трогаем, дефолт
+    «спрашивать вечером» (False) сохраняется для всех старых задач.
+    Идемпотентна через add_column() (повторный прогон ничего не меняет).
+    Бэкап — штатный backup_before_migration() в apply()."""
+    add_column(conn, "task", "auto_roll", "BOOLEAN DEFAULT 0")
+
+
+def _v12_account_debt_link(conn) -> None:
+    """Связка долг ↔ счёт-кредитка 1-к-1: `account.debt_id` (INTEGER DEFAULT NULL).
+
+    Только ADD COLUMN — существующие счета/долги не связываем автоматически,
+    инвариант баланс = -remaining выстраивается при ручной связке (link_debt_account).
+    Идемпотентна через add_column()."""
+    add_column(conn, "account", "debt_id", "INTEGER DEFAULT NULL")
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
@@ -251,6 +270,8 @@ MIGRATIONS: list[Migration] = [
     (8, "деньги: <col>_cents INTEGER + бэкфилл CAST(ROUND(col*100)) (float-колонки оставлены)", _v8_money_cents),
     (9, "ретеншн-поддержка: date-индексы chatmessage/memory/actionlog (без удаления данных)", _v9_retention_dates),
     (10, "сирота schemaversion: DROP пустой таблицы-двойника SchemaVersion (непустую не трогаем, только warning)", _v10_drop_stray_schemaversion),
+    (11, "задачи: task.auto_roll (автоперенос на завтра, дефолт выкл)", _v11_task_auto_roll),
+    (12, "финансы: account.debt_id (связка долг ↔ кредитка 1-к-1)", _v12_account_debt_link),
 ]
 
 

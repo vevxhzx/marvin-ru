@@ -74,7 +74,7 @@ def test_router_picks_right_tools(text, want):
     names = _names(tools)
     for w in want:
         assert w in names, f"{text!r}: нет {w} (группы {groups}, всего {len(names)})"
-    assert len(tools) <= 19, f"{text!r}: схем {len(tools)} — роутер не ужал"
+    assert len(tools) <= 20, f"{text!r}: схем {len(tools)} — роутер не ужал"  # было 19 до link_debt_account (47 схем всего)
 
 
 def test_chitchat_gets_minimum():

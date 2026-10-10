@@ -136,6 +136,10 @@
      "priority": {
       "type": "integer",
       "description": "1 высокий, 2 обычный, 3 низкий"
+     },
+     "auto_roll": {
+      "type": "boolean",
+      "description": "автоперенос на завтра, если не закрылась (по умолчанию выкл)"
      }
     },
     "required": [
@@ -1006,6 +1010,30 @@
     },
     "required": [
      "question"
+    ]
+   }
+  }
+ },
+ {
+  "type": "function",
+  "function": {
+   "name": "link_debt_account",
+   "description": "Связать долг и счёт-кредитку 1-к-1",
+   "parameters": {
+    "type": "object",
+    "properties": {
+     "debt": {
+      "type": "string",
+      "description": "название или id долга"
+     },
+     "account": {
+      "type": "string",
+      "description": "название счёта-кредитки"
+     }
+    },
+    "required": [
+     "debt",
+     "account"
     ]
    }
   }

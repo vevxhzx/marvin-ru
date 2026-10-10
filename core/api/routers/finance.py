@@ -19,6 +19,7 @@ import json as _json
 from datetime import datetime, timedelta
 
 from fastapi import APIRouter, HTTPException, Request
+from pydantic import BaseModel
 
 from ...brain import agent
 from ...db import Debt, Event, Link, Note, Recurring, Task, Transaction, session
@@ -237,12 +238,46 @@ def fin_balance(b: BalanceIn):
 
 @router.post("/api/finance/accounts")
 def fin_account_add(a: AccountIn):
-    return finance.add_account(a.name, a.kind, a.balance)
+    acc = finance.add_account(a.name, a.kind, a.balance)
+    if a.debt_id:
+        acc = finance.update_account(acc.id, debt_id=a.debt_id)
+    return acc
 
 
 @router.put("/api/finance/accounts/{aid}")
 def fin_account_update(aid: int, p: AccountPatch):
     return finance.update_account(aid, **p.model_dump(exclude_unset=True))
+
+
+class DebtLinkIn(BaseModel):
+    debt_id: int
+
+
+@router.post("/api/finance/accounts/{aid}/link-debt")
+def fin_account_link(aid: int, p: DebtLinkIn):
+    from fastapi import HTTPException as _HE
+    try:
+        return finance.link_debt_account(p.debt_id, aid)
+    except finance.FinanceNotFound as e:
+        raise _HE(404, str(e))
+    except finance.FinanceError as e:
+        raise _HE(400, str(e))
+
+
+@router.delete("/api/finance/accounts/{aid}/link-debt")
+def fin_account_unlink(aid: int):
+    from ...db import session as _session
+    from ...db import Account as _Account
+    with _session() as s:
+        a = s.get(_Account, aid)
+        if not a:
+            from fastapi import HTTPException as _HE
+            raise _HE(404, "Счёт не найден")
+        debt_id = a.debt_id
+    if not debt_id:
+        return {"ok": True, "linked": False}
+    finance.unlink_debt_account(debt_id)
+    return {"ok": True, "linked": False}
 
 
 @router.delete("/api/finance/accounts/{aid}")
@@ -254,7 +289,16 @@ def fin_account_del(aid: int):
 
 @router.get("/api/finance/debts")
 def fin_debts():
-    return [{**d.model_dump(), **finance.debt_forecast(d)} for d in finance.list_debts(include_closed=True)]
+    out = []
+    for d in finance.list_debts(include_closed=True):
+        row = {**d.model_dump(), **finance.debt_forecast(d)}
+        try:
+            acc = finance.debt_linked_account(d.id)
+            row["linked_account"] = {"id": acc.id, "name": acc.name, "balance": acc.balance} if acc else None
+        except Exception:
+            row["linked_account"] = None
+        out.append(row)
+    return out
 
 
 @router.post("/api/finance/debts")

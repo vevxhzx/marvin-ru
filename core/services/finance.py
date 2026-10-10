@@ -15,6 +15,26 @@ from ..db import cached, icontains, Account, Category, Debt, Recurring, Transact
 from . import regime
 
 
+def _overdraft_blocked() -> bool:
+    """finance.allow_overdraft=false → трата/перевод, уводящий счёт в минус, отклоняется.
+    Дефолт True: записываем + предупреждаем хвостом (см. agent._overdraft_tail)."""
+    try:
+        from ..config import cfg
+        return bool(getattr(getattr(cfg, "finance", None), "allow_overdraft", True) is False)
+    except Exception:
+        return False
+
+
+def _payer_balance(s, name: str | None) -> tuple[float, str] | tuple[None, None]:
+    """(баланс, kind) счёта-плательщика. None — счёта нет / не знаем."""
+    if not name:
+        return None, None
+    a = s.exec(select(Account).where(Account.name == name)).first()
+    if not a:
+        return None, None
+    return float(a.balance), a.kind
+
+
 class FinanceError(ValueError):
     """Понятная человеку ошибка ввода (сумма больше остатка и т.п.). API отдаёт её как 400."""
 
@@ -271,6 +291,13 @@ def set_balance(name: str, balance: float) -> Account:
             a = Account(name=name)
         a.balance = balance
         s.add(a)
+        if a.debt_id:
+            d = s.get(Debt, a.debt_id)
+            if d:
+                d.remaining = round(max(0.0, -balance), 2)
+                d.total = round(max(d.total, d.remaining), 2)
+                d.closed = d.remaining <= 0
+                s.add(d)
         remember(s, "finance", f"Баланс «{name}» установлен: {money(balance)}", "account", a.id)
         s.commit()
         s.refresh(a)
@@ -291,7 +318,7 @@ def add_account(name: str, kind: str = "bank", balance: float = 0) -> Account:
         return a
 
 
-def update_account(account_id: int, name: str | None = None, balance=None, kind: str | None = None, is_main: bool | None = None) -> Account:
+def update_account(account_id: int, name: str | None = None, balance=None, kind: str | None = None, is_main: bool | None = None, debt_id: int | None | str = "__unset__") -> Account:
     with session() as s:
         a = s.get(Account, account_id)
         if not a:
@@ -309,13 +336,38 @@ def update_account(account_id: int, name: str | None = None, balance=None, kind:
                 r.account = new; s.add(r)
             a.name = new
         if balance is not None:
-            a.balance = _num(balance, "Баланс", min_=None)
+            new_bal = _num(balance, "Баланс", min_=None)
+            a.balance = new_bal
+            # прямая правка баланса привязанной кредитки двигает и долг (инвариант: баланс = -remaining)
+            if a.debt_id:
+                d = s.get(Debt, a.debt_id)
+                if d:
+                    d.remaining = round(max(0.0, -new_bal), 2)
+                    d.total = round(max(d.total, d.remaining), 2)
+                    d.closed = d.remaining <= 0
+                    s.add(d)
         if kind in ("bank", "cash", "debt_only"):
+            if a.debt_id and kind != "debt_only":
+                raise FinanceError("Счёт связан с долгом — сначала отвяжите, потом меняйте тип")
             a.kind = kind
         if is_main:
             for other in s.exec(select(Account)).all():
                 other.is_main = False; s.add(other)
             a.is_main = True
+        if debt_id != "__unset__":
+            if debt_id is None:
+                a.debt_id = None
+            else:
+                d = s.get(Debt, int(debt_id))
+                if not d:
+                    raise FinanceNotFound("Долг не найден")
+                if a.kind != "debt_only":
+                    raise FinanceError("Связать можно только счёт-кредитку (debt_only)")
+                other = s.exec(select(Account).where(Account.debt_id == d.id)).first()
+                if other and other.id != a.id:
+                    raise FinanceError(f"Долг уже связан со счётом «{other.name}» — сначала отвяжите")
+                a.debt_id = d.id
+                a.balance = round(-d.remaining, 2)
         s.add(a)
         remember(s, "finance", f"Счёт «{a.name}»: {money(a.balance)}", "account", a.id)
         s.commit(); s.refresh(a)
@@ -342,6 +394,78 @@ def _shift_balance(s, name: str | None, delta: float) -> None:
     if a:
         a.balance += delta
         s.add(a)
+
+
+# ---------- связка долг ↔ счёт-кредитка 1-к-1 ----------
+def _linked_account_for_debt(s, debt_id: int) -> Account | None:
+    return s.exec(select(Account).where(Account.debt_id == debt_id)).first()
+
+
+def _debt_for_account(s, account_name: str | None):
+    if not account_name:
+        return None
+    a = s.exec(select(Account).where(Account.name == account_name)).first()
+    if not a or not a.debt_id:
+        return None
+    return s.get(Debt, a.debt_id)
+
+
+def _close_linked_recurring(s, debt_id: int) -> None:
+    for r in s.exec(select(Recurring).where(Recurring.debt_id == debt_id)).all():
+        r.active = False; s.add(r)
+
+
+def _sync_account_to_debt(s, debt: Debt) -> None:
+    """Инвариант связки: баланс кредитки = -остаток долга."""
+    a = _linked_account_for_debt(s, debt.id)
+    if a:
+        a.balance = round(-debt.remaining, 2)
+        s.add(a)
+
+
+def link_debt_account(debt_id: int, account_id: int) -> Account:
+    """Связать долг и счёт-кредитку 1-к-1. Источник правды при связке — долг: баланс карты становится -remaining."""
+    with session() as s:
+        d = s.get(Debt, int(debt_id))
+        a = s.get(Account, int(account_id))
+        if not d:
+            raise FinanceNotFound("Долг не найден")
+        if not a:
+            raise FinanceNotFound("Счёт не найден")
+        if a.kind != "debt_only":
+            raise FinanceError("Связать можно только счёт-кредитку (debt_only)")
+        if a.debt_id and a.debt_id != d.id:
+            raise FinanceError("Счёт уже связан с другим долгом — сначала отвяжите")
+        other = _linked_account_for_debt(s, d.id)
+        if other and other.id != a.id:
+            raise FinanceError(f"Долг уже связан со счётом «{other.name}» — сначала отвяжите")
+        a.debt_id = d.id
+        a.balance = round(-d.remaining, 2)
+        s.add(a)
+        remember(s, "finance", f"Долг «{d.title}» связан со счётом «{a.name}»: баланс карты = {money(a.balance)}", "debt", d.id)
+        s.commit(); s.refresh(a)
+        return a
+
+
+def unlink_debt_account(debt_id: int) -> bool:
+    """Отвязать кредитку от долга. Балансы как есть (история не переписывается)."""
+    with session() as s:
+        d = s.get(Debt, int(debt_id))
+        if not d:
+            raise FinanceNotFound("Долг не найден")
+        a = _linked_account_for_debt(s, d.id)
+        if not a:
+            return False
+        a.debt_id = None
+        s.add(a)
+        remember(s, "finance", f"Долг «{d.title}» отвязан от счёта «{a.name}»", "debt", d.id)
+        s.commit()
+        return True
+
+
+def debt_linked_account(debt_id: int) -> Account | None:
+    with session() as s:
+        return _linked_account_for_debt(s, int(debt_id))
 
 
 # ---------- операции ----------
@@ -374,6 +498,12 @@ def add_transaction(amount: float, kind: str = "expense", category: str | None =
         _account_exists(s, account)
         if kind == "transfer":
             _account_exists(s, to_account)
+        if kind in ("expense", "transfer") and _overdraft_blocked():
+            # минус запрещён настройкой — проверяем ДО записи (кредитки debt_only не касаемся: там минус норма)
+            bal, akind = _payer_balance(s, account)
+            if bal is not None and akind != "debt_only" and bal - amount < 0:
+                raise FinanceError(f"На «{account}» не хватает: {money(bal)}, а надо {money(amount)}. "
+                                   f"Пополните или выберите другой счёт (разрешить минус: finance.allow_overdraft=true).")
         t = Transaction(amount=amount, kind=kind, category=category, note=(note or None), account=account,
                         to_account=to_account, date=date or datetime.now(), source=source,
                         import_hash=import_hash, debt_id=debt_id, order_id=order_id, goal_id=goal_id, idem_key=idem_key)
@@ -381,13 +511,53 @@ def add_transaction(amount: float, kind: str = "expense", category: str | None =
         if kind == "expense":
             _shift_balance(s, account, -amount)
             txt = f"Трата {money(amount)} · {category}" + (f" · {note}" if note else "")
+            if debt_id is None:
+                # трата с привязанной кредитки растит долг (платёж по долгу идёт через debt_id и ниже не заходит)
+                d = _debt_for_account(s, account)
+                if d and not d.closed:
+                    d.remaining = round(d.remaining + amount, 2)
+                    d.total = round(max(d.total, d.remaining), 2)
+                    d.closed = False
+                    s.add(d)
+                    _sync_account_to_debt(s, d)
+                    txt += f" · долг «{d.title}» теперь {money(d.remaining)}"
         elif kind == "income":
             _shift_balance(s, account, +amount)
             txt = f"Доход {money(amount)} · {category}" + (f" · {note}" if note else "")
+            if debt_id is None:
+                # возврат/доход на привязанную кредитку уменьшает долг
+                d = _debt_for_account(s, account)
+                if d and not d.closed and d.remaining > 0:
+                    d.remaining = round(max(0.0, d.remaining - amount), 2)
+                    if d.remaining == 0:
+                        d.closed = True
+                        _close_linked_recurring(s, d.id)
+                    s.add(d)
+                    _sync_account_to_debt(s, d)
+                    txt += f" · долг «{d.title}» теперь {money(d.remaining)}"
         else:
             _shift_balance(s, account, -amount)
             _shift_balance(s, to_account, +amount)
             txt = f"Перевод {money(amount)}: {account} → {to_account}"
+            if debt_id is None:
+                # перевод НА привязанную кредитку гасит долг; СНЯТИЕ с неё — растит
+                d_to = _debt_for_account(s, to_account)
+                if d_to and not d_to.closed and d_to.remaining > 0:
+                    d_to.remaining = round(max(0.0, d_to.remaining - amount), 2)
+                    if d_to.remaining == 0:
+                        d_to.closed = True
+                        _close_linked_recurring(s, d_to.id)
+                    s.add(d_to)
+                    _sync_account_to_debt(s, d_to)
+                    txt += f" · долг «{d_to.title}» теперь {money(d_to.remaining)}"
+                else:
+                    d_from = _debt_for_account(s, account)
+                    if d_from and not d_from.closed and (d_to is None or d_to.id != d_from.id):
+                        d_from.remaining = round(d_from.remaining + amount, 2)
+                        d_from.total = round(max(d_from.total, d_from.remaining), 2)
+                        s.add(d_from)
+                        _sync_account_to_debt(s, d_from)
+                        txt += f" · долг «{d_from.title}» теперь {money(d_from.remaining)}"
         s.commit()
         s.refresh(t)
         remember(s, "finance", txt, "transaction", t.id, source)
@@ -420,7 +590,40 @@ def delete_transaction(tx_id: int) -> bool:
                 d.remaining = min(d.total, d.remaining + t.amount)
                 d.closed = d.remaining <= 0
                 s.add(d)
+                _sync_account_to_debt(s, d)
                 remember(s, "finance", f"Отменён платёж {money(t.amount)} по «{d.title}», остаток {money(d.remaining)}", "debt", d.id)
+        else:
+            # откат автосинхронизации связки (операции без debt_id, менявшие долг через карту)
+            if t.kind == "expense":
+                d = _debt_for_account(s, t.account)
+                if d:
+                    d.remaining = round(max(0.0, d.remaining - t.amount), 2)
+                    d.closed = d.remaining <= 0
+                    s.add(d)
+                    _sync_account_to_debt(s, d)
+            elif t.kind == "income":
+                d = _debt_for_account(s, t.account)
+                if d:
+                    d.remaining = round(d.remaining + t.amount, 2)
+                    d.total = round(max(d.total, d.remaining), 2)
+                    d.closed = False
+                    s.add(d)
+                    _sync_account_to_debt(s, d)
+            elif t.kind == "transfer":
+                d_to = _debt_for_account(s, t.to_account)
+                if d_to:
+                    d_to.remaining = round(d_to.remaining + t.amount, 2)
+                    d_to.total = round(max(d_to.total, d_to.remaining), 2)
+                    d_to.closed = False
+                    s.add(d_to)
+                    _sync_account_to_debt(s, d_to)
+                else:
+                    d_from = _debt_for_account(s, t.account)
+                    if d_from:
+                        d_from.remaining = round(max(0.0, d_from.remaining - t.amount), 2)
+                        d_from.closed = d_from.remaining <= 0
+                        s.add(d_from)
+                        _sync_account_to_debt(s, d_from)
         if getattr(t, "goal_id", None):  # перевод в конверт — возвращаем «отложено» назад
             from ..db import Goal
             g = s.get(Goal, t.goal_id)
@@ -709,7 +912,7 @@ def _summary(days: int = 30) -> dict:
 # ---------- регулярные ----------
 def add_recurring(title: str, amount: float, day: int = 1, kind: str = "expense",
                   category: str | None = None, period: str = "monthly", debt_id: int | None = None,
-                  month: int | None = None) -> Recurring:
+                  month: int | None = None, source: str = "tg") -> Recurring:
     title = _title(title)
     amount = _num(amount, "Сумма", 0, strict_min=True)
     if kind not in ("expense", "income"):
@@ -724,9 +927,9 @@ def add_recurring(title: str, amount: float, day: int = 1, kind: str = "expense"
         s.add(r)
         s.commit()
         s.refresh(r)
-        remember(s, "finance", f"Регулярный платёж: «{title}» {money(amount)} каждое {day}-е", "recurring", r.id)
+        remember(s, "finance", f"Регулярный платёж: «{title}» {money(amount)} каждое {day}-е", "recurring", r.id, source)
         if not debt_id:
-            log_action(s, "add_recurring", "recurring", r.id, title)
+            log_action(s, "add_recurring", "recurring", r.id, title, source)
         s.commit()
         return r
 
@@ -913,7 +1116,7 @@ def process_due_recurring() -> list[Recurring]:
 
 # ---------- долги ----------
 def add_debt(title: str, total: float, payment: float = 0, rate: float = 0, pay_day: int = 1,
-             creditor: str | None = None, remaining: float | None = None) -> Debt:
+             creditor: str | None = None, remaining: float | None = None, source: str = "tg") -> Debt:
     title = _title(title)
     total = _num(total, "Сумма долга", 0, strict_min=True)
     remaining = total if remaining in (None, "") else _num(remaining, "Остаток", 0, total)
@@ -928,8 +1131,8 @@ def add_debt(title: str, total: float, payment: float = 0, rate: float = 0, pay_
         s.add(d)
         s.commit()
         s.refresh(d)
-        remember(s, "finance", f"Долг: «{title}» {money(d.remaining)}" + (f", платёж {money(payment)}/мес" if payment else ""), "debt", d.id)
-        log_action(s, "add_debt", "debt", d.id, title)
+        remember(s, "finance", f"Долг: «{title}» {money(d.remaining)}" + (f", платёж {money(payment)}/мес" if payment else ""), "debt", d.id, source)
+        log_action(s, "add_debt", "debt", d.id, title, source)
         s.commit()
     if payment:
         add_recurring(f"Платёж: {title}", payment, pay_day, "expense", "Долги", debt_id=d.id)
@@ -977,6 +1180,7 @@ def pay_debt(debt_id_or_title: int | str, amount: float, auto: bool = False,
             for r in s.exec(select(Recurring).where(Recurring.debt_id == d.id)).all():
                 r.active = False; s.add(r)
         s.add(d)
+        _sync_account_to_debt(s, d)
         remember(s, "finance", f"Платёж по долгу «{d.title}»: {money(amount)}, остаток {money(d.remaining)}" + (" · закрыт 🎉" if d.closed else ""), "debt", d.id)
         s.commit()
         s.refresh(d)
@@ -1021,6 +1225,7 @@ def update_debt(debt_id: int, **fields) -> Debt:
         elif fields.get("closed") is None:
             d.closed = False
         s.add(d)
+        _sync_account_to_debt(s, d)
         # синхронизируем регулярный платёж
         rec = s.exec(select(Recurring).where(Recurring.debt_id == d.id)).first()
         if d.payment > 0 and not d.closed:
@@ -1048,6 +1253,8 @@ def delete_debt(debt_id: int) -> bool:
             s.delete(r)
         for t in s.exec(select(Transaction).where(Transaction.debt_id == d.id)).all():
             t.debt_id = None; s.add(t)
+        for a in s.exec(select(Account).where(Account.debt_id == d.id)).all():
+            a.debt_id = None; s.add(a)
         remember(s, "finance", f"Долг «{d.title}» удалён", "debt", d.id)
         s.delete(d); s.commit()
         return True

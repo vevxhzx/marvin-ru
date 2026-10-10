@@ -83,8 +83,8 @@ const pctText = (v) => `${v.toLocaleString(localeOf(), { maximumFractionDigits: 
 /* Локальные подписи финансов — i18n-raw: новых ключей в i18n.js не заводим.
    Кредитка (счёт-долг), период регулярного платежа, группа «на паузе». */
 const FIN = {
-  ru: { credit_card: 'кредитка', debt_now: 'долг сейчас', debt: 'долг', period: 'период', monthly: 'месяц', weekly: 'неделя', yearly: 'год', day_of_week: 'день недели', month: 'месяц', amount: 'сумма, ₽', paused_section: 'на паузе', debt_hint: 'траты с неё растут в долг, перевод на неё — уменьшает' },   // i18n-raw
-  en: { credit_card: 'credit card', debt_now: 'debt now', debt: 'debt', period: 'period', monthly: 'month', weekly: 'week', yearly: 'year', day_of_week: 'weekday', month: 'month', amount: 'amount, ₽', paused_section: 'paused', debt_hint: 'spending grows the debt, a transfer to it pays it down' },
+  ru: { credit_card: 'кредитка', debt_now: 'долг сейчас', debt: 'долг', period: 'период', monthly: 'месяц', weekly: 'неделя', yearly: 'год', day_of_week: 'день недели', month: 'месяц', amount: 'сумма, ₽', paused_section: 'на паузе', debt_hint: 'траты с неё растут в долг, перевод на неё — уменьшает', linked_debt: 'связан с долгом', link_debt: 'долг для связки', no_link: 'без связки', unlink: 'отвязать' },   // i18n-raw
+  en: { credit_card: 'credit card', debt_now: 'debt now', debt: 'debt', period: 'period', monthly: 'month', weekly: 'week', yearly: 'year', day_of_week: 'weekday', month: 'month', amount: 'amount, ₽', paused_section: 'paused', debt_hint: 'spending grows the debt, a transfer to it pays it down', linked_debt: 'linked to debt', link_debt: 'debt to link', no_link: 'no link', unlink: 'unlink' },
 }
 const WEEKDAYS = {
   ru: ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'],   // i18n-raw
@@ -1222,6 +1222,14 @@ export default function Finance() {
                       {isDebt ? fmt.money(Math.abs(Number(a.balance) || 0)) : fmt.money(a.balance || 0)}
                     </div>
                     {isDebt && <div className="muted mt-1 text-[length:var(--fs-xs)]">{L.debt} · {L.debt_hint}</div>}
+                    {isDebt && (() => {
+                      const linked = debts.find((d) => d.id === a.debt_id)
+                      return linked ? (
+                        <div className="muted mt-1 text-[length:var(--fs-xs)]">↔ {L.linked_debt}: <b>{linked.title || linked.name}</b> · {fmt.money(linked.remaining ?? 0)}</div>
+                      ) : (
+                        <div className="faint mt-1 text-[length:var(--fs-xs)]">↔ {L.no_link}</div>
+                      )
+                    })()}
                     {(f.in > 0 || f.out > 0) && (
                       <div className="fg-delta">
                         {t('fin.for_days_short', { n: days || t('common.all') })}: <span className="pos">+{fmt.money(f.in)}</span> / <span>{MINUS}{fmt.money(f.out)}</span>
@@ -1292,6 +1300,9 @@ export default function Finance() {
                   <div className="muted mt-2 text-[length:var(--fs-xs)]">
                     {t('fin.paid_out')} <b className="num pos">{fmt.money(paid)}</b> (<b className="num">{fmt.int(pct)} %</b>) · {t('fin.of')} {fmt.money(total)}
                   </div>
+                  {d.linked_account && (
+                    <div className="muted mt-1 text-[length:var(--fs-xs)]">↔ {L.credit_card}: <b>{d.linked_account.name}</b> · {fmt.money(Math.abs(Number(d.linked_account.balance) || 0))}</div>
+                  )}
                   <div className="mt-3">
                     <RowActions>
                       <button type="button" className="btn btn-sm fg-pay" onClick={() => { setEditingItem(d); setSheet('payDebt') }}>{t('fin.make_payment')}</button>
@@ -1445,6 +1456,7 @@ export default function Finance() {
       <AccountSheet
         open={sheet === 'account'}
         account={editingItem}
+        debts={debts}
         onClose={() => { setSheet(null); setEditingItem(null) }}
         onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
       />
@@ -1662,13 +1674,14 @@ function TxSheet({ open, item, categories = [], accounts = [], onClose, onDone }
   )
 }
 
-function AccountSheet({ open, account, onClose, onDone }) {
+function AccountSheet({ open, account, debts = [], onClose, onDone }) {
   const { t, lang } = useI18n()
   const L = FIN[lang] || FIN.ru
   const isNew = !account?.id
   const [name, setName] = useState('')
   const [balance, setBalance] = useState('')
   const [type, setType] = useState('card')
+  const [debtId, setDebtId] = useState('')
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
@@ -1683,6 +1696,7 @@ function AccountSheet({ open, account, onClose, onDone }) {
       ? String(kind === 'debt_only' ? Math.abs(account.balance) : account.balance)
       : '')
     setType(kind)
+    setDebtId(account?.debt_id != null ? String(account.debt_id) : '')
   }, [open, account])
 
   const submit = async (e) => {
@@ -1698,10 +1712,20 @@ function AccountSheet({ open, account, onClose, onDone }) {
         type,
         kind: type,   // сиды хранят kind, форма — type: держим оба, чтобы иконка и расчёты сходились
       }
+      let accId = account?.id
       if (isNew) {
-        await api.addAccount(payload)
+        const created = await api.addAccount(payload)
+        accId = created?.id || accId
       } else {
         await api.updateAccount(account.id, payload)
+      }
+      // связка с долгом — отдельным вызовом (бэкенд держит инвариант баланс = −remaining)
+      if (isDebt && accId) {
+        if (debtId) {
+          await api.linkDebtAccount(accId, Number(debtId))
+        } else if (!isNew && account?.debt_id) {
+          await api.unlinkDebtAccount(accId)
+        }
       }
       onDone()
     } catch (err) {
@@ -1729,6 +1753,18 @@ function AccountSheet({ open, account, onClose, onDone }) {
             <option value="debt_only">{L.credit_card}</option>
           </select>
         </Field>
+        {isDebt && (
+          <Field label={L.link_debt} hint={L.debt_hint}>
+            <select className="input" value={debtId} onChange={(e) => setDebtId(e.target.value)}>
+              <option value="">{L.no_link}</option>
+              {debts.filter((d) => !d.closed).map((d) => (
+                <option key={d.id} value={String(d.id)}>
+                  {(d.title || d.name) + ' · ' + money(d.remaining ?? d.total ?? 0)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        )}
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
           <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? t('people.saving') : t('common.save')}</button>

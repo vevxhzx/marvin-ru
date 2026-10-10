@@ -114,6 +114,7 @@ class TaskIn(BaseModel):
     due: Optional[datetime] = None
     priority: int = Field(2, ge=1, le=3)
     project: Optional[str] = Field(None, max_length=120)
+    auto_roll: bool = False            # автоперенос на завтра, если не закрылась (дефолт: спрашивает вечерний обзор)
 
     @field_validator("title")
     @classmethod
@@ -133,6 +134,7 @@ class TaskPatch(BaseModel):
     blocked_by: Optional[str] = None      # "" — снять блокировку
     aim_id: Optional[int] = None          # 0 — отвязать
     milestone_id: Optional[int] = None
+    auto_roll: Optional[bool] = None      # True — автоперенос вкл, False — выкл (спрашивает вечерний обзор)
 
 
 class AimIn(BaseModel):
@@ -204,6 +206,7 @@ class AccountIn(BaseModel):
     name: str
     kind: str = "bank"
     balance: float = 0
+    debt_id: Optional[int] = None
 
 
 class AccountPatch(BaseModel):
@@ -211,6 +214,7 @@ class AccountPatch(BaseModel):
     kind: Optional[str] = None
     balance: Optional[float] = None
     is_main: Optional[bool] = None
+    debt_id: Optional[int] = None
 
 
 class DebtIn(BaseModel):

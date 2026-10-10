@@ -11,7 +11,7 @@ from typing import Any, Callable
 
 from ..brain.dates import fix_night_hour, is_all_day, parse_datetime, parse_datetime_ex, task_due
 from ..services import brain_notes, calendar, finance, tasks
-from ..services.calendar import fmt_dt, fmt_due
+from ..services.calendar import fmt_day, fmt_dt, fmt_due, fmt_task_due
 from ..services.finance import money
 from ..services.plural import days as _days_word
 
@@ -385,6 +385,17 @@ def _dt_ex(value: str | None) -> tuple[datetime | None, bool]:
         return dt, time_set
 
 
+def _bool(value: Any) -> bool:
+    """Строгое приведение флага для инструментов: True/1/«да/true/вкл» → True, остальное → False."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "да", "вкл", "включено", "on")
+    return bool(value)
+
+
 # ---------------- Календарь ----------------
 @tool("add_event", "Добавить встречу/событие в календарь. Для повторяющихся укажи repeat.",
       {"title": {"type": "string", "description": "Название события"},
@@ -447,13 +458,15 @@ def delete_event(query: str, **_) -> str:
 # ---------------- Задачи ----------------
 @tool("add_task", "Добавить задачу в список дел.",
       {"title": {"type": "string"}, "due": {"type": "string", "description": "Срок (необязательно): ISO 8601 или словами («сегодня», «завтра в 15:00»). Только дата без времени = задача на весь день"},
-       "priority": {"type": "integer", "description": "1 высокий, 2 обычный, 3 низкий"}}, ["title"])
-def add_task(title: str, due: str | None = None, priority: int = 2, _channel: str = "tg") -> str:
+       "priority": {"type": "integer", "description": "1 высокий, 2 обычный, 3 низкий"},
+       "auto_roll": {"type": "boolean", "description": "Автоперенос: не закрылась — сама переедет на завтра (по умолчанию выкл, спрашивает вечерний обзор)"}}, ["title"])
+def add_task(title: str, due: str | None = None, priority: int = 2, auto_roll: bool = False, _channel: str = "tg") -> str:
     d, time_set = _dt_ex(due)
     d = task_due(fix_night_hour(d, f"{title} {due or ''}"), time_set)   # только день («сегодня», «2026-09-16») — задача на весь день
-    t = tasks.add_task(title, d, priority or 2, source=_channel)
+    t = tasks.add_task(title, d, priority or 2, source=_channel, auto_roll=_bool(auto_roll))
     tail = fmt_due(t.due).strip()            # «На сегодня.» / «Дедлайн завтра в 15:00.» / «»
-    return f"Задача #{t.id} «{t.title}» добавлена" + (f" — {tail[0].lower()}{tail[1:-1]}" if tail else "")
+    tail = (f" — {tail[0].lower()}{tail[1:-1]}" if tail else "")
+    return f"Задача #{t.id} «{t.title}» добавлена{tail}" + (" · автоперенос вкл" if t.auto_roll else "")
 
 
 @tool("add_aim", "Поставить долгосрочную цель (месяцы: портфолио, доход, здоровье). НЕ задача и НЕ денежный конверт.",
@@ -542,7 +555,13 @@ def list_tasks(**_) -> str:
         return "Открытых задач нет."
     pr = {1: "‼️ ", 2: "", 3: ""}
     head = f"✅ **Задачи** · {len(ts)}"
-    return head + "\n" + "\n".join(f"— {pr.get(t.priority, '')}{t.title}" + (f" · до **{fmt_dt(t.due)}**" if t.due else "") for t in ts)
+    def _tail(t):
+        if not t.due:
+            return ""
+        if is_all_day(t.due):
+            return f" · **{fmt_task_due(t.due)}**"
+        return f" · до **{fmt_dt(t.due)}**"
+    return head + "\n" + "\n".join(f"— {pr.get(t.priority, '')}{t.title}" + _tail(t) for t in ts)
 
 
 @tool("complete_task", "Отметить задачу выполненной по id или названию.",
@@ -646,7 +665,8 @@ def agenda(date: str, days: int = 1, **_) -> str:
     pays = [r for r in finance.list_recurring() if start <= r.next_date < end]
     if not evs and not due and not pays:
         return f"{start:%d.%m}: ничего не запланировано"
-    out = [f"{fmt_dt(e.start)} — {'✓ ' if calendar.is_done(e) else ''}{e.title}" for e in evs] + [f"задача «{t.title}» до {fmt_dt(t.due)}" for t in due] + \
+    out = [f"{fmt_dt(e.start)} — {'✓ ' if calendar.is_done(e) else ''}{e.title}" for e in evs] + \
+          [(f"задача «{t.title}» на {fmt_task_due(t.due)}" if is_all_day(t.due) else f"задача «{t.title}» до {fmt_dt(t.due)}") for t in due] + \
           [f"платёж {p.title} {money(p.amount)} {p.next_date:%d.%m}" for p in pays]
     return "; ".join(out)
 
@@ -704,6 +724,23 @@ def pay_debt(debt: str, amount: float, _channel: str = "tg") -> str:
     if not d:
         return "Не нашёл такой долг."
     return f"Платёж {money(amount)} по «{d.title}». Остаток {money(d.remaining)}" + (" — закрыт 🎉" if d.closed else "")
+
+
+@tool("link_debt_account", "Связать долг и счёт-кредитку 1-к-1 (траты с неё растят долг, перевод на неё гасит).",
+      {"debt": {"type": "string", "description": "название или id долга"},
+       "account": {"type": "string", "description": "название счёта-кредитки"}}, ["debt", "account"])
+def link_debt_account(debt: str, account: str, _channel: str = "tg") -> str:
+    d = finance.find_debt(debt)
+    if not d:
+        return "Не нашёл такой долг."
+    a = finance.find_account(account)
+    if not a:
+        return f"Счёта «{account}» нет."
+    try:
+        acc = finance.link_debt_account(d.id, a.id)
+    except (finance.FinanceError, finance.FinanceNotFound) as e:
+        return f"Не получилось: {e}."
+    return f"Связал: долг «{d.title}» ↔ счёт «{acc.name}», баланс карты {money(acc.balance)}"
 
 
 @tool("list_debts", "Показать долги и прогноз закрытия.", {})
@@ -797,7 +834,15 @@ def today_briefing(**_) -> str:
     lines.append("")
     if ts:
         lines.append(f"✅ **Задачи** · {len(ts)}")
-        lines += [f"— {t.title}" + (f" · до **{t.due:%H:%M}**" if t.due and t.due.date() == now.date() and not is_all_day(t.due) else "") for t in ts[:5]]
+        def _tail(t):
+            if not t.due:
+                return ""
+            if is_all_day(t.due):
+                return f" · **{fmt_task_due(t.due)}**"
+            if t.due.date() == now.date():
+                return f" · до **{t.due:%H:%M}**"
+            return ""
+        lines += [f"— {t.title}" + _tail(t) for t in ts[:5]]
         if len(ts) > 5:
             lines.append(f"…и ещё {len(ts) - 5}")
     else:
@@ -1068,6 +1113,8 @@ def _coerce(name: str, key: str, spec: dict, val: Any) -> Any:
         if key == "rate" and not (0 <= val <= 1000):
             raise ToolArgError(f"rate: ставка в процентах от 0 до 1000, получил {val}")
         return val
+    if typ == "boolean":
+        return _bool(val)
     if typ == "string":
         if not isinstance(val, str):
             val = str(val)
