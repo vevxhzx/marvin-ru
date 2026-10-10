@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { api, hhmm, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
+import { api, hhmm, isAllDay, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
 import { Sheet, Field, DateTimeField, Empty, useToast, ListSkeleton } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, Settings2 } from 'lucide-react'
@@ -145,7 +145,7 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
           </div>
           <div style={{ fontSize: 'var(--fs-2xl)', fontWeight: 600, letterSpacing: '-0.03em', overflowWrap: 'anywhere' }}>{ev?.title}</div>
           <div className="muted num" style={{ fontSize: 'var(--fs-md)' }}>
-            {fullDate(ev?.start)} {ev?.start ? hhmm(ev.start) : ''}
+            {fullDate(ev?.start)}{ev?.start && !isAllDay(ev.start) ? ` · ${hhmm(ev.start)}` : ''}
           </div>
           <p className="faint" style={{ fontSize: 'var(--fs-md)', lineHeight: 'var(--lh-body)' }}>
             {ev?.kind === 'order' ? t('cal.order_help') : t('cal.task_help')}
@@ -697,7 +697,7 @@ export default function Calendar() {
                       style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}
                     >
                       <EvCheck ev={e} onToggle={toggleDone} />
-                      <time style={{ color: 'var(--acc)', fontWeight: 500 }}>{hhmm(e.start)}</time>
+                      {isAllDay(e.start) ? null : <time style={{ color: 'var(--acc)', fontWeight: 500 }}>{hhmm(e.start)}</time>}
                       <span className="t">
                         {e.title}
                         {(evSub(e, linkTasks, linkOrders) || e.sub) && <small>{evSub(e, linkTasks, linkOrders) || e.sub}</small>}
@@ -798,7 +798,7 @@ export default function Calendar() {
                         >
                           <EvCheck small ev={ev} onToggle={toggleDone} />
                           <span className="min-w-0 flex-1">
-                            <span className="mono block" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-3)' }}>{hhmm(ev.start)}</span>
+                            {!isAllDay(ev.start) && <span className="mono block" style={{ fontSize: 'var(--fs-xs)', color: 'var(--ink-3)' }}>{hhmm(ev.start)}</span>}
                             <span className="clamp-2 block" style={{ fontSize: 'var(--fs-md)', fontWeight: 500, overflowWrap: 'anywhere', textDecoration: ev.done ? 'line-through' : undefined }}>{ev.title}</span>
                           </span>
                         </div>
@@ -826,7 +826,7 @@ export default function Calendar() {
               <div className="calg-nd calg-now" style={{ '--x': '3%' }}><span>{t('mem.t_short')}</span></div>
               {calgNodes.map(({ e, x }) => (
                 <div key={e.id} className="calg-nd" style={{ '--x': `${x}%` }}>
-                  <span>{e.title}<small>{shortDate(e.start)} · {hhmm(e.start)}</small></span>
+                  <span>{e.title}<small>{shortDate(e.start)}{isAllDay(e.start) ? '' : ` · ${hhmm(e.start)}`}</small></span>
                 </div>
               ))}
             </div>
@@ -855,7 +855,7 @@ export default function Calendar() {
                     }}
                     style={{ cursor: 'pointer', overflowWrap: 'anywhere' }}>
                     <EvCheck ev={e} onToggle={toggleDone} />
-                    <time>{WD_SHORT[d.getDay()]} {hhmm(e.start)}</time>
+                    <time>{WD_SHORT[d.getDay()]}{isAllDay(e.start) ? '' : ` ${hhmm(e.start)}`}</time>
                     <span className="t">
                       {e.title}
                       <small>{[shortDate(e.start), sub].filter(Boolean).join(' · ')}</small>

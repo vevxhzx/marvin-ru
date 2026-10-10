@@ -97,30 +97,8 @@ export default function Chat({ open, onClose, seed }) {
   }, [open, onClose])
   useEffect(() => { window.dispatchEvent(new CustomEvent('assistant:busy', { detail: busy })) }, [busy])
 
-  // предложенный факт из последнего ответа (suggest_fact) — тост «Запомнить?» с кнопками да/нет
-  const [sg, setSg] = useState(null)
-  useEffect(() => {
-    if (!sg) return
-    const t = setTimeout(() => setSg((cur) => (cur === sg ? null : cur)), 45000)   // сам гаснет, если не трогают
-    return () => clearTimeout(t)
-  }, [sg])
-  const decideSg = async (yes) => {
-    const s = sg
-    setSg(null)
-    if (!s) return
-    try {
-      const r = await fetch(yes ? '/api/memory/confirm' : '/api/memory/dismiss', {
-        method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ text: s.text, category: s.category, fact_id: s.fact_id }),
-        signal: AbortSignal.timeout(10000),
-      })
-      if (!r.ok) throw new Error(`memory ${r.status}`)
-      if (yes) bump()                 // факт подтверждён — страницы «память» и сводки перечитываем
-    } catch {
-      setSg(s)   // не ушло — возвращаем вопрос, чтобы можно было повторить
-      setMsgs((m) => [...m, { role: 'bot', via: 'none', channel: 'web', at: new Date().toISOString(), text: t('mem.failed') }])
-    }
-  }
+  // Батч 4: память молча — тоста «Запомнить?» (suggest_fact) больше нет.
+  // Подтверждение/отклонение фактов живёт на странице «память».
 
   const send = async (text) => {
     text = (text ?? q).trim(); if (!text || busy) return
@@ -137,7 +115,7 @@ export default function Chat({ open, onClose, seed }) {
         })
       })
       setMsgs((m) => (streamed && m[m.length - 1]?.streaming ? m.slice(0, -1) : m).concat({ role: 'bot', text: r.text, via: r.via, actions: r.actions, card: r.card, channel: 'web', at: new Date().toISOString() }))
-      setSg(r.suggest_fact || null)   // тост «Запомнить?» — только к свежему ответу, старый гасим
+      // suggest_fact игнорируем: память молча (батч 4), тоста «Запомнить?» нет
       // команда «отмена» пришла ответом — гасим отменяемые actions у прежнего сообщения,
       // иначе кнопка в шапке переживёт уже сделанную отмену
       if (r.actions?.some(isUndoMark)) setMsgs(dropLastUndoable)
@@ -233,14 +211,7 @@ export default function Chat({ open, onClose, seed }) {
               {hints.map((h) => <button key={h} onClick={() => send(h)} className="chip shrink-0 !py-1.5 hover:text-accent">{h}</button>)}
             </div>
           )}
-          {sg && (
-            <div className="act-card mb-2">
-              <span className="act-ic"><Brain size={14} strokeWidth={2.6} /></span>
-              <span className="font-medium">{t('chat.remember_q', { text: sg.text })}</span>
-              <button className="btn-ghost btn-sm ml-auto" onClick={() => decideSg(true)}><Check size={13} strokeWidth={2.6} /> {t('common.yes')}</button>
-              <button className="btn-ghost btn-sm" onClick={() => decideSg(false)}><X size={13} strokeWidth={2.6} /> {t('common.no')}</button>
-            </div>
-          )}
+          {/* тоста «Запомнить?» (suggest_fact) больше нет: память молча (батч 4) */}
           <form onSubmit={(e) => { e.preventDefault(); send() }} className="composer flex items-end gap-2 py-2 pl-4 pr-2">
             <textarea ref={inp} rows={1} value={q} onChange={(e) => { setQ(e.target.value); grow(e.target) }} onKeyDown={onKey} placeholder={t('chat.placeholder', { name: dat() })} className="max-h-40 py-1.5" />
             <button type="submit" disabled={!q.trim() || busy} className="btn-primary grid !h-9 !w-9 shrink-0 !rounded-full !p-0" aria-label={t('chat.send')}><ArrowUp size={16} strokeWidth={2.4} /></button>

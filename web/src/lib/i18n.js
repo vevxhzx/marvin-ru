@@ -436,6 +436,8 @@ export const DICT = {
   'task.blocked_ph': { ru: 'жду исходники от клиента', en: 'waiting for assets from the client' },
   'task.delete_title': { ru: 'Удалить задачу?', en: 'Delete the task?' },
   'task.delete_text': { ru: '«{title}» — запись исчезнет из списка и из календаря.', en: '“{title}” — the record will disappear from the list and the calendar.' },
+  'task.auto_roll': { ru: 'Автоперенос на завтра', en: 'Auto-roll to tomorrow' },
+  'task.auto_roll_hint': { ru: 'не закроете — сама переедет на завтра, вечером не спрошу', en: 'if left open it moves to tomorrow by itself, no evening ask' },
 
   // ---- карта активности и стрик
   'heat.weeks_back': { ru: '{n} нед. назад', en: '{n} weeks back' },

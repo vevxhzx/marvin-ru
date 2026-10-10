@@ -60,7 +60,12 @@ async def memory_dismiss(p: SuggestIn):
 
 # ---------------- вшивание suggest_fact в ответы чата ----------------
 def _patch_json(msgs: list[dict]) -> list[dict]:
-    """Добавить suggest_fact в JSON-ответ /api/chat. Меняем тело только если это наш (200, JSON, есть «text»)."""
+    """Добавить suggest_fact в JSON-ответ /api/chat. Меняем тело только если это наш (200, JSON, есть «text»).
+
+    Батч 4: предложения выключены по умолчанию — при suggest_enabled()==False
+    ничего не вшиваем (молча), слот не трогаем."""
+    if not memory.suggest_enabled():
+        return msgs
     start = next((m for m in msgs if m.get("type") == "http.response.start"), None)
     if not start or start.get("status") != 200:
         return msgs
@@ -96,7 +101,11 @@ _SSE_PING_SEC = 5.0
 
 
 def _patch_sse(chunk: bytes) -> bytes | None:
-    """Добавить suggest_fact в финальное событие `done` потока /api/chat/stream. None — не наш кусок."""
+    """Добавить suggest_fact в финальное событие `done` потока /api/chat/stream. None — не наш кусок.
+
+    Батч 4: при выключенных предложениях — всегда None (молча)."""
+    if not memory.suggest_enabled():
+        return None
     try:
         s = chunk.decode("utf-8")
     except UnicodeDecodeError:
