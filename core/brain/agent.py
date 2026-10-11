@@ -476,6 +476,28 @@ def _fix_rule(t: str, channel: str) -> Reply | None:
     kind = _fix_kind(m.group(1))
     if not kind:
         return None
+    return _fix_apply(kind, channel)
+
+
+_FIX_BARE_RX = re.compile(r"^\s*(трата|расход|доход|долг|заказ|проект|задача|дело|событие|встреча|календарь|заметка|мысль|мозг|память)\s*[.!]*\s*$", re.I)
+
+
+def _resolve_fix(text: str, channel: str) -> Reply | None:
+    """Голое «трата/заказ/…» сразу после догадки судьи (pending fix|): чиним, как явное «это трата».
+    Без свежей догадки — не трогаем (слот пуст): голое слово идёт обычным путём."""
+    p = _pending_consume(channel, prefix="fix|")
+    if not p:
+        return None
+    m = _FIX_BARE_RX.match(text)
+    if not m:
+        return None   # заговорили о другом — слот снят, ничего не пишем
+    kind = _fix_kind(m.group(1))
+    if not kind:
+        return None
+    return _fix_apply(kind, channel)
+
+
+def _fix_apply(kind: str, channel: str) -> Reply | None:
     a = undo.last_action(channel, max_age_min=30)
     orig = _last_user_text(channel)
     if not a or not orig or a.kind not in _ACTION_KIND:
@@ -692,7 +714,7 @@ def rules(text: str, channel: str) -> Reply | None:
     if pc.TIDY_RX.match(t) or pc.TIDY_UNDO_RX.match(t) or pc.ORGANIZE_RX.match(t) or pc.ORGANIZE_UNDO_RX.match(t):   # файловые операции — только через план и подтверждение
         cmd = pc.parse(t)
         return Reply(pc.dispatch(cmd, channel), [f"pc_{cmd.action}"])
-    r_fix = _resolve_judge(t, channel) or _resolve_pay_ask(t, channel) or _fix_rule(t, channel)
+    r_fix = _resolve_judge(t, channel) or _resolve_pay_ask(t, channel) or _fix_rule(t, channel) or _resolve_fix(t, channel)
     if r_fix:
         return r_fix
     mr = _memory_rules(t, channel)
@@ -3002,6 +3024,7 @@ async def _judge_disputed(text: str, channel: str) -> Reply | None:
         return None
     if via != "lesson":
         r.text += f" (Понял как {judge.KIND_RU[kind].split()[0]} — если не то, скажите «это заказ» или «это трата».)"
+        _pending_set(channel, "fix|")   # голое «трата/заказ» следующим сообщением — тоже чинит
     r.actions = r.actions + ["judge"]
     return r
 

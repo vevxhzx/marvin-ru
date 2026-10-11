@@ -608,7 +608,7 @@ def icontains(column, query: str):
 
 DEFAULT_CATEGORIES = [
     ("Еда", "expense", "🍔", "еда,продукты,кафе,ресторан,обед,ужин,завтрак,кофе,доставка,пятёрочка,перекрёсток,вкусвилл,магнит"),
-    ("Транспорт", "expense", "🚕", "такси,метро,автобус,бензин,заправка,яндекс go,каршеринг,проезд,парковка"),
+    ("Транспорт", "expense", "🚕", "такси,метро,автобус,бензин,заправка,яндекс go,каршеринг,проезд,парковка,самокат"),
     ("Жильё", "expense", "🏠", "аренда,квартира,коммуналка,жкх,свет,вода,интернет"),
     ("Подписки", "expense", "📱", "подписка,spotify,youtube,яндекс плюс,netflix,telegram premium,icloud"),
     ("Здоровье", "expense", "💊", "аптека,врач,лекарства,клиника,стоматолог,анализы"),
@@ -822,6 +822,19 @@ def init_db() -> None:
         for c in s.exec(select(Category).where(Category.kind == "expense")).all():
             if not c.bucket and c.name in DEFAULT_BUCKETS:
                 c.bucket = DEFAULT_BUCKETS[c.name]; s.add(c)
+        # новые слова по умолчанию («самокат» → Транспорт в 0.17) доклеиваем один раз;
+        # своё не трогаем: удалённое вами заново не появится
+        if not s.exec(select(Setting).where(Setting.key == "migr.kwmerge1")).first():
+            for name, kind, _icon, kw in DEFAULT_CATEGORIES:
+                c = s.exec(select(Category).where(Category.name == name, Category.kind == kind)).first()
+                if c is None:
+                    continue
+                have = {k.strip() for k in (c.keywords or "").replace("ё", "е").split(",") if k.strip()}
+                add = [k.strip() for k in kw.replace("ё", "е").split(",") if k.strip() and k.strip() not in have]
+                if add:
+                    c.keywords = ((c.keywords or "") + "," + ",".join(add)).strip(",")
+                    s.add(c)
+            s.add(Setting(key="migr.kwmerge1", value="1")); s.commit()
         if s.exec(select(Account)).first() is None:
             main = cfg.finance.main_account if hasattr(cfg, "finance") else "Т-Банк"
             s.add(Account(name=main, kind="bank", is_main=True))
