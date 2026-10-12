@@ -22,6 +22,8 @@ cp config.example.yaml config.yaml       # дальше правим значе�
 ## Настройки (config.yaml мамы или переменные окружения вкладки Web)
 
 ```yaml
+setup:
+  done: true                  # мастер первого запуска пропущен (он только локальный)
 brain:
   mode: "cloud"
   cloud:
