@@ -13,10 +13,11 @@
 ## Заливка (консоль PythonAnywhere, Bash)
 
 ```bash
-git clone https://github.com/vevxhzx/marvin-ru.git mom-marvin
+git clone --depth 1 https://github.com/vevxhzx/marvin-ru.git mom-marvin
 cd mom-marvin
+rm -rf .venv                             # если уже ставили полный набор и квота забита
 python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt          # лёгкий набор, без torch/голоса
+pip install --no-cache-dir -r requirements-mom.txt   # SLIM-набор (~150 МБ): обычный requirements.txt ставит torch 550 МБ и упрётся в квоту 512 МБ!
 cp config.example.yaml config.yaml       # дальше правим значения ниже
 ```
 
