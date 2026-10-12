@@ -52,6 +52,12 @@ async function fetchOnce(method, path, body, timeoutMs = 30000) {
     clearTimeout(timer)
   }
   if (r.status === 401) {
+    // Вход по паролю сам отвечает 401 при неверном пароле — это не «чужое
+    // устройство», событие denied не шлём (экран Gate уже показан).
+    if (path === '/api/login') {
+      const e = new Error(t('login.wrong')); e.status = 401
+      throw e
+    }
     const msg = tg.active
       ? (tg.error ? t('api.tg_denied', { err: tg.error }) : t('api.tg_session_expired'))
       : t('api.no_access_device')
@@ -97,6 +103,7 @@ export const api = {
   del: (p) => req('DELETE', p),
 
   health: () => req('GET', '/api/health'),
+  login: (password) => req('POST', '/api/login', { password }),
   dashboard: () => req('GET', '/api/dashboard'),
   missed: () => req('GET', '/api/missed'),
   chat: (text) => req('POST', '/api/chat', { text, channel: 'web' }, 120000),   // ответ ядра (LLM) может идти долго

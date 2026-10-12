@@ -700,6 +700,14 @@ export const DICT = {
   'gate.close_reopen': { ru: 'закрыть и открыть заново', en: 'close and reopen' },
   'gate.privacy': { ru: 'Данные не покидают компьютер владельца. Этот экран — всё, что видно без входа.', en: 'Data never leaves the owner’s computer. This screen is all that is visible without signing in.' },
 
+  // ---- вход по паролю на экране «нет доступа» (только password-режим сервера)
+  'login.hint': { ru: 'Знаете пароль — введите его ниже.', en: 'If you know the password, enter it below.' },
+  'login.password_ph': { ru: 'Пароль', en: 'Password' },
+  'login.submit': { ru: 'Войти', en: 'Sign in' },
+  'login.sending': { ru: 'Вхожу…', en: 'Signing in…' },
+  'login.wrong': { ru: 'Неверный пароль', en: 'Wrong password' },
+  'login.unavailable': { ru: 'Вход по паролю не настроен на сервере — откройте сайт по QR из настроек.', en: 'Password sign-in is not set up on the server — open the site via the QR code in Settings.' },
+
   // ---- люди
   'people.k_person': { ru: 'человек', en: 'person' },
   'people.k_family': { ru: 'семья', en: 'family' },

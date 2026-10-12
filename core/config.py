@@ -125,6 +125,10 @@ def _load() -> _Node:
     if env_api:
         # ключ доступа к ядру с другой машины (config.yaml: voice.pc.api_token, см. voice_client.py)
         raw.setdefault("voice", {}).setdefault("pc", {})["api_token"] = env_api
+    env_password = os.getenv("ASSISTANT_PASSWORD")
+    if env_password:
+        # пароль входа на сайт (config.yaml: server.password) — для облачной копии
+        raw.setdefault("server", {})["password"] = env_password
     # Обезличивание текста перед отправкой в облако — ВКЛЮЧЕНО по умолчанию: личные данные не должны
     # уходить открытым текстом из-за того, что ключа нет в config.yaml (setdefault не перезаписывает —
     # явное `brain.gemini.anonymize: false` в файле остаётся в силе). Подробнее — core/brain/llm.py.
@@ -237,6 +241,7 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "persona.voice_accents": ("bool", "Итог дня и подколы иногда голосовым (не чаще раза в день)", False),
     "cards.mode": ("str", "Картинки-карточки в Telegram: always (всегда) / important (важные + короткие карточки на траты и задачи) / never", False),
     "server.port": ("int", "Порт сайта (нужен перезапуск)", False),
+    "server.password": ("str", "Пароль для входа на сайт (пусто — только токен-ссылка)", True),
     "google.enabled": ("bool", "Синхронизация с Google Календарём (туда и обратно, если включён забор)", False),
     "google.pull": ("bool", "Забирать события из Google (созданные там появляются у Марвина, правки и удаления зеркалятся)", False),
     "google.client_id": ("str", "Google OAuth Client ID (…apps.googleusercontent.com) — см. README «Google Календарь»", False),

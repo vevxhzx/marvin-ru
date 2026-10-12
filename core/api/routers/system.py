@@ -37,10 +37,15 @@ log = logging.getLogger("jarvis.api.system")
 # новые маршруты его не должны ломать. Регистрируем ПЕРВЫМ — иначе
 # GET /api/backups/cloud/download съедается параметрическим /api/backups/{name:path}/download.
 cloud_router = APIRouter()
+# Вход по паролю (/api/login) — отдельный роутер рядом с settings: базовый `router`
+# сверяется тестом tests/test_review_a_contract.py со списком SYSTEM_ROUTES
+# («до разбиения app.py»), новые маршруты его не должны ломать (как cloud_router выше).
+login_router = APIRouter()
 
 
 def register(app) -> None:
     app.include_router(cloud_router)
+    app.include_router(login_router)
     app.include_router(router)
 
 
@@ -49,8 +54,37 @@ async def health():
     from ...brain import llm
     from ... import VERSION, BUILD
     from ...brain import persona
+    from ...config import cfg
+    password = getattr(getattr(cfg, "server", None), "password", "") or ""
     return {"ok": True, "ollama": await llm.ollama_available(), "mode": llm.MODE, "time": datetime.now().isoformat(), "version": VERSION, "build": BUILD,
-            "name": persona.display_name()}
+            "name": persona.display_name(), "auth": "password" if password else "token"}
+
+
+@login_router.post("/api/login")
+async def login_by_password(request: Request):
+    """Вход по паролю для отдельного облачного инстанса: верный пароль ставит
+    ту же сессионную куку, что и вход по токен-ссылке (?t= → assistant_session).
+
+    Пароль задаётся настройкой server.password; пока он пуст, эндпоинта как бы
+    нет (404). Неверный пароль — 401; перебор ограничен общим лимитом
+    чувствительных маршрутов (AUTH_RATE_LIMIT в app.py: /api/login в AUTH_PATHS)."""
+    import hmac as _hmac
+    from ...config import cfg as _cfg
+    from ..auth import COOKIE as _COOKIE, is_https as _is_https, token as _tok
+    configured = getattr(getattr(_cfg, "server", None), "password", "") or ""
+    configured = configured if isinstance(configured, str) else str(configured)
+    if not configured:
+        raise HTTPException(404, "Not Found")
+    try:
+        body = await request.json()
+    except Exception:
+        body = None
+    given = body.get("password") if isinstance(body, dict) else None
+    if not isinstance(given, str) or not given or not _hmac.compare_digest(given.encode("utf-8"), configured.encode("utf-8")):
+        raise HTTPException(401, "Неверный пароль")
+    resp = JSONResponse({"ok": True})
+    resp.set_cookie(_COOKIE, _tok(), max_age=90 * 86400, httponly=True, samesite="lax", path="/", secure=_is_https(request))
+    return resp
 
 
 # ---------------- дашборд ----------------

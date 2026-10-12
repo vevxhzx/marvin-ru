@@ -76,7 +76,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     # маршруты, где лимит защищает от подбора ключа доступа и от выгрузки данных
     AUTH_PATHS = ("/api/settings", "/api/status", "/api/backups", "/api/dashboard",
-                  "/api/export", "/api/phone", "/api/setup")
+                  "/api/export", "/api/phone", "/api/setup", "/api/login")
     AUTH_RATE_LIMIT = 60           # не больше стольких попыток в минуту…
 
     async def dispatch(self, request: Request, call_next):

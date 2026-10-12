@@ -37,7 +37,7 @@ QUERY = "t"
 # время жизни cookie с QR-ключом: 90 дней (было 365 — год без перевыпуска многовато для bearer-куки)
 # без токена (нет ничего секретного / нужны снаружи): здоровье, PWA-манифест, статика сайта, OAuth-возврат от Google
 PUBLIC_PREFIXES = ("/assets/", "/icon-", "/apple-touch-icon", "/favicon")
-PUBLIC_EXACT = {"/api/health", "/manifest.json", "/api/google/callback", "/sw.js", "/robots.txt", "/api/tg/login"}
+PUBLIC_EXACT = {"/api/health", "/manifest.json", "/api/google/callback", "/sw.js", "/robots.txt", "/api/tg/login", "/api/login"}
 # только с самого компьютера, даже с токеном: мастер первого запуска и его API (пишут config.yaml, перезапускают процесс),
 # ссылки/QR с мастер-ключом (/api/phone), бэкапы целиком (список, копии config.yaml с ключами,
 # скачивание снимка базы /api/backups/…/download — там вся база: деньги, письма, ключи) и

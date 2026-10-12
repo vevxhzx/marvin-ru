@@ -346,9 +346,71 @@ function Shell({ inbox }) {
 
 /* Живое соединение с ядром: useLive держит SSE-подобный опрос и пульс ПК-клиента */
 
+/* Парольный режим сервера: GET /api/health отдаёт auth: "password"|"token".
+   Узнаём один раз при первом показе экрана Gate, дальше — из памяти модуля. */
+let gateAuthMode = null
+
+function LoginForm() {
+  const { t } = useI18n()
+  const [pw, setPw] = useState('')
+  const [err, setErr] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const submit = async (e) => {
+    e?.preventDefault()
+    if (busy || !pw) return
+    setBusy(true)
+    setErr(null)
+    try {
+      await api.login(pw)
+      location.reload()
+    } catch (ex) {
+      setErr(ex?.status === 404 ? t('login.unavailable') : t('login.wrong'))
+      setPw('')
+    } finally {
+      setBusy(false)
+    }
+  }
+  return (
+    <form data-testid="login-form" onSubmit={submit} className="mx-auto mt-6 w-full max-w-[280px]">
+      <p className="muted text-[13px] leading-relaxed">{t('login.hint')}</p>
+      <input
+        data-testid="login-password"
+        type="password"
+        autoComplete="current-password"
+        className="input mt-3 w-full"
+        placeholder={t('login.password_ph')}
+        aria-label={t('login.password_ph')}
+        value={pw}
+        onChange={(e) => setPw(e.target.value)}
+      />
+      {err ? <p data-testid="login-error" role="alert" className="mt-2 text-[13px] leading-snug" style={{ color: 'var(--neg-ink)' }}>{err}</p> : null}
+      <button data-testid="login-submit" type="submit" disabled={busy || !pw} className="btn-primary mt-3 w-full">
+        {t(busy ? 'login.sending' : 'login.submit')}
+      </button>
+    </form>
+  )
+}
+
 function Gate({ denied }) {
   const { t } = useI18n()
   const tgMode = denied.tg
+  const [pwMode, setPwMode] = useState(() => gateAuthMode === 'password')
+  const [pwChecked, setPwChecked] = useState(() => gateAuthMode !== null)
+  useEffect(() => {
+    if (tgMode || gateAuthMode !== null) return
+    let alive = true
+    fetch('/api/health')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((h) => {
+        gateAuthMode = h?.auth === 'password' ? 'password' : 'other'
+        if (alive) { setPwMode(gateAuthMode === 'password'); setPwChecked(true) }
+      })
+      .catch(() => {
+        gateAuthMode = 'other'
+        if (alive) setPwChecked(true)
+      })
+    return () => { alive = false }
+  }, [tgMode])
   const title = tgMode ? (denied.tgError ? t('gate.tg_failed') : t('gate.session_expired')) : t('gate.no_access')
   // webview Telegram, но без данных для входа: сайт открыт как обычная ссылка, а не кнопкой бота
   const tgLink = !tgMode && /Telegram|TelegramBot|tgWebApp/i.test(navigator.userAgent + location.hash) || (!tgMode && !!window.Telegram)
@@ -368,7 +430,10 @@ function Gate({ denied }) {
         {tgMode ? (
           <button className="btn-primary mt-6" onClick={() => { try { tg.app?.close() } catch {} location.reload() }}>{t('gate.close_reopen')}</button>
         ) : (
-          <button className="btn-ghost mt-6" onClick={() => location.reload()}>{t('common.retry')}</button>
+          <>
+            {pwChecked && pwMode ? <LoginForm /> : null}
+            <button className="btn-ghost mt-6" onClick={() => location.reload()}>{t('common.retry')}</button>
+          </>
         )}
         <div className="faint mt-8 text-[12px]">{t('gate.privacy')}</div>
       </div>
