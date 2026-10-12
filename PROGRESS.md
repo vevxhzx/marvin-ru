@@ -5,6 +5,10 @@
 
 ---
 
+## 12.10.2026: облачная копия для мамы (main, запушено)
+- Вход по паролю: server.password + POST /api/login (кука сессии, лимит перебора), экран входа на 401, health отдаёт режим. Тесты tests/test_login_password.py (5 шт.).
+- wsgi.py для PythonAnywhere free + docs/mom-deploy.md (копия, ключи, WSGI, ограничения тарифа).
+
 ## 12.10.2026: волна 4 по аудиту — остатки механики (ветка audit-wave4, не пушить в main без отмашки)
 - Шрифты text-[12/12.5/13/13.5px] → text-xs/sm/md (254 замены, tailwind привязан к токенам); мёртвые Stat/FlowBar/Toast-заглушка/Swatch удалены; Toggle → алиас Switch; общий Dialog для Palette/OmniSearch; канбан scroll-snap; цвета в токены (+--violet/--cyan); тихие catch в поверхности.
 - Сознательно НЕ тронуто: Pills оставлен отдельным (алиас менял вид 4 мест); Finance-остаток/og-* (пиксель-сейф); text-[14px]+ (нет токена).
