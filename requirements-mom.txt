@@ -1,7 +1,7 @@
 # Мамина копия: SLIM-набор для PythonAnywhere free (512 МБ квота!).
-# Выкинуты torch (~550 МБ) и faster-whisper (+ctranslate2/nvidia, ~300 МБ):
-# маме они не нужны — мозг через Groq, озвучка через Edge, ввод через Groq.
-# Голосовые с сайта декодирует PyAV (av), числа словами — num2words.
+# Выкинуты torch (~550 МБ), faster-whisper (+ctranslate2/nvidia, ~300 МБ),
+# av+numpy (~50 МБ): маме они не нужны — мозг и ввод через Groq, озвучка через Edge.
+# Все импорты выкинутого в коде ленивые — без них заводится.
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-multipart>=0.0.9
@@ -20,5 +20,3 @@ Pillow>=10
 pdfplumber>=0.11
 openpyxl>=3.1
 edge-tts>=6.1
-av>=12
-numpy>=1.26
