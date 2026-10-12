@@ -2,6 +2,7 @@
 # Source of truth: requirements.txt (human-edited). Regenerate: pip freeze filtered to direct deps.
 # Do NOT bump pins by hand — edit requirements.txt then regenerate.
 # Единственное руками добавленное исключение — маркеры версии Python у numpy (см. ниже).
+a2wsgi==1.10.10
 aiogram==3.31.0
 aiohttp_socks==0.12.0
 APScheduler==3.11.3

@@ -56,13 +56,13 @@
   <b>Телефон</b>
 </p>
 <p align="center">
-  <img src="docs/img/mobile-home.png" alt="Телефон: главная" width="210">
-  <img src="docs/img/mobile-finance.png" alt="Телефон: финансы" width="210">
-  <img src="docs/img/mobile-tasks.png" alt="Телефон: задачи" width="210">
-  <img src="docs/img/mobile-orders.png" alt="Телефон: заказы" width="210">
-  <img src="docs/img/mobile-mind.png" alt="Телефон: мозг" width="210">
-  <img src="docs/img/mobile-calendar.png" alt="Телефон: календарь" width="210">
-  <img src="docs/img/mobile-settings.png" alt="Телефон: настройки" width="210">
+  <img src="design-audit/shots/mob/today.jpg" alt="Телефон: главная" width="210">
+  <img src="design-audit/shots/mob/finance.jpg" alt="Телефон: финансы" width="210">
+  <img src="design-audit/shots/mob/tasks.jpg" alt="Телефон: задачи" width="210">
+  <img src="design-audit/shots/mob/orders.jpg" alt="Телефон: заказы" width="210">
+  <img src="design-audit/shots/mob/mind.jpg" alt="Телефон: мозг" width="210">
+  <img src="design-audit/shots/mob/calendar.jpg" alt="Телефон: календарь" width="210">
+  <img src="design-audit/shots/mob/settings.jpg" alt="Телефон: настройки" width="210">
 </p>
 
 </details>
