@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Users, Search, CalendarClock } from 'lucide-react'
 import { api, money, listOf, shortDate } from '../lib/api'
-import { Sheet, Field, Empty, useToast, PageHead, ListSkeleton } from '../components/ui'
+import { Sheet, Field, Empty, useToast, PageHead, ListSkeleton, ErrorState } from '../components/ui'
+import { useLoad } from '../lib/useLoad'
 import { StatRow } from './Orders'
 import { useRefresh } from '../App'
 import { usePageAccent } from '../lib/prefs'
@@ -13,7 +14,7 @@ import { useI18n, SERVER, t as T } from '../lib/i18n'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 // colleague есть в данных (Дмитрий Соколов) — без него на карточке светилось английское слово.
 // Подписи типов — ключи словаря (см. lib/i18n.js)
@@ -40,28 +41,46 @@ const CHIPS_ROW_M = 'no-scrollbar fade-x max-[820px]:!flex-nowrap max-[820px]:!o
 /* Подписи мелким кеглем на узком телефоне (≤380px) уменьшаются на ступень */
 const SMALL_M = 'max-[380px]:text-[length:var(--fs-xs)]'
 
-/* Стадия клиента и «следующий шаг» — две разные сущности, и берутся они из разных
-   ответов: стадия — /api/crm/clients/{id}/stage (там авто-логика по оплатам), шаг — из
-   карточки CRM. Один проход по клиентам, порциями по четыре: восемь запросов на порцию
-   уходят одновременно, соединения не забиваются. Стадии грузим только для клиентов и
-   компаний — у «своих» людей стадии нет. Больше CARD_LIMIT клиентов подряд не тянем. */
+/* Стадия клиента и «следующий шаг» — один запрос summary на всех клиентов
+   (GET /api/crm/clients/summary?ids=…), а не 2N запросов порциями. Неизвестные id
+   бэкенд пропускает. Если эндпоинта нет (старый бэкенд) — откат на прежний путь
+   порциями по четыре. Стадии осмысленны только у клиентов и компаний. */
 const CARD_LIMIT = 60
 async function loadPeople(ids) {
   const stages = {}, steps = {}
   const list = [...new Set((ids || []).filter((x) => x != null))].slice(0, CARD_LIMIT)
-  for (let i = 0; i < list.length; i += 4) {
-    const part = list.slice(i, i + 4)
-    await Promise.allSettled(part.flatMap((cid) => [
-      clientStageApi.get(cid).then((v) => { stages[cid] = v }).catch(() => {}),
-      api.crmClientCard(cid).then((c) => { if (c?.next_step) steps[cid] = { step: c.next_step, at: c.next_step_at } }).catch(() => {}),
-    ]))
+  if (!list.length) return { stages, steps }
+  const apply = (entry, cid) => {
+    if (!entry) return
+    const st = entry.stage
+    if (st && typeof st === 'object') stages[cid] = st
+    else if (typeof st === 'string') stages[cid] = { stage: st, label: entry.label, manual: !!entry.manual }
+    const card = entry.card || {}
+    const step = entry.next_step ?? card.next_step ?? ''
+    const at = entry.next_step_at ?? card.next_step_at ?? null
+    if (step) steps[cid] = { step, at }
   }
-  return { stages, steps }
+  try {
+    const r = await api.crmClientsSummary(list)
+    const map = r?.clients || {}
+    for (const cid of list) apply(map[cid] ?? map[String(cid)], cid)
+    return { stages, steps }
+  } catch {
+    for (let i = 0; i < list.length; i += 4) {
+      const part = list.slice(i, i + 4)
+      await Promise.allSettled(part.flatMap((cid) => [
+        clientStageApi.get(cid).then((v) => { stages[cid] = v }).catch(() => {}),
+        api.crmClientCard(cid).then((c) => { if (c?.next_step) steps[cid] = { step: c.next_step, at: c.next_step_at } }).catch(() => {}),
+      ]))
+    }
+    return { stages, steps }
+  }
 }
 
 export default function People() {
   const { t } = useI18n()
-  const [list, setList] = useState(null)
+  const { tick, bump } = useRefresh()
+  const { data: list, err: loadErr, reload: load } = useLoad(() => api.people(), [tick])
   const pageAcc = usePageAccent('people')
   const [q, setQ] = useState('')
   const [tab, setTab] = useState('all')
@@ -70,10 +89,7 @@ export default function People() {
   const [stageTick, setStageTick] = useState(0)        // правка стадии в шторке — перечитать её
   const [steps, setSteps] = useState({})               // id → «следующий шаг» (из карточки CRM)
   const [sheet, setSheet] = useState(null)
-  const { tick, bump } = useRefresh()
 
-  const load = () => api.people().then(setList).catch(() => setList([]))
-  useEffect(() => { load() }, [tick])
   // «+» дока на «Людях» открывает форму нового контакта (AppShell шлёт people:add)
   useEffect(() => {
     const on = () => setSheet('new')
@@ -144,12 +160,14 @@ export default function People() {
       {/* Сетка карточек человека: на десктопе — карточки в три (две) колонки, на телефоне —
           те же секции, но плоские строки вплотную. Разметка <section class="c"> — по ней
           ходят проверки e2e (карточка человека = секция с именем и бейджем стадии). */}
-      {list === null ? <ListSkeleton n={6} rowH={62} avatar={false} /> : !items.length ? (
+      {list === null && !loadErr ? <ListSkeleton n={6} rowH={62} avatar={false} /> : !items.length ? (
+        loadErr ? <ErrorState onRetry={() => load().catch(() => {})} /> : (
         <Empty
           icon={<Users size={38} />}
           text={t(list?.length ? 'people.none_found' : 'people.none_yet')}
           sub={t(list?.length ? 'people.none_found_hint' : 'people.none_yet_hint')}
         />
+        )
       ) : (
         <div className={GRID_M}>
           {items.map((p) => (
@@ -158,7 +176,7 @@ export default function People() {
         </div>
       )}
 
-      <PersonSheet open={!!sheet} person={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }}
+      <PersonSheet open={!!sheet} person={sheet} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load().catch(() => {}); bump() }}
         onStage={() => setStageTick((n) => n + 1)} />
     </div>
   )
@@ -208,17 +226,17 @@ function PersonRow({ p, stage, next, onOpen }) {
               <span className="min-w-0 max-w-full truncate break-anywhere font-medium" style={{ fontSize: 'var(--fs-lg)' }}>{p.name}</span>
               <span className={`faint shrink-0 ${SMALL_M}`} style={{ fontSize: 'var(--fs-xs)' }}>{kindLabel(p)}</span>
             </div>
-            {alias && <div className="muted break-anywhere truncate text-[12.5px]" title={alias}>{alias}</div>}
+            {alias && <div className="muted break-anywhere truncate text-sm" title={alias}>{alias}</div>}
             {step && (
-              <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 text-[12.5px]">
+              <div className="mt-1 flex min-w-0 flex-wrap items-baseline gap-x-2 text-sm">
                 <CalendarClock size={12} className="faint shrink-0" aria-hidden />
                 <span className="truncate" style={{ maxWidth: '48ch' }} title={step}>{step}</span>
                 {stepAt && <span className="faint num shrink-0">{shortDate(stepAt)}</span>}
               </div>
             )}
-            {money2.length > 0 && <div className="mt-1 flex flex-wrap items-baseline gap-x-3 text-[12px] tabular-nums">{money2}</div>}
+            {money2.length > 0 && <div className="mt-1 flex flex-wrap items-baseline gap-x-3 text-xs tabular-nums">{money2}</div>}
             {/* совсем пустая строка (новый контакт без заказов и без шага) — сказать об этом честно */}
-            {!alias && !step && money2.length === 0 && <div className="muted mt-1 text-[12.5px]">{t('people.no_orders')}</div>}
+            {!alias && !step && money2.length === 0 && <div className="muted mt-1 text-sm">{t('people.no_orders')}</div>}
           </div>
         </div>
         {HAS_STAGE.has(p.kind) ? (
@@ -292,7 +310,7 @@ function PersonSheet({ open, person, onClose, onDone, onDone2, onStage }) {
     setSaving(true)
     try {
       if (isNew) {
-        await api.chat(`человек: ${name.trim()}${aliases ? `, ${aliases}` : ''}${contact ? `, ${contact}` : ''}`)   // i18n-raw — фраза для ядра
+        await api.addPerson({ name: name.trim(), aliases: aliases.trim() || null, contact: contact.trim() || null, kind })
       } else {
         await api.updatePerson(person.id, { name: name.trim(), aliases: aliases.trim(), contact: contact.trim(), kind })
       }
@@ -307,7 +325,7 @@ function PersonSheet({ open, person, onClose, onDone, onDone2, onStage }) {
   return (
     <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t(isNew ? 'people.new_title' : 'people.title')}
       sub={isNew ? undefined : kindLabel({ kind: person?.kind })}>
-      <form onSubmit={save} className="text-[13px]">
+      <form onSubmit={save} className="text-md">
         {isNew ? (
           <div className="space-y-4">
             <Field label={t('common.name')}>
@@ -346,7 +364,7 @@ function PersonSheet({ open, person, onClose, onDone, onDone2, onStage }) {
             </Sec>
 
             <Sec title={t('next_step.title')}>
-              <ClientNextStep cid={person.id} card={card} onErr={show.err} onSaved={() => api.crmClientCard(person.id).then(setCard).catch(() => {})} />
+              <ClientNextStep cid={person.id} card={card} onErr={show.err} onSaved={() => api.crmClientCard(person.id).then(setCard).catch((e) => show.err(e))} />
             </Sec>
 
             {HAS_STAGE.has(kind) && (

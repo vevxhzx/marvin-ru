@@ -47,7 +47,7 @@ export default function HowToOrders() {
         <HelpCircle size={17} className="faint shrink-0" aria-hidden />
         <span className="min-w-0 flex-1">
           <span className="block font-medium leading-tight" style={{ fontSize: 'var(--fs-lg)' }}>{t('howto.title')}</span>
-          <span className="faint block text-[12px] leading-snug">{t('howto.subtitle')}</span>
+          <span className="faint block text-xs leading-snug">{t('howto.subtitle')}</span>
         </span>
         {open ? <ChevronUp size={16} className="faint shrink-0" aria-hidden /> : <ChevronDown size={16} className="faint shrink-0" aria-hidden />}
       </button>
@@ -55,8 +55,8 @@ export default function HowToOrders() {
         <div id="orders-howto" className="animate-rise mt-1">
           <ol className="grid gap-x-6 gap-y-4 sm:grid-cols-3">
             {STEPS.map((s) => (
-              <li key={s.n} className="flex gap-2.5 text-[12.5px]">
-                <span className="num mt-px grid h-6 w-6 shrink-0 place-items-center rounded-full text-[12px] font-medium"
+              <li key={s.n} className="flex gap-2.5 text-sm">
+                <span className="num mt-px grid h-6 w-6 shrink-0 place-items-center rounded-full text-xs font-medium"
                   style={{ background: 'var(--fill-2)', color: 'var(--ink-2)' }}>{s.n}</span>
                 <span className="min-w-0"><b className="font-medium">{t(s.title)}</b><span className="muted block leading-snug">{t(s.text)}</span></span>
               </li>
@@ -64,7 +64,7 @@ export default function HowToOrders() {
           </ol>
           <div className="mt-4 border-t pt-3.5" style={{ borderColor: 'var(--line)' }}>
             <div className="label mb-2">{t('howto.funnel')}</div>
-            <div className="flex flex-wrap items-center gap-1.5 text-[12px]">
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
               {ORDER_STAGES.map(([k, label], i) => (
                 <span key={k} className="flex items-center gap-1.5">
                   {i > 0 && <span className="faint" aria-hidden>→</span>}
@@ -74,7 +74,7 @@ export default function HowToOrders() {
                 </span>
               ))}
             </div>
-            <div className="muted mt-2 text-[12px] leading-snug">
+            <div className="muted mt-2 text-xs leading-snug">
               {t('howto.stage_note')}
             </div>
           </div>

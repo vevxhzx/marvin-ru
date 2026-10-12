@@ -23,7 +23,7 @@ export function ClientStageNote({ view }) {
   const { t } = useI18n()
   if (!view) return null
   return (
-    <div className="faint mt-1 text-[12px] leading-snug">
+    <div className="faint mt-1 text-xs leading-snug">
       {view.manual
         ? t('cstage.manual_note')
         : view.auto ? t('cstage.auto_by_orders', { label: view.auto_label || clientStageLabel(view.auto) }) : t('cstage.no_signal')}

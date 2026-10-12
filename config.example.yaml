@@ -160,6 +160,7 @@ voice:
     edge_voice: "ru-RU-DmitryNeural"
     piper_voice: "ru_RU-denis-medium"  # piper: denis / dmitri (муж.), irina / ruslan (жен.), качество medium
     piper_model: ""           # свой .onnx Piper; пусто — скачается сам в data/models/piper/
+    piper_length: 1.0         # темп Piper: 1.0 норма, 1.15-1.3 медленнее и чётче (ударения), 0.8 быстрее
     reply_in_telegram: "voice"  # voice — голосом отвечать на голосовые (по умолчанию) · always — на всё · never — только текст
   pc:
     # api: "http://192.168.1.10:8765"   # если ядро крутится на другой машине (по умолчанию — этот же ПК)

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Search, CalendarDays, CheckSquare, Wallet, FileText, Link2, MessageCircle, Cpu, ArrowUpRight, X, Pencil, Check, Star, RotateCcw, Plus, Monitor, Target, Bot } from 'lucide-react'
-import { api, hhmm, dayLabel, shortDate } from '../lib/api'
+import { Search, CalendarDays, CheckSquare, Wallet, FileText, Link2, MessageCircle, Cpu, ArrowUpRight, X, Pencil, Check, Star, RotateCcw, Plus, Monitor, Target, Bot, Lock } from 'lucide-react'
+import { api, hhmm, dayLabel, shortDate, toLocalISO } from '../lib/api'
+import { getUsedFactIds, subscribeUsedFactIds } from '../lib/usedFacts'
 import { Empty, ErrorState, Seg, PageHead, ListSkeleton, Pills, toast } from '../components/ui'
 import { useRefresh } from '../App'
 import { name as aName } from '../lib/name'
@@ -10,7 +11,7 @@ import { usePhone } from '../lib/motion'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 /* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
    отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
@@ -75,11 +76,25 @@ export default function Memory() {
   )
 }
 
-const CATS = { 'о человеке': 'var(--accent)', 'предпочтение': '#7c3aed', 'здоровье': 'var(--neg)', 'работа': 'var(--warn)', 'быт': 'var(--ink-3)', 'отношения': '#db2777', 'привычка': 'var(--pos)' }
+const CATS = { 'о человеке': 'var(--accent)', 'предпочтение': 'var(--acc)', 'здоровье': 'var(--neg)', 'работа': 'var(--warn)', 'быт': 'var(--ink-3)', 'отношения': 'var(--neg)', 'привычка': 'var(--pos)' }
+/* источник факта с бэка (mem.fact_source): «сайт» / «тг», иначе «чат» */
+const SRC_LABEL = { 'сайт': 'mem.src_site', 'тг': 'mem.src_tg', 'мозг': 'mem.src_mind' }
 const ago = (iso) => {
   if (!iso) return ''
   const d = Math.floor((Date.now() - new Date(iso)) / 864e5)
   return d <= 0 ? T('common.today') : d === 1 ? T('common.yesterday') : T('mem.ago', { count: d })
+}
+
+/* срок факта (due — ISO-строка с бэка или null): дата + счётчик дней */
+function Due({ iso }) {
+  const { t } = useI18n()
+  if (!iso) return null
+  const dt = new Date(iso)
+  if (Number.isNaN(dt)) return null
+  const days = Math.round((new Date(dt.toDateString()) - new Date(new Date().toDateString())) / 864e5)
+  const date = dt.toLocaleDateString(localeOf(), { day: 'numeric', month: 'short' })
+  const tail = days === 0 ? t('common.today') : days > 0 ? t('mem.due_in', { count: days }) : t('mem.due_over', { count: -days })
+  return <span className="muted">📅 {date} · {tail}</span>
 }
 
 /* Уверенность факта — короткая шкала: без подписи она не мешает строке, а число в подсказке. */
@@ -111,7 +126,7 @@ function Facts({ layer, data, reload }) {
   return (
     <div className="space-y-6">
       {!data.enabled && (
-        <div className="soft-warn flex items-start gap-2 rounded-2xl px-4 py-3 text-[13px]" style={{ border: '1px solid color-mix(in srgb, var(--warn) 30%, transparent)' }}>
+        <div className="soft-warn flex items-start gap-2 rounded-2xl px-4 py-3 text-md" style={{ border: '1px solid color-mix(in srgb, var(--warn) 30%, transparent)' }}>
           <span>{t('mem.disabled')}</span>
         </div>
       )}
@@ -155,15 +170,39 @@ function MiniBtn({ children, onClick, disabled, icon, tone }) {
   const toneCls = tone === 'neg' ? 'neg' : tone === 'muted' ? 'muted' : 'text-accent'
   return (
     <button type="button" disabled={disabled} onClick={onClick}
-      className={`flex min-h-[var(--tap)] items-center gap-1.5 rounded-full px-3 text-[13px] font-medium transition ${toneCls}`}>
+      className={`flex min-h-[var(--tap)] items-center gap-1.5 rounded-full px-3 text-md font-medium transition ${toneCls}`}>
       {icon}{children}
     </button>
   )
 }
 
+/* Портрет — plain text с бэка. Режем на секции по пустым строкам:
+   одиночная короткая строка без точки в конце — подзаголовок.
+   Секций нет — возвращаем null и показываем текст как есть. */
+function portraitSections(text) {
+  const blocks = String(text || '').split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean)
+  if (blocks.length < 2) return null
+  const out = []
+  let cur = null
+  for (const b of blocks) {
+    const lines = b.split('\n').map((l) => l.trim()).filter(Boolean)
+    if (lines.length === 1 && lines[0].length <= 80 && !/[.!?…]$/.test(lines[0])) {
+      if (cur) out.push(cur)
+      cur = { title: lines[0].replace(/^#+\s*/, '').replace(/\*\*/g, '').replace(/:$/, ''), body: [] }
+    } else {
+      if (!cur) cur = { title: null, body: [] }
+      cur.body.push(b)
+    }
+  }
+  if (cur) out.push(cur)
+  if (out.length < 2 || out.every((s) => !s.title)) return null
+  return out
+}
+
 /* Портрет — короткий блок «кто вы» над списком фактов */
 function Portrait({ st, busy, run }) {
   const { t } = useI18n()
+  const sections = st.portrait ? portraitSections(st.portrait) : null
   return (
     <section>
       <div className="mb-1.5 flex flex-wrap items-baseline justify-between gap-2">
@@ -172,11 +211,18 @@ function Portrait({ st, busy, run }) {
       </div>
       <div className={`panel p-4 sm:p-5 ${PANEL_M_LIGHT}`}>
         {st.portrait
-          ? <div className="whitespace-pre-line text-[14.5px] leading-relaxed">{st.portrait}</div>
-          : <div className="muted text-[13.5px] leading-snug">{t('mem.portrait_hint')}</div>}
+          ? (sections
+            ? <div className="space-y-1.5">{sections.map((s, i) => (
+              <details key={i} open={i === 0} className="rounded-xl px-3 py-1.5" style={{ background: 'var(--fill)' }}>
+                <summary className="min-h-[var(--tap)] cursor-pointer text-[14px] font-medium">{s.title}</summary>
+                <div className="whitespace-pre-line pb-1.5 pt-1 text-[14px] leading-relaxed">{s.body.join('\n\n')}</div>
+              </details>
+            ))}</div>
+            : <div className="whitespace-pre-line text-[14.5px] leading-relaxed">{st.portrait}</div>)
+          : <div className="muted text-md leading-snug">{t('mem.portrait_hint')}</div>}
         <div className="mt-2 flex flex-wrap items-center gap-x-2">
           <MiniBtn disabled={busy || (st.long || 0) < 3} onClick={() => run(() => api.rebuildPortrait(), t('mem.portrait_rebuilt'))}>{t('mem.rebuild_portrait')}</MiniBtn>
-          <span className="faint text-[12.5px]">{t('mem.weekly_auto')}</span>
+          <span className="faint text-sm">{t('mem.weekly_auto')}</span>
         </div>
       </div>
     </section>
@@ -201,7 +247,7 @@ function StyleBlock({ st, busy, run }) {
           <textarea autoFocus value={text} onChange={(e) => setText(e.target.value)} rows={5} className="input !h-auto w-full resize-none py-2 text-[14px] leading-relaxed" placeholder={t('mem.style_ph')} />
         ) : st.style ? (
           <div className="whitespace-pre-line text-[14.5px] leading-relaxed">{st.style}</div>
-        ) : <div className="muted text-[13.5px] leading-snug">{t('mem.style_hint')}</div>}
+        ) : <div className="muted text-md leading-snug">{t('mem.style_hint')}</div>}
         <div className="mt-2 flex flex-wrap items-center gap-x-1">
           {edit ? (
             <>
@@ -212,7 +258,7 @@ function StyleBlock({ st, busy, run }) {
             <>
               <MiniBtn disabled={busy} onClick={() => run(() => api.rebuildStyle(), t('mem.style_rebuilt'))}>{t('mem.rebuild_style')}</MiniBtn>
               <MiniBtn onClick={() => setEdit(true)}>{t('mem.fix')}</MiniBtn>
-              <span className="faint text-[12.5px]">{t('mem.weekly_auto2')}</span>
+              <span className="faint text-sm">{t('mem.weekly_auto2')}</span>
             </>
           )}
         </div>
@@ -237,7 +283,7 @@ function Lessons() {
         <div className="label">{t('les.title')}</div>
         <span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('les.n', { count: items.length })}</span>
       </div>
-      <div className="muted mb-3 text-[13px]">{t('les.hint')}</div>
+      <div className="muted mb-3 text-md">{t('les.hint')}</div>
       <div className={listCls(phone)}>
         {items.map((l) => (
           <div key={l.id} className="row group">
@@ -245,9 +291,9 @@ function Lessons() {
               <span className="break-words">«{l.text}»</span>
               <span className="faint"> → </span>
               <span className="muted">{t(LESSON_RU[l.kind]) || l.kind}</span>
-              {l.wrong && <span className="faint text-[12px]"> {t('les.was', { what: t(LESSON_RU[l.wrong]) || l.wrong })}</span>}
+              {l.wrong && <span className="faint text-xs"> {t('les.was', { what: t(LESSON_RU[l.wrong]) || l.wrong })}</span>}
             </div>
-            {l.uses > 0 && <span className="faint hidden shrink-0 text-[12px] sm:block">{t('les.used', { n: l.uses })}</span>}
+            {l.uses > 0 && <span className="faint hidden shrink-0 text-xs sm:block">{t('les.used', { n: l.uses })}</span>}
             <button className="btn-icon shrink-0" onClick={() => del(l.id)} aria-label={t('les.forget')} title={t('les.forget')}><X size={13} /></button>
           </div>
         ))}
@@ -263,6 +309,12 @@ function FactRow({ f, busy, run, cats }) {
   const [open, setOpen] = useState(false)
   const [edit, setEdit] = useState(false)
   const [text, setText] = useState(f.text)
+  /* id фактов из последнего ответа чата — бейдж «использовано в ответе» */
+  const [usedIds, setUsedIds] = useState(getUsedFactIds)
+  useEffect(() => subscribeUsedFactIds(setUsedIds), [])
+  const used = usedIds.includes(Number(f.id))
+  /* приватный факт скрыт блюром до клика */
+  const [revealed, setRevealed] = useState(false)
   const save = () => { const next = text.trim(); if (!next || next === f.text) return setEdit(false); run(() => api.updateFact(f.id, { text: next }), t('mem.fixed')).then(() => setEdit(false)) }
   const color = CATS[f.category] || 'var(--ink-3)'
   /* метка «возможно устарело» — факт не трогали > 30 дней (только показ, данные не меняем) */
@@ -270,6 +322,12 @@ function FactRow({ f, busy, run, cats }) {
     const ts = f.updated_at || f.created_at
     return !!ts && f.layer !== 'archive' && (Date.now() - new Date(ts)) / 864e5 > 30
   })()
+  /* в календарь — событием на час от даты факта (due — только метка, событие создаём явно) */
+  const toCalendar = () => {
+    const at = f.due && !Number.isNaN(Date.parse(f.due)) ? new Date(f.due) : new Date(Date.now() + 3600000)
+    const end = new Date(at.getTime() + 3600000)
+    run(() => api.addEvent({ title: String(f.text).slice(0, 120), start: toLocalISO(at), end: toLocalISO(end), duration_min: 60 }), t('mem.cal_done'))
+  }
   return (
     <div className={`row !items-start gap-x-3 gap-y-1.5 ${open ? '' : 'row-hover'}`} onClick={() => !edit && setOpen((v) => !v)} style={open ? { background: 'var(--fill)' } : {}}>
       <span className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: color }} aria-hidden="true" />
@@ -279,35 +337,52 @@ function FactRow({ f, busy, run, cats }) {
             <input autoFocus value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') save(); if (e.key === 'Escape') { setText(f.text); setEdit(false) } }} className="input !h-9" aria-label={t('mem.fix')} />
             <button className="btn-icon shrink-0" onClick={save} aria-label={t('common.save_changes')} title={t('common.save_changes')}><Check size={14} /></button>
           </div>
+        ) : f.is_private && !revealed ? (
+          <button type="button" className="flex min-h-[var(--tap)] items-center gap-2 text-left" onClick={(e) => { e.stopPropagation(); setRevealed(true) }} aria-label={t('mem.reveal')} title={t('mem.reveal')}>
+            <Lock size={14} className="shrink-0" aria-hidden="true" />
+            <span className="select-none text-[15px] leading-snug" style={{ filter: 'blur(5px)', overflowWrap: 'anywhere' }} aria-hidden="true">{f.text}</span>
+            <span className="text-accent shrink-0 text-md">{t('mem.reveal')}</span>
+          </button>
         ) : (
           /* текст целиком и с переносом: обрезанная строка памяти читается хуже, чем длинная */
           <div className="text-[15px] leading-snug" style={{ overflowWrap: 'anywhere' }}>
-            {f.core && <Star size={13} className="mr-1 inline -mt-0.5" style={{ color: 'var(--warn)', fill: 'var(--warn)' }} />}{f.text}
+            {f.is_private && <Lock size={13} className="mr-1 inline -mt-0.5" aria-hidden="true" />}{f.core && <Star size={13} className="mr-1 inline -mt-0.5" style={{ color: 'var(--warn)', fill: 'var(--warn)' }} />}{f.text}
           </div>
         )}
         {/* слой · категория · дата · уверенность */}
-        <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px]">
+        <div className="mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-xs">
           <span className="badge">{t(LAYER[f.layer] || 'mem.t_long')}</span>
           {f.category && <span className="muted">{f.category}</span>}
-          <span className="faint">{ago(f.updated_at || f.created_at)}</span>
+          <span className="faint">{ago(f.updated_at || f.created_at)} · {t(SRC_LABEL[f.source] || 'mem.src_chat')}</span>
+          <Due iso={f.due} />
           <Conf v={f.confidence} />
           {f.core && <span className="warn">{t('mem.important')}</span>}
+          {f.is_private && <span className="badge">{t('mem.private')}</span>}
+          {used && <span className="badge">{t('mem.used_reply')}</span>}
           {stale && <span className="badge warn">{t('mem.maybe_stale')}</span>}
         </div>
+        {f.layer !== 'archive' && !edit && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-1 gap-y-1" onClick={(e) => e.stopPropagation()}>
+            <MiniBtn disabled={busy} onClick={() => run(() => api.wrongFact(f.id), t('mem.wrong_done'))}>{t('mem.wrong')}</MiniBtn>
+            <MiniBtn disabled={busy} onClick={() => run(() => api.updateFact(f.id, { core: !f.core }), f.core ? t('mem.unpinned') : t('mem.pinned'))} icon={<Star size={13} />}>{t(f.core ? 'mem.unpin' : 'mem.pin')}</MiniBtn>
+            {f.due && <MiniBtn disabled={busy} onClick={toCalendar} icon={<CalendarDays size={13} />}>{t('mem.to_cal')}</MiniBtn>}
+            {(stale || f.due) && <MiniBtn disabled={busy} onClick={() => run(() => api.confirmFact(f.id), t('mem.confirmed'))} icon={<Check size={13} />}>{t('mem.actual')}</MiniBtn>}
+            <MiniBtn tone="neg" disabled={busy} onClick={() => run(() => api.forgetFact(f.id), t('mem.forgotten'))}>{t('mem.forget')}</MiniBtn>
+          </div>
+        )}
         {open && !edit && (
           <div className="mt-2 flex flex-wrap items-center gap-x-1 gap-y-1" style={{ animation: 'fade .16s ease-out' }} onClick={(e) => e.stopPropagation()}>
-            {f.uses > 0 && <span className="faint mr-1 text-[12px]">{t('mem.used_n', { count: f.uses })}</span>}
-            {f.layer === 'archive' && f.archive_reason && <span className="faint mr-1 text-[12px]">{f.archive_reason}{f.replaced_by ? ` → #${f.replaced_by}` : ''}</span>}
+            {f.uses > 0 && <span className="faint mr-1 text-xs">{t('mem.used_n', { count: f.uses })}</span>}
+            {f.layer === 'archive' && f.archive_reason && <span className="faint mr-1 text-xs">{f.archive_reason}{f.replaced_by ? ` → #${f.replaced_by}` : ''}</span>}
             {f.layer !== 'archive' ? (
               <>
                 <MiniBtn disabled={busy} onClick={() => setEdit(true)} icon={<Pencil size={13} />}>{t('mem.fix')}</MiniBtn>
-                <MiniBtn disabled={busy} onClick={() => run(() => api.updateFact(f.id, { core: !f.core }), f.core ? t('mem.not_core') : t('mem.always_core'))} icon={<Star size={13} />}>{t(f.core ? 'mem.less_important' : 'mem.important')}</MiniBtn>
                 {f.layer === 'short' && <MiniBtn disabled={busy} onClick={() => run(() => api.updateFact(f.id, { layer: 'long' }), t('mem.kept_long'))}>{t('mem.keep_long')}</MiniBtn>}
-                <MiniBtn tone="neg" disabled={busy} onClick={() => run(() => api.forgetFact(f.id), t('mem.forgotten'))}>{t('mem.forget')}</MiniBtn>
               </>
             ) : (
               <MiniBtn disabled={busy} onClick={() => run(() => api.restoreFact(f.id), t('mem.restored'))} icon={<RotateCcw size={13} />}>{t('mem.restore')}</MiniBtn>
             )}
+            <MiniBtn disabled={busy} onClick={() => run(() => api.updateFact(f.id, { is_private: !f.is_private }), f.is_private ? t('mem.now_public') : t('mem.now_private'))} icon={<Lock size={13} />}>{t(f.is_private ? 'mem.make_public' : 'mem.make_private')}</MiniBtn>
             {f.layer !== 'archive' && <Pills className="w-full" value={f.category} onChange={(c) => c !== f.category && run(() => api.updateFact(f.id, { category: c }))} options={(cats || []).map((c) => [c, c])} />}
           </div>
         )}
@@ -322,7 +397,7 @@ const KINDS = [
   { id: 'event', label: 'mem.k_events', icon: CalendarDays, color: 'var(--accent)', to: '/calendar' },
   { id: 'task', label: 'mem.k_tasks', icon: CheckSquare, color: 'var(--pos)', to: '/tasks' },
   { id: 'finance', label: 'mem.k_money', icon: Wallet, color: 'var(--warn)', to: '/finance' },
-  { id: 'note', label: 'mem.k_notes', icon: FileText, color: '#7c3aed', to: '/mind' },
+  { id: 'note', label: 'mem.k_notes', icon: FileText, color: 'var(--acc)', to: '/mind' },
   { id: 'link', label: 'mem.k_links', icon: Link2, color: '#0891b2', to: '/mind' },
   { id: 'chat', label: 'mem.k_chat', icon: MessageCircle, color: 'var(--ink-3)' },
   { id: 'system', label: 'mem.k_system', icon: Cpu, color: 'var(--ink-3)' },
@@ -397,7 +472,7 @@ function Journal() {
               </div>
             </section>
           ))}
-          {n >= 300 && <div className="faint text-center text-[12px]">{t('mem.capped')}</div>}
+          {n >= 300 && <div className="faint text-center text-xs">{t('mem.capped')}</div>}
         </div>
       )}
     </div>
@@ -411,12 +486,12 @@ function Entry({ m, open, onToggle }) {
   const text = clean(m.text)
   return (
     <div className={`row !items-start gap-x-3 gap-y-1.5 ${open ? '' : 'row-hover'}`} onClick={onToggle} style={open ? { background: 'var(--fill)' } : {}}>
-      <span className="faint num mt-[3px] w-11 shrink-0 text-[12px]">{hhmm(m.created_at)}</span>
+      <span className="faint num mt-[3px] w-11 shrink-0 text-xs">{hhmm(m.created_at)}</span>
       <span className="mt-[3px] grid h-[18px] w-[18px] shrink-0 place-items-center" style={{ color: k.color || 'var(--ink-3)' }} aria-hidden="true"><I size={14} /></span>
       <div className="min-w-0 flex-1">
         <div className="text-[15px] leading-snug" style={{ overflowWrap: 'anywhere' }}>{text}</div>
         {open && (
-          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px]" style={{ animation: 'fade .16s ease-out' }}>
+          <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs" style={{ animation: 'fade .16s ease-out' }}>
             <span className="muted">{k.label ? t(k.label) : m.kind}</span>
             <span className="faint">· {t('mem.source', { what: CH[m.channel] ? t(CH[m.channel]) : m.channel })}</span>
             <span className="faint">· {new Date(m.created_at).toLocaleString(localeOf(), { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }).replace(/\.?\s*г\.$/u, '')}</span>
@@ -425,7 +500,7 @@ function Entry({ m, open, onToggle }) {
           </div>
         )}
       </div>
-      {!open && m.channel && m.channel !== 'web' && <span className="faint hidden shrink-0 text-[12px] sm:block">{CH[m.channel] || m.channel}</span>}
+      {!open && m.channel && m.channel !== 'web' && <span className="faint hidden shrink-0 text-xs sm:block">{CH[m.channel] || m.channel}</span>}
     </div>
   )
 }
@@ -469,12 +544,12 @@ function Timeline() {
             const I = w.icon
             return (
               <div key={i} className={`row !items-start gap-x-3 gap-y-1.5 ${it.kind === 'fail' ? 'opacity-70' : ''}`}>
-                <span className="faint num mt-[3px] w-11 shrink-0 text-[12px]">{hhmm(it.at)}</span>
+                <span className="faint num mt-[3px] w-11 shrink-0 text-xs">{hhmm(it.at)}</span>
                 <span className="mt-[3px] grid h-[18px] w-[18px] shrink-0 place-items-center" style={{ color: w.color }} aria-hidden="true">{I ? <I size={14} /> : <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--ink-2)' }} />}</span>
                 <div className="min-w-0 flex-1">
                   <div className={`text-[15px] leading-snug ${it.kind === 'screen' ? 'muted' : ''}`} style={{ overflowWrap: 'anywhere' }}>{clean(it.text)}</div>
                 </div>
-                {it.who !== WHO_ME && <span className="faint shrink-0 text-[12px]">{t(w.label)}</span>}
+                {it.who !== WHO_ME && <span className="faint shrink-0 text-xs">{t(w.label)}</span>}
               </div>
             )
           })}

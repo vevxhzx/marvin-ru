@@ -406,15 +406,9 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   font-variant-numeric: tabular-nums; font-feature-settings: 'tnum', 'cv11', 'ss01';
   color: var(--acc);
 }
-:root[data-theme="dark"] .gc-num, .dark .gc-num {
+:root[data-theme="dark"] .gc-num {
   color: var(--hero-ink);
   text-shadow: 0 1px 14px rgba(4, 6, 20, 0.35);
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .gc-num {
-    color: var(--hero-ink);
-    text-shadow: 0 1px 14px rgba(4, 6, 20, 0.35);
-  }
 }
 /* --- карусель: только вид (переключение — за JS) --- */
 .dots { display: flex; align-items: center; justify-content: center; gap: 6px; }
@@ -439,14 +433,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     var(--shadow-2);
 }
 /* заголовки секций в тёмной теме: чуть крупнее и белее */
-:root[data-theme="dark"] .card h3, :root[data-theme="dark"] .gc-title,
-.dark .card h3, .dark .gc-title {
+:root[data-theme="dark"] .card h3, :root[data-theme="dark"] .gc-title {
   color: #fff; font-size: calc(var(--fs-lg) + 1px); letter-spacing: -0.02em;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .card h3, :root:not([data-theme="light"]) .gc-title {
-    color: #fff; font-size: calc(var(--fs-lg) + 1px); letter-spacing: -0.02em;
-  }
 }
 /* Строгие строки «подпись — значение» в две колонки под премиум-карточкой */
 .kv-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 var(--s-5); }
@@ -532,7 +520,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .cin i { width: 8px; height: 8px; border-radius: 50%; background: var(--acc); flex: none; }
 .cin input {
   flex: 1; min-width: 0; border: 0; outline: 0; background: transparent;
-  color: var(--ink); font-size: 18px; min-height: var(--tap);
+  color: var(--ink); font-size: var(--fs-xl); min-height: var(--tap);
 }
 .cin input::placeholder { color: var(--ink-3); }
 .cin .go {
@@ -605,6 +593,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 .cap { margin-top: var(--s-2); font-size: var(--fs-xs); color: var(--blk-dim); }
 
 .emp { font-size: var(--fs-2xl); font-weight: 500; letter-spacing: -0.03em; line-height: 1.25; max-width: 16ch; }
+/* .chip — большая (эталон V7); маленькая — .chip--sm ниже (бывший второй .chip).
+   .chip.on действует на обе; мобильные/тач-правила сгруппированы там же. */
 .chip { display: inline-flex; align-items: center; gap: 6px; margin-top: var(--s-5); padding: 9px 16px; border-radius: 999px; background: var(--sf2); font-weight: 500; font-size: var(--fs-md); transition: background var(--t-base), color var(--t-base); cursor: pointer; border: 0; }
 .chip:hover { background: var(--ink); color: var(--bg); }
 
@@ -720,7 +710,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   overflow: hidden;
 }
 .cal2 .ev-pill {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   padding: 2px 6px;
   border-radius: 99px;
   background: color-mix(in srgb, var(--acc) 16%, transparent);
@@ -785,15 +775,15 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   align-items: center;
   justify-content: center;
 }
-.nx { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; display: flex; gap: 12px; }
+.nx { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: var(--fs-md); display: flex; gap: 12px; }
 .nx small { color: var(--ink3); white-space: nowrap; }
 
 .note { padding: 14px 10px; border-top: 1px solid var(--line); border-radius: var(--r-sm); transition: background 0.25s var(--e), transform 0.25s var(--e); }
 .note:hover { background: var(--sf2); transform: translateX(3px); }
 .note:first-of-type { border-top: 0; }
-.note b { display: block; font-weight: 500; font-size: 16px; letter-spacing: -0.02em; }
+.note b { display: block; font-weight: 500; font-size: var(--fs-lg); letter-spacing: -0.02em; }
 .note small { color: var(--ink3); }
-.cfg { margin-top: 28px; text-align: right; color: var(--ink3); font-size: 14px; cursor: pointer; transition: color 0.2s; }
+.cfg { margin-top: 28px; text-align: right; color: var(--ink3); font-size: var(--fs-md); cursor: pointer; transition: color 0.2s; }
 .cfg:hover { color: var(--ink); }
 
 /* Появление «блока» страницы каскадом. fill-mode здесь — backwards, а не both: заполнение
@@ -918,7 +908,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
 @keyframes fade { from { opacity: 0; } }
 @keyframes draw { from { stroke-dashoffset: 1; } }
 @keyframes pop { from { opacity: 0; transform: scale(0); } }
-@keyframes rise { from { transform: scaleY(0); } }
+/* rise — единственный (opacity+translateY из блока шторки ниже); дубли не заводить */
 @keyframes ping { 0% { opacity: 0.5; transform: scale(1); } 100% { opacity: 0; transform: scale(3.4); } }
 @keyframes breathe { 50% { opacity: 0.35; } }
 @keyframes blink { 50% { opacity: 0; } }
@@ -1410,6 +1400,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --ai-ink: #373070;
   --ai-solid: #373070;
   --ai-soft: #eeeafd;                   /* фиолетовая подложка макета: 9.8:1 */
+  --violet: #7c3aed;                    /* яркий фиолет для графики (иконки, маркеры) */
+  --cyan: #0891b2;                      /* циан для графики */
 
   /* исторические алиасы смысла: код и разметка их ещё спрашивают */
   --lime: var(--pos);
@@ -1538,6 +1530,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --dock-ring: rgba(255, 255, 255, 0.7);
   --dock-shadow: 0 12px 30px rgba(40, 50, 140, 0.18);
   --dock-ink: #555a78;
+  /* Топбар: полупрозрачная подложка с размытием (в тёмной — прозрачнее, см. блоки тем). */
+  --topbar-bg: color-mix(in srgb, var(--bg) 82%, transparent);
   /* Стекло (liquid glass) для плавающих слоёв и плиток: светлая тема — морозное белое,
      тёмная — прозрачное с внутренней светящейся линией. */
   --glass-bg: rgba(255, 255, 255, 0.62);
@@ -1566,7 +1560,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --ease-io: cubic-bezier(.65, 0, .35, 1);
   --ease-spring: cubic-bezier(.34, 1.56, .64, 1); /* пружина с перелётом */
   --ease-apple: var(--ease-out);                  /* синоним для старых правил ниже */
-  --t-fast: .16s; --t-base: .28s; --t-slow: .5s;
+  --t-fast: .16s; --t-base: .28s; --t-slow: .5s; --t-enter: .4s;
 
   /* Слои: порядок наложения оболочки */
   --z-topbar: 40;   /* липкая шапка телефона */
@@ -1609,13 +1603,12 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --hero-ink-16: var(--hero-w-26);
   --hero-shadow: 0 2px 4px rgba(16, 20, 43, 0.08), 0 18px 40px -16px color-mix(in srgb, var(--acc) 42%, transparent), 0 46px 80px -40px color-mix(in srgb, var(--acc) 34%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.28);
 }
-/* Тёмная тема «до скриптов»: системная настройка, чтобы не было вспышки светлого при старте.
-   Палитра — по макету-основе: фон почти чёрный, карточка на два тона светлее, вложенная
-   ещё на тон. Сайдбар здесь НЕ переопределяется: он тёмный в обеих темах (см. :root).
-   Акцент в тёмной теме светлеет (accentFor в lib/prefs.js) — прямой #3458f5 на
-   чёрном давал бы 3.3:1, а поднятый #5f83ff — 5.3:1 на карточке. */
+/* Тёмная тема «до скриптов»: пока App.jsx (useThemeState) не поставил явный
+   data-theme, у <html> нет ни data-theme, ни .dark — единственный признак тёмной
+   системы здесь (:not([data-theme]) = «скрипт ещё не резолвил auto»).
+   Набор токенов — тот же, что в :root[data-theme="dark"] ниже. */
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
+  :root:not([data-theme]) {
     --bg: #060919;
     --sf: #0c1233;
     --sf2: #141a45;
@@ -1632,6 +1625,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     --dock-ring: rgba(255, 255, 255, 0.12);
     --dock-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
     --dock-ink: #9aa3d6;
+  --topbar-bg: color-mix(in srgb, var(--bg) 58%, transparent);
     --glass-bg: rgba(255, 255, 255, 0.08);
     --glass-ring: rgba(255, 255, 255, 0.14);
     --neg: #ff7d90;
@@ -1650,6 +1644,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     --ai-ink: #b9a6f5;
     --ai-solid: #4b3d8f;
     --ai-soft: #292540;              /* фиолетовая подложка макета */
+    --violet: #a78bfa;
+    --cyan: #22d3ee;
     --p1: #26235a;
     --p1b: #1a1840;
     --p2: #173a26;
@@ -1674,23 +1670,9 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
     --shadow-2: 0 20px 60px -20px rgba(0, 0, 0, 0.7);
     --shadow-3: 0 34px 56px -36px rgba(0, 0, 0, 0.85);
 }
-
-:root[data-theme="light"] {
-    --accent: var(--acc);
-    --surface: var(--sf);
-    --surface-2: var(--sf2);
-    --panel: var(--sf);
-    --card-solid: var(--sf);
-    --fill: rgba(255, 255, 255, 0.05);
-    --fill-2: rgba(255, 255, 255, 0.09);
-    --bubble: rgba(255, 255, 255, 0.07);
-    --shadow-1: 0 4px 20px -8px rgba(0, 0, 0, 0.5);
-    --shadow-2: 0 20px 60px -20px rgba(0, 0, 0, 0.7);
-    --shadow-3: 0 34px 56px -36px rgba(0, 0, 0, 0.85);
-  }
 }
 
-:root[data-theme="dark"], .dark {
+:root[data-theme="dark"] {
   --bg: #060919;
   --sf: #0c1233;
   --sf2: #141a45;
@@ -1707,6 +1689,7 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --dock-ring: rgba(255, 255, 255, 0.12);
   --dock-shadow: 0 16px 40px rgba(0, 0, 0, 0.4);
   --dock-ink: #9aa3d6;
+  --topbar-bg: color-mix(in srgb, var(--bg) 58%, transparent);
   --glass-bg: rgba(255, 255, 255, 0.08);
   --glass-ring: rgba(255, 255, 255, 0.14);
   --neg: #ff7d90;
@@ -1725,6 +1708,8 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --ai-ink: #b9a6f5;
   --ai-solid: #4b3d8f;
   --ai-soft: #292540;
+  --violet: #a78bfa;
+  --cyan: #22d3ee;
   --p1: #26235a;
   --p1b: #1a1840;
   --p2: #173a26;
@@ -1788,6 +1773,15 @@ h1.bench-h1, .top h1 { font-size: var(--h1-fs); font-weight: 600; letter-spacing
   --fill: rgba(23, 25, 31, 0.045);
   --fill-2: rgba(23, 25, 31, 0.085);
   --bubble: rgba(23, 25, 31, 0.055);
+}
+/* Явный light при тёмной ОС: раньше вложенное правило в системном media-блоке
+   оставляло здесь тёмные тени (--shadow-1/2/3) — сохраняем вычисление как было. */
+@media (prefers-color-scheme: dark) {
+  :root[data-theme="light"] {
+    --shadow-1: 0 4px 20px -8px rgba(0, 0, 0, 0.5);
+    --shadow-2: 0 20px 60px -20px rgba(0, 0, 0, 0.7);
+    --shadow-3: 0 34px 56px -36px rgba(0, 0, 0, 0.85);
+  }
 }
 
 /* Углы: настройка «углы» масштабирует типовые радиусы карточек, кнопок и полей по всему интерфейсу.
@@ -1926,7 +1920,7 @@ button:focus:not(:focus-visible), input:focus:not(:focus-visible) { outline: non
 .btn-soft:hover { background: var(--fill-2); }
 .btn-dark { @apply btn; background: var(--ink); color: var(--bg); }
 .btn-danger { @apply btn; background: var(--neg-solid); color: #fff; }
-.btn-icon { @apply inline-flex items-center justify-center rounded-full; width: 36px; height: 36px; color: var(--ink); border: 1px solid transparent; background: transparent; transition: transform var(--t-base) var(--ease-spring), background-color var(--t-fast) ease; }
+.btn-icon { @apply inline-flex items-center justify-center rounded-full; width: 38px; height: 38px; color: var(--ink); border: 1px solid transparent; background: transparent; transition: transform var(--t-base) var(--ease-spring), background-color var(--t-fast) ease; }
 .btn-icon:hover { background: var(--fill); transform: scale(1.08); }
 .btn-icon.outlined { border-color: var(--line-2); }
 .btn-icon:active { transform: scale(.92); }
@@ -1956,13 +1950,16 @@ select.input { appearance: none; }
 .editable:hover { border-bottom-color: var(--line-2); }
 
 .seg { @apply inline-flex flex-wrap rounded-full p-[3px] font-medium; font-size: var(--fs-md); border: 1px solid var(--line); background: var(--fill); }
-.seg > button { @apply rounded-full px-3 py-1; color: var(--ink-2); }
+/* одно правило (было два: база здесь + transition в блоке ДВИЖЕНИЯ) */
+.seg > button { @apply rounded-full px-3 py-1; color: var(--ink-2); transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), transform var(--t-fast) var(--ease-spring); }
 .seg > button.on { background: var(--surface-2); color: var(--ink); box-shadow: var(--shadow-1); }
 
-.chip { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium; font-size: var(--fs-xs); border: 1px solid var(--line); color: var(--ink-2); }
-.chip.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+/* Маленький чип (строки календаря, фильтры): та же рамка/актив, что у .chip,
+   но компактный. Работает и один (.chip--sm), и поверх большого (.chip.chip--sm). */
+.chip--sm { @apply inline-flex items-center gap-1 rounded-full px-2.5 py-1 font-medium; font-size: var(--fs-xs); border: 1px solid var(--line); color: var(--ink-2); }
+.chip.on, .chip--sm.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 /* бейдж статуса: без рамки, мягкая заливка. Подписи не мельче 12px (DESIGN.md) */
-.badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-[3px] font-medium; font-size: 12px; background: var(--fill); color: var(--ink-2); }
+.badge { @apply inline-flex items-center gap-1 rounded-full px-2 py-[3px] font-medium; font-size: var(--fs-xs); background: var(--fill); color: var(--ink-2); }
 .badge.accent { background: var(--accent-soft); color: var(--accent); }
 .badge.pos { background: var(--pos-soft); color: var(--pos-ink); }
 .badge.neg { background: var(--neg-soft); color: var(--neg-ink); }
@@ -2030,8 +2027,7 @@ select.input { appearance: none; }
 .nav-item:hover .nav-kbd { opacity: 1; }
 
 /* топ-бар: полупрозрачный, с размытием */
-.topbar { background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-.dark .topbar { background: color-mix(in srgb, var(--bg) 58%, transparent); }
+.topbar { background: var(--topbar-bg); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
 .search-trigger { @apply h-9 items-center gap-2 rounded-full px-3.5 text-[13px]; color: var(--ink-3); background: var(--fill); border: 1px solid transparent; min-width: 200px; transition: border-color var(--t-fast), background-color var(--t-fast); }
 .search-trigger:hover { border-color: var(--line-2); color: var(--ink-2); }
 
@@ -2041,7 +2037,7 @@ select.input { appearance: none; }
 /* min-width:0 + flex — иначе поле шириной 100% не учитывает круглую кнопку отправки
    и текст-подсказка уезжает под неё */
 .composer textarea { background: transparent; border: 0; outline: none; resize: none; flex: 1 1 auto;
-  min-width: 0; width: 100%; font-size: 15px; line-height: 1.5; color: var(--ink); }
+  min-width: 0; width: 100%; font-size: var(--fs-base); line-height: 1.5; color: var(--ink); }
 .composer textarea::placeholder { color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* карточка результата действия ассистента */
@@ -2053,7 +2049,7 @@ select.input { appearance: none; }
 .msg-bot { border-radius: 6px 21px 21px 21px; }
 .msg-bot .md p + p { margin-top: .5em; }
 .md code { font-family: var(--font-mono); font-size: .88em; padding: .1em .35em; border-radius: 6px; background: color-mix(in srgb, currentColor 9%, transparent); }
-.md pre { margin: .6em 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--fill); overflow-x: auto; font-size: 12.5px; line-height: 1.5; }
+.md pre { margin: .6em 0; padding: 10px 12px; border-radius: var(--r-sm); background: var(--fill); overflow-x: auto; font-size: var(--fs-sm); line-height: 1.5; }
 .md pre code { background: none; padding: 0; font-size: inherit; }
 .md ul { margin: .35em 0; padding-left: 1.2em; list-style: disc; }
 .md li + li { margin-top: .15em; }
@@ -2099,7 +2095,7 @@ input[type="datetime-local"].input::-webkit-date-and-time-value, input[type="dat
 @media (max-width: 639px) { .sheet .grid > label { min-width: 0; } .sheet input[type="datetime-local"].input { padding-left: 12px; padding-right: 8px; font-size: var(--fs-base); letter-spacing: -.01em; } }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px) } to { opacity: 1; transform: translateY(0) } }
-.animate-rise { animation: rise .35s var(--ease-out) backwards; }
+.animate-rise { animation: rise var(--t-enter) var(--ease-out) backwards; }
 
 .safe-b { padding-bottom: var(--safe-b); }
 /* iOS PWA: шапка не залезает под часы/чёлку; нижний док сам учитывает safe-area (Dock.jsx) */
@@ -2123,13 +2119,13 @@ input[type="datetime-local"].input::-webkit-date-and-time-value, input[type="dat
 
 /* цвета темы перетекают, а не щёлкают */
 html.theme-anim, html.theme-anim body, html.theme-anim .panel, html.theme-anim .btn, html.theme-anim .pill,
-html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-anim .row, html.theme-anim .sticky {
+html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-anim .chip--sm, html.theme-anim .row, html.theme-anim .sticky {
   transition: background-color .45s var(--ease-io), color .45s var(--ease-io), border-color .45s var(--ease-io) !important;
 }
 
 /* ---------- появление: страница и её части каскадом ---------- */
 @keyframes pageOut { to { opacity: 0; transform: translateY(-6px) } }
-.page-enter { animation: pageIn .42s var(--ease-out) backwards; }
+.page-enter { animation: pageIn var(--t-enter) var(--ease-out) backwards; }
 .page-exit { animation: pageOut .16s var(--ease-io) both; pointer-events: none; }
 @keyframes pageIn { from { opacity: 0; transform: translateY(10px) scale(.995) } to { opacity: 1; transform: none } }
 /* Когда переход между разделами идёт через наш WAAPI crossfade (класс ставит
@@ -2140,7 +2136,7 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 .page-enter.page-cf { animation: none; }
 
 /* дочерние .animate-rise внутри страницы стартуют по очереди (fill — см. правило .r) */
-.page-enter .animate-rise { animation: rise .55s var(--ease-out) backwards; }
+.page-enter .animate-rise { animation: rise var(--t-enter) var(--ease-out) backwards; }
 .page-enter .animate-rise:nth-child(1) { animation-delay: .04s }
 .page-enter .animate-rise:nth-child(2) { animation-delay: .10s }
 .page-enter .animate-rise:nth-child(3) { animation-delay: .16s }
@@ -2155,7 +2151,7 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
    применялась к другим keyframes) — теперь у новой строки имя анимации задано явно,
    а её собственная задержка остаётся от .stagger (она объявлена раньше и не спорит). */
 @keyframes rowIn { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }
-.stagger > * { animation: rowIn .45s var(--ease-out) backwards; }
+.stagger > * { animation: rowIn var(--t-enter) var(--ease-out) backwards; }
 .stagger > *:nth-child(1) { animation-delay: .03s } .stagger > *:nth-child(2) { animation-delay: .07s }
 .stagger > *:nth-child(3) { animation-delay: .11s } .stagger > *:nth-child(4) { animation-delay: .15s }
 .stagger > *:nth-child(5) { animation-delay: .19s } .stagger > *:nth-child(6) { animation-delay: .23s }
@@ -2167,8 +2163,8 @@ html.theme-anim .input, html.theme-anim .seg, html.theme-anim .chip, html.theme-
 .stagger > .arrived { animation-name: arrive; animation-duration: 1.4s; animation-timing-function: var(--ease-out); animation-fill-mode: both; }
 
 /* большой заголовок */
-.page-enter .h1 { animation: rowIn .5s var(--ease-out) backwards; animation-delay: .04s; }
-.page-enter .label:first-child { animation: rowIn .5s var(--ease-out) backwards; }
+.page-enter .h1 { animation: rowIn var(--t-enter) var(--ease-out) backwards; animation-delay: .04s; }
+.page-enter .label:first-child { animation: rowIn var(--t-enter) var(--ease-out) backwards; }
 
 /* ---------- поверхности: карточка чуть приподнимается под курсором, строки подсвечиваются без рывка ---------- */
 a > .panel, button > .panel, .panel.hover { transition: transform var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), border-color var(--t-base); }
@@ -2192,7 +2188,6 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 /* пилюли и сегменты: активное состояние «перетекает», а не щёлкает */
 .pill { transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out), transform var(--t-base) var(--ease-spring); }
 .pill:active { transform: scale(.96); }
-.seg > button { transition: background-color var(--t-base) var(--ease-out), color var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), transform var(--t-fast) var(--ease-spring); }
 .seg > button:active { transform: scale(.97); }
 
 /* переключатель: ползунок с лёгкой пружиной, фон плавно */
@@ -2221,7 +2216,7 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 /* will-change НЕ ставим: он вечно держит композитный слой у каждой кнопки/пилюли
    (на странице их десятки — память + перекомпозиция при каждом кадре перехода).
    Переходы короткие, браузер справляется без предварительного слоя. */
-.btn, .btn-icon, .pill, .chip, .seg > button {
+.btn, .btn-icon, .pill, .chip, .chip--sm, .seg > button {
   transition: transform var(--t-base) var(--ease-spring), background-color var(--t-base) var(--ease-out),
               color var(--t-base) var(--ease-out), border-color var(--t-base) var(--ease-out),
               box-shadow var(--t-base) var(--ease-out), filter var(--t-base) var(--ease-out);
@@ -2247,7 +2242,7 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 .btn-primary:active::after, .btn-dark:active::after { opacity: 1; transform: scale(2); transition: 0s; }
 
 /* пилюли навигации */
-.chip:hover { transform: translateY(-1px); border-color: var(--line-2); }
+.chip:hover, .chip--sm:hover { transform: translateY(-1px); border-color: var(--line-2); }
 
 /* ---------- панели, строки, поля ---------- */
 .panel { transition: transform var(--t-base) var(--ease-out), box-shadow var(--t-base) var(--ease-out), border-color var(--t-base); }
@@ -2285,7 +2280,7 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 
 /* шторка/модалка. Появление — один раз, без fill: держащийся кадр перебил бы инлайновый
    transform, который шторка ставит себе для свайпа (см. блок «шторка» выше). */
-.sheet { animation: rise .38s var(--ease-spring); }
+.sheet { animation: rise var(--t-enter) var(--ease-spring); }
 
 /* скелетоны — мягкое мерцание */
 @keyframes shimmer { 0% { background-position: -400px 0 } 100% { background-position: 400px 0 } }
@@ -2351,7 +2346,7 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 .swipe-bg.left  { justify-content: flex-end;   background: var(--neg-solid); }
 .swipe-bg.show { opacity: 1; }
 /* кнопка растёт вместе со сдвигом; иконка держится у края строки, при «полном» свайпе — подпрыгивает */
-.swipe-act { display: flex; flex-direction: row; align-items: center; gap: 4px; min-width: 84px; font-size: 12px; font-weight: 600; letter-spacing: -.01em; color: #fff; background: transparent; border: 0; padding: 0; }
+.swipe-act { display: flex; flex-direction: row; align-items: center; gap: 4px; min-width: 84px; font-size: var(--fs-xs); font-weight: 600; letter-spacing: -.01em; color: #fff; background: transparent; border: 0; padding: 0; }
 .swipe-act > * { flex: none; }
 .swipe-act span { display: none; }
 .swipe-act::after { content: none; }
@@ -2393,15 +2388,15 @@ a:active > .panel, button:active > .panel { transform: translateY(0); transition
 /* ---------- тёмная тема: глубокий чёрно-синий (реф ver3: #060919), спокойный ----------
    Страница градиентная (приглушённый радиальный блик справа сверху → #040610/#060919/#0c1233),
    карточки почти не нужны: списки идут по фону с волосяными линиями. */
-.dark body {
+:root[data-theme="dark"] body {
   background-color: var(--bg);
   background-image:
     radial-gradient(110% 55% at 90% 0%, #232a6e 0%, rgba(35, 42, 110, 0) 60%),
     linear-gradient(175deg, #040610 0%, #060919 55%, #0c1233 100%);
   background-attachment: fixed;
 }
-.dark #root { position: relative; z-index: 1; }
-.dark .panel { background: linear-gradient(180deg, rgba(236,236,233,.03), rgba(236,236,233,.01)), var(--surface); }
+:root[data-theme="dark"] #root { position: relative; z-index: 1; }
+:root[data-theme="dark"] .panel { background: linear-gradient(180deg, rgba(236,236,233,.03), rgba(236,236,233,.01)), var(--surface); }
 
 /* ---------- цифры: главные суммы плотнее и тяжелее ---------- */
 .num { font-feature-settings: 'tnum', 'cv11', 'ss01'; }
@@ -2450,7 +2445,7 @@ html { zoom: var(--ui-zoom); }
   .top > .hr > .seg, .pg .top .hr > .seg { flex: 0 1 auto; flex-wrap: nowrap; }
   .head-actions > .seg, .head-actions > .sg { flex-wrap: nowrap; }
   .head-actions > .nav-group-btn { display: flex; }
-  .head-actions > .head-primary { height: var(--tap); font-size: 14.5px; box-shadow: 0 10px 24px -12px var(--accent); }
+  .head-actions > .head-primary { height: var(--tap); font-size: var(--fs-base); box-shadow: 0 10px 24px -12px var(--accent); }
 }
 
 /* ---------- композер на главной: тихий градиентный ореол ---------- */
@@ -2472,8 +2467,8 @@ html { zoom: var(--ui-zoom); }
 .composer-hero:focus-within { box-shadow: var(--shadow-1); border-color: transparent; }
 .composer-hero.thinking::before { animation: ga-spin 2.4s linear infinite; opacity: 1; }
 @keyframes ga-spin { to { --ga: 360deg; } }
-.dark .composer-hero::after { opacity: .45; }
-.dark .composer-hero:hover::after, .dark .composer-hero:focus-within::after { opacity: .85; }
+:root[data-theme="dark"] .composer-hero::after { opacity: .45; }
+:root[data-theme="dark"] .composer-hero:hover::after, :root[data-theme="dark"] .composer-hero:focus-within::after { opacity: .85; }
 .no-motion .composer-hero::before, .no-motion .composer-hero::after { transition: none; animation: none; }
 
 /* Telegram Mini App: сайт открыт внутри Telegram. Сверху — шапка Telegram (безопасная зона считается им самим),
@@ -2490,7 +2485,7 @@ html.in-telegram body { overscroll-behavior-y: none; }
   /* Выделять текст в кнопке при долгом тапе не нужно — это выглядит как баг нативного приложения.
      Исключения — поля ввода, редактируемые области и тексты, которые нужно копировать:
      ответ ассистента (.md), числовые значения (.num-r) и всё, что помечено [data-copyable]. */
-  button, .row, .row-hover, .rowi, .note, .nav-item, .nav-group-title, .pill, .chip, .seg, .badge,
+  button, .row, .row-hover, .rowi, .note, .nav-item, .nav-group-title, .pill, .chip, .chip--sm, .seg, .badge,
   .label, .idx, .h1, .h2, .h3, .h4, .display, .btn, .btn-icon, .swatch, .pa-sw, .sw i, .sw button,
   .more-row, .cfg {
     -webkit-user-select: none; user-select: none;
@@ -2570,7 +2565,7 @@ aside.sidebar-bench, aside { height: calc(100dvh - var(--app-pad) * 2); }
 
 /* ---------- 3. Кнопки: одна высота, одно радиальное свечение, одна волна ---------- */
 .btn, .btn-primary, .btn-ghost, .btn-soft, .btn-dark, .btn-danger { min-height: 38px; }
-.btn-icon { width: 38px; height: 38px; }
+/* размер икон-кнопки — только в базе .btn-icon (38px); тач/телефон — var(--tap), см. ниже */
 /* Главное действие на телефоне — на всю ширину строки действий */
 .head-primary { flex: none; }
 
@@ -2711,7 +2706,7 @@ select.input option { background: var(--surface); color: var(--ink); }
   .btn-sm { min-height: var(--tap); padding-inline: 14px; }
   .btn-lg { min-height: var(--tap-lg); }
   .btn-icon { width: var(--tap); height: var(--tap); }
-  .pill, .chip { min-height: var(--tap-sm); padding-block: 8px; }
+  .pill, .chip, .chip--sm { min-height: var(--tap-sm); padding-block: 8px; }
   .seg > button { min-height: var(--tap-sm); padding: 8px 14px; }
   .sg span, .sg button { min-height: var(--tap-sm); padding: 8px 14px; }
   .ib, .av { width: var(--tap); height: var(--tap); }
@@ -2734,12 +2729,12 @@ select.input option { background: var(--surface); color: var(--ink); }
   input[type="password"], input[type="email"], input[type="url"],
   input[type="datetime-local"], input[type="date"], input[type="time"], textarea, select { font-size: 16px !important; }
   /* активные состояния вместо hover: короткая анимация отклика */
-  .btn:active, .chip:active, .pill:active, .seg > button:active, .sg span:active, .ib:active, .av:active { transform: scale(.96); }
+  .btn:active, .chip:active, .chip--sm:active, .pill:active, .seg > button:active, .sg span:active, .ib:active, .av:active { transform: scale(.96); }
   .row-hover:active, .rowi:active, .note:active { background: var(--fill-2); }
 }
 /* На устройствах без hover не показываем эффекты наведения — они «залипают» после тапа */
 @media (hover: none) {
-  .c:hover, .btn:hover, .btn-primary:hover, .btn-icon:hover, .chip:hover, .pill:hover,
+  .c:hover, .btn:hover, .btn-primary:hover, .btn-icon:hover, .chip:hover, .chip--sm:hover, .pill:hover,
   .seg > button:hover, .sg span:hover, .sg button:hover, .chips span:hover, .chips button:hover,
   .row-hover:hover, .rowi:hover, .note:hover, .comp:hover, .comp:hover .send,
   .cal b:hover:not(.o), .cal2 b:hover:not(.o), .swatch:hover, .pa-sw:hover,
@@ -2856,6 +2851,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 @media (pointer: coarse) {
   .seg > button,
   .chip,
+  .chip--sm,
   .chips > button,
   .pl { min-height: var(--tap); }
   .sg > button { min-height: var(--tap); }
@@ -3048,8 +3044,19 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   .top .btn-soft {
     min-height: 38px;
   }
+  /* зоны нажатия: икон-кнопки и маленькие кнопки — не ниже --tap;
+     десктоп не тронут (правило только ≤820px, pointer:coarse дублирует для тача) */
+  .btn-icon {
+    width: var(--tap);
+    height: var(--tap);
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+  .btn-sm, .top .btn-sm {
+    min-height: var(--tap);
+  }
   /* чипы фильтров — ниже, но всё ещё 34+ для пальца */
-  .chip {
+  .chip, .chip--sm {
     min-height: 34px;
     font-size: var(--fs-md);
   }
@@ -3091,7 +3098,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   --liq-violet: color-mix(in srgb, var(--acc) 55%, #ffffff);
   --liq-amber: #ffb347;
 }
-:root[data-theme="dark"] #p-today, .dark #p-today {
+:root[data-theme="dark"] #p-today {
   --liq-g1: rgba(255, 255, 255, .15);
   --liq-g2: rgba(255, 255, 255, .03);
   --liq-hl: rgba(255, 255, 255, .4);
@@ -3099,7 +3106,8 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   --liq-tr: rgba(255, 255, 255, .09);
 }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) #p-today {
+  /* до скриптов (нет data-theme): те же значения, что в :root[data-theme="dark"] выше */
+  :root:not([data-theme]) #p-today {
     --liq-g1: rgba(255, 255, 255, .15);
     --liq-g2: rgba(255, 255, 255, .03);
     --liq-hl: rgba(255, 255, 255, .4);
@@ -3141,14 +3149,14 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 .aur .liq-o2 { width: 110px; height: 110px; top: 62%; right: 6%; animation-delay: -5s; }
 /* светлая тема: те же пятна, но мягче — на #e1e5fb полные --bo заливали фон сиреневым
    (в моках ver3/ver6 фон остаётся пастельным, цвет живёт только по краям) */
-:root[data-theme="light"] .aur .liq-bl, .light .aur .liq-bl { --bm: .62; }
+:root[data-theme="light"] .aur .liq-bl { --bm: .62; }
 @media (prefers-color-scheme: light) {
-  :root:not([data-theme="dark"]) .aur .liq-bl { --bm: .62; }
+  :root:not([data-theme]) .aur .liq-bl { --bm: .62; }
 }
 /* тёмная тема: те же пятна, но ярче — на #060919 приглушённые значения читались как грязь */
-:root[data-theme="dark"] .aur .liq-bl, .dark .aur .liq-bl { --bm: 1.4; }
+:root[data-theme="dark"] .aur .liq-bl { --bm: 1.4; }
 @media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) .aur .liq-bl { --bm: 1.4; }
+  :root:not([data-theme]) .aur .liq-bl { --bm: 1.4; }
 }
 /* локальный фон Today.jsx больше не нужен — общий уже в .aur; прячем, чтобы не двоилось */
 #p-today .liq-bg { display: none; }
@@ -3347,7 +3355,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   #p-today .liq-missed .rowi:hover { transform: translateX(6px) scale(1.01); }
 }
 #p-today .liq-missed .amt {
-  font-size: 13px; font-weight: 600; white-space: nowrap;
+  font-size: var(--fs-md); font-weight: 600; white-space: nowrap;
   color: #fff; background: linear-gradient(135deg, #ff7a9c, var(--liq-rose));
   padding: 6px 13px; border-radius: 99px;
   box-shadow: 0 6px 18px -4px var(--liq-rose), inset 0 1px 1px rgba(255, 255, 255, .5);
@@ -3371,7 +3379,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
   display: flex; flex-direction: column; gap: 10px;
 }
 #p-today .liq-chip {
-  align-self: flex-start; font: inherit; font-size: 12px; padding: 8px 14px;
+  align-self: flex-start; font: inherit; font-size: var(--fs-xs); padding: 8px 14px;
   border-radius: 99px; border: 0; cursor: pointer; color: var(--ink);
   background: linear-gradient(100deg, var(--liq-g1) 30%, rgba(255, 255, 255, .5) 50%, var(--liq-g1) 70%) 0 0 / 250% 100%;
   box-shadow: inset 0 1px 1px var(--liq-hl);
@@ -3447,7 +3455,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
     backdrop-filter: blur(14px);
     box-shadow: inset 0 1px 1px var(--glass-ring);
     color: var(--ink);
-    font-size: 11px;
+    font-size: var(--fs-xs);
     font-weight: 500;
     opacity: 0;
     transition: opacity .2s;
@@ -3664,7 +3672,7 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 }
 
 /* --- чипы и переключатели --- */
-.chip.on { box-shadow: 0 0 16px -2px color-mix(in srgb, var(--accent) 55%, transparent); }
+.chip.on, .chip--sm.on { box-shadow: 0 0 16px -2px color-mix(in srgb, var(--accent) 55%, transparent); }
 .switch.on { box-shadow: 0 0 14px -3px color-mix(in srgb, var(--accent) 65%, transparent); }
 
 /* --- шкалы и кольца --- */
@@ -3712,6 +3720,67 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 /* --- живое состояние помодоро и точка статуса в шапке --- */
 .pomo-head.live { box-shadow: 0 0 14px -6px color-mix(in srgb, var(--acc) 70%, transparent); }
 .st-head .dot { box-shadow: 0 0 8px -1px currentColor; }
+
+/* =====================================================================
+   КОНТРАКТ wave2: классы ставит JSX (параллельный агент), имена фиксированы.
+   .glass — общее «стекло» десктопных карточек из страничных файлов
+   (tg-list/tg-card/fg-card: одинаковый блок 1:1). Десктоп-only, как исходники:
+   на телефоне правило не применяется и лёгкая карточка телефона не меняется.
+   .glass-strong — стекло поповера (tg-pp 1:1): блюр 26px, глубокая тень.
+   .stagger — каскад появления rise .22s var(--ease-out), шаг через --i (70мс).
+   .modal-in — появление модалки/поповера (тот же rise .22s из инлайн-стилей).
+   .progress > i — градиентная заливка прогресса (former inline в Aims/FinanceSmart).
+   .btn-icon--sm (28px) / .input--sm — компактные варианты (комбинацией с базой).
+   ===================================================================== */
+@media (min-width: 821px) {
+  .glass {
+    background:
+      linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
+      var(--sf);
+    border: 1px solid var(--glass-ring);
+    -webkit-backdrop-filter: blur(14px) saturate(150%);
+    backdrop-filter: blur(14px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      inset 0 0 0 1px var(--glass-ring),
+      var(--shadow-1);
+  }
+  /* hover и раньше держал стеклянную тень (страничное правило было сильнее
+     .c:hover) — сторожок сохраняет это для связки .c.glass, подъём не трогаем */
+  .c.glass:hover {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.5),
+      inset 0 0 0 1px var(--glass-ring),
+      var(--shadow-1);
+  }
+}
+.glass-strong {
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
+    var(--sf);
+  border: 1px solid var(--glass-ring);
+  -webkit-backdrop-filter: blur(26px) saturate(150%);
+  backdrop-filter: blur(26px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 24px 50px -12px rgba(0, 0, 0, 0.35);
+}
+.c.glass-strong:hover {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    0 24px 50px -12px rgba(0, 0, 0, 0.35);
+}
+/* Маленькая икон-кнопка 28px (class="btn-icon btn-icon--sm") */
+.btn-icon--sm { width: 28px; height: 28px; min-width: 28px; min-height: 28px; }
+/* Маленькое поле (class="input input--sm") */
+.input--sm { min-height: var(--tap-sm); font-size: var(--fs-sm); padding-top: 6px; padding-bottom: 6px; }
+/* Каскад появления: rise .22s var(--ease-out), задержка — calc(var(--i, 0) * 70ms) */
+.stagger { animation: rise .22s var(--ease-out) backwards; animation-delay: calc(var(--i, 0) * 70ms); }
+/* Появление модалки/поповера */
+.modal-in { animation: rise .22s var(--ease-out) backwards; }
+/* Прогресс на <i>: градиент + то же свечение, что у .progress > div */
+.progress > i { display: block; height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--acc), color-mix(in srgb, var(--acc) 55%, #ffffff)); box-shadow: 0 0 10px -1px color-mix(in srgb, var(--accent) 70%, transparent); transition: width .9s var(--ease-out); }
+.progress.dark > i { background: var(--ink); }
 
 /* --- карточки: мягкий внешний ореол на hover (не прожектор за курсором) --- */
 .glass-card:hover { box-shadow: inset 0 0 0 1px var(--glass-ring), var(--shadow-2), var(--glow-acc); }

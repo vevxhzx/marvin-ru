@@ -12,7 +12,7 @@
 
 import { useEffect, useMemo, useState, useRef, Children, cloneElement, useId } from 'react'
 import { api, money, shortDate, toLocalISO, catColor, catLabel, parseNum } from '../lib/api'
-import { Sheet, Field, Empty, Money, Rowi, Skeleton, useToast, Confirm } from '../components/ui'
+import { Sheet, Field, Empty, Money, Rowi, Skeleton, useToast, Confirm, PageHead, Card, ErrorState } from '../components/ui'
 import { BigMoney, HeroLine, useNumFormats, useReveal } from '../components/Widgets'
 import CashChart from '../components/CashChart'
 import LifeRegime from '../components/LifeRegime'
@@ -29,7 +29,7 @@ import '../fin-glass.css'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 /* Две раскладки — одна разметка. На десктопе (≥821px) раздел становится поверхностью-карточкой
    (--sf, волосяная рамка --line, радиус --r-lg, отступы --card-pad). На телефоне (≤820px) это
@@ -103,7 +103,7 @@ const MONTHS = {
    заголовком), поэтому класс .c остаётся и на десктопе, и на телефоне. */
 function Block({ title, note, action, children, className = '' }) {
   return (
-    <section className={`${CARD_M} ${className}`} data-reveal>
+    <Card className={`${CARD_M} ${className}`} data-reveal>
       <div className="hd flex-wrap">
         <div className="min-w-0"><h2 className="trunc" title={title}>{title}</h2></div>
         <div className="flex items-center gap-2">
@@ -112,7 +112,7 @@ function Block({ title, note, action, children, className = '' }) {
         </div>
       </div>
       {children}
-    </section>
+    </Card>
   )
 }
 
@@ -317,6 +317,7 @@ export default function Finance() {
   const [techniquesData, setTechniquesData] = useState(null)
   const [forecast, setForecast] = useState(null)
   const [budgets, setBudgets] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   // Режим жизни (services/regime.py): по умолчанию выключен, цифры считаются как раньше
   const [regime, setRegime] = useState(null)
 
@@ -356,6 +357,8 @@ export default function Finance() {
         api.get('/api/finance/regimes').catch(() => null),   // режим жизни (по умолчанию выключен)
       ])
       if (s) setSum(s)
+      // сводка и прогноз оба не ответили — показывать «пустые нули» молча нельзя
+      setLoadErr(!s && !fc)
       setTxs(t || [])
       setAccounts(accs || [])
       setDebts(d || [])
@@ -655,16 +658,11 @@ export default function Finance() {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-fin" style={pageAcc.style} ref={reveal}>
-      {/* Шапка экрана: заголовок, что показываем, и действия справа */}
-      <header className="top" data-reveal>
-        <div className="min-w-0">
-          <h1>{t('nav.finance')}</h1>
-          <p className="sub">{tabLine}</p>
-        </div>
-        <div className="hr">
-          {/* Переключатель периода — в шапке: период режет данные ВСЕХ вкладок (обзор, операции,
-              счета, долги), а не только списка операций. Тот же сегмент .sg в .top, что на
-              задачах и календаре — и по нему ходят проверки e2e (#p-fin .top .sg[title^="период"]). */}
+      {/* Шапка через PageHead: .sg периодов в .top для e2e (#p-fin .top .sg). */}
+      <PageHead
+        title={t('nav.finance')}
+        sub={tabLine}
+        right={<>
           <div className={`sg fg-seg ${SEG_ROW_M}`} role="group" aria-label={t('fin.period_tip')} title={t('fin.period_tip')}>
             {[[7, 'mem.d7'], [30, 'mem.d30'], [90, 'fin.d90'], [0, 'fin.d_all']].map(([v, key]) => (
               <button key={v} type="button" className={days === v ? 'on' : ''} aria-pressed={days === v} onClick={() => setDays(v)}>
@@ -672,23 +670,18 @@ export default function Finance() {
               </button>
             ))}
           </div>
-          {/* Настройка разделов — одна точка входа: на десктопе кнопка с подписью,
-              на телефоне та же кнопка иконкой (aria-label и тултип на месте). */}
           {tab === 'overview' && (
             <button type="button" className={`btn-soft btn-sm ${phone ? '!px-2.5' : ''}`} onClick={() => setCardsEdit((v) => !v)}
               title={t('tk.layout_tip')} aria-label={t('fin.configure_cards')}>
               {phone ? <Settings2 size={15} /> : t('tk.layout')}
             </button>
           )}
-          {/* Выписка — не в шапке: на телефоне она живёт рядом с фильтрами списка
-              операций (там, где выгрузка и нужна), поэтому в шапке остаётся одно действие. */}
           {!phone && (
             <button type="button" className="btn-soft btn-sm" onClick={exportCSV}
               title={t('fin.csv_dl')} aria-label={t('fin.csv_dl')}>
               {t('fin.statement')}
             </button>
           )}
-          {/* На ПК добавление в шапке; на телефоне — «+» в доке */}
           <button
             type="button"
             className="btn btn-sm head-primary fg-add max-[820px]:!hidden"
@@ -698,10 +691,12 @@ export default function Finance() {
           >
             {t(tab === 'accounts' ? 'fin.add_account' : tab === 'debts' ? 'fin.add_debt' : tab === 'recurring' ? 'fin.add_pay' : tab === 'goals' ? 'fin.add_goal' : 'fin.add_tx')}
           </button>
-        </div>
-      </header>
+        </>}
+      />
 
       {/* Режим жизни перенесён в «Настройки» — на главной финансов его быть не должно */}
+
+      {loadErr && <div className="mt-3"><ErrorState onRetry={load} /></div>}
 
       {/* Вкладки разделов — прямой ребёнок .pg (без обёртки): на них завязаны проверки e2e
           (#p-fin > .sg). Спокойный сегмент, активная вкладка читается заливкой. */}
@@ -723,7 +718,7 @@ export default function Finance() {
           {/* Герой: баланс крупно и три строки мелким под ним — без карточек на каждое число */}
           {/* Герой: баланс крупно и три строки мелким под ним — на телефоне и на ПК
               одна и та же акцентная карточка (герой везде акцентный). */}
-          <section className={`c hero fg-hero col-span-12 min-[821px]:col-span-7 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
+          <Card variant="hero" className={`fg-hero col-span-12 min-[821px]:col-span-7 ${CARD_M_LIGHT} ${HERO_M}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.c_balance')}</h2></div>
               <small className={`trunc ${SMALL_M}`}>{t('fin.all_accounts')}</small>
@@ -747,11 +742,11 @@ export default function Finance() {
                 <HeroLine label={t('td.to_zero', { n: forecast.runway_days })} value={forecast?.min_balance != null ? fmt.money(forecast.min_balance) : '—'} />
               )}
             </div>
-          </section>
+          </Card>
 
           {/* Запас хода: кольцо тиков из референса (30 тиков, статичный инлайн-SVG).
               Значения переиспользуются: дни — forecast.runway_days, сумма — balance. */}
-          <section className={`c fg-card fg-runway col-span-12 min-[821px]:col-span-5 ${CARD_M_LIGHT}`} data-reveal>
+          <Card className={`fg-card glass fg-runway col-span-12 min-[821px]:col-span-5 ${CARD_M_LIGHT}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('tech.tab_runway')}</h2></div>
               <small className="trunc">{forecast?.runway_days != null ? t('td.to_zero', { n: forecast.runway_days }) : t('fc.by_pace')}</small>
@@ -785,10 +780,10 @@ export default function Finance() {
                 <span className="fg-ring-note">{t('fin.all_accounts')} · {fmt.money(balance)}</span>
               </div>
             </div>
-          </section>
+          </Card>
 
           {/* Один график на экран: касса на N дней, интерактивный, с подсказками ChartTip */}
-          <section className={`c chart fg-card fg-cash mt-4 ${CARD_M_LIGHT} col-span-12`} data-reveal>
+          <Card variant="chart" className={`fg-card glass fg-cash mt-4 ${CARD_M_LIGHT} col-span-12`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0">
                 <h2 className="trunc">{t('fin.cash_on', { n: days || t('common.all'), days: t('run.days_n', { count: days }) })}</h2>
@@ -803,7 +798,7 @@ export default function Finance() {
               ? <CashChart f={forecast} height={220} txs={txs} legend={false} />
               : <Skeleton h={220} radius="var(--r-md)" />}
             <div className="lg">
-              <span><i style={{ background: '#ff9f5c' }}></i>{t('chart.fact')}</span>
+              <span><i style={{ background: 'var(--warn)' }}></i>{t('chart.fact')}</span>
               <span><i style={{ background: 'var(--accent)' }}></i>{t('chart.forecast')}</span>
               <span><i style={{ border: '1.5px dashed var(--ink3)', background: 'none' }}></i>{t('chart.zero')}</span>
               {forecast?.runway_days != null && (
@@ -820,7 +815,7 @@ export default function Finance() {
                 {' · '}{t('fin.pessimistic', { n: forecast.scenarios.pessimistic.delay_days ?? 0 })} <b className={`num ${forecast.scenarios.pessimistic.ok ? '' : 'neg'}`}>{money(forecast.scenarios.pessimistic.low)}</b>
               </div>
             )}
-          </section>
+          </Card>
 
           {/* Дальше — разделы-строки. Порядок и состав — кнопкой «настроить» */}
           <div className="contents">
@@ -834,7 +829,7 @@ export default function Finance() {
               /* Поток денег: четыре строки-числа и полоса долей */
               if (id === 'flow') {
                 return (
-                  <section key="flow" data-reveal className={`relative fg-card fg-flow col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="flow" data-reveal className={`relative fg-card glass fg-flow col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.flow_month')}</h2></div>
@@ -869,7 +864,7 @@ export default function Finance() {
               /* Лимиты по категориям: строки с полосками */
               if (id === 'budgets') {
                 return (
-                  <section key="budgets" data-reveal className={`relative fg-card fg-limits col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="budgets" data-reveal className={`relative fg-card glass fg-limits col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.budgets_month')}</h2></div>
@@ -930,7 +925,7 @@ export default function Finance() {
                 nextPayments.reduce((s, r) => s + (daysUntil(r.on) === i ? Number(r.amount) || 0 : 0), 0))
               const stripMax = Math.max(1, ...stripByDay)
               return (
-                <section key="upcoming" data-reveal className={`relative fg-card fg-upcoming col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                <section key="upcoming" data-reveal className={`relative fg-card glass fg-upcoming col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                   {ctl}
                   <div className="hd flex-wrap">
                     <div className="min-w-0"><h2 className="trunc">{t('fin.c_upcoming')}</h2></div>
@@ -1159,7 +1154,7 @@ export default function Finance() {
       {/* ---------------- СЧЕТА (ver6: hero с итогом + лаймовый бар + карточки) ---------------- */}
       {tab === 'accounts' && (
         <div className="bento mt-4">
-          <section className={`c fg-card fg-acc-hero col-span-12 ${CARD_M_LIGHT}`} data-reveal>
+          <section className={`c fg-card glass fg-acc-hero col-span-12 ${CARD_M_LIGHT}`} data-reveal>
             <div className="hd flex-wrap">
               <div className="min-w-0"><h2 className="trunc">{t('fin.tab_accounts')}</h2></div>
               <small className="trunc">{t('fin.n_accounts', { count: accounts.length })}</small>
@@ -1194,7 +1189,7 @@ export default function Finance() {
                 const kindLabel = isDebt ? L.credit_card : ({ card: t('acc.card'), cash: t('acc.cash2'), bank: t('graph.one_account'), savings: t('acc.deposit'), crypto: t('acc.crypto') })[atype] || t('graph.one_account')
                 const f = accFlow[a.name] || { in: 0, out: 0 }
                 return (
-                  <section className={`c fg-card fg-acct ${CARD_M_LIGHT}`} data-reveal key={a.id || a.name}>
+                  <section className={`c fg-card glass fg-acct ${CARD_M_LIGHT}`} data-reveal key={a.id || a.name}>
                     <div className="flex items-center gap-2.5">
                       <span className="fg-chip" aria-hidden="true"><Icon size={18} /></span>
                       <span className="t min-w-0 flex-1">

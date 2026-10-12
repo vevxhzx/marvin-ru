@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Отмена — глобальная с пометкой канала; pay_ask понимает имена заказов.
 TDD: сначала красные."""
 import asyncio
@@ -6,7 +6,6 @@ import os
 
 os.environ.setdefault("ASSISTANT_TEST", "1")
 
-from tests.test_core import fresh_db  # noqa: F401  (временная БД)
 
 
 def _offline(monkeypatch):
@@ -34,7 +33,7 @@ def _h(text, ch="tg"):
     return asyncio.run(agent.handle(text, ch))
 
 
-def test_undo_other_channel_asks_globally(monkeypatch):
+def test_undo_other_channel_asks_globally(fresh_db, monkeypatch):
     """Трата в одном канале, «отмени» в другом — спрашивает про неё, а не отфутболивает."""
     _offline(monkeypatch)
     from core.services import finance
@@ -48,7 +47,7 @@ def test_undo_other_channel_asks_globally(monkeypatch):
     assert finance.list_transactions(30, 100) == []
 
 
-def test_undo_truly_nothing(monkeypatch):
+def test_undo_truly_nothing(fresh_db, monkeypatch):
     _offline(monkeypatch)
     r = _h("отмени", "tg")
     assert "нечего" in r.text
@@ -59,7 +58,7 @@ def _make_order(title="Кот прод"):
     return orders.add_order(title, price=10_000)
 
 
-def test_pay_ask_accepts_order_name(monkeypatch):
+def test_pay_ask_accepts_order_name(fresh_db, monkeypatch):
     """«это заказ кот прод» после вопроса про аванс — пишет оплату, а не теряет её."""
     _offline(monkeypatch)
     _make_order()
@@ -70,7 +69,7 @@ def test_pay_ask_accepts_order_name(monkeypatch):
     assert "10 000" in r2.text.replace(" ", " ")
 
 
-def test_pay_ask_accepts_bare_name(monkeypatch):
+def test_pay_ask_accepts_bare_name(fresh_db, monkeypatch):
     _offline(monkeypatch)
     _make_order()
     _h("пришёл аванс 5000 за ролик", "tg")
@@ -78,7 +77,7 @@ def test_pay_ask_accepts_bare_name(monkeypatch):
     assert "order_payment" in r2.actions
 
 
-def test_pay_ask_unknown_name_is_honest(monkeypatch):
+def test_pay_ask_unknown_name_is_honest(fresh_db, monkeypatch):
     _offline(monkeypatch)
     _make_order()
     _h("пришёл аванс 5000 за ролик", "tg")

@@ -27,6 +27,10 @@ SPEAKER = str(getattr(_TTS, "speaker", "eugene") or "eugene")        # silero: a
 EDGE_VOICE = str(getattr(_TTS, "edge_voice", "ru-RU-DmitryNeural") or "ru-RU-DmitryNeural")
 PIPER_VOICE = str(getattr(_TTS, "piper_voice", "ru_RU-denis-medium") or "ru_RU-denis-medium")  # piper: ru_RU-denis/dmitri/irina/ruslan-medium
 PIPER_MODEL = str(getattr(_TTS, "piper_model", "") or "")  # свой .onnx; пусто — data/models/piper/<голос>.onnx
+PIPER_LENGTH = float(getattr(_TTS, "piper_length", 1.0) or 1.0)  # темп: 1.0 норма, 1.15–1.3 медленнее и чётче (ударения medium-голосов)
+PIPER_NOISE = getattr(_TTS, "piper_noise", None)                 # выразительность: None — дефолт модели
+PIPER_NOISE_W = getattr(_TTS, "piper_noise_w", None)             # разброс длительностей: None — дефолт модели
+PIPER_TAIL_SEC = 0.3  # пауза в конце фразы: Piper отдаёт звук встык (0 мс тишины) — без неё кодек/плеер подъедают последний слог
 
 # Голоса, за которыми — «она»: тексты бота о себе идут в женском роде («записала»).
 # Список по VOICES (routers/pc.py): piper denis/dmitri — м, irina — ж, ruslan — м.
@@ -367,6 +371,36 @@ def _piper_available() -> bool:
 _PIPER_VOICES: dict[str, object] = {}  # onnx-путь → загруженный PiperVoice (модель ~60 МБ, грузим раз)
 
 
+def _clamp_length(x) -> float:
+    """Темп в разумных рамках: медленнее 2.0 — зануда, быстрее 0.5 — скороговорка."""
+    try:
+        return min(2.0, max(0.5, float(x)))
+    except (TypeError, ValueError):
+        return 1.0
+
+
+def _piper_syn_config():
+    """SynthesisConfig из настроек (темп/выразительность) или None — тогда дефолт модели."""
+    length = _clamp_length(PIPER_LENGTH)
+    try:
+        from piper.config import SynthesisConfig
+    except ImportError:
+        return None
+    kw = {}
+    if abs(length - 1.0) > 1e-9:
+        kw["length_scale"] = length
+    for key, attr in (("noise_scale", PIPER_NOISE), ("noise_w_scale", PIPER_NOISE_W)):
+        try:
+            kw[key] = float(attr) if attr is not None else None
+        except (TypeError, ValueError):
+            kw[key] = None
+        if kw[key] is None:
+            del kw[key]
+    if not kw:
+        return None
+    return SynthesisConfig(**kw)
+
+
 def _piper_voice():
     """Загруженный голос (кэш на процесс). CLI `python -m piper` больше не используем:
     на Windows он молча отдавал пустой wav (wave.Error: channels not specified)."""
@@ -392,11 +426,12 @@ def _piper_wave(text: str):
     import wave as wavmod
     import numpy as np
     voice = _piper_voice()
+    syn_config = _piper_syn_config()
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
         tmp_wav = tmp.name
     try:
         with wavmod.open(tmp_wav, "wb") as w:
-            voice.synthesize_wav(text, w)
+            voice.synthesize_wav(text, w, syn_config=syn_config)
         with wavmod.open(tmp_wav, "rb") as w:
             n, sw, ch, sr = w.getnframes(), w.getsampwidth(), w.getnchannels(), w.getframerate()
             if n == 0:
@@ -413,6 +448,8 @@ def _piper_wave(text: str):
         if sr != SAMPLE_RATE:  # 22050 → SAMPLE_RATE линейной интерполяцией (без scipy)
             idx = np.linspace(0, len(wave) - 1, int(round(len(wave) * SAMPLE_RATE / sr)))
             wave = np.interp(idx, np.arange(len(wave)), wave).astype(np.float32)
+        tail = np.zeros(int(round(SAMPLE_RATE * PIPER_TAIL_SEC)), dtype=np.float32)
+        wave = np.concatenate([wave, tail])
         return wave
     finally:
         Path(tmp_wav).unlink(missing_ok=True)
@@ -460,7 +497,8 @@ _CACHE_VERSION = "v2"                   # v1 отравлен: упавший pi
 def _cache_path(spoken: str, suffix: str, engine: str | None = None) -> Path:
     import hashlib
     eng = resolve_engine(engine)  # local+edge → silero: кэш не должен отдавать чужой движок
-    key = f"{_CACHE_VERSION}|{eng}|{SPEAKER}|{EDGE_VOICE}|{PIPER_VOICE}|{PIPER_MODEL}|{SAMPLE_RATE}|{suffix}|{spoken}".encode("utf-8")
+    tune = f"{PIPER_LENGTH}|{PIPER_NOISE}|{PIPER_NOISE_W}" if eng == "piper" else ""
+    key = f"{_CACHE_VERSION}|{eng}|{SPEAKER}|{EDGE_VOICE}|{PIPER_VOICE}|{PIPER_MODEL}|{tune}|{SAMPLE_RATE}|{suffix}|{spoken}".encode("utf-8")
     return CACHE_DIR / (hashlib.sha1(key).hexdigest()[:20] + (suffix or ".ogg"))
 
 

@@ -22,13 +22,13 @@ export function Goals({ goals, onChange, onErr, onOk }) {
   const [del, setDel] = useState(null)
   const [showClosed, setShowClosed] = useState(false)
   const [closed, setClosed] = useState([])
-  useEffect(() => { if (showClosed) api.goals(true).then((all) => setClosed(all.filter((g) => g.closed))).catch(() => {}) }, [showClosed, goals])
+  useEffect(() => { if (showClosed) api.goals(true).then((all) => setClosed(all.filter((g) => g.closed))).catch((e) => onErr?.(e)) }, [showClosed, goals])
   const list = goals || []
   const totalSaved = list.reduce((s, g) => s + g.saved, 0)
   const perMonth = list.reduce((s, g) => s + (g.per_month || 0), 0)
   return (
     <Section title={t('gl.title')} idx={list.length} hint={t(list.length ? 'gl.hint' : 'gl.hint_empty', { saved: money(totalSaved), per: perMonth ? t('gl.per_month_tail', { per: money(perMonth) }) : '' })}
-      action={<button className="btn-ghost !py-1.5 !text-[13px]" onClick={() => setSheet('new')}><Plus size={14} /> {t('gl.goal')}</button>}>
+      action={<button className="btn-ghost !py-1.5 !text-md" onClick={() => setSheet('new')}><Plus size={14} /> {t('gl.goal')}</button>}>
       <div className="rule pt-6">
         {list.length === 0 && <Empty glyph="money" text={t('gl.none')} sub={t('gl.none_hint')} hint={t('gl.hint_example')} compact />}
         {list.length > 0 && (
@@ -40,7 +40,7 @@ export function Goals({ goals, onChange, onErr, onOk }) {
                   <span className="num shrink-0 text-[14px]"><b>{money(g.saved)}</b> <span className="faint">/ {money(g.target)}</span></span>
                 </div>
                 <div className="progress mt-2 !h-[6px]"><div style={{ width: `${Math.round(g.pct * 100)}%`, background: g.pct >= 1 ? 'linear-gradient(90deg, #19b34a, #14b8a6)' : 'linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--acc) 55%, #ffffff))' }} /></div>
-                <div className="mt-1.5 flex items-center justify-between gap-2 text-[12px]">
+                <div className="mt-1.5 flex items-center justify-between gap-2 text-xs">
                   <span className="muted">{Math.round(g.pct * 100)} %{g.due ? ` · ${t('aims.by', { date: new Date(g.due).toLocaleDateString(localeOf(), { day: 'numeric', month: 'short' }).replace(/\.?\s*г\.$/u, '') })}` : ''}{g.per_month ? ` · ${t('gl.per_month', { m: money(g.per_month) })}` : g.left ? ` · ${t('gl.left', { m: money(g.left) })}` : ''}{g.days_left != null && g.days_left < 0 && g.left > 0 ? ` · ${t('aims.overdue')}` : ''}</span>
                   <div className="flex items-center gap-1">
                     <button className="btn-soft btn-sm !h-7" onClick={() => setPut(g)}><Plus size={12} /> {t('gl.put')}</button>
@@ -53,8 +53,8 @@ export function Goals({ goals, onChange, onErr, onOk }) {
           </div>
         )}
         <div className="mt-5">
-          <button className="faint flex items-center gap-1 text-[12px] hover:text-accent" onClick={() => setShowClosed((v) => !v)}>{t('gl.reached')} {showClosed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
-          {showClosed && (closed.length ? <div className="mt-2 flex flex-wrap gap-1.5">{closed.map((g) => <span key={g.id} className="badge pos"><Check size={11} /> {g.icon} {g.title} · {money(g.target)}</span>)}</div> : <div className="faint mt-2 text-[12px]">{t('gl.reached_none')}</div>)}
+          <button className="faint flex items-center gap-1 text-xs hover:text-accent" onClick={() => setShowClosed((v) => !v)}>{t('gl.reached')} {showClosed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}</button>
+          {showClosed && (closed.length ? <div className="mt-2 flex flex-wrap gap-1.5">{closed.map((g) => <span key={g.id} className="badge pos"><Check size={11} /> {g.icon} {g.title} · {money(g.target)}</span>)}</div> : <div className="faint mt-2 text-xs">{t('gl.reached_none')}</div>)}
         </div>
       </div>
 
@@ -114,7 +114,7 @@ function PutSheet({ goal, onClose, onDone, onErr }) {
         {goal?.left > 0 && <div className="flex flex-wrap gap-1.5">
           {[goal.per_month, 5000, 10000, goal.left].filter((v, i, a) => v && a.indexOf(v) === i).map((v) => <button type="button" key={v} className="chip" onClick={() => setAmount(String(Math.round(v)))}>{v === goal.left ? t('gl.close_it') : v === goal.per_month ? t('gl.by_plan') : ''} {money(Math.round(v))}</button>)}
         </div>}
-        <label className="flex cursor-pointer items-start gap-3 text-[13.5px]">
+        <label className="flex cursor-pointer items-start gap-3 text-md">
           <input type="checkbox" className="mt-1" checked={record} onChange={(e) => setRecord(e.target.checked)} />
           <span><b>{t('gl.record')}</b><br /><span className="muted">{t('gl.record_hint')}</span></span>
         </label>

@@ -1,0 +1,223 @@
+/* mapp/mapp.css — тёмный телефонный скин мобильной копии.
+ *
+ * Порт m-* токенов из референса (только чтение). Отличия от оригинала:
+ *  - выкинут Tailwind4-синтаксис (@theme/@layer) — только plain CSS;
+ *  - все правила заскоуплены под .mapp-root: десктопные классы и кейфреймы
+ *    (pop/toastIn/rise уже есть в web/src/index.css) не переопределяются;
+ *  - кейфреймы переименованы с префиксом m- по той же причине;
+ *  - .no-scrollbar/.tnum/.fade-x продублированы под скоупом (те же значения),
+ *    чтобы MApp не зависел от десктопных медиа-правил.
+ */
+
+.mapp-root {
+  font-family: "Onest", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mapp-root .no-scrollbar::-webkit-scrollbar { display: none; }
+.mapp-root .no-scrollbar {
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mapp-root .tnum { font-variant-numeric: tabular-nums; }
+
+/* ── фон приложения: синий «сумеречный» градиент ── */
+.mapp-root .m-bg {
+  background:
+    radial-gradient(110% 55% at 85% -5%, rgba(124, 144, 255, 0.5), transparent 60%),
+    radial-gradient(85% 45% at -10% 105%, rgba(142, 160, 168, 0.55), transparent 65%),
+    linear-gradient(180deg, #3547a6 0%, #2d3c91 38%, #2f3d88 68%, #47547f 100%);
+}
+
+/* стеклянный пузырь */
+.mapp-root .m-orb {
+  position: absolute;
+  border-radius: 9999px;
+  background: radial-gradient(
+    circle at 32% 28%,
+    rgba(255, 255, 255, 0.32),
+    rgba(255, 255, 255, 0.1) 45%,
+    rgba(255, 255, 255, 0.03) 72%
+  );
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow:
+    inset 0 0 32px rgba(255, 255, 255, 0.08),
+    0 24px 60px -24px rgba(10, 20, 80, 0.55);
+  pointer-events: none;
+}
+
+/* тёмная карточка */
+.mapp-root .m-card {
+  background: linear-gradient(180deg, rgba(23, 31, 79, 0.97) 0%, rgba(14, 20, 57, 0.98) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  box-shadow:
+    0 24px 48px -26px rgba(4, 8, 40, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+/* яркая hero-карточка */
+.mapp-root .m-hero {
+  background:
+    radial-gradient(120% 90% at 100% 0%, rgba(206, 214, 255, 0.55), transparent 52%),
+    linear-gradient(140deg, #4562f2 0%, #5874f6 50%, #7f90f8 100%);
+  border: 1px solid rgba(255, 255, 255, 0.32);
+  box-shadow:
+    0 26px 50px -20px rgba(60, 90, 255, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45);
+}
+
+/* стекло */
+.mapp-root .m-glass {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06));
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.18),
+    0 10px 30px -14px rgba(5, 10, 50, 0.55);
+}
+
+/* плотное стекло для навбара */
+.mapp-root .m-glass-strong {
+  background: linear-gradient(180deg, rgba(60, 76, 160, 0.55), rgba(30, 40, 100, 0.55));
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  backdrop-filter: blur(24px) saturate(170%);
+  -webkit-backdrop-filter: blur(24px) saturate(170%);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.22),
+    0 18px 40px -16px rgba(5, 10, 50, 0.7);
+}
+
+/* плашка внутри hero */
+.mapp-root .m-tile {
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.26);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25);
+}
+
+/* активный сегмент */
+.mapp-root .m-active {
+  background: linear-gradient(180deg, #6b87ff 0%, #4d69f5 100%);
+  box-shadow:
+    0 6px 18px -4px rgba(80, 110, 255, 0.75),
+    inset 0 1px 0 rgba(255, 255, 255, 0.35);
+}
+
+/* главная кнопка «+» */
+.mapp-root .m-fab {
+  background: radial-gradient(circle at 35% 25%, #8199ff 0%, #4d6bff 55%, #3d57e4 100%);
+  box-shadow:
+    0 12px 30px -6px rgba(77, 107, 255, 0.9),
+    inset 0 1px 0 rgba(255, 255, 255, 0.45),
+    0 0 0 1px rgba(255, 255, 255, 0.16);
+}
+
+/* голографическая рамка */
+.mapp-root .holo-border {
+  position: relative;
+  border: 0;
+}
+.mapp-root .holo-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  background: linear-gradient(
+    225deg,
+    #82f2ff 0%,
+    rgba(255, 255, 255, 0.35) 35%,
+    rgba(255, 255, 255, 0.12) 62%,
+    #d8ff6e 100%
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* прогрессивный блюр под статус-баром и навбаром */
+.mapp-root .m-blur-top {
+  background: linear-gradient(180deg, rgba(48, 64, 160, 0.78), rgba(48, 64, 160, 0));
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  mask-image: linear-gradient(to bottom, #000 55%, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent);
+}
+.mapp-root .m-blur-bottom {
+  background: linear-gradient(0deg, rgba(40, 50, 110, 0.6), rgba(40, 50, 110, 0));
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  mask-image: linear-gradient(to top, #000 45%, transparent);
+  -webkit-mask-image: linear-gradient(to top, #000 45%, transparent);
+}
+
+/* затухание краёв горизонтального скролла */
+.mapp-root .fade-x {
+  mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 36px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, #000 14px, #000 calc(100% - 36px), transparent 100%);
+}
+
+/* сфера Марвина */
+.mapp-root .marvin-orb-core {
+  background: conic-gradient(from 0deg, #82f2ff, #6b7cff, #c58bff, #ff9bd2, #82f2ff);
+  animation: m-orbSpin 7s linear infinite;
+  filter: blur(3px);
+}
+
+.mapp-root .anim-screen { animation: m-screenIn 0.38s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.mapp-root .anim-sheet { animation: m-sheetUp 0.45s cubic-bezier(0.2, 0.9, 0.25, 1) both; }
+.mapp-root .anim-fade { animation: m-fadeIn 0.25s ease both; }
+.mapp-root .anim-float { animation: m-float 10s ease-in-out infinite; }
+.mapp-root .anim-float-slow { animation: m-float 14s ease-in-out infinite reverse; }
+.mapp-root .anim-pop { animation: m-pop 0.38s cubic-bezier(0.2, 0.9, 0.3, 1.4) both; }
+.mapp-root .anim-toast { animation: m-toastIn 0.32s cubic-bezier(0.2, 0.9, 0.3, 1.2) both; }
+.mapp-root .anim-rise { animation: m-rise 0.4s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.mapp-root .typing-dot { animation: m-typing 1.2s infinite; }
+.mapp-root .pulse-ring { animation: m-pulseRing 1.6s ease-out infinite; }
+
+@keyframes m-screenIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes m-sheetUp {
+  from { transform: translateY(100%); }
+  to { transform: none; }
+}
+@keyframes m-fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes m-float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-12px); }
+}
+@keyframes m-pop {
+  0% { transform: scale(0.5); opacity: 0; }
+  60% { transform: scale(1.15); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes m-toastIn {
+  from { opacity: 0; transform: translateY(14px) scale(0.96); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes m-rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes m-typing {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-3px); }
+}
+@keyframes m-orbSpin {
+  to { transform: rotate(360deg); }
+}
+@keyframes m-pulseRing {
+  0% { transform: scale(1); opacity: 0.55; }
+  100% { transform: scale(1.7); opacity: 0; }
+}

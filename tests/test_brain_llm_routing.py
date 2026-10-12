@@ -332,7 +332,7 @@ def test_memory_block_is_not_in_system_prompt():
 
     src = inspect.getsource(agent.via_ollama)
     # блок памяти приходит результатом _turn_context и уходит в сообщение пользователя
-    assert "_turn_context(text)" in src
+    assert "_turn_context(text" in src
     assert 'ctx_head = budget.assemble' in src
     assert "ЧТО ТЫ ЗНАЕШЬ" not in agent._system()
     # статика системного промпта постоянна (иначе кэш Ollama бесполезен)

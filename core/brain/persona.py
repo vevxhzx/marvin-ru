@@ -244,17 +244,21 @@ async def nudge(fact: dict, fallback: str) -> str:
     try:
         from ..services import memory
         rel = await memory.recall(str(fact.get("title") or fact.get("text") or ""), limit=3) if memory.enabled() else []
-        mem = [f.text for f in rel]
+        mem_all = [f.text for f in rel]
+        mem_open = [f.text for f in rel if not getattr(f, "is_private", False)]  # замок: в облако приватное не идёт
     except Exception:  # pragma: no cover
-        mem = []
-    user = "ФАКТ:\n" + llm._hide_secrets(json.dumps(fact, ensure_ascii=False)) + ("\n\nПАМЯТЬ:\n" + "\n".join(f"— {m}" for m in mem) if mem else "")
+        mem_all = mem_open = []
+    base = "ФАКТ:\n" + llm._hide_secrets(json.dumps(fact, ensure_ascii=False))
+    user = base + ("\n\nПАМЯТЬ:\n" + "\n".join(f"— {m}" for m in mem_all) if mem_all else "")
+    user_cloud = base + ("\n\nПАМЯТЬ:\n" + "\n".join(f"— {m}" for m in mem_open) if mem_open else "")
     used = recent_images()
     if used:
         user += "\n\nНЕДАВНО ИСПОЛЬЗОВАННЫЕ ОБРАЗЫ (не повторяй): " + ", ".join(used)
+        user_cloud += "\n\nНЕДАВНО ИСПОЛЬЗОВАННЫЕ ОБРАЗЫ (не повторяй): " + ", ".join(used)
     system = character_block() + "\n" + NUDGE_PROMPT
 
     async def cloud() -> str | None:
-        return await llm.cloud_chat(system, user, temperature=0.9)
+        return await llm.cloud_chat(system, user_cloud, temperature=0.9)
 
     async def local() -> str | None:
         if not await llm.local_available():

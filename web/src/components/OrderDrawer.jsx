@@ -58,7 +58,7 @@ function Revisions({ n = 0 }) {
       <span className="flex items-center gap-1" aria-hidden="true">
         {Array.from({ length: shown }, (_, i) => <i key={i} className="block h-2 w-2 rounded-full" style={{ background: 'var(--warn)' }} />)}
       </span>
-      <span className="num text-[12px]">{n}</span>
+      <span className="num text-xs">{n}</span>
     </span>
   )
 }
@@ -142,7 +142,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
     <Sheet open={!!oid} wide onClose={onClose} title={d?.title || t('od.order')}
       sub={d ? `${d.client || t('od.no_client')}${d.deadline ? ` · ${t('od.due', { date: shortDate(d.deadline) })}` : ''}` : t('common.loading')}>
       {!d ? <ListSkeleton n={5} rowH={54} avatar={false} /> : (
-        <div className="text-[13px]">
+        <div className="text-md">
           {/* 1. стадия заказа — клик меняет, «потерян» спрашивает причину */}
           <Sec title={t('stage.block')} right={<span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('od.stage_hint')}</span>}>
             <StageStepper stage={stage} onStage={setStage} revisions={d.revisions} disabled={busy} />
@@ -153,7 +153,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
                 <button className="btn-ghost" onClick={() => setLost(null)}>{t('common.cancel')}</button>
               </div>
             )}
-            {stage === 'lost' && d.lost_reason && <div className="neg mt-2 text-[12.5px]">{t('od.reason', { what: t.sv(d.lost_reason) || d.lost_reason })}</div>}
+            {stage === 'lost' && d.lost_reason && <div className="neg mt-2 text-sm">{t('od.reason', { what: t.sv(d.lost_reason) || d.lost_reason })}</div>}
           </Sec>
 
           {/* 2. оплата */}
@@ -177,7 +177,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
             {d.payments?.length > 0 && (
               <div className="mt-2.5 rule">
                 {d.payments.map((p) => (
-                  <div key={p.id} className="muted flex items-baseline justify-between gap-3 py-1 text-[12.5px]">
+                  <div key={p.id} className="muted flex items-baseline justify-between gap-3 py-1 text-sm">
                     <span className="min-w-0 truncate">{dayLabel(p.date).toLowerCase()} · {p.note || t('od.payment')}</span><span className="num pos shrink-0">+{money(p.amount)}</span>
                   </div>
                 ))}
@@ -193,7 +193,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
                 <span className="muted num">{hhmm(d.deadline)}</span>
                 {dl && <span className={`num ${d.overdue ? 'neg' : ''}`} style={{ fontSize: 'var(--fs-xs)' }}>{dl}</span>}
               </div>
-            ) : <div className="faint text-[12.5px]">{t('od.no_client_hint')}</div>}
+            ) : <div className="faint text-sm">{t('od.no_client_hint')}</div>}
           </Sec>
 
           {/* 4. время: таймер, ручной ввод и круги правок */}
@@ -206,7 +206,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
               { label: t('od.revisions'), value: <Revisions n={d.revisions || 0} /> },
             ]} />
             {running && (
-              <div className="accent mt-2 text-[12.5px]">
+              <div className="accent mt-2 text-sm">
                 {t('od.timer_running', { left: mmss ? mmss(Math.max(0, Math.round((new Date(timer.ends_at) - Date.now()) / 1000))) : '' })}
               </div>
             )}
@@ -215,7 +215,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
               <input className="input min-w-[160px] flex-1" placeholder={t('od.what_ph')} value={note} onChange={(e) => setNote(e.target.value)} aria-label={t('od.what_label')} />
               <button className="btn-soft" onClick={addManual} disabled={busy}>{t('od.add_time')}</button>
             </div>
-            {msg && <div className="muted mt-1 text-[12px]">{msg}</div>}
+            {msg && <div className="muted mt-1 text-xs">{msg}</div>}
           </Sec>
 
           {/* 5. клиент: его собственная стадия (не стадия заказа) */}
@@ -228,15 +228,15 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
                 <ClientStageSelect view={stageView} onView={setStageView} onErr={onErr} className="mt-2" />
                 <ClientStageNote view={stageView} />
               </>
-            ) : <div className="faint text-[12.5px]">{t('od.no_client_hint')}</div>}
+            ) : <div className="faint text-sm">{t('od.no_client_hint')}</div>}
           </Sec>
 
           {/* 6. заметки / ТЗ */}
           <Sec title={t('od.notes_spec')} right={
             <button type="button" className="btn-ghost btn-sm" onClick={() => onEdit?.(d)}><Pencil size={13} /> {t('od.edit_order')}</button>}>
             {d.notes
-              ? <div className="muted whitespace-pre-wrap text-[13px]">{d.notes}</div>
-              : <div className="faint text-[12.5px]">{t('od.notes_hint')}</div>}
+              ? <div className="muted whitespace-pre-wrap text-md">{d.notes}</div>
+              : <div className="faint text-sm">{t('od.notes_hint')}</div>}
           </Sec>
 
           {/* 7. чек-лист этапов */}
@@ -265,7 +265,7 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
             {d.comments?.length > 0 && (
               <div className="rule">
                 {d.comments.map((c) => (
-                  <div key={c.id} className="muted py-1 text-[12.5px]"><span className="faint num">{dayLabel(c.created_at).toLowerCase()} · {c.author}:</span> {c.text}</div>
+                  <div key={c.id} className="muted py-1 text-sm"><span className="faint num">{dayLabel(c.created_at).toLowerCase()} · {c.author}:</span> {c.text}</div>
                 ))}
               </div>
             )}
@@ -283,9 +283,9 @@ export default function OrderDrawer({ oid, reloadKey = 0, onClose, onChanged, on
           <Sec title={t('od.history')} right={<span className="faint" style={{ fontSize: 'var(--fs-xs)' }}>{t('od.history_hint')}</span>}>
             <div className="max-h-[240px] space-y-1 overflow-y-auto">
               {d.activity?.map((a) => (
-                <div key={a.id} className="flex gap-2 text-[12.5px]"><span className="faint shrink-0 num">{dayLabel(a.created_at).toLowerCase()}</span><span className="muted">{a.text}</span></div>
+                <div key={a.id} className="flex gap-2 text-sm"><span className="faint shrink-0 num">{dayLabel(a.created_at).toLowerCase()}</span><span className="muted">{a.text}</span></div>
               ))}
-              {!d.activity?.length && <div className="faint text-[12px]">{t('od.history_empty')}</div>}
+              {!d.activity?.length && <div className="faint text-xs">{t('od.history_empty')}</div>}
             </div>
           </Sec>
         </div>

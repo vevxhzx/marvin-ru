@@ -20,7 +20,7 @@ from sqlmodel import select
 
 from ..db import ChatMessage, get_setting, session, set_setting
 from ..services import brain_notes, calendar, finance, judge, memory, tasks, trace, undo, screen
-from ..services.calendar import fmt_dt, fmt_due, fmt_repeat, fmt_task_due
+from ..services.calendar import fmt_dt, fmt_due, fmt_repeat
 from ..services.finance import money
 from ..tools import registry
 from ..tools import router as tool_router
@@ -39,6 +39,8 @@ class Reply:
     actions: list[str] = field(default_factory=list)   # что было сделано (для UI/лога)
     via: str = "rules"                                  # rules / ollama / gemini(=облако) / none
     suggest_fact: dict | None = None                    # предложенный факт {text, category, fact_id} | null — тост «Запомнить?»
+    used_fact_ids: list[int] | None = None              # факты, ушедшие в контекст ответа — «использовано в ответе»
+    buttons: list[tuple[str, str]] | None = None        # умные кнопки [(подпись, текст)]: нажатие = как будто написал это слово
 
 
 # --------------------------------------------------------------------------- правила
@@ -357,35 +359,9 @@ _ME_RX = re.compile(r"\b(я|у\s+меня|мне|мой|моя|мои|моё|м�
 
 
 def _memory_rules(t: str, channel: str) -> Reply | None:
-    if not memory.enabled():
-        return None
-    if MEM_ABOUT_RX.match(t):
-        return Reply(memory.about_me_text(), ["about_me"])
-    m = MEM_FORGET_RX.match(t)
-    if m and len(t.split()) <= 20:
-        what = m.group(1).strip(" .!")
-        f = memory.find_fact(what)
-        if f:
-            memory.forget(f.id)
-            return Reply(f"Забыл: «{f.text}». Лежит в архиве памяти — если что, верну («восстанови …»).", ["forget_fact"])
-        arch = memory.find_fact(what, include_archived=True)
-        if arch is not None:
-            return Reply(f"«{arch.text}» — так я уже и не помню: оно в архиве памяти. Скажите «восстанови …», если нужно вернуть.", [])
-        return Reply(f"Такого я и не помнил, сэр: «{what}». Проверьте страницу «память».", [])
-    m = MEM_RESTORE_RX.match(t)
-    if m and len(t.split()) <= 20:
-        # восстановление затухшего/забытого факта: ищем и в архиве (recall/find_fact с include_archived=True)
-        f = memory.find_fact(m.group(1).strip(" .!"), include_archived=True)
-        if f is not None and f.layer == "archive":
-            memory.restore(f.id)
-            return Reply(f"Вернул: «{f.text}» — снова в памяти, и больше он не затухнет.", ["restore_fact"])
-    m = MEM_REMEMBER_RX.match(t)
-    if m and _ME_RX.search(m.group(1)) and len(t.split()) <= 40 and not _looks_like_question(t):
-        body = m.group(1).strip(" .!")
-        f = memory.add_fact_sync(body, layer="long", confidence=0.95)   # вектор досчитает планировщик
-        if f:
-            return Reply(f"Запомнил: «{f.text}». Это теперь часть того, что я о вас знаю.", ["add_fact"])
-    return None
+    # Совместимость: реализация — в rules/memory.py (memory_rule). Порядок в rules() — через RULES.
+    from .rules.memory import memory_rule
+    return memory_rule(t, t.lower(), channel)
 
 
 # «это задача» / «это была трата» / «не трата, а заказ» — исправление последней записи: откат + перезапись нужным типом + урок
@@ -400,83 +376,49 @@ _ACTION_KIND = {"add_expense": "expense", "add_income": "income", "add_debt": "d
 
 
 def _fix_kind(word: str) -> str | None:
-    w = word.lower()
-    for pref, k in _FIX_KIND:
-        if w.startswith(pref):
-            return k
-    return None
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import fix_kind
+    return fix_kind(word)
 
 
 def _last_user_text(channel: str) -> str | None:
     """Предыдущая реплика хозяина (не текущая) — исходник для перезаписи другим типом."""
-    with session() as s:
-        rows = s.exec(select(ChatMessage).where(ChatMessage.role == "user").order_by(ChatMessage.id.desc()).limit(2)).all()
-    return rows[1].text if len(rows) > 1 else None
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import _last_user_text as _lut
+    return _lut(channel)
 
 
 def _write_as(kind: str, text: str, channel: str) -> Reply | None:
     """Записать фразу заданным типом (после судьи, урока или исправления). None — не смог разобрать (нет суммы и т.п.)."""
-    t = text.strip()
-    if kind in ("expense", "income"):
-        amount, rest = parse_amount(re.sub(r"^\s*(потратил\w*|получил\w*|отдал\w*|заплатил\w*|пришл[оа]|перевёл|перевел|перекинул\w*|закинул\w*|скинул\w*)\s*", "", t, flags=re.I))
-        if amount is None:
-            return None
-        when, rest = _past_date(rest)
-        note = _strip_fillers(rest) or None
-        tx = finance.add_transaction(amount, kind, None, note, source=channel, date=when)
-        sm = finance.summary(1)
-        return Reply(say(kind, amount=money(tx.amount), category=tx.category, balance=money(sm["total_balance"])), [f"add_{kind}"])
-    if kind == "debt":
-        amount, rest = parse_amount(t)
-        if amount is None:
-            return None
-        title = _strip_fillers(re.sub(r"^\s*(долг|должен|должна|отдал\w*|дал\w*|занял\w*|взял\w*|одолжил\w*|перевёл|перевел|перекинул\w*|закинул\w*|скинул\w*)\s*", "", rest, flags=re.I)) or "Долг"
-        d = finance.add_debt(title[0].upper() + title[1:], amount)
-        return Reply(f"Долг «{d.title}» на {money(d.remaining)} записан.", ["add_debt"])
-    if kind == "order":
-        from ..services import orders
-        client = None
-        mc = re.search(r"(?:^|\s)(?:для|от|клиент[:\s])\s*([А-ЯЁA-Z][\w\-]*(?:\s+[А-ЯЁA-Z][\w\-]*)?)", t)
-        body = t
-        if mc:
-            client = mc.group(1); body = (t[:mc.start()] + " " + t[mc.end():]).strip()
-        amount, rest = parse_amount(re.sub(r"^\s*(заказ|проект|новый\s+заказ)\s*[:\-—]?\s*", "", body, flags=re.I))
-        dt, rest = parse_datetime(rest)
-        title = re.sub(r"\s{2,}", " ", rest).strip(" ,.-—:;")
-        if not title:
-            return None
-        o = orders.add_order(title[0].upper() + title[1:], amount or 0, client, dt, source=channel)
-        return Reply(f"Заказ #{o.id} «{o.title}»" + (f" · {money(o.price)}" if o.price else " · сумму уточним") + ". В работе.", ["add_order"])
-    if kind == "task":
-        auto_roll = bool(AUTO_ROLL_MARK_RX.search(t))
-        t = AUTO_ROLL_MARK_RX.sub(" ", t).strip() if auto_roll else t
-        due, body, time_set = parse_datetime_ex(t)
-        due = task_due(due, time_set)
-        body = re.sub(r"^\s*(задача|надо\s+бы|надо|нужно|не\s+забыть)\s*[:\-—]?\s*", "", body, flags=re.I).strip() or t
-        tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel, auto_roll=auto_roll)
-        return Reply(say("task", title=tk.title) + fmt_due(due) + (" · автоперенос вкл" if auto_roll else ""), ["add_task"])
-    if kind == "event":
-        dt, rest = parse_datetime(t)
-        if not dt:
-            return None
-        title = _strip_fillers(re.sub(r"^\s*(встреча|событие|у\s+меня|напомни(?:\s+мне)?)\s*[:\-—]?\s*", "", rest, flags=re.I)) or "Событие"
-        ev = calendar.add_event(title[0].upper() + title[1:], dt, remind_minutes=30, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start)), ["add_event"])
-    if kind == "note":
-        brain_notes.add_note(re.sub(r"^\s*(мозг|мысль|заметка|запомни)\s*[:\-—,]?\s*", "", t, flags=re.I) or t, source=channel)
-        return Reply(say("note"), ["add_note"])
-    return None
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import write_as
+    return write_as(kind, text, channel)
 
 
 def _fix_rule(t: str, channel: str) -> Reply | None:
     """«это задача» после неверной записи: откатить последнее, записать исходную фразу нужным типом, запомнить урок."""
-    m = FIX_RX.match(t)
-    if not m:
-        return None
-    kind = _fix_kind(m.group(1))
-    if not kind:
-        return None
-    return _fix_apply(kind, channel)
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import fix_rule
+    return fix_rule(t, t.lower(), channel)
+
+
+_CATCHANGE_RX = re.compile(r"^\s*это\s+(.+?)\s*[.!]*\s*$", re.I | re.S)
+_CATCHANGE_KIND_RX = re.compile(r"^(трата|расход|доход|долг|заказ|проект|задача|дело|событие|встреча|календарь|заметка|мысль|мозг|память)\s*$", re.I)
+
+
+def _resolve_category_name(want: str, kind: str) -> str | None:
+    """«доставка еды» → «Еда»: сначала точное имя категории, потом угадайка по ключевым словам."""
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import resolve_category_name
+    return resolve_category_name(want, kind)
+
+
+def _catchange_rule(t: str, channel: str) -> Reply | None:
+    """«это еда» / «это доставка еды а не транспорт» после траты/дохода: меняем категорию
+    последней операции офлайн, с настоящими цифрами."""
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import catchange_rule
+    return catchange_rule(t, t.lower(), channel)
 
 
 _FIX_BARE_RX = re.compile(r"^\s*(трата|расход|доход|долг|заказ|проект|задача|дело|событие|встреча|календарь|заметка|мысль|мозг|память)\s*[.!]*\s*$", re.I)
@@ -485,150 +427,46 @@ _FIX_BARE_RX = re.compile(r"^\s*(трата|расход|доход|долг|з�
 def _resolve_fix(text: str, channel: str) -> Reply | None:
     """Голое «трата/заказ/…» сразу после догадки судьи (pending fix|): чиним, как явное «это трата».
     Без свежей догадки — не трогаем (слот пуст): голое слово идёт обычным путём."""
-    p = _pending_consume(channel, prefix="fix|")
-    if not p:
-        return None
-    m = _FIX_BARE_RX.match(text)
-    if not m:
-        return None   # заговорили о другом — слот снят, ничего не пишем
-    kind = _fix_kind(m.group(1))
-    if not kind:
-        return None
-    return _fix_apply(kind, channel)
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import resolve_fix_rule
+    return resolve_fix_rule(text, text.lower(), channel)
 
 
 def _fix_apply(kind: str, channel: str) -> Reply | None:
-    a = undo.last_action(channel, max_age_min=30)
-    orig = _last_user_text(channel)
-    if not a or not orig or a.kind not in _ACTION_KIND:
-        return Reply("Исправлять нечего, сэр: за последние полчаса я ничего не записывал. Скажите фразу заново — запишу как " + judge.KIND_RU[kind] + ".", [])
-    wrong = _ACTION_KIND[a.kind]
-    if wrong == kind:
-        return Reply(f"Так и записано — {judge.KIND_RU[kind]}: «{a.title}».", [])
-    try:
-        r = _write_as(kind, orig, channel)
-    except (finance.FinanceError, ValueError) as e:
-        log.warning("fix as %s failed: %s", kind, e)
-        r = None
-    if r is None:
-        return Reply(f"Понял, что это {judge.KIND_RU[kind]}, но из «{orig[:60]}» не собрал запись" + (" — нет суммы." if kind in ("expense", "income", "debt") else " — нет даты." if kind == "event" else ".") + " Скажите заново, сэр.", [])
-    undo.undo_one(a)   # откатываем именно ту запись, а не только что созданную
-    judge.add_lesson(orig, kind, wrong=wrong)
-    r.text = f"Переложил: было «{judge.KIND_RU[wrong]}», теперь {judge.KIND_RU[kind]}. " + r.text + " Запомнил на будущее."
-    r.actions = r.actions + ["fix", "lesson"]
-    return r
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import fix_apply
+    return fix_apply(kind, channel)
 
 
 def _resolve_judge(text: str, channel: str) -> Reply | None:
     """Ответ на вопрос судьи («трата, заказ или доход?»)."""
-    p = _pending_get(channel)
-    if not p or not p[0].startswith("judge|"):
-        return None
-    orig, ts = p
-    if (datetime.now() - ts).total_seconds() > PENDING_TTL_SEC:
-        _pending_clear(channel)
-        return None
-    orig = orig[6:]
-    m = re.match(r"^\s*(?:это\s+)?(трата|расход|доход|долг|заказ|проект|задача|дело|событие|встреча|календарь|заметка|мысль|мозг)\s*[.!]*\s*$", text, re.I)
-    if NO_RX.match(text):
-        _pending_clear(channel)
-        return Reply("Ок, не записываю.", [])
-    if not m:
-        return None   # заговорили о другом — вопрос снимется по TTL
-    kind = _fix_kind(m.group(1))
-    _pending_clear(channel)
-    try:
-        r = _write_as(kind, orig, channel)
-    except finance.FinanceError as e:
-        return Reply(f"Не записал: {e}", [], "rules")
-    if r is None:
-        return Reply(f"Понял, {judge.KIND_RU[kind]}, но из «{orig[:60]}» не собрал запись. Скажите заново полностью, сэр.", [])
-    judge.add_lesson(orig, kind)
-    r.text += " Запомнил: в следующий раз такое не переспрошу."
-    r.actions = r.actions + ["lesson"]
-    return r
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import resolve_judge_rule
+    return resolve_judge_rule(text, text.lower(), channel)
 
 
 def _resolve_pay_ask(text: str, channel: str) -> Reply | None:
-    """Батч 1: ответ на «оплата по заказу [кандидат] или обычный доход?».
-    «заказ» → платёж по заказу-кандидату (заказ не выдумываем);
-    «доход» → обычный доход; «нет» — не пишем. Чужой слот не трогаем."""
-    p = _pending_consume(channel, prefix="pay_ask|")   # TTL + one-shot; чужой слот цел
-    if not p:
-        return None
-    orig, _ts = p
-    try:
-        d = json.loads(orig[8:])
-    except (ValueError, IndexError):
-        return None
-    amount = d.get("amount")
-    q = (d.get("q") or "").strip()
-    oid = d.get("oid")
-    try:
-        pay_date = datetime.fromisoformat(d["date"]) if d.get("date") else None
-    except ValueError:
-        pay_date = None
-    if re.match(r"^\s*(?:это\s+)?(заказ|по\s+заказу|оплата(?:\s+по\s+заказу)?|аванс(?:\s+по\s+заказу)?)\s*[.!]*\s*$", text, re.I):
-        from ..services import orders
-        o = None
-        if oid:
-            try:
-                o = orders.get_order(oid)
-            except Exception:
-                o = None
-        if o is None and q:
-            o = orders.find_order(q)
-        if o is None:
-            return Reply(f"Заказ{(' «' + q + '»') if q else ''} не нашёл, сэр — не выдумываю. "
-                         f"Скажите «заказ: …», чтобы завести, или «доход», чтобы записать {money(amount)} как обычный доход.", [])
-        return _record_order_payment(o.id if hasattr(o, "id") else o["id"], amount, channel, pay_date)
-    if re.match(r"^\s*(?:это\s+)?(доход|обычный\s+доход)\s*[.!]*\s*$", text, re.I):
-        try:
-            tx = finance.add_transaction(amount, "income", None, (q or "доход"), source=channel, date=pay_date)
-        except finance.FinanceError as e:
-            return Reply(f"Не записал: {e}", [], "rules")
-        s = finance.summary(1)
-        return Reply(say("income", amount=money(tx.amount), category=tx.category, balance=money(s["total_balance"])), ["add_income"])
-    if NO_RX.match(text):
-        return Reply("Ок, не записываю.", [])
-    # «это заказ кот прод» / «заказ кот прод» / голое имя заказа — платёж к нему.
-    # Раньше такое падало мимо всех веток: слот снимался, а 10к терялись (жалоба с «Кот прод»).
-    name = None
-    m = re.search(r"заказ\s*[:\-—]?\s*(.+)", text, re.I)
-    if m:
-        name = m.group(1).strip(" .!?«»\"'")
-    else:
-        cand = text.strip(" .!?")
-        if cand and len(cand.split()) <= 6:
-            from ..services import orders as _ox
-            if _ox.find_order(cand):
-                name = cand
-    if name:
-        from ..services import orders
-        o = orders.find_order(name)
-        if o is None:
-            return Reply(f"Заказ «{name}» не нашёл, сэр — не выдумываю. "
-                         f"Скажите «заказ: …», чтобы завести, или «доход», чтобы записать {money(amount)} как обычный доход.", [])
-        return _record_order_payment(o.id if hasattr(o, "id") else o["id"], amount, channel, pay_date)
-    return None   # заговорили о другом — вопрос уже снят (consume), ничего не пишем
+    """Батч 1: ответ на «оплата по заказу [кандидат] или обычный доход?»."""
+    # Совместимость: реализация — в rules/orders.py.
+    from .rules.orders import pay_ask_rule
+    return pay_ask_rule(text, text.lower(), channel)
 
 
 def _record_order_payment(oid: int, amount: float, channel: str, pay_date) -> Reply:
     """Платёж по заказу + честный ответ. Заказ не выдумываем — его ищет вызывающий."""
-    from ..services import orders
-    try:
-        orders.add_payment(oid, amount, source=channel, date=pay_date)
-    except Exception as e:
-        return Reply(f"Не записал: {e}", [], "rules")
-    v = orders.order_view(orders.get_order(oid))
-    return Reply(f"Оплата {money(amount)} по «{v['title']}» — в доходах" + (f" за {pay_date:%d.%m}" if pay_date else "") + "."
-                 + (f" Осталось {money(v['left'])}." if v["left"] > 0 else " Заказ закрыт как оплаченный ✓"), ["order_payment"])
+    # Совместимость: реализация — в rules/orders.py.
+    from .rules.orders import record_order_payment
+    return record_order_payment(oid, amount, channel, pay_date)
 
 
 def _judge_question(orig: str, channel: str, options: tuple[str, ...]) -> Reply:
     _pending_set(channel, "judge|" + orig)
     names = [judge.KIND_RU[k].split()[0] for k in options]
-    return Reply(f"«{orig}» — это " + ", ".join(names[:-1]) + f" или {names[-1]}? Ответьте одним словом, сэр.", ["clarify"])
+    _emoji = {"трата": "💸", "доход": "💰", "долг": "🤝", "заказ": "📦",
+              "задача": "📋", "событие": "📅", "заметка": "📝"}
+    btns = [((_emoji.get(n, "") + " " + n.capitalize()).strip(), n) for n in names]
+    return Reply(f"«{orig}» — это " + ", ".join(names[:-1]) + f" или {names[-1]}? Ответьте одним словом, сэр.", ["clarify"],
+                 buttons=btns)
 
 
 # спорные фразы: где шаблон угадывает, а не знает. Судья зовётся ТОЛЬКО тут; явные команды идут как раньше
@@ -693,8 +531,8 @@ _DATE_WORDS = re.compile(r"\b(завтра|недел\w*|выходн\w*|пон�
 def _is_briefing_ask(low: str) -> bool:
     """Это «покажи день»? Нормализуем воду и сравниваем с маленьким набором; даты кроме сегодня сюда не берём."""
     t = re.sub(r"[?!.…«»\"',;:()]+", " ", low)
-    t = re.sub(r"^\s*(?:дай|дайте|покажи|выдай|сделай|прими|отдай)\s+", "", t, flags=re.I)   # «дай дайджест»
-    if re.match(r"^(дайджест|бриф\w*)\b", t):
+    t = re.sub(r"^\s*(?:дай|дайте|покажи|выдай|сделай|прими|отдай|подведи|подводи)\s+", "", t, flags=re.I)   # «дай дайджест»
+    if re.match(r"^(дайджест|бриф\w*|итог\w*)\b", t):
         return not _DATE_WORDS.search(t)   # «дайджест на завтра» разбирает quick.agenda
     if not re.match(r"^(что|чё|че|план|планы|дела|расписание)\b", t):
         return False
@@ -710,14 +548,34 @@ def rules(text: str, channel: str) -> Reply | None:
     if tq:
         return Reply(tq[0], tq[1])
     if FIN_TECH_RX.match(t):   # «хватит ли на платежи» — готовый отчёт, а не анализ моделью
-        return _orders_rules(t, low, channel)
+        from .rules.orders import RULES as _orders_rules_list
+        for _fn in _orders_rules_list:
+            _r = _fn(t, low, channel)
+            if _r:
+                return _r
+        return None
     if pc.TIDY_RX.match(t) or pc.TIDY_UNDO_RX.match(t) or pc.ORGANIZE_RX.match(t) or pc.ORGANIZE_UNDO_RX.match(t):   # файловые операции — только через план и подтверждение
         cmd = pc.parse(t)
         return Reply(pc.dispatch(cmd, channel), [f"pc_{cmd.action}"])
-    r_fix = _resolve_judge(t, channel) or _resolve_pay_ask(t, channel) or _fix_rule(t, channel) or _resolve_fix(t, channel)
+    # fix-цепочка — порядок ТОЧНО как раньше: судья → оплата → явный fix → голый fix → catchange
+    from .rules.edit import catchange_rule as _cr
+    from .rules.edit import fix_rule as _fr
+    from .rules.edit import resolve_fix_rule as _rfr
+    from .rules.edit import resolve_judge_rule as _rjr
+    from .rules.orders import pay_ask_rule as _par
+    r_fix = None
+    for _fn in (_rjr, _par, _fr, _rfr, _cr):
+        r_fix = _fn(t, low, channel)
+        if r_fix:
+            break
     if r_fix:
         return r_fix
-    mr = _memory_rules(t, channel)
+    from .rules.memory import RULES as _memory_rules_list
+    mr = None
+    for _fn in _memory_rules_list:
+        mr = _fn(t, low, channel)
+        if mr:
+            break
     if mr:
         return mr
     if _is_analysis(t) or _too_long_for_rules(t):
@@ -729,17 +587,21 @@ def rules(text: str, channel: str) -> Reply | None:
                 brain_notes.add_note(body, source=channel)
                 return Reply(say("note"), ["add_note"])
         if UNDO_RX.match(low):
-            r_undo = _undo_ask(t, channel)
+            from .rules.edit import undo_ask_rule as _uar
+            r_undo = _uar(t, low, channel)
             if r_undo is not None:
                 return r_undo
-            return _edit_note_rule(t, channel)
-        return _edit_note_rule(t, channel)
+            from .rules.edit import edit_note_rule as _enr
+            return _enr(t, low, channel)
+        from .rules.edit import edit_note_rule as _enr2
+        return _enr2(t, low, channel)
 
     # ---- ссылки: приоритет, если в сообщении есть URL ----
     urls = brain_notes.extract_urls(t)
     if urls:
         return None  # ссылки обрабатываются асинхронно в handle() — здесь только сигнал
-    r_edit = _edit_note_rule(t, channel)
+    from .rules.edit import edit_note_rule as _enr3
+    r_edit = _enr3(t, low, channel)
     if r_edit:
         return r_edit
 
@@ -797,7 +659,8 @@ def rules(text: str, channel: str) -> Reply | None:
         if cmd.action == "power" and cmd.arg in ("shutdown", "reboot"):
             # необратимое для несохранённой работы — только после «да» (тем же pending-механизмом, что и крупные суммы)
             _pending_set(channel, "confirm|" + json.dumps({"pc": cmd.arg}))
-            return Reply(("Выключить компьютер" if cmd.arg == "shutdown" else "Перезагрузить компьютер") + "? Несохранённое пропадёт. Скажите «да» или «нет», сэр.", ["clarify"])
+            return Reply(("Выключить компьютер" if cmd.arg == "shutdown" else "Перезагрузить компьютер") + "? Несохранённое пропадёт. Скажите «да» или «нет», сэр.", ["clarify"],
+                         buttons=[("✅ Да", "да"), ("❌ Нет", "нет")])
         return Reply(pc.dispatch(cmd, channel), [f"pc_{cmd.action}"])
     st = screen.chat_rule(t)   # «сколько сидел за компом», «на что ушёл день», «сколько ютуба сегодня»
     if st:
@@ -822,11 +685,17 @@ def rules(text: str, channel: str) -> Reply | None:
         return Reply("Перечитал базу — вот точные цифры.\n" + registry.finance_summary(30), ["finance_summary"])
     if low in ("долги", "мои долги", "кредиты"):
         return Reply(registry.list_debts(), ["list_debts"])
-    r_o = _orders_rules(t, low, channel)
+    from .rules.orders import RULES as _orders_rules_list2
+    r_o = None
+    for _fn in _orders_rules_list2:
+        r_o = _fn(t, low, channel)
+        if r_o:
+            break
     if r_o:
         return r_o
     if UNDO_RX.match(low):
-        r_undo = _undo_ask(t, channel)
+        from .rules.edit import undo_ask_rule as _uar2
+        r_undo = _uar2(t, low, channel)
         if r_undo is not None:
             return r_undo
 
@@ -836,7 +705,8 @@ def rules(text: str, channel: str) -> Reply | None:
         return Reply(q[0], q[1])
 
     # ---- правка из чата: перенести / переименовать / удалить / пропустить повтор ----
-    r = _edit_rules(t, channel)
+    from .rules.edit import edit_rule as _er
+    r = _er(t, low, channel)
     if r:
         return r
 
@@ -940,7 +810,8 @@ def rules(text: str, channel: str) -> Reply | None:
         if ev and ev.start > datetime.now() + timedelta(hours=12) and not calendar.is_done(ev):
             # раньше отвечал «не нашёл», хотя событие есть — просто впереди. Честно: спросить, закрыть ли заранее
             _pending_set(channel, f"done_future|{ev.id}")
-            return Reply(f"«{ev.title}» у вас {fmt_dt(ev.start)} — ещё не наступило. Отметить сделанным заранее? «Да» или «нет», сэр.", ["clarify"])
+            return Reply(f"«{ev.title}» у вас {fmt_dt(ev.start)} — ещё не наступило. Отметить сделанным заранее? «Да» или «нет», сэр.", ["clarify"],
+                         buttons=[("✅ Да", "да"), ("❌ Нет", "нет")])
         if len(what.split()) <= 6:
             # раньше «готово: X» / «сделал X» без такой задачи проваливалось дальше и заводило задачу «Сделал X» — теперь честно говорим
             return Reply(f"Не нашёл дела «{what}» ни в задачах, ни в календаре, сэр. Если это просто факт — скажите «запомни: сделал {what}».", [])
@@ -988,7 +859,8 @@ def rules(text: str, channel: str) -> Reply | None:
             and not re.match(r"^\s*напомни\b", low):
         _pending_set(channel, "nighthour|" + json.dumps({"orig": t, "hour": nh}, ensure_ascii=False))
         return Reply(f"«В {nh}» — это ночью в {nh:02d}:00 или днём в {nh + 12:02d}:00? "
-                     f"Ответьте «ночью» или «днём», сэр.", ["clarify"])
+                     f"Ответьте «ночью» или «днём», сэр.", ["clarify"],
+                     buttons=[("🌙 Ночью", "ночью"), ("☀️ Днём", "днём")])
     if dt and not is_deadline and not explicit_task and not action_task and (m or EVENT_NOUN_RX.search(low) or (has_clock and len(rest.split()) <= 8)):
         title = re.sub(r"^(напомни(?:\s+мне)?|у меня|мне)\s+", "", rest, flags=re.I)
         # «напомни … что надо не забыть вычесть жкх» → «вычесть жкх»
@@ -1010,7 +882,9 @@ def rules(text: str, channel: str) -> Reply | None:
         what = re.sub(r"^\s*напомни(?:\s+мне)?\s*(?:что\s+(?:надо|нужно)\s+)?", "", t, flags=re.I).strip(" ,.-—:")
         if what:
             _pending_set(channel, "remind|" + what)
-            return Reply(f"Напомнить «{what}» — когда, сэр? Например: «завтра в 10» или «через час».", ["clarify"])
+            return Reply(f"Напомнить «{what}» — когда, сэр? Например: «завтра в 10» или «через час».", ["clarify"],
+                         buttons=[("⏰ Через час", "через час"), ("🌅 Завтра в 10", "завтра в 10"),
+                                  ("🌙 Вечером", "вечером"), ("❌ Нет", "нет")])
         # Батч 2: голое «напомни» — тоже спрашиваем (что и когда), а не молчим.
         _pending_set(channel, "remind|")
         return Reply("Что напомнить и когда, сэр? Например: «напомни завтра в 10 позвонить маме».", ["clarify"])
@@ -1051,7 +925,8 @@ def rules(text: str, channel: str) -> Reply | None:
     if dt and rest and not _looks_like_question(t) and len(t.split()) <= 12 and (_time_set or EVENT_NOUN_RX.search(low) or ACTION_VERB_RX.search(rest) or not _told) \
             and not (re.match(r"^\s*(?:новый\s+)?(?:заказ|проект)\b", t, re.I) and parse_amount(t)[0] is not None):   # заказ с суммой — модели (add_order)
         _pending_set(channel, t)
-        return Reply(f"«{rest}» — {fmt_dt(dt)}. Это событие в календарь или задача с дедлайном? Ответьте «календарь» или «задача», сэр.", ["clarify"])
+        return Reply(f"«{rest}» — {fmt_dt(dt)}. Это событие в календарь или задача с дедлайном? Ответьте «календарь» или «задача», сэр.", ["clarify"],
+                     buttons=[("📅 Календарь", "календарь"), ("📋 Задача", "задача")])
 
     return None
 
@@ -1062,20 +937,9 @@ EDIT_NOTE_RX = re.compile(r"^\s*(исправь|поправь|измени|до
 
 def _edit_note_rule(t: str, channel: str) -> Reply | None:
     """«исправь заметку про очки: они в комоде», «дополни мысль о ролике: добавить титры» — правка памяти без модели."""
-    m = EDIT_NOTE_RX.match(t)
-    if not m:
-        return None
-    verb, _, query, body = m.group(1).lower(), m.group(2), m.group(3).strip(" «»\"'"), m.group(4).strip()
-    n = brain_notes.find_note(query)
-    if not n:
-        return Reply(f"Заметку про «{query}» не нашёл, сэр. Посмотрите в Мозге, как она называется.", [])
-    if verb.startswith(("дополни", "допиши")):
-        head = (n.title or n.text.splitlines()[0])[:50]
-        n = brain_notes.update_note(n.id, append=body)
-        return Reply(f"Дописал в «{head}»: {body[:150]}", ["edit_note"])
-    body = body[0].upper() + body[1:]
-    n = brain_notes.update_note(n.id, text=body)
-    return Reply(f"Заметка обновлена: «{n.text[:200]}». Старый вариант сохранён как оригинал.", ["edit_note"])
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import edit_note_rule
+    return edit_note_rule(t, t.lower(), channel)
 
 
 POMO_RX = re.compile(r"^\s*(?:марвин\W*)?(?:запусти|включи|поставь|начни|стартуй)?\s*(?:таймер|помодоро|помидор\w*|фокус)\s*(?:на\s+(\d{1,3})\s*(?:мин\w*)?)?"
@@ -1100,13 +964,9 @@ _MONTH_N = {"январ": 1, "феврал": 2, "март": 3, "апрел": 4, 
 
 def _month_target(text: str):
     """«к марту», «до декабря 2027» → первое число того месяца (следующего такого, если уже прошёл)."""
-    m = _MONTH_TARGET_RX.search(text)
-    if not m:
-        return None, text
-    mon = _MONTH_N[m.group(1).lower()]
-    now = datetime.now()
-    year = int(m.group(2)) if m.group(2) else (now.year if mon > now.month else now.year + 1)
-    return datetime(year, mon, 1, 23, 59), (text[:m.start()] + " " + text[m.end():]).strip()
+    # Совместимость: реализация — в rules/orders.py.
+    from .rules.orders import _month_target as _mt
+    return _mt(text)
 
 
 PERSON_Q_RX = re.compile(r"^\s*(?:что\s+(?:по|у\s+меня\s+с|там\s+с|с)|кто\s+такой|кто\s+такая|кто\s+это|карточк[аи]\s+(?:клиента|человека)?|досье\s+(?:на)?|напомни\s+(?:мне\s+)?(?:про|кто\s+такой))\s+(?:по\s+)?([А-ЯЁA-Z@][\w@\-]*(?:\s+[А-ЯЁA-Z][\w\-]*)?)\s*[?.!]*\s*$", re.U)
@@ -1115,32 +975,9 @@ PERSON_ADD_RX = re.compile(r"^\s*(?:человек|контакт|персона
 
 def _people_rules(t: str, channel: str) -> Reply | None:
     """«что по Ване», «кто такой Иванов», «человек: Лена, сестра» — без модели."""
-    from ..services import people
-    m = PERSON_Q_RX.match(t)
-    if m:
-        q = m.group(1).strip()
-        cands = people.find_candidates(q)
-        if len(cands) >= 2:
-            # тёзки: молча никого не выбираем — спрашиваем одним словом (батч 4)
-            shown = " или ".join(f"«{c.name}»" for c in cands[:3])
-            return Reply(f"Какой {q}: {shown}? Уточните, сэр.", ["clarify"])
-        if cands:
-            return Reply(people.card_text(people.card(cands[0])), ["person_card"])
-        return None   # неизвестное имя — пусть решает модель/память
-    m = PERSON_ADD_RX.match(t)
-    if m:
-        body = m.group(1).strip()
-        head = t.lower().lstrip()
-        kind = ("client" if head.startswith("клиент") else "company" if head.startswith(("компани", "фирм"))
-                else "family" if head.startswith(("семья", "родн", "родствен")) else "friend" if head.startswith(("друг", "подруг", "прият"))
-                else None)   # None — угадать по подписи
-        name, _, rest = body.partition(",")
-        name = name.strip(" «»\"'")
-        if not name or len(name) > 60:
-            return None
-        c = people.add_person(name, kind, notes=rest.strip() or None)
-        return Reply(f"{ {'client': 'Клиент', 'company': 'Компания', 'family': 'Семья', 'friend': 'Друг'}.get(c.kind, 'Карточка')} «{c.name}» — есть. Всё, где всплывёт это имя, теперь собирается в одном месте — спросите «что по …» или «кто такой …».", ["add_person"])
-    return None
+    # Совместимость: реализация — в rules/people.py.
+    from .rules.people import people_rule
+    return people_rule(t, t.lower(), channel)
 
 
 def people_hint(text: str, reply_text: str) -> str | None:
@@ -1162,225 +999,28 @@ def people_hint(text: str, reply_text: str) -> str | None:
 
 def _orders_rules(t: str, low: str, channel: str) -> Reply | None:
     """Заказы, помодоро, цели и фин-отчёты без модели — мгновенно."""
-    from ..services import goals, orders
-    r = _people_rules(t, channel)
-    if r:
-        return r
-    if LATE_Q_RX.match(t):
-        from ..services import pulse
-        return Reply(pulse.late_text(), ["late_payments"])
-    if ORDERS_Q_RX.match(t):
-        return Reply(orders.summary_text(), ["list_orders"])
-    if GOALS_Q_RX.match(t):
-        return Reply(goals.goals_text(), ["list_goals"])
-    m = FIN_TECH_RX.match(t)
-    if m:
-        kind = "buckets" if m.group(1) else "compare" if m.group(2) else "runway" if m.group(3) else "payments"
-        return Reply(registry.finance_report(kind), ["finance_report"])
-    if POMO_STOP_RX.match(t):
-        return Reply(registry.pomodoro("stop", _channel=channel), ["pomodoro"])
-    if POMO_Q_RX.match(t):
-        return Reply(registry.pomodoro("status", _channel=channel), ["pomodoro"])
-    m = POMO_BREAK_RX.match(t)
-    if m:
-        return Reply(registry.pomodoro("break", minutes=int(m.group(1)) if m.group(1) else None, _channel=channel), ["pomodoro"])
-    m = POMO_RX.match(t)
-    if m and re.search(r"таймер|помодоро|помидор|фокус", low):
-        mins = int(m.group(1)) if m.group(1) else None
-        q = (m.group(2) or "").strip(" «»\"'")
-        if q and not orders.find_order(q):
-            return Reply(f"Заказ «{q}» не нашёл, сэр. Запустил бы без привязки — скажите «таймер» без названия, или добавьте заказ: «заказ: {q}».", [])
-        return Reply(registry.pomodoro("start", query=q or None, minutes=mins, _channel=channel), ["pomodoro"])
-    m = GOAL_RX.match(t)
-    if m:
-        body = m.group(1).strip()
-        amount, rest = parse_amount(body)
-        dt, rest = _month_target(rest)
-        if not dt:
-            dt, rest = parse_datetime(rest)
-        title = re.sub(r"\s{2,}", " ", rest).strip(" ,.-—:;")
-        if amount and title:
-            g = goals.add_goal(title, amount, dt, source=channel)
-            v = goals.goal_view(g)
-            return Reply(f"Цель «{g.title}»: {money(g.target)}" + (f" к {g.due:%d.%m.%Y} — откладывать по {money(v['per_month'])} в месяц" if v["per_month"] else "")
-                         + ". Пополнять: «отложил 10к — " + g.title.lower() + "».", ["add_goal"])
-    m = SAVE_RX.match(t)
-    if m:
-        amount, rest = parse_amount(m.group(2))
-        q = re.sub(r"^\s*(?:в|на|—|-)\s*", "", rest).strip(" ,.-—:;«»\"'")
-        if amount and q:
-            g = goals.find_goal(q)
-            if not g:
-                return Reply(f"Цель «{q}» не нашёл, сэр. Есть: " + (", ".join(x["title"] for x in goals.list_goals()) or "пока ни одной — «цель: подушка 300к»") + ".", [])
-            r_ = goals.put_to_goal(g.id, -amount if m.group(1).lower().startswith(("взял", "снял", "достал")) else amount, source=channel)
-            v = r_["goal"]
-            return Reply(f"«{v['title']}»: {money(v['saved'])} из {money(v['target'])} ({v['pct'] * 100:.0f}%)." + (" Цель достигнута 🎉" if r_["reached"] else ""), ["save_to_goal"])
-    m = PAYMENT_RX.match(t)
-    if m and not _too_long_for_rules(t):
-        amount, rest = parse_amount(t)
-        q = re.sub(r"^\s*(?:пришл[аои]|приш[её]л|получил\w*|перевели|заплатил\w*|оплатил\w*)\s*(?:аванс|оплат\w*|предоплат\w*|деньги)?\s*(?:за|от|по)?\s*", "", rest, flags=re.I).strip(" ,.-—:;«»\"'")
-        q = re.sub(r"\s*(?:за|от|по)\s+(?:заказ\w*|ролик\w*|проект\w*)?\s*$", "", q).strip()
-        when, q2 = parse_datetime(q)   # «…за ролик 20 августа» — деньги пришли задним числом
-        pay_date = None
-        if when and q2.strip() != q.strip():
-            if when > datetime.now():   # парсер дат смотрит вперёд; оплата в будущем — это прошлый год
-                when = when.replace(year=when.year - 1)
-            pay_date = when.replace(hour=12, minute=0)
-            q = q2.strip(" ,.-—:;«»\"'")
-        if amount:
-            o = orders.find_order(q) if q else (orders.list_orders()[0] if len(orders.list_orders()) == 1 else None)
-            if o and hasattr(o, "id"):
-                oid = o.id
-            elif isinstance(o, dict):
-                oid = o["id"]
-            else:
-                oid = None
-            if amount >= CONFIRM_AMOUNT:
-                return None   # крупная сумма — через модель с подтверждением
-            # Батч 1: входящие «пришёл аванс 10к за ролик» / «получил 15000» — ВСЕГДА спрашиваем
-            # «оплата по заказу [кандидат] или обычный доход?», заказ не выдумываем.
-            # Исходящие «заплатил/оплатил» — как раньше (трата, заказ только если точно найден).
-            if not re.match(r"^\s*(?:пришл[аои]|приш[её]л|получил\w*|перевели)", t, re.I):
-                if oid:
-                    orders.add_payment(oid, amount, source=channel, date=pay_date)
-                    v = orders.order_view(orders.get_order(oid))
-                    return Reply(f"Оплата {money(amount)} по «{v['title']}» — в доходах" + (f" за {pay_date:%d.%m}" if pay_date else "") + "." + (f" Осталось {money(v['left'])}." if v["left"] > 0 else " Заказ закрыт как оплаченный ✓"), ["order_payment"])
-                return None
-            _pending_set(channel, "pay_ask|" + json.dumps(
-                {"amount": amount, "q": q, "oid": oid,
-                 "date": pay_date.isoformat() if pay_date else None}, ensure_ascii=False))
-            if oid:
-                try:
-                    v = orders.order_view(orders.get_order(oid))
-                    title = v["title"]
-                except Exception:
-                    title = q or "заказ"
-                return Reply(f"«{t.strip()}» — это оплата по заказу «{title}» ({money(amount)}) или обычный доход? "
-                             f"Ответьте «заказ» или «доход», сэр.", ["clarify"])
-            if q:
-                return Reply(f"Заказа «{q}» не нашёл, сэр — не выдумываю. "
-                             f"Записать {money(amount)} как обычный доход? Ответьте «доход» или «нет».", ["clarify"])
-            return Reply(f"«{t.strip()}» — это оплата по заказу или обычный доход? "
-                         f"Ответьте «заказ» или «доход», сэр.", ["clarify"])
-    m = ORDER_RX.match(t)
-    if m and not _too_long_for_rules(t):
-        body = m.group(1).strip()
-        # «ролик для Пятёрочки, 25к, до пятницы» — клиент («для X» с заглавной), сумма и дата вырезаются, остаток — название
-        client = None
-        mc = re.search(r"(?:^|\s)(?:для|от|клиент[:\s])\s*([А-ЯЁA-Z][\w\-]*(?:\s+[А-ЯЁA-Z][\w\-]*)?)", body)
-        if mc:
-            client = mc.group(1); body = (body[:mc.start()] + " " + body[mc.end():]).strip()
-        amount, rest = parse_amount(body)
-        dt, rest = parse_datetime(rest)
-        title = re.sub(r"\s{2,}", " ", rest).strip(" ,.-—:;")
-        title = title[0].upper() + title[1:] if title else title
-        if title:
-            o = orders.add_order(title, amount or 0, client, dt, source=channel)
-            v = orders.order_view(o)
-            return Reply(f"Заказ #{o.id} «{o.title}»" + (f" · {v['client']}" if v["client"] else "") + (f" · {money(o.price)}" if o.price else " · сумму уточним")
-                         + (f" · до {o.deadline:%d.%m}" if o.deadline else "") + ". В работе. Скажите «таймер на " + o.title.split()[0].lower() + "», когда сядете за него.", ["add_order"])
-    return None
+    # Совместимость: реализация — в rules/orders.py (orders_rule). Порядок в rules() — через RULES.
+    from .rules.orders import orders_rule
+    return orders_rule(t, low, channel)
 
 
 def _auto_roll_rule(t: str, channel: str) -> Reply | None:
-    """«задача X каждый день переноси» / «X с автопереносом» → флаг вкл (сама переедет на завтра);
-    «X без автопереноса» / «убери автоперенос у X» → флаг выкл (вечером спросит обзор)."""
-    want: bool | None = None
-    what: str | None = None
-    for rx, flag in ((AUTO_ROLL_OFF_RX, False), (AUTO_ROLL_OFF_PRE_RX, False),
-                     (AUTO_ROLL_ON_RX, True), (AUTO_ROLL_ON_PRE_RX, True)):
-        m = rx.match(t)
-        if m:
-            want, what = flag, m.group(1).strip(" .!«»\"'")
-            break
-    if want is None or not what:
-        return None
-    what = re.sub(r"^(задачу|задача|дело)\s+(про|о|об)?\s*", "", what, flags=re.I).strip() or what
-    tk = tasks.find_task(what)
-    if tk is None and what.isdigit():
-        tk = tasks.find_task(int(what))
-    if tk is None:
-        return Reply(f"Не нашёл задачу «{what}», сэр.", [])
-    tasks.update_task(tk.id, auto_roll=want)
-    if want:
-        return Reply(f"Включил автоперенос «{tk.title}»: не закроете — сама переедет на завтра.", ["update_task"])
-    return Reply(f"Выключил автоперенос «{tk.title}»: вечером спрошу, перенести ли.", ["update_task"])
+    """«задача X каждый день переноси» / «X с автопереносом» → флаг вкл;
+    «X без автопереноса» / «убери автоперенос у X» → флаг выкл."""
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import auto_roll_rule
+    return auto_roll_rule(t, t.lower(), channel)
+
+
 
 
 def _edit_rules(t: str, channel: str) -> Reply | None:
     """«перенеси ужин на 8», «переименуй встречу в созвон», «удали задачу про полку», «сегодня тренировки не будет»."""
-    r = _auto_roll_rule(t, channel)
-    if r is not None:
-        return r
-    m = SKIP_RX.match(t)
-    if m:
-        ev = calendar.find_event(m.group(2).strip())
-        if ev and ev.repeat:
-            day = datetime.now() + (timedelta(days=1) if m.group(1).lower() == "завтра" else timedelta(0))
-            calendar.skip_occurrence(ev.id, day)
-            return Reply(f"Понял, «{ev.title}» {m.group(1).lower()} пропускаем. Повтор остаётся.", ["update_event"])
-        if ev:
-            calendar.delete_event(ev.id)
-            return Reply(f"Убрал «{ev.title}» из календаря.", ["delete_event"])
-        return Reply(f"Не нашёл «{m.group(2).strip()}» в календаре, сэр.")
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import edit_rule
+    return edit_rule(t, t.lower(), channel)
 
-    m = MOVE_RX.match(t)
-    if m:
-        what, when = m.group(2).strip(), m.group(3).strip()
-        # «на 8» / «на 20:00» / «на завтра в 10» / «на пятницу»
-        dt, _ = parse_datetime("в " + when if re.fullmatch(r"\d{1,2}(?:[:.]\d{2})?", when) else when)
-        if not dt:
-            return Reply(f"Не понял, на когда перенести «{what}», сэр. Скажите время или день.")
-        ev = calendar.find_event(what)
-        if ev:
-            # «на 8» без даты — оставляем день события, меняем только время
-            if re.fullmatch(r"(?:в\s+)?\d{1,2}(?:[:.]\d{2})?(?:\s*(?:утра|вечера|дня|ночи))?", when.lower()):
-                dt = ev.start.replace(hour=dt.hour, minute=dt.minute)
-            old = fmt_dt(ev.start)
-            ev = calendar.update_event(ev.id, start=dt)
-            return Reply(f"Перенёс «{ev.title}»: {old} → {fmt_dt(ev.start)}.", ["update_event"])
-        tk = tasks.find_task(what)
-        if tk:
-            tasks.update_task(tk.id, due=dt)
-            return Reply(f"Дедлайн «{tk.title}» теперь {fmt_task_due(dt)}.", ["update_task"])
-        return Reply(f"Не нашёл «{what}» ни в календаре, ни в задачах, сэр.")
 
-    m = RENAME_RX.match(t)
-    if m:
-        what, new = m.group(2).strip(), m.group(3).strip()
-        what = re.sub(r"^(задачу|событие|встречу)\s+", "", what, flags=re.I)
-        ev = calendar.find_event(what)
-        if ev:
-            calendar.update_event(ev.id, title=new[0].upper() + new[1:])
-            return Reply(f"«{ev.title}» теперь называется «{new[0].upper() + new[1:]}».", ["update_event"])
-        tk = tasks.find_task(what)
-        if tk:
-            tasks.update_task(tk.id, title=new[0].upper() + new[1:])
-            return Reply(f"Задача «{tk.title}» → «{new[0].upper() + new[1:]}».", ["update_task"])
-        return Reply(f"Не нашёл «{what}», сэр.")
-
-    m = DELETE_RX.match(t)
-    if m and m.group(3).strip() and not re.match(r"^(последн|это|её|его)", m.group(3).strip(), re.I):
-        kind = (m.group(2) or "").lower()
-        what = m.group(3).strip(" .!«»\"")
-        if kind.startswith("задач") or not kind:
-            tk = tasks.find_task(what)
-            if tk and (kind or not calendar.find_event(what)):
-                tasks.delete_task(tk.id)
-                return Reply(f"Задача «{tk.title}» удалена.", ["delete_task"])
-        if kind.startswith(("событ", "встреч", "напомин")) or not kind:
-            ev = calendar.find_event(what)
-            if ev:
-                calendar.delete_event(ev.id)
-                return Reply(f"«{ev.title}» ({fmt_dt(ev.start)}) убрано из календаря.", ["delete_event"])
-        if kind.startswith(("заметк", "мысл")):
-            n = brain_notes.find_note(what)
-            if n:
-                brain_notes.delete_note(n.id)
-                return Reply("Заметку удалил.", ["delete_note"])
-        if kind:
-            return Reply(f"Не нашёл «{what}», сэр.")
-    return None
 
 
 YES_RX = re.compile(r"^\s*(да|давай|ага|угу|подтверждаю|конечно|точно|yes|ок|окей|окей давай|да,?\s*удали|удаляй|стирай|сотри|погнали|валяй|делай)\s*[.!]*\s*$", re.I)
@@ -1410,7 +1050,7 @@ def _bulk_rule(t: str, channel: str) -> Reply | None:
         return Reply(txt, [])
     _pending_set(channel, "bulk|" + json.dumps({"kind": kind, "since": since.isoformat() if since else None,
                                                  "until": until.isoformat() if until else None, "label": label}, ensure_ascii=False))
-    return Reply(txt, ["clarify"])
+    return Reply(txt, ["clarify"], buttons=[("✅ Да", "да"), ("❌ Нет", "нет")])
 
 
 def _resolve_bulk(text: str, channel: str) -> Reply | None:
@@ -1586,34 +1226,12 @@ def _resolve_confirm(text: str, channel: str) -> Reply | None:
 
 
 def _undo_ask(text: str, channel: str) -> Reply | None:
-    """Батч 3: «отмени» не откатывает молча — показывает ЧТО и ждёт «да»/«нет».
+    """Батч 3: «отмени» не откатывает молча — показывает ЧТО и ждёт «да»/«нет»."""
+    # Совместимость: реализация — в rules/edit.py.
+    from .rules.edit import undo_ask_rule
+    return undo_ask_rule(text, text.lower(), channel)
 
-    Пачка сортировщика — целиком («да» откатит всё) или по пунктам
-    («удали задачу …» одну). Одиночное действие — с названием.
-    Чужой канал не трогаем: undo ищет только свой channel."""
-    if not UNDO_RX.match(text.strip().lower()):
-        return None
-    bi = sorter.batch_info(channel)
-    if bi is not None:
-        n, titles = bi
-        _pending_set(channel, "undo|batch")
-        tail = f" ({'; '.join(titles[:5])})" if titles else ""
-        return Reply(f"Отменить всю пачку — {n} {_plural_ru(n, 'запись', 'записи', 'записей')}{tail}? "
-                     "«да» — целиком, или скажите что именно («удали задачу …» одну).", ["clarify"])
-    a = undo.last_action(channel)
-    if a is None:
-        other = undo.last_action_any()
-        if other is not None and other.channel != channel:
-            # одного хозяина — одна история: предлагаем отменить глобально последнее,
-            # с пометкой где оно было, а не отфутболиваем «отмените там»
-            label = undo._LABEL.get(other.kind, other.kind)
-            _pending_set(channel, f"undo|single-any:{other.id}")
-            return Reply(f"В этом канале записей не было, сэр. Но последнее действие было в другом канале — "
-                         f"{label} «{other.title}» ({_channel_where(other.channel)}). Отменить его? «да»/«нет».", ["clarify"])
-        return Reply("Отменять нечего, сэр.", [])
-    _pending_set(channel, "undo|single")
-    label = undo._LABEL.get(a.kind, a.kind)
-    return Reply(f"Отменить {label} «{a.title}»? Скажите «да» или «нет», сэр.", ["clarify"])
+
 
 
 def _channel_where(channel: str | None) -> str:
@@ -2148,7 +1766,7 @@ def _fit_budget(messages: list[dict], tools: list[dict], channel: str) -> list[d
     return msgs
 
 
-async def _turn_context(text: str, with_lessons: bool = True) -> tuple[str, str]:
+async def _turn_context(text: str, with_lessons: bool = True, include_private: bool = True) -> tuple[str, str]:
     """Блоки «уроки хозяина» и «что ты знаешь о хозяине» для реплики, готовятся ПАРАЛЛЕЛЬНО.
 
     Раньше это были два последовательных вызова, и каждый внутри ещё дёргал Ollama за эмбеддингом
@@ -2158,7 +1776,9 @@ async def _turn_context(text: str, with_lessons: bool = True) -> tuple[str, str]
 
     Эмбеддинг реплики внутри памяти считается СВОИМ (core/services/memory.py — файл чужого агента,
     менять его нельзя). Поэтому общий вектор передаётся только блоку уроков, который тоже нужен
-    для отбора: считаем его один раз за ход вместо двух."""
+    для отбора: считаем его один раз за ход вместо двух.
+    include_private=False — контекст для облака: приватные факты не идут (id использованных
+    при этом всё равно оседают в слоте памяти для Reply.used_fact_ids)."""
     if not text.strip():
         return "", ""
     vec = None
@@ -2168,13 +1788,14 @@ async def _turn_context(text: str, with_lessons: bool = True) -> tuple[str, str]
     except Exception as e:  # pragma: no cover — эмбеддинги опциональны, без них отбор по словам
         log.debug("turn embed: %s", e)
         vec = None
-    ctx_fut = asyncio.ensure_future(memory.context(text))
+    ctx_fut = asyncio.ensure_future(memory.context_with_ids(text, include_private=include_private, track=True))
     try:
         les = await _lessons_block(text, vectors=vec) if with_lessons else ""
     except Exception as e:  # pragma: no cover — блок уроков не должен ронять ход
         log.warning("уроки не собрались: %s", e)
         les = ""
-    return les, await ctx_fut
+    _mem, _used = await ctx_fut
+    return les, _mem
 
 
 async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply | None:
@@ -2185,7 +1806,7 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     if not with_tools:
         # болтовня/общий вопрос, облако не ответило: без схем инструментов промпт в 4–5 раз короче → ответ в разы быстрее
         voice_hint = " Отвечай 1–2 короткими предложениями, без списков и эмодзи." if channel.endswith("voice") else ""
-        mem = await memory.context(text)
+        mem = await memory.context(text, include_private=not cloud_tools, track=True)  # в облако приватное не идёт (замок)
         if cloud_tools and not llm.cloud_personal_tools():
             mem = ""   # ФАЗА 6: блок «что ты знаешь о хозяине» в облако без явного brain.cloud.personal_tools не идёт
         messages = [{"role": "system", "content": _system(compact=not cloud_tools) + voice_hint + mem + _no_repeat_block()}]
@@ -2222,7 +1843,7 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
     # и Ollama берёт их из кэша вместо того, чтобы каждый раз заново читать ~6k токенов (на 1660 Super это 15–25 с).
     # уроки хозяина («это заказ, а не трата») идут ПЕРЕД памятью, чтобы при нехватке окна (_fit_budget)
     # срезались первыми, а портрет и стиль остались. Оба блока считаются вместе, эмбеддинг реплики — один.
-    les_ctx, mem_ctx = await _turn_context(text)
+    les_ctx, mem_ctx = await _turn_context(text, include_private=not cloud_tools)  # в облако приватное не идёт
     if cloud_tools and not llm.cloud_personal_tools():
         mem_ctx, les_ctx = "", ""   # ФАЗА 6: личные факты и уроки в облако без явного brain.cloud.personal_tools не отдаём
     messages = [{"role": "system", "content": _system() + voice_hint +
@@ -2435,7 +2056,8 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                     _pending_set(channel, "confirm|" + json.dumps({"name": c["name"], "args": args_ok}, ensure_ascii=False))
                     log.info("[%s] %s на %.0f — жду подтверждения", channel, c["name"], big)
                     # что уже успели сделать в этом ходу — сообщаем, чтобы не потерялось
-                    return Reply("\n".join(done_results + [_confirm_question(c["name"], args_ok, big)]), actions + ["clarify"], via)
+                    return Reply("\n".join(done_results + [_confirm_question(c["name"], args_ok, big)]), actions + ["clarify"], via,
+                                 buttons=[("✅ Да", "да"), ("❌ Нет", "нет")])
                 elif registry.risk_of(c["name"]) == "destructive":
                     # удаление/остановка — только по «да». Раньше подтверждения требовали лишь крупные суммы,
                     # а «удали встречу» модель могла выполнить по своей трактовке фразы.
@@ -2446,7 +2068,8 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                         continue
                     _pending_set(channel, "confirm|" + json.dumps({"name": c["name"], "args": args_ok}, ensure_ascii=False))
                     log.info("[%s] %s — необратимое действие, жду подтверждения", channel, c["name"])
-                    return Reply("\n".join(done_results + [_destructive_question(c["name"], args_ok)]), actions + ["clarify"], via)
+                    return Reply("\n".join(done_results + [_destructive_question(c["name"], args_ok)]), actions + ["clarify"], via,
+                                 buttons=[("✅ Да", "да"), ("❌ Нет", "нет")])
                 else:
                     tr = registry.call(c["name"], c["arguments"], channel, trusted=tool_trusted)
                     results.append(tr)
@@ -2482,7 +2105,7 @@ async def via_gemini(text: str, channel: str, explicit: bool = True) -> Reply | 
         return Reply(hit[1], [], "gemini")
     # историю передаём только при явном обращении (и она тоже проходит анонимайзер)
     voice_hint = " ОТВЕТ ГОЛОСОМ: максимум 1–2 коротких предложения, без списков, markdown и эмодзи." if channel.endswith("voice") else ""
-    ans = await llm.cloud_chat(_system() + voice_hint + await memory.context(text) + _no_repeat_block() + "\nТы ведёшь разговор и отвечаешь на общие вопросы. Личных данных пользователя (деньги, календарь, задачи, заметки, файлы) "
+    ans = await llm.cloud_chat(_system() + voice_hint + await memory.context(text, include_private=False, track=True) + _no_repeat_block() + "\nТы ведёшь разговор и отвечаешь на общие вопросы. Личных данных пользователя (деньги, календарь, задачи, заметки, файлы) "
                                "у тебя нет — не проси их и не выдумывай (то, что выше в блоке «что ты знаешь о хозяине», — знаешь). Если для ответа НУЖНЫ его личные данные или надо что-то записать/изменить/показать из них — "
                                "ответь ровно одним словом: LOCAL (без пояснений). Во всех остальных случаях отвечай кратко, по-русски, в характере. "
                                "История переписки в этом запросе нужна только для тона и продолжения разговора: она могла устареть (задачи, события и записи менялись). "
@@ -2526,13 +2149,31 @@ def _cache_key(text: str, channel: str) -> str | None:
     return ("v" if channel.endswith("voice") else "t") + ":" + t
 
 
+# Плейсхолдеры анонимайзера (см. llm.anonymize): облако видит «[сумма]» вместо цифр,
+# и слабая модель иногда тащит скобки в ответ человеку, хотя _ANON_HINT запрещает.
+# Последний рубеж: вычищаем из любого исходящего текста (_truth_gate ловит только путь
+# с инструментами, а поболтать со скобками модель может и без них).
+_ANON_SCRUB = (("[сумма]", "сумма"), ("[имя]", "контакт"), ("[телефон]", "телефон"),
+               ("[email]", "почта"), ("[карта]", "карта"), ("[ключ]", "ключ"), ("[скрыто]", "скрытое"))
+
+
+def _scrub_anon_placeholders(text: str) -> str:
+    out = text or ""
+    for ph, word in _ANON_SCRUB:
+        if ph in out.lower():
+            out = re.sub(re.escape(ph), word, out, flags=re.I)
+    if out != (text or ""):
+        log.warning("ответ содержал плейсхолдеры анонимайзера — вычистил: %r", (text or "")[:80])
+    return out
+
+
 def _mark(r: Reply) -> Reply:
     """Пометка источника ответа + обращение к хозяину как в настройках (owner.name).
 
     Маркер — тихой последней строкой курсивом (форматтер Telegram сделает из неё
     <i>…</i>), а не инлайновым значком в конце фразы. Так ответ читается чисто,
     а источник виден внизу и не мешает. Дубли убираем."""
-    r.text = localize(r.text)
+    r.text = _scrub_anon_placeholders(localize(r.text))
     if not llm.MARK_SOURCE:
         return r
     tag = {"gemini": ("☁️", "облако"), "ollama": ("🧠", "локально"),
@@ -2644,126 +2285,12 @@ WHATS_UP_RX = re.compile(r"^\s*(?:что\s+(?:сейчас\s+)?(?:происхо
 
 
 async def _presence_rules(text: str, channel: str) -> Reply | None:
-    """Правила 0.10: цели (aims), решения, лента, самопроверка, стоп фоновой работы, «что происходит».
-    Всё без модели — это команды к своим данным, а не разговор."""
-    from ..services import aims, decisions, health, state, timeline
-    t = text.strip()
-    # --- цели --- («цель: подушка 300к к марту» с суммой — это денежный конверт, его берёт GOAL_RX ниже по цепочке)
-    ma = aims.AIM_RX.match(t)
-    if ma and _money_like(ma.group(2)):
-        return None
-    m = aims.AIM_CLOSE_RX.match(t)
-    if m:
-        name = (m.group(1) or m.group(3) or "").strip()
-        aim = aims.find_aim(name)
-        if not aim:
-            return Reply(f"Цели «{name}» не нашёл. «Мои цели» — покажу, какие есть.", [], "rules")
-        drop = bool(m.group(1)) and m.group(2).lower() in ("отбой", "отменяется", "больше не актуальна") or bool(m.group(3)) and re.match(r"^\s*(убери|отмени)", t, re.I)
-        aims.close_aim(aim, "dropped" if drop else "done")
-        return Reply((f"Цель «{aim.title}» снята. Без драмы — не всё, что начал, надо дожимать." if drop else f"Цель «{aim.title}» закрыта. Это не задача из списка — это то, ради чего список был."), ["close_aim"], "rules")
-    m = re.match(r"^\s*цель\s+[«\"]?(.+?)[»\"]?\s+(?:активна|снова в работе|возобновляется|продолжаем)\s*[.!]?\s*$", t, re.I)
-    if m:
-        aim = aims.find_aim(m.group(1), any_status=True)
-        if aim:
-            aims.update_aim(aim.id, status="active")
-            return Reply(f"«{aim.title}» снова в работе.", ["reopen_aim"], "rules")
-    a = aims.detect_aim_phrase(t)
-    if a:
-        existing = aims.find_aim(a["title"])
-        if existing and existing.title.lower() == a["title"].lower():
-            return Reply(f"Такая цель уже есть: «{existing.title}» ({int(aims.progress(existing) * 100)}%).", [], "rules")
-        aim = aims.add_aim(a["title"], why=a["why"], due=a["due"], source=channel)
-        tail = f", к {aim.due:%d.%m.%Y}" if aim.due else ""
-        why = "" if aim.why else " Зачем она тебе — скажи, запишу: через месяц это единственное, что удержит."
-        return Reply(f"Цель поставлена: «{aim.title}»{tail}. Теперь «веха: …» — первый ощутимый рубеж, а задачи к ней я подтяну сам.{why}", ["add_aim"], "rules")
-    m = aims.MS_RX.match(t)
-    if m and not _is_analysis(t):
-        title, aim_q = m.group(1).strip(" .«»\""), (m.group(2) or "").strip()
-        aim = aims.find_aim(aim_q) if aim_q else None
-        if aim is None:
-            active = aims.list_aims()
-            if len(active) == 1:
-                aim = aims.find_aim(active[0]["id"])
-            elif not active:
-                return Reply("Вех без цели не бывает. Сначала «цель: …».", [], "rules")
-            else:
-                return Reply("К какой цели? " + "; ".join(f"«{x['title']}»" for x in active[:4]) + ". Скажи «веха: … к цели <название>».", [], "rules")
-        ms = aims.add_milestone(aim, title)
-        return Reply(f"Веха «{ms.title}» — в цели «{aim.title}». Задачи к ней: «задача: … к вехе {ms.title[:20]}» или просто закрывай дела — я сам спрошу, если похоже.", ["add_milestone"], "rules")
-    if aims.FOCUS_RX.match(t):
-        return Reply(aims.text_focus(), ["focus"], "rules")
-    if aims.AIMS_RX.match(t):
-        # «цели» — и долгосрочные (aims), и денежные конверты (goals) одним ответом: человек не обязан помнить разницу
-        from ..services import goals as _goals
-        parts, acts = [], ["aims"]
-        if aims.list_aims():
-            parts.append(aims.text_aims())
-        if _goals.list_goals():
-            parts.append(_goals.goals_text()); acts.append("list_goals")
-        if not parts:
-            parts.append(aims.text_aims())
-        return Reply("\n\n".join(parts), acts, "rules")
-    m = aims.BLOCK_RX.match(t)
-    if m and len(m.group(2).strip()) >= 3 and not _is_analysis(t):
-        tk = tasks.find_task(m.group(1).strip())
-        if tk:
-            aims.set_blocked(tk.id, m.group(2).strip())
-            return Reply(f"«{tk.title}» — стоит: {m.group(2).strip()}. Из фокуса убрал, в «мешает» добавил. Скажи «разблокирована», когда сдвинется.", ["block_task"], "rules")
-    m = re.match(r"^\s*(?:задача\s+)?[«\"]?(.+?)[»\"]?\s+(?:разблокирован\w*|сдвинулась|пошла|больше не стоит)\s*[.!]?\s*$", t, re.I)
-    if m:
-        tk = tasks.find_task(m.group(1).strip())
-        if tk and tk.blocked_by:
-            aims.set_blocked(tk.id, "")
-            return Reply(f"«{tk.title}» снова в работе.", ["unblock_task"], "rules")
-    # --- рутины ---
-    from ..services import routines
-    rt = routines.chat_rule(t)
-    if rt:
-        return Reply(rt, ["routines"], "rules")
-    # --- доски: «доска: …», «раскадровка: … на 8 кадров», «на доску: мысль», «что по доске …» ---
-    if not _is_analysis(t):
-        from ..services import boards
-        try:
-            br = boards.chat_rule(t, channel)
-        except ValueError as e:
-            return Reply(str(e), [], "rules")
-        if br:
-            return Reply(br[0], br[1], "rules")
-    # --- решения ---
-    d = decisions.chat_rule(t, channel)
-    if d:
-        return Reply(d, ["decision"], "rules")
-    # --- лента ---
-    tl = timeline.chat_rule(t)
-    if tl:
-        return Reply(tl, ["timeline"], "rules")
-    # --- самопроверка ---
-    if health.SELF_RX.match(t):
-        res = await health.diagnose()
-        health.record(res)
-        return Reply(res["text"], ["diagnose"], "rules")
-    # --- фоновые работы ---
-    if STOP_JOB_RX.match(t):
-        job = state.running_job()
-        if job:
-            state.job_fail(job["name"], "остановлено по команде")
-            return Reply(f"Остановил «{job['name']}».", ["stop_job"], "rules")
-        return None   # обычный «стоп» (например, голосу) — дальше по цепочке
-    if WHATS_UP_RX.match(t):
-        sn = state.snapshot()
-        parts = []
-        line = state.line()
-        if line:
-            parts.append(line)
-        if sn["jobs"]:
-            parts.append("Фон: " + ", ".join(f"{j['name']} {int((j['progress'] or 0) * 100)}%" for j in sn["jobs"]))
-        if sn["pending"]:
-            parts.append("Жду ответа: " + sn["pending"])
-        from . import attention
-        left = attention.budget_left()
-        parts.append(f"Инициатив на сегодня осталось {left}" + (f", отложено {attention.queue_size()}" if attention.queue_size() else "") + ".")
-        return Reply(" ".join(parts) if parts else "Тихо. ПК не на связи, фоновых работ нет, жду.", ["state"], "rules")
-    return None
+    """Правила 0.10: цели (aims), решения, лента, самопроверка, стоп фоновой работы, «что происходит»."""
+    # Совместимость: реализация — в rules/presence.py. _handle НЕ тронут по логике.
+    from .rules.presence import presence_rule
+    return await presence_rule(text, text.strip().lower(), channel)
+
+
 
 
 async def handle(text: str, channel: str = "tg") -> Reply:
@@ -2775,8 +2302,11 @@ async def handle(text: str, channel: str = "tg") -> Reply:
         text = text[:8000]
     trace.start(text, channel)   # журнал работы: строка в базе на каждый ход (services/trace.py)
     memory.clear_suggest()       # предложение «запомнить?» живёт один ход чата — не тащим в следующий ответ
+    memory.clear_used_ids()      # то же для «использовано в ответе»
     try:
         r = await _handle(text, channel)
+        if r.used_fact_ids is None:
+            r.used_fact_ids = memory.peek_used_ids() or []
         try:
             from ..voice import tts as _tts
             if _tts.voice_is_feminine():

@@ -276,7 +276,7 @@ export default function Graph({ height, focus: initialFocus = null, compact = fa
       {/* карточка узла: едет за узлом (transform в кадре отрисовки) и всегда внутри холста */}
       {hover && (
         <div ref={cardRef} aria-hidden="true"
-          className="pointer-events-none absolute left-0 top-0 max-w-[calc(100%-16px)] rounded-2xl px-3 py-2 text-[12.5px] leading-snug"
+          className="pointer-events-none absolute left-0 top-0 max-w-[calc(100%-16px)] rounded-2xl px-3 py-2 text-sm leading-snug"
           style={{ background: 'var(--ink)', color: 'var(--bg)', boxShadow: 'var(--shadow-2)', willChange: 'transform', animation: 'fade .14s ease-out both' }}>
           <div className="font-medium">{t(KIND_ONE[hover.kind]) || hover.kind} · {hover.label}{hover.kind === 'money' && hover.total ? ` · ${fmtNumber(hover.total)} ₽` : ''}{hover.kind === 'order' && hover.price ? ` · ${hover.paid ? `${fmtNumber(hover.paid)} ${t('graph.of')} ` : ''}${fmtNumber(hover.price)} ₽` : ''}</div>
           {hoverRels && <div className="mt-0.5 opacity-80">{hoverRels}</div>}
@@ -290,7 +290,7 @@ export default function Graph({ height, focus: initialFocus = null, compact = fa
       )}
 
       {!compact && !empty && (
-        <div className="pointer-events-none absolute bottom-2 right-3 rounded-full px-2 py-1 text-[12px]" style={{ background: 'var(--bg)' }}>
+        <div className="pointer-events-none absolute bottom-2 right-3 rounded-full px-2 py-1 text-xs" style={{ background: 'var(--bg)' }}>
           <span className="faint">{t('graph.stats', { people: st.people || 0, notes: st.notes || 0, links: st.links || 0, edges: st.edges || 0 })}{st.lonely ? ` · ${t('graph.lonely', { n: st.lonely })}` : ''}</span>
         </div>
       )}

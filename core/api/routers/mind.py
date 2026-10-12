@@ -24,11 +24,19 @@ router = APIRouter()
 # tests/test_review_a_contract.py описывает роуты, перенесённые из app.py на шаге 7.5a,
 # её не трогаем (иначе контракт-тест упадёт на «лишних» маршрутах).
 polish_router = APIRouter()
+# То же для новых маршрутов экрана доверия («неверно», подтверждение актуальности):
+# отдельный роутер, чтобы frozen-таблица MIND_ROUTES не разъехалась.
+facts_router = APIRouter()
+# Мост «запись Мозга → факт Памяти» (кнопка «Запомнить»): тоже отдельным роутером
+# по той же причине — контракт-тест смотрит только `router`.
+remember_router = APIRouter()
 
 
 def register(app) -> None:
     app.include_router(router)
     app.include_router(polish_router)
+    app.include_router(facts_router)
+    app.include_router(remember_router)
 
 
 @router.get("/api/cards/{name}")
@@ -51,7 +59,8 @@ async def chat(inp: ChatIn):
     from ..app import _card_for  # хелпер остаётся в app.py до шага 7.6
     r = await agent.handle(inp.text, inp.channel)
     card = await _asyncio.to_thread(_card_for, r)
-    return {"text": r.text, "actions": r.actions, "via": r.via, "card": card}
+    return {"text": r.text, "actions": r.actions, "via": r.via, "card": card,
+            "used_fact_ids": list(r.used_fact_ids or [])}
 
 
 @router.post("/api/undo")
@@ -65,10 +74,7 @@ def undo_last():
 @router.get("/api/chat/history")
 def chat_history(limit: int = 40):
     """Общая история чата — одна и та же в Telegram и на сайте."""
-    from ...db import ChatMessage
-    from sqlmodel import select
-    with session() as s:
-        rows = s.exec(select(ChatMessage).order_by(ChatMessage.id.desc()).limit(limit)).all()
+    rows = brain_notes.recent_chat(limit)
     return [{"id": m.id, "role": m.role, "text": m.text, "channel": m.channel, "at": m.created_at.isoformat()} for m in reversed(rows)]
 
 
@@ -286,11 +292,72 @@ def link_del(lid: int):
     return {"ok": True}
 
 
-# ---------------- память о хозяине (факты, слои, портрет) ----------------
-@router.get("/api/facts")
-def facts_list(layer: Optional[str] = None):
+# ---------------- мост «запись Мозга → факт Памяти» (кнопка «Запомнить») ----------------
+# Повторный вызов по той же записи возвращает существующий факт (дедуп по source_ref
+# вида "note:{id}" / "link:{id}"), а не плодит дубль. Текст факта — заголовок + текст
+# записи, category/layer по умолчанию, уверенность максимальная (человек нажал сам).
+def _remembered_fact(ref: str):
+    """Живой факт-мост с таким source_ref — или None (дедупа нет, создаём новый)."""
     from ...services import memory as mem
-    rows = [f.model_dump(exclude={"vector"}) for f in mem.list_facts(layer)]
+    return mem.get_fact_by_source_ref(ref)
+
+
+@remember_router.post("/api/notes/{nid}/remember")
+async def note_remember(nid: int):
+    from ...services import memory as mem
+    with session() as s:
+        n = s.get(Note, nid)
+        title, text = (n.title or "").strip() if n else "", (n.text or "").strip() if n else ""
+    if not n:
+        raise HTTPException(404, "Заметка не найдена")
+    ref = f"note:{nid}"
+    old = _remembered_fact(ref)
+    if old:
+        return _fact_out(old)
+    body = f"{title}: {text}" if title and text else (title or text)
+    f = await mem.add_fact(body, source_ref=ref, confidence=1.0)
+    if not f:
+        raise HTTPException(400, "Такое не запоминаю (пусто или похоже на пароль/код)")
+    broadcast("fact", {"id": f.id, "action": "remember", "ref": ref})
+    return _fact_out(f)
+
+
+@remember_router.post("/api/links/{lid}/remember")
+async def link_remember(lid: int):
+    from ...services import memory as mem
+    with session() as s:
+        l = s.get(Link, lid)
+        title, comment, url = ((l.title or "").strip() if l else "",
+                               (l.comment or "").strip() if l else "",
+                               (l.url or "").strip() if l else "")
+    if not l:
+        raise HTTPException(404, "Ссылка не найдена")
+    ref = f"link:{lid}"
+    old = _remembered_fact(ref)
+    if old:
+        return _fact_out(old)
+    head = " — ".join(p for p in (title, comment) if p) or url
+    body = head if not url or url in head else f"{head} ({url})"
+    f = await mem.add_fact(body, source_ref=ref, confidence=1.0)
+    if not f:
+        raise HTTPException(400, "Такое не запоминаю (пусто или похоже на пароль/код)")
+    broadcast("fact", {"id": f.id, "action": "remember", "ref": ref})
+    return _fact_out(f)
+
+
+# ---------------- память о хозяине (факты, слои, портрет) ----------------
+def _fact_out(f) -> dict:
+    """Факт наружу: модель без вектора + человекочитаемый источник для экрана доверия."""
+    from ...services import memory as mem
+    d = f.model_dump(exclude={"vector"})
+    d["source"] = mem.fact_source(f)
+    return d
+
+
+@router.get("/api/facts")
+def facts_list(layer: Optional[str] = None, q: Optional[str] = None):
+    from ...services import memory as mem
+    rows = [_fact_out(f) for f in mem.list_facts(layer, q=q)]
     return {"items": rows, "stats": mem.stats(), "enabled": mem.enabled(), "categories": list(mem.CATEGORIES)}
 
 
@@ -300,7 +367,7 @@ async def facts_add(p: FactIn):
     f = await mem.add_fact(p.text, p.layer, p.category, p.core, confidence=1.0)
     if not f:
         raise HTTPException(400, "Пусто или похоже на пароль/код — такое не запоминаю")
-    return f.model_dump(exclude={"vector"})
+    return _fact_out(f)
 
 
 # Литеральный путь ПЕРЕД /api/facts/{fid}: Starlette сверяет роуты по порядку
@@ -318,10 +385,10 @@ def facts_style_set(p: StyleIn):
 @router.put("/api/facts/{fid}")
 async def facts_patch(fid: int, p: FactPatch):
     from ...services import memory as mem
-    f = await mem.update_fact(fid, p.text, p.layer, p.category, p.core, reason="поправлено вручную")
+    f = await mem.update_fact(fid, p.text, p.layer, p.category, p.core, p.is_private, reason="поправлено вручную")
     if not f:
         raise HTTPException(404)
-    return f.model_dump(exclude={"vector"})
+    return _fact_out(f)
 
 
 @router.post("/api/facts/{fid}/forget")
@@ -330,7 +397,7 @@ def facts_forget(fid: int):
     f = mem.forget(fid)
     if not f:
         raise HTTPException(404)
-    return f.model_dump(exclude={"vector"})
+    return _fact_out(f)
 
 
 @router.post("/api/facts/{fid}/restore")
@@ -339,7 +406,27 @@ def facts_restore(fid: int):
     f = mem.restore(fid)
     if not f:
         raise HTTPException(404)
-    return f.model_dump(exclude={"vector"})
+    return _fact_out(f)
+
+
+@facts_router.post("/api/facts/{fid}/wrong")
+def facts_wrong(fid: int):
+    """«Неверно» — отдельно от «забыть»: факт уходит в архив с пометкой для разбора."""
+    from ...services import memory as mem
+    f = mem.forget(fid, reason="неверно")
+    if not f:
+        raise HTTPException(404)
+    return _fact_out(f)
+
+
+@facts_router.post("/api/facts/{fid}/confirm")
+def facts_confirm(fid: int):
+    """Подтверждение актуальности: confirmed_at=now, снимает stale."""
+    from ...services import memory as mem
+    f = mem.confirm_fact(fid)
+    if not f:
+        raise HTTPException(404)
+    return _fact_out(f)
 
 
 @router.post("/api/facts/portrait")

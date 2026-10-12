@@ -17,6 +17,7 @@ import { useLive } from './components/Live'
 import { NAV, NAV_GROUPS, pickTabs, pickMore } from './lib/nav'
 import { Skeleton, toast } from './components/ui'
 import AppShell from './components/AppShell'
+import { usePhone } from './lib/motion'
 
 /* Тяжёлые страницы — отдельными чанками: главная грузится сразу, а финансы/доска/
 // память/настройки подтягиваются по первому переходу. Фолбэк — тот же Skeleton,
@@ -25,6 +26,8 @@ const Finance = lazy(() => import('./pages/Finance'))
 const BoardPage = lazy(() => import('./pages/Board'))
 const Memory = lazy(() => import('./pages/Memory'))
 const Settings = lazy(() => import('./pages/Settings'))
+/* Мобильная копия (mapp/): отдельный чанк — десктоп его не тянет. */
+const MApp = lazy(() => import('./mapp/shell'))
 
 function PageFallback() {
   return (
@@ -375,6 +378,9 @@ function Gate({ denied }) {
 
 export default function App() {
   const theme = useThemeState()
+  /* Телефон (≤820px, тот же порог, что в CSS): вместо десктопа — тёмная
+     мобильная копия. Хук выше всех return, десктопный путь ниже не меняется. */
+  const phone = usePhone()
   const [tick, setTick] = useState(0)
   const bump = useCallback(() => setTick((t) => t + 1), [])
   const inbox = useInbox()
@@ -420,6 +426,13 @@ export default function App() {
     document.addEventListener('visibilitychange', onVis)
     return () => { es?.close(); document.removeEventListener('visibilitychange', onVis) }
   }, [bump]) // eslint-disable-line
+  if (phone) {
+    return (
+      <Suspense fallback={null}>
+        <MApp />
+      </Suspense>
+    )
+  }
   return (
     <ThemeCtx.Provider value={theme}>
       <RefreshCtx.Provider value={{ tick, bump }}>

@@ -46,9 +46,9 @@ export function Section({ title, idx, hint, tip, action, children, className = '
           <div className="min-w-0">
             <div className="flex items-baseline gap-2">
               {title && <h2 data-tip={tip} className={`${tip ? 'tip-wide cursor-help underline decoration-dotted decoration-[var(--line-2)] underline-offset-[6px]' : ''} text-[20px] font-semibold tracking-[-0.03em]`}>{title}{tip ? ' ?' : ''}</h2>}
-              {idx != null && idx !== 0 && <span className="mono text-[12px] text-accent">{idx}</span>}
+              {idx != null && idx !== 0 && <span className="mono text-xs text-accent">{idx}</span>}
             </div>
-            {hint && !tip && <div className="muted mt-1 max-w-[520px] text-[13px] leading-snug">{hint}</div>}
+            {hint && !tip && <div className="muted mt-1 max-w-[520px] text-md leading-snug">{hint}</div>}
           </div>
           {action && <div className="flex items-center gap-2">{action}</div>}
         </div>
@@ -63,7 +63,7 @@ export function PageHead({ kicker, title, idx, right, children, sub }) {
   return (
     <header className="top r mb-6 sm:mb-8" style={{ '--i': 0 }}>
       <div className="min-w-0">
-        {kicker && <div className="mono text-[11px] uppercase tracking-wider text-[var(--ink3)] mb-1">{kicker}</div>}
+        {kicker && <div className="mono text-[length:var(--fs-xs)] uppercase tracking-wider text-[var(--ink3)] mb-1">{kicker}</div>}
         <h1 className="text-[34px] sm:text-[44px] font-semibold tracking-[-0.045em] leading-[1.04]">
           {title}{idx != null && idx !== 0 && <span className="mono text-[18px] ml-3 align-middle text-accent">{idx}</span>}
         </h1>
@@ -651,50 +651,7 @@ export function Bars({ values = [], labels = [], height = 62, className = '' }) 
   )
 }
 
-export function FlowBar({ items = [], note, legend, className = '' }) {
-  return (
-    <div className={className}>
-      <div className="flow">
-        {items.map((it, i) => (
-          <i key={i} style={{ width: `${it.pct}%`, background: it.color }} title={`${it.label}: ${it.pct}%`} />
-        ))}
-      </div>
-      {(legend || note) && (
-        <div className="fl">
-          <span>{legend}</span>
-          {note && <span>{note}</span>}
-        </div>
-      )}
-    </div>
-  )
-}
-
-export function Toggle({ on, onChange, label }) {
-  return (
-    <Pressable
-      role="switch"
-      aria-checked={!!on}
-      aria-label={label}
-      className={`tgl ${on ? '' : 'off'}`}
-      onClick={() => onChange(!on)}
-    />
-  )
-}
-
-export function Swatch({ color, active, onClick, title, label }) {
-  return (
-    <button
-      type="button"
-      style={{ '--c': color }}
-      className={active ? 'on' : ''}
-      onClick={() => onClick(color)}
-      title={title || label || color}
-      aria-label={label || title || color}
-      aria-pressed={!!active}
-    />
-  )
-}
-
+/* Выбор одного варианта пилюлями (класс .pill). Seg ниже — сегмент-трек, другой вид. */
 export function Pills({ value, onChange, options, className = '', label }) {
   return (
     <div className={`flex flex-wrap gap-1.5 ${className}`} role="group" aria-label={label}>
@@ -705,15 +662,10 @@ export function Pills({ value, onChange, options, className = '', label }) {
   )
 }
 
-export function Stat({ label, value, sub, tone, big }) {
-  const color = tone === 'green' ? 'pos' : tone === 'red' ? 'neg' : tone === 'orange' ? 'warn' : tone === 'accent' ? 'accent' : ''
-  return (
-    <div>
-      <div className="label">{label}</div>
-      <div className={`num mt-2 leading-none tracking-[-0.04em] ${big ? 'text-[36px] sm:text-[44px]' : 'text-[26px] sm:text-[30px]'} font-medium ${color}`}>{value}</div>
-      {sub && <div className="muted mt-1.5 text-[13px]">{sub}</div>}
-    </div>
-  )
+/* Переключатель да/нет — каноническая реализация Switch ниже (класс .switch).
+   Toggle — тонкий алиас: тот же контракт и тот же вид. */
+export function Toggle({ on, onChange, label }) {
+  return <Switch on={on} onChange={onChange} label={label} />
 }
 
 /* Анимация ухода элемента перед удалением/выполнением.
@@ -774,7 +726,7 @@ export function Toaster() {
           <span className="toast-ic">{t.kind === 'err' ? <X size={14} /> : <Check size={14} />}</span>
           <div className="min-w-0">
             <div className="font-medium leading-snug">{t.title}</div>
-            {t.sub && <div className="muted mt-0.5 text-[12.5px] leading-snug">{t.sub}</div>}
+            {t.sub && <div className="muted mt-0.5 text-sm leading-snug">{t.sub}</div>}
           </div>
         </div>
       ))}
@@ -782,8 +734,8 @@ export function Toaster() {
     document.body
   )
 }
-/* обратная совместимость: страницы рендерят <Toast {...toast} /> — теперь это ничего не рисует, всё идёт через Toaster */
-export function Toast() { return null }
+/* Строчный toast()/useToast()/Toaster выше — единственный канал уведомлений.
+   Заглавный <Toast> нигде не используется (только строчный toast) — заглушка удалена. */
 export function useToast() {
   const [t] = useState({ msg: '', kind: '' })
   const show = (msg, kind = '', sub) => { if (msg) toast(msg, { kind: kind === 'err' ? 'err' : kind || 'ok', sub }) }
@@ -896,14 +848,14 @@ export function PriorityDot({ value, onChange, disabled }) {
   }, [open])
   return (
     <>
-      <button ref={btn} type="button" className="btn-icon !h-7 !w-7" data-tip={open ? undefined : t(PRIORITY[value]?.label)} onClick={toggle} aria-label={t('common.priority')} aria-expanded={open}>
+      <button ref={btn} type="button" className="btn-icon btn-icon--sm !h-7 !w-7" data-tip={open ? undefined : t(PRIORITY[value]?.label)} onClick={toggle} aria-label={t('common.priority')} aria-expanded={open}>
         <span className={`h-2 w-2 rounded-full ${PRIORITY[value]?.dot}`} />
       </button>
       {open && pos && createPortal(
         <div data-pr-menu className="elevated fixed z-[120] w-[152px] !p-1" style={{ left: pos.left, top: pos.top, bottom: pos.bottom, animation: 'rise .16s var(--ease-out)' }}>
-          <div className="label px-2.5 pb-1 pt-1.5 !text-[10px]">{t('common.importance')}</div>
+          <div className="label px-2.5 pb-1 pt-1.5">{t('common.importance')}</div>
           {[1, 2, 3].map((p) => (
-            <button key={p} type="button" className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-[13px] hover:bg-[var(--fill)] ${p === value ? 'font-medium' : ''}`} onClick={() => { setOpen(false); if (p !== value) onChange(p) }}>
+            <button key={p} type="button" className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-md hover:bg-[var(--fill)] ${p === value ? 'font-medium' : ''}`} onClick={() => { setOpen(false); if (p !== value) onChange(p) }}>
               <span className={`h-2 w-2 rounded-full ${PRIORITY[p].dot}`} />{t(PRIORITY[p].label)}{p === value && <Check size={12} className="ml-auto text-accent" />}
             </button>
           ))}

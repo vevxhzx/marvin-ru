@@ -150,7 +150,7 @@ def test_d_big_tool_call_waits_for_yes(monkeypatch):
             {"name": "add_expense", "arguments": {"amount": 60000, "note": "тест"}}]}
     monkeypatch.setattr(agent, "_chat", fake_chat)
     monkeypatch.setattr(agent, "_history", lambda *a, **k: [])
-    monkeypatch.setattr(agent, "_turn_context", lambda t, with_lessons=True: __import__("asyncio").sleep(0, result=("", "")))
+    monkeypatch.setattr(agent, "_turn_context", lambda t, with_lessons=True, include_private=True: __import__("asyncio").sleep(0, result=("", "")))
 
     r = asyncio.run(agent.via_ollama("потрать 60000 на тест", "b1-d"))
     assert r is not None and "clarify" in r.actions, (r.actions if r else None, r.text if r else None)

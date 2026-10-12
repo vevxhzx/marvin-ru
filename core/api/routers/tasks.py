@@ -39,7 +39,6 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
-from sqlmodel import select
 
 from ...db import Aim, Event, Milestone, Task, session
 from ...services import calendar, orders, tasks
@@ -72,15 +71,9 @@ def _task_as_event(t: Task) -> dict:
 def events(start: Optional[datetime] = None, end: Optional[datetime] = None, tasks_too: bool = False):
     out = [dict(_ev_out(e), kind="event") for e in calendar.list_events(start, end, limit=1000)]
     if tasks_too:
-        with session() as s:
-            q = select(Task).where(Task.due != None)  # noqa: E711
-            if start:
-                q = q.where(Task.due >= start)
-            if end:
-                q = q.where(Task.due <= end)
-            for t in s.exec(q.limit(1000)).all():
-                if not t.done or (t.done_at and start and t.done_at >= start):
-                    out.append(_task_as_event(t))
+        for t in tasks.list_tasks_with_due(start, end, limit=1000):
+            if not t.done or (t.done_at and start and t.done_at >= start):
+                out.append(_task_as_event(t))
         # дедлайны заказов — тоже в календаре (kind='order'), закрытые не показываем
         for o in orders.list_orders():
             if o["deadline"] and o["status"] in ("new", "work", "review") and (not start or o["deadline"] >= start) and (not end or o["deadline"] <= end):

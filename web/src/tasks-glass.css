@@ -6,7 +6,7 @@
    with side text; bars «неделя»). Плюс тост «вернуть» после закрытия/удаления.
    Scoped to #p-tasks (кроме .tg-toast — он портируется в body, имя префиксовано).
    Tokens only (acc, line, glass, sf and fill vars), no raw palette.
-   index.css is NOT touched (owned by another agent).
+   Shared glass lives in index.css (.glass/.glass-strong — JSX adds the class).
    Data: ring + week bars derive client-side from the already-loaded tasks
    (api.tasks(true,true) in Tasks.jsx) — no new backend calls.
    prefers-reduced-motion: входы/кольцо/бары гасит общее правило index.css
@@ -80,15 +80,7 @@
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background:
-    linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
-    var(--sf);
-  -webkit-backdrop-filter: blur(26px) saturate(150%);
-  backdrop-filter: blur(26px) saturate(150%);
-  border: 1px solid var(--glass-ring);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    0 24px 50px -12px rgba(0, 0, 0, 0.35);
+  /* стекло — .glass-strong из index.css (класс ставит JSX): фон/блюр/кромка/тень общие */
   transform-origin: top right;
   animation: tgPop .25s var(--ease-out) both;
 }
@@ -96,7 +88,7 @@
   from { opacity: 0; transform: translateY(-8px) scale(.97); }
 }
 #p-tasks .tg-pp-note {
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
 }
 #p-tasks .tg-chs {
@@ -180,12 +172,12 @@
 }
 #p-tasks .tg-qmark {
   color: var(--acc);
-  font-size: 16px;
+  font-size: var(--fs-lg);
   line-height: 1;
   text-shadow: 0 0 12px color-mix(in srgb, var(--acc) 60%, transparent);
 }
 #p-tasks .tg-qenter {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   letter-spacing: .06em;
   text-transform: uppercase;
   color: var(--ink-3);
@@ -251,7 +243,7 @@
   align-items: center;
   padding: 4px 11px;
   border-radius: 999px;
-  font-size: 11.5px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   white-space: nowrap;
   background: var(--fill);
@@ -338,7 +330,7 @@
 }
 /* .tag — амберный чип проекта в строке */
 #p-tasks .tg-tag {
-  font-size: 11px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   padding: 3px 10px;
   border-radius: 999px;
@@ -355,7 +347,7 @@
 }
 /* строка-заголовок группы (.gh2): тонкая подпись, просроченное — розовым */
 #p-tasks .gh2 {
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 500;
   color: var(--ink-3);
   padding: 18px 4px 6px;
@@ -498,7 +490,7 @@
 #p-tasks .er > span:first-child {
   width: 76px;
   flex: none;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   color: var(--ink-3);
 }
 /* поле заголовка: не трогать .ck input (чекбокс-правило из index.css сюда тоже попадает) */
@@ -515,7 +507,7 @@
   background: var(--fill);
   color: var(--ink);
   font-family: var(--font-ui);
-  font-size: 14px;
+  font-size: var(--fs-md);
   font-weight: 500;
   line-height: 1.4;
   outline: 0;
@@ -536,7 +528,7 @@
   background: color-mix(in srgb, var(--neg-solid) 12%, transparent);
   color: var(--neg);
   font: inherit;
-  font-size: 12.5px;
+  font-size: var(--fs-sm);
   font-weight: 600;
   cursor: pointer;
   transition: background var(--t-fast) var(--e), box-shadow var(--t-fast) var(--e);
@@ -558,7 +550,7 @@
   max-width: 90vw;
   padding: 11px 14px 11px 20px;
   border-radius: 999px;
-  font-size: 13px;
+  font-size: var(--fs-md);
   text-align: center;
   background:
     linear-gradient(135deg, color-mix(in srgb, var(--acc) 14%, transparent), transparent 60%),
@@ -583,7 +575,7 @@
 }
 .tg-toast-t i {
   font-style: normal;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   opacity: .72;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -599,7 +591,7 @@
   background: var(--acc);
   color: var(--accent-ink);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   font-weight: 600;
   cursor: pointer;
   box-shadow: 0 0 14px color-mix(in srgb, var(--acc) 55%, transparent);
@@ -751,33 +743,12 @@
    the .s8/.s4/.s12 span rules in index.css, so the pair survives 821–1060px
    where .s8 would otherwise go full-width. Glass surfaces desktop-only. */
 @media (min-width: 821px) {
+  /* стекло карточек — .glass из index.css (класс ставит JSX), здесь только раскладка */
   #p-tasks .tg-list {
     grid-column: span 8;
-    background:
-      linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
-      var(--sf);
-    border: 1px solid var(--glass-ring);
-    -webkit-backdrop-filter: blur(14px) saturate(150%);
-    backdrop-filter: blur(14px) saturate(150%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.5),
-      inset 0 0 0 1px var(--glass-ring),
-      var(--shadow-1);
   }
   #p-tasks .tg-side {
     grid-column: span 4;
-  }
-  #p-tasks .tg-card {
-    background:
-      linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
-      var(--sf);
-    border: 1px solid var(--glass-ring);
-    -webkit-backdrop-filter: blur(14px) saturate(150%);
-    backdrop-filter: blur(14px) saturate(150%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.5),
-      inset 0 0 0 1px var(--glass-ring),
-      var(--shadow-1);
   }
 }
 

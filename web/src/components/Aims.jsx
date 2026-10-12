@@ -23,7 +23,7 @@ export default function Aims({ tick, bump }) {
   return (
     <div className="space-y-8">
       <div className="flex items-center justify-between">
-        <div className="muted text-[13px]">{t(active.length ? 'aims.active_n' : 'aims.long_term', { count: active.length })}</div>
+        <div className="muted text-md">{t(active.length ? 'aims.active_n' : 'aims.long_term', { count: active.length })}</div>
         <div className="flex items-center gap-2">
           <button className={`btn-ghost btn-sm ${all ? 'text-accent' : ''}`} onClick={() => setAll(!all)}>{t(all ? 'aims.only_active' : 'common.all')}</button>
           <button className="btn-primary head-primary" onClick={() => setSheet(true)}><Plus size={15} /> {t('aims.goal')}</button>
@@ -38,10 +38,10 @@ export default function Aims({ tick, bump }) {
           <div className="rule">
             {rest.map((a) => (
               <div key={a.id} className="row opacity-70">
-                <span className="grid h-[22px] w-[22px] shrink-0 place-items-center text-[12px]">{a.status === 'done' ? <Check size={14} className="text-accent" /> : a.status === 'paused' ? <Pause size={12} /> : <X size={12} />}</span>
+                <span className="grid h-[22px] w-[22px] shrink-0 place-items-center text-xs">{a.status === 'done' ? <Check size={14} className="text-accent" /> : a.status === 'paused' ? <Pause size={12} /> : <X size={12} />}</span>
                 <div className="min-w-0 flex-1">
                   <div className={`truncate text-[15px] ${a.status === 'done' ? '' : 'line-through'}`}>{a.title}</div>
-                  <div className="muted text-[12px]">{t(a.status === 'done' ? 'aims.reached' : a.status === 'paused' ? 'aims.on_pause' : 'aims.dropped', { date: fmtDate(a.done_at) })}{a.why ? ` · ${a.why}` : ''}</div>
+                  <div className="muted text-xs">{t(a.status === 'done' ? 'aims.reached' : a.status === 'paused' ? 'aims.on_pause' : 'aims.dropped', { date: fmtDate(a.done_at) })}{a.why ? ` · ${a.why}` : ''}</div>
                 </div>
                 {a.status !== 'done' && <button className="btn-ghost btn-sm" onClick={() => patch(a.id, { status: 'active' }, t('aims.back_to_work'))}><Play size={12} /> {t('aims.restore')}</button>}
               </div>
@@ -104,7 +104,7 @@ function AimCard({ a, onPatch, onChange }) {
             <div className="truncate text-[16px] font-semibold">{a.title}</div>
             {a.priority === 1 && <span className="label shrink-0 !text-accent">{t('aims.main')}</span>}
           </div>
-          <div className="muted mt-0.5 truncate text-[13px]">
+          <div className="muted mt-0.5 truncate text-md">
             {a.why || <span className="faint">{t('aims.no_why')}</span>}
           </div>
         </button>
@@ -113,7 +113,7 @@ function AimCard({ a, onPatch, onChange }) {
       </div>
       <div className="progress mt-3 !h-[6px]"><div style={{ width: `${pct}%`, background: 'linear-gradient(90deg, var(--acc), color-mix(in srgb, var(--acc) 55%, #ffffff))' }} /></div>
       {(a.due || a.days_left < 0 || stale) && (
-        <div className="muted mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-[12px]">
+        <div className="muted mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-xs">
           {a.due && <span className="num">{t('aims.by', { date: fmtDate(a.due) })}{a.days_left != null && a.days_left >= 0 ? t('aims.days_left', { n: a.days_left }) : ''}</span>}
           {a.days_left != null && a.days_left < 0 && <span className="neg">{t('aims.overdue')}</span>}
           {stale && <span className="warn">{t('aims.stale', { n: a.stale_days })}</span>}
@@ -132,15 +132,15 @@ function AimCard({ a, onPatch, onChange }) {
       </div>
       {open && (
         <div className="mt-4 space-y-4" style={{ animation: 'rise .2s var(--ease-out)' }}>
-          {!v ? <div className="muted text-[13px]">…</div> : (
+          {!v ? <div className="muted text-md">…</div> : (
             <>
-              {v.milestones.length === 0 && v.tasks.length === 0 && <div className="muted text-[13px]">{t('aims.no_ms')}</div>}
+              {v.milestones.length === 0 && v.tasks.length === 0 && <div className="muted text-md">{t('aims.no_ms')}</div>}
               {v.milestones.map((m) => (
                 <div key={m.id}>
                   <div className="flex items-center gap-2">
                     <button onClick={() => msStatus(m, m.status === 'done' ? 'open' : 'done')} aria-label={t('aims.ms_done')} className={`grid h-[20px] w-[20px] shrink-0 place-items-center rounded-full border transition ${m.status === 'done' ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={{ borderColor: 'var(--line-2)' }}>{m.status === 'done' && <Check size={11} strokeWidth={3} />}</button>
                     <div className={`min-w-0 flex-1 truncate text-[14px] font-medium ${m.status === 'done' ? 'muted line-through' : ''}`}>{m.title}</div>
-                    <div className="muted num text-[12px]">{Math.round(m.progress * 100)}%{m.order_title ? ` · ${t('aims.order', { title: m.order_title })}` : ''}{m.due ? ` · ${t('aims.by', { date: fmtDate(m.due) })}` : ''}</div>
+                    <div className="muted num text-xs">{Math.round(m.progress * 100)}%{m.order_title ? ` · ${t('aims.order', { title: m.order_title })}` : ''}{m.due ? ` · ${t('aims.by', { date: fmtDate(m.due) })}` : ''}</div>
                   </div>
                   {m.tasks.length > 0 && (
                     <div className="ml-7 mt-1">
@@ -172,7 +172,7 @@ function TaskLine({ t, onDone }) {
   return (
     <div className="flex items-center gap-2 py-1">
       <button onClick={() => !t.done && onDone(t)} aria-label={T2('focus.done')} className={`grid h-[18px] w-[18px] shrink-0 place-items-center rounded-full border transition ${t.done ? 'border-accent bg-accent text-accent-ink' : 'hover:border-accent'}`} style={{ borderColor: 'var(--line-2)' }}>{t.done && <Check size={10} strokeWidth={3} />}</button>
-      <div className={`min-w-0 flex-1 truncate text-[13px] ${t.done ? 'muted line-through' : ''}`}>{t.title}</div>
+      <div className={`min-w-0 flex-1 truncate text-md ${t.done ? 'muted line-through' : ''}`}>{t.title}</div>
       {t.blocked_by && !t.done && <span className="warn truncate text-[11px]">⏸ {t.blocked_by}</span>}
       {t.due && !t.done && <span className="faint text-[11px]">{fmtDate(t.due)}</span>}
     </div>

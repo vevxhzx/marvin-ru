@@ -802,7 +802,7 @@ function inline(s) { return s.split(/(\*\*[^*]+\*\*|_[^_]+_)/g).map((p, i) => p.
 
 function ContextMenu({ m, onClose, onAct, hasSel, readOnly }) {
   useEffect(() => { const h = () => onClose(); window.addEventListener('pointerdown', h, { once: true, capture: true }); return () => window.removeEventListener('pointerdown', h, { capture: true }) }, [onClose])
-  const Item = ({ a, icon: I, children, danger }) => <button className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[13px] hover:bg-[var(--fill)] ${danger ? 'neg' : ''}`} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onAct(a) }}><I size={14} className="faint" />{children}</button>
+  const Item = ({ a, icon: I, children, danger }) => <button className={`flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-md hover:bg-[var(--fill)] ${danger ? 'neg' : ''}`} onPointerDown={(e) => { e.stopPropagation(); e.preventDefault(); onAct(a) }}><I size={14} className="faint" />{children}</button>
   const el = document.querySelector('.board-wrap'); const W = el?.clientWidth || 800, H = el?.clientHeight || 600
   return (
     <div className="elevated absolute z-[60] w-[210px] !p-1.5" style={{ left: Math.min(m.x, W - 220), top: Math.min(m.y, H - 260) }} onPointerDown={(e) => e.stopPropagation()}>

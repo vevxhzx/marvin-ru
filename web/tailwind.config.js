@@ -15,6 +15,9 @@ export default {
         sans: ['"Inter Variable"', 'Inter', '-apple-system', 'BlinkMacSystemFont', '"Segoe UI"', 'Roboto', 'sans-serif'],
         mono: ['"JetBrains Mono Variable"', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
+      fontSize: {
+        xs: 'var(--fs-xs)', sm: 'var(--fs-sm)', md: 'var(--fs-md)',
+      },
       colors: {
         accent: 'var(--accent)',
         ink: 'var(--ink)',

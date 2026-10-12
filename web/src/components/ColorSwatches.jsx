@@ -33,7 +33,7 @@ export function SwatchRow({ label, value, onChange, showDefault = false, colors 
   const { t } = useI18n()
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-      {label ? <span className="w-[96px] shrink-0 text-[13px] font-medium leading-tight">{label}</span> : null}
+      {label ? <span className="w-[96px] shrink-0 text-md font-medium leading-tight">{label}</span> : null}
       <div className="sw !m-0">
         {showDefault && <Swatch hex="var(--sf2)" name={t('color.as_is')} selected={!value} onClick={() => onChange('')} />}
         {colors.map((c) => (

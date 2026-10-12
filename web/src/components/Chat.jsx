@@ -3,6 +3,7 @@ import { lower, name as aName, dat } from '../lib/name'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, X, Undo2, Check, CalendarDays, CheckSquare, Wallet, Brain, Cloud, Zap, Cpu, AlertCircle, HelpCircle, Link2, Sparkles } from 'lucide-react'
 import { chatStream, api, dayLabel, hhmm, isSameDay, kbShiftEnter } from '../lib/api'
+import { setUsedFactIds } from '../lib/usedFacts'
 import { useRefresh } from '../App'
 import { MorningDigestCard, WeekSummaryCard } from './ReportCards'
 import { useI18n, t as T } from '../lib/i18n'
@@ -115,6 +116,8 @@ export default function Chat({ open, onClose, seed }) {
         })
       })
       setMsgs((m) => (streamed && m[m.length - 1]?.streaming ? m.slice(0, -1) : m).concat({ role: 'bot', text: r.text, via: r.via, actions: r.actions, card: r.card, channel: 'web', at: new Date().toISOString() }))
+      // какие факты попали в ответ — для бейджа «использовано в ответе» на странице памяти
+      setUsedFactIds(r.used_fact_ids || [])
       // suggest_fact игнорируем: память молча (батч 4), тоста «Запомнить?» нет
       // команда «отмена» пришла ответом — гасим отменяемые actions у прежнего сообщения,
       // иначе кнопка в шапке переживёт уже сделанную отмену
@@ -179,7 +182,7 @@ export default function Chat({ open, onClose, seed }) {
           {loaded && msgs.length === 0 && (
             <div className="flex h-full flex-col items-start justify-end pb-4">
               <div className="h3">{t('chat.hello')}</div>
-              <div className="muted mt-1 text-[13.5px] leading-relaxed">{t('chat.hello_hint')}</div>
+              <div className="muted mt-1 text-md leading-relaxed">{t('chat.hello_hint')}</div>
             </div>
           )}
           {msgs.map((m, i) => {

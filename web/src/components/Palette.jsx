@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { dat, gen } from '../lib/name'
-import { createPortal } from 'react-dom'
+import DialogShell from './Dialog'
 import { useNavigate } from 'react-router-dom'
 import { Clapperboard, Sparkles, Wallet, CalendarDays, CheckSquare, Brain, Settings, Search, MessageCircle, Plus, Moon, Sun, Monitor, Undo2, Gamepad2, BarChart3, Coins, Flame, History, Link2, FileText, CornerDownLeft, Briefcase, Timer, Target, Users, Share2 } from 'lucide-react'
 import { api, kb, kbAlt } from '../lib/api'
@@ -135,12 +135,8 @@ export default function Palette({ open, onClose, openChat, setTheme }) {
 
   if (!open) return null
   let lastGroup = null
-  return createPortal(
-    <div className="fixed inset-0 flex items-start justify-center px-3 pt-[calc(10vh/var(--ui-zoom))] sm:pt-[calc(14vh/var(--ui-zoom))]"
-      onMouseDown={(e) => e.target === e.currentTarget && onClose()}
-      style={{ zIndex: 'var(--z-scrim)', background: 'color-mix(in srgb, var(--bg) 40%, rgba(8, 8, 12, .46))', animation: 'fade .16s ease-out' }}>
-      <div className="elevated flex max-h-[86dvh] w-full max-w-[600px] flex-col overflow-hidden" style={{ animation: 'rise .22s var(--ease-out)' }}
-        role="dialog" aria-modal="true" aria-label={t('pal.aria')}>
+  return (
+    <DialogShell onClose={onClose} label={t('pal.aria')}>
         <div className="hair flex items-center gap-3 border-b px-4">
           <Search size={16} className="faint shrink-0" aria-hidden="true" />
           <input ref={inp} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('pal.ph')} aria-label={t('pal.ph')}
@@ -177,6 +173,6 @@ export default function Palette({ open, onClose, openChat, setTheme }) {
           <span className="truncate"><span className="kbd">↑↓</span> {t('pal.pick')} · <span className="kbd">↵</span> {t('pal.run')} · <span className="kbd">tab</span> {t('pal.next')}</span>
           <span className="kbd shrink-0">{kb('K')}</span>
         </div>
-      </div>
-    </div>, document.body)
+    </DialogShell>
+  )
 }

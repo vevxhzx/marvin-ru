@@ -2,7 +2,7 @@
 
 Слушает микрофон → ждёт «ассистент» (Vosk, офлайн) → записывает команду до паузы → Whisper (офлайн) →
 отправляет текст ядру (http://127.0.0.1:8765/api/chat, то же, что сайт и Telegram) → озвучивает ответ
-(Silero, офлайн) в наушники. Иконка в трее: серая — сплю, синяя — слушаю, жёлтая — думаю, зелёная — говорю.
+(движок из настроек: Piper/Silero офлайн, при сбое — Microsoft) в наушники. Иконка в трее: серая — сплю, синяя — слушаю, жёлтая — думаю, зелёная — говорю.
 
 Горячая клавиша (по умолчанию Ctrl+Shift+J) — начать слушать без wake word.
 """
@@ -310,12 +310,21 @@ def _play_wave(wave: np.ndarray, sr: int) -> None:
 
 
 def _synth(text: str):
-    """Текст → (wave, sr) или None. Silero офлайн, при сбое — голос Microsoft (edge)."""
+    """Текст → (wave, sr) или None. Выбранный движок первым (Piper офлайн),
+    при сбое — Silero, в конце голос Microsoft (edge)."""
     from core.voice import tts
     spoken = tts.prepare(text)
     if not spoken:
         return None
-    if tts.silero_available() and tts.ENGINE == "silero":
+    eng = tts.resolve_engine()
+    if eng == "piper":
+        try:
+            w = tts._piper_wave(spoken)
+            if w is not None and len(w):
+                return w, tts.SAMPLE_RATE
+        except Exception as e:
+            log.warning("Piper не озвучил (%s) — пробую Silero/Microsoft", e)
+    if tts.silero_available() and eng in ("silero", "piper"):
         try:
             w = tts._silero_wave(spoken)
             if w is not None and len(w):

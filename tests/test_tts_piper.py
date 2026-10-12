@@ -70,7 +70,7 @@ def test_piper_wave_uses_python_api_not_cli(monkeypatch, tmp_path):
         class config:
             sample_rate = 22050
 
-        def synthesize_wav(self, text, w):
+        def synthesize_wav(self, text, w, syn_config=None):
             assert "Привет" in text
             w.setnchannels(1)
             w.setsampwidth(2)

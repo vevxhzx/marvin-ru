@@ -17,7 +17,7 @@ import { usePhone } from '../lib/motion'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 /* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
    отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
@@ -142,16 +142,26 @@ export default function Orders() {
   /* Иконка «проверить снова» крутится заново на каждый клик (перемонтирование по key). */
   const [fuSpin, setFuSpin] = useState(0)
 
-  const load = () => {
+  /* Список и статистика грузятся раздельно: список — при каждом tick и после мутаций,
+     статистика (4 тяжёлых запроса) — не чаще раза в минуту, после денежных мутаций —
+     принудительно. После мутаций правим затронутое (строка/список), а не всё подряд. */
+  const statsAt = useRef(0)
+  const loadList = () => {
     setLoadErr(false)
+    return api.orders(true).then(setOrders).catch(() => setLoadErr(true))
+  }
+  const loadStats = (force = false) => {
+    if (!force && Date.now() - statsAt.current < 60000) return Promise.resolve()
+    statsAt.current = Date.now()
     return Promise.all([
-      api.orders(true).then(setOrders).catch(() => setLoadErr(true)),
-      api.orderStats(6).then(setStats),
+      api.orderStats(6).then(setStats).catch(() => {}),
       api.pulse().then(setPulse).catch(() => {}),
-      api.crmFollowups().then(setFollowups).catch(() => {}), api.crmAnalytics(6).then(setAnalytics).catch(() => {}),
+      api.crmFollowups().then(setFollowups).catch(() => {}),
+      api.crmAnalytics(6).then(setAnalytics).catch(() => {}),
     ]).catch(() => {})
   }
-  useEffect(() => { load() }, [tick])
+  const load = () => Promise.all([loadList(), loadStats()]).catch(() => {})
+  useEffect(() => { loadList(); loadStats() }, [tick])
   // «+» дока на заказах открывает форму нового заказа (AppShell шлёт orders:add)
   useEffect(() => {
     const on = () => setSheet('new')
@@ -200,12 +210,17 @@ export default function Orders() {
 
   const addQuick = async (e) => {
     e.preventDefault(); if (!quick.trim()) return
-    try { await api.chat(T('or.seed_order', { text: quick.trim() })); setQuick(''); load(); bump() } catch (err) { show.err(err) }
+    try { await api.addOrder({ title: quick.trim(), status: 'work' }); setQuick(''); loadList(); loadStats(true); bump() } catch (err) { show.err(err) }
   }
   const [leaveCls, leave] = useLeave()
   const setStatus = async (o, status) => {
     if (status === 'paid' && o.left > 0) return setPay(o)   // деньги не записаны — сначала оплата, полная сумма сама закроет заказ
-    try { await api.updateOrder(o.id, { status }); load(); bump(); if (status === 'paid') show(t('or.paid'), '', o.title) } catch (e) { show.err(e) }
+    try {
+      await api.updateOrder(o.id, { status })
+      setOrders((l) => (l || []).map((x) => (x.id === o.id ? { ...x, status } : x)))   // строка сразу, список дотягиваем фоном
+      if (status === 'paid') show(t('or.paid'), '', o.title)
+      loadList(); loadStats(true); bump()
+    } catch (e) { show.err(e); loadList() }
   }
   // стадия заказа меняется через CRM (старый status синхронизируется на бэке).
   // «потерян» требует причину: клик по нему открывает вопрос, а не меняет стадию сразу.
@@ -213,13 +228,18 @@ export default function Orders() {
     if (stage === stageOf(o)) return
     if (stage === 'lost') return setLost(o)
     if (stage === 'paid' && o.left > 0) return setPay(o)
-    try { await api.crmSetStage(o.id, stage); show(t('stage.of', { label: t(ORDER_STAGE_LABEL[stage]) }), '', o.title); markLand(o.id); load(); bump() } catch (e) { show.err(e) }
+    try {
+      await api.crmSetStage(o.id, stage)
+      show(t('stage.of', { label: t(ORDER_STAGE_LABEL[stage]) }), '', o.title); markLand(o.id)
+      setOrders((l) => (l || []).map((x) => (x.id === o.id ? { ...x, stage } : x)))   // строка сразу, список дотягиваем фоном
+      loadList(); loadStats(true); bump()
+    } catch (e) { show.err(e); loadList() }
   }
   const openDrawer = (o) => setDrawerId(o.id)
-  const scanFollowups = async () => { try { const r = await api.crmScanFollowups(); await load(); show(t('or.fu_updated'), r.created?.length ? t('or.fu_new', { n: r.created.length }) : t('or.fu_none')) } catch (e) { show.err(e) } }
-  const remove = (o) => leave(o.id, 'leaving', async () => { await api.delOrder(o.id); show(t('or.deleted'), '', o.title); load(); bump() })
-  const start = async (o, minutes = null) => { try { await api.startTimer(o?.id || null, minutes); load() } catch (e) { show.err(e) } }
-  const stop = async () => { try { await api.stopTimer(); load() } catch (e) { show.err(e) } }
+  const scanFollowups = async () => { try { const r = await api.crmScanFollowups(); await loadStats(true); show(t('or.fu_updated'), r.created?.length ? t('or.fu_new', { n: r.created.length }) : t('or.fu_none')) } catch (e) { show.err(e) } }
+  const remove = (o) => leave(o.id, 'leaving', async () => { await api.delOrder(o.id); show(t('or.deleted'), '', o.title); setOrders((l) => (l || []).filter((x) => x.id !== o.id)); loadList(); loadStats(true); bump() })
+  const start = async (o, minutes = null) => { try { await api.startTimer(o?.id || null, minutes); loadList() } catch (e) { show.err(e) } }
+  const stop = async () => { try { await api.stopTimer(); loadList() } catch (e) { show.err(e) } }
 
   const kicker = overdue ? t('or.overdue_n', { count: overdue }) : openN ? t('or.open_n', { count: openN }) : t('or.free')
   const month = stats?.months?.at(-1)?.income || 0
@@ -294,20 +314,20 @@ export default function Orders() {
 
       {/* Панель заказов идёт ПЕРВОЙ из модалок: всё, что открывают из неё (оплата, форма,
           карточка клиента), должно оказываться поверх — порядок DOM определяет стек. */}
-      <OrderDrawer oid={drawerId} reloadKey={payTick} onClose={() => setDrawerId(null)} onChanged={() => { load(); bump() }} onErr={show.err} onMsg={(msg) => show(msg)}
+      <OrderDrawer oid={drawerId} reloadKey={payTick} onClose={() => setDrawerId(null)} onChanged={() => { loadList(); loadStats(); bump() }} onErr={show.err} onMsg={(msg) => show(msg)}
         onClient={(cid) => { setDrawerId(null); setPersonCard(cid) }} onEdit={(o) => setSheet(o)} onPay={(o) => setPay(o)}
         onAsk={(o) => ask(T('or.ask_seed', { title: o.title }))} timer={timer} onStartTimer={start} onStopTimer={stop} mmss={mmss} />
 
-      <OrderSheet open={!!sheet} order={sheet && sheet !== 'new' ? sheet : null} onClose={() => setSheet(null)} onDone={(msg) => { setSheet(null); show(msg); load(); bump() }} onErr={show.err} />
-      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show(t('or.closed'), t('or.no_income'), o.title); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(t(r.order.status === 'paid' ? 'or.closed_paid' : 'or.pay_to_income'), '', r.order.title); setPayTick((x) => x + 1); load(); bump() }} onErr={show.err} />
+      <OrderSheet open={!!sheet} order={sheet && sheet !== 'new' ? sheet : null} onClose={() => setSheet(null)} onDone={(msg) => { setSheet(null); show(msg); loadList(); loadStats(true); bump() }} onErr={show.err} />
+      <PaySheet order={pay} onClose={() => setPay(null)} onJustClose={async (o) => { setPay(null); try { await api.updateOrder(o.id, { status: 'paid' }); show(t('or.closed'), t('or.no_income'), o.title); setPayTick((x) => x + 1); loadList(); loadStats(true); bump() } catch (e) { show.err(e) } }} onDone={(r) => { setPay(null); show(t(r.order.status === 'paid' ? 'or.closed_paid' : 'or.pay_to_income'), '', r.order.title); setPayTick((x) => x + 1); loadList(); loadStats(true); bump() }} onErr={show.err} />
       <Confirm open={!!del} title={t('or.del_q')} text={del ? t('or.del_text', { title: del.title }) : ''} danger onOk={() => { remove(del); setDel(null) }} onClose={() => setDel(null)} />
-      <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show(t('od.lost_marked'), '', lost.title); setLost(null); setPayTick((x) => x + 1); load(); bump() } catch (e) { show.err(e) } }} />
+      <LostSheet order={lost} onClose={() => setLost(null)} onDone={async (reason) => { try { await api.crmSetStage(lost.id, 'lost', reason); show(t('od.lost_marked'), '', lost.title); setLost(null); setPayTick((x) => x + 1); loadList(); loadStats(true); bump() } catch (e) { show.err(e) } }} />
       <ClientCardSheet cid={personCard} onClose={() => setPersonCard(null)} onOrder={(oid) => { setPersonCard(null); setDrawerId(oid) }} />
 
       {/* Задержки оплат и налог — живая строка-пульс (без макетного аналога): точки
           мигают янтарём (ожидание), клик уводит в фильтр «ждут оплаты». */}
       {pulse?.enabled && (pulse.late?.length > 0 || pulse.tax?.tax_total > 0) && (
-        <div className="og-pulse animate-rise flex flex-wrap items-center gap-x-5 gap-y-1.5 text-[13px]">
+        <div className="og-pulse animate-rise flex flex-wrap items-center gap-x-5 gap-y-1.5 text-md">
           {pulse.late.map((x) => (
             <button key={x.order_id} type="button" className="max-[820px]:min-h-[var(--tap)] flex items-center gap-1.5 text-left" onClick={() => setView('unpaid')}>
               <span className="og-pdot" style={{ background: 'var(--warn)', color: 'var(--warn)' }} />
@@ -582,12 +602,12 @@ function Board({ orders, onOpen, onStage, stageTab = 'all', landId = null }) {
       {/* сводка над колонками: сколько закрытых заказов спрятано прямо сейчас. Клик открывает
           ещё одну порцию в каждой закрытой стадии, дальше — кнопки в самих колонках. */}
       {hidden > 0 && (
-        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[13px]">
+        <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-md">
           <button type="button" className="btn-soft" onClick={showNextPage}
             aria-label={t('or.board_hidden_aria', { count: hidden })} data-tip={t('or.board_hint_limited')}>
             <ChevronDown size={13} /> {t('or.board_hidden', { count: hidden })}
           </button>
-          <span className="faint text-[12px]">{t('or.board_hint_limited')}</span>
+          <span className="faint text-xs">{t('or.board_hint_limited')}</span>
         </div>
       )}
       <div className="og-kb flex gap-3" style={{ minWidth: 'max-content' }}>
@@ -608,8 +628,8 @@ function Board({ orders, onOpen, onStage, stageTab = 'all', landId = null }) {
               <div className="og-kh" aria-label={t('or.column_aria', {
                 label: t(label), n: col.length, sum: sum > 0 ? t('or.column_sum', { m: money(sum) }) : '',
               })}>
-                <span className="truncate text-[13px] font-medium">{t(label)}</span>
-                <span className="num shrink-0 text-[12px]">
+                <span className="truncate text-md font-medium">{t(label)}</span>
+                <span className="num shrink-0 text-xs">
                   <span className={col.length ? 'text-[var(--ink-2)]' : 'faint'}>{col.length}</span>
                   {sum > 0 && <span className="faint"> · {moneyShort(sum)}</span>}
                 </span>
@@ -627,12 +647,12 @@ function Board({ orders, onOpen, onStage, stageTab = 'all', landId = null }) {
                     className={`og-kcard cursor-grab px-3 py-2.5 active:cursor-grabbing ${drag?.id === o.id ? 'dg' : ''} ${o.overdue ? 'og-over' : ''} ${landId === o.id ? 'land' : ''}`}>
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="truncate text-[13.5px] font-medium">{o.title}</div>
-                        {o.client && <div className="muted truncate text-[12px]">{o.client}</div>}
+                        <div className="truncate text-md font-medium">{o.title}</div>
+                        {o.client && <div className="muted truncate text-xs">{o.client}</div>}
                       </div>
-                      {o.deadline && <span className={`num shrink-0 text-[12px] ${o.overdue ? 'neg' : 'faint'}`}>{shortDate(o.deadline)}</span>}
+                      {o.deadline && <span className={`num shrink-0 text-xs ${o.overdue ? 'neg' : 'faint'}`}>{shortDate(o.deadline)}</span>}
                     </div>
-                    <div className="mt-1.5 flex items-center justify-between gap-2 text-[12px]">
+                    <div className="mt-1.5 flex items-center justify-between gap-2 text-xs">
                       <span className="muted num">{o.price ? money(o.price) : '—'}</span>
                       {o.left > 0 && o.status !== 'new' && <span className="faint num">{t('or.debt', { m: money(o.left) })}</span>}
                       {o.revisions > 0 && <span className="warn">{t('or.rev', { n: o.revisions })}</span>}
@@ -643,7 +663,7 @@ function Board({ orders, onOpen, onStage, stageTab = 'all', landId = null }) {
                       </div>
                     )}
                     <div className="mt-2 flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-                      <select className="input !h-8 min-w-0 flex-1 !text-[12.5px]" value={stageOf(o)} onChange={(e) => onStage(o, e.target.value)}
+                      <select className="input input--sm !h-8 min-w-0 flex-1 !text-sm" value={stageOf(o)} onChange={(e) => onStage(o, e.target.value)}
                         aria-label={t('or.stage_aria', { title: o.title })} data-tip={t('stage.aria')}>
                         {ORDER_STAGES.map(([sk, sl]) => <option key={sk} value={sk}>{t(sl)}</option>)}
                       </select>
@@ -651,7 +671,7 @@ function Board({ orders, onOpen, onStage, stageTab = 'all', landId = null }) {
                   </div>
                 ))}
                 {col.length === 0 && (
-                  <div className="og-kp rounded-xl px-3 py-4 text-center text-[12px] faint" style={{ border: '1px dashed var(--line)' }}>
+                  <div className="og-kp rounded-xl px-3 py-4 text-center text-xs faint" style={{ border: '1px dashed var(--line)' }}>
                     {t('or.drop_here')}
                   </div>
                 )}
@@ -690,7 +710,7 @@ function LostSheet({ order, onClose, onDone }) {
           <input autoFocus className="input" value={reason} onChange={(e) => setReason(e.target.value)}
             placeholder={t('or.why_lost_ph')} aria-label={t('or.why_lost')} />
         </Field>
-        <div className="muted text-[12.5px]">{t('or.lost_note')}</div>
+        <div className="muted text-sm">{t('or.lost_note')}</div>
         <div className="flex gap-2">
           <button className="btn-primary" disabled={!reason.trim()} type="submit">{t('or.mark_lost')}</button>
           <button type="button" className="btn-ghost" onClick={onClose}>{t('common.cancel')}</button>
@@ -725,7 +745,7 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
   return (
     <Sheet bodyClass={FIELD_LABEL_M} open={!!cid} onClose={onClose} wide title={d?.client?.name || t('graph.one_client')} sub={d?.source ? t('mem.source', { what: d.source }) : ''}>
       {!d ? <ListSkeleton n={3} rowH={40} avatar={false} /> : (
-        <div className="space-y-5 text-[13px]">
+        <div className="space-y-5 text-md">
           <section>
             <div className="label mb-1.5">{t('or.cc_stage_note')}</div>
             <ClientStageSelect view={d.stage} onView={(v) => setD({ ...d, stage: v })} onErr={show.err} label={t('cstage.for', { name: d.client?.name || '' })} />
@@ -751,8 +771,8 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
               <input type="date" className="input !w-[160px]" value={stepAt} onChange={(e) => setStepAt(e.target.value)} aria-label={t('next_step.date')} />
               <button className="btn-soft" disabled={step === (d.next_step || '') && stepAt === (d.next_step_at ? toLocalISO(new Date(d.next_step_at)).slice(0, 10) : '')} onClick={saveStep} aria-label={t('next_step.save')}>{t('common.save')}</button>
             </div>
-            {err && <div className="neg mt-1 text-[12px]">{err}</div>}
-            <div className="faint mt-1 text-[12px]">{d.next_step_at ? t('or.cc_was', { when: dayLabel(d.next_step_at) }) : t('or.cc_date_hint')}</div>
+            {err && <div className="neg mt-1 text-xs">{err}</div>}
+            <div className="faint mt-1 text-xs">{d.next_step_at ? t('or.cc_was', { when: dayLabel(d.next_step_at) }) : t('or.cc_date_hint')}</div>
           </section>
           <section>
             <div className="label mb-1.5">{t('or.cc_history')}</div>
@@ -764,11 +784,11 @@ export function ClientCardSheet({ cid, onClose, onOrder }) {
                 </button>
               ))}
             </div>
-            {!d.orders.length && <div className="faint text-[12px]">{t('or.cc_no_orders')}</div>}
+            {!d.orders.length && <div className="faint text-xs">{t('or.cc_no_orders')}</div>}
           </section>
           {d.activity?.length > 0 && <section>
             <div className="label mb-1.5">{t('mem.t_timeline')}</div>
-            <div className="max-h-[180px] space-y-1 overflow-y-auto">{d.activity.map((a) => <div key={a.id} className="muted text-[12.5px]"><span className="faint num">{dayLabel(a.created_at).toLowerCase()}</span> {a.text}</div>)}</div>
+            <div className="max-h-[180px] space-y-1 overflow-y-auto">{d.activity.map((a) => <div key={a.id} className="muted text-sm"><span className="faint num">{dayLabel(a.created_at).toLowerCase()}</span> {a.text}</div>)}</div>
           </section>}
         </div>
       )}
@@ -809,7 +829,7 @@ function AnalyticsBlock({ a, i = 0 }) {
           </div>
         ))}
       </div>
-      <div className="muted mt-3 text-[12px]">{t('or.an_foot', { conv: a.conversion, won: a.won, total: a.total }) + (a.avg_check ? t('or.an_avg', { m: money(a.avg_check) }) : '')}</div>
+      <div className="muted mt-3 text-xs">{t('or.an_foot', { conv: a.conversion, won: a.won, total: a.total }) + (a.avg_check ? t('or.an_avg', { m: money(a.avg_check) }) : '')}</div>
     </Section>
   )
 }
@@ -838,12 +858,12 @@ function StatsBlock({ stats, unpaid = 0, onUnpaid, timer = null, left = 0, onSta
               const cur = m.month === lastMonth
               return (
                 <div key={m.month} className="group flex flex-1 flex-col items-center gap-1.5">
-                  <div className="num text-[12px] opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
+                  <div className="num text-xs opacity-0 transition group-hover:opacity-100">{m.income ? moneyShort(m.income) : ''}</div>
                   <div className="og-bz">
                     {cur && unpaid > 0 && <div className="og-gh" style={{ height: h(unpaid, max) }} title={t('or.st_awaiting', { m: money(unpaid) })} aria-hidden="true" />}
                     <div className={`og-b ${m.income ? 'og-p' : 'og-zero'}`} style={{ height: h(m.income, max) }} />
                   </div>
-                  <div className="faint num text-[12px]">{m.month.slice(5)}</div>
+                  <div className="faint num text-xs">{m.month.slice(5)}</div>
                 </div>
               )
             })}
@@ -852,7 +872,7 @@ function StatsBlock({ stats, unpaid = 0, onUnpaid, timer = null, left = 0, onSta
         <div>
           <div className="mb-4 flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1.5">
             <div className="label">{t('or.st_focus')}</div>
-            <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5 text-[12px]">
+            <span className="flex flex-wrap items-baseline gap-x-3 gap-y-1.5 text-xs">
               <span className="muted">{timer?.active ? t('od.timer_running', { left: mmss(left) }) : stats.week_load_h ? t('or.st_week', { h: hours(stats.week_load_h) }) : t('or.st_no_timer')}</span>
               <button type="button" className="pill og-tmr" onClick={timer?.active ? onStop : onStart}>
                 {timer?.active ? <><Square size={12} /> {t('pomo.stop_short')}</> : <><Play size={12} /> {t('pomo.start_short')}</>}
@@ -863,7 +883,7 @@ function StatsBlock({ stats, unpaid = 0, onUnpaid, timer = null, left = 0, onSta
             {stats.focus_days.map((d) => (
               <div key={d.date} className="flex flex-1 flex-col items-center gap-1.5" title={t('or.st_day', { date: `${d.date.slice(8)}.${d.date.slice(5, 7)}`, min: d.min })}>
                 <div className={`og-b ${d.min ? 'og-f' : 'og-zero'}`} style={{ height: h(d.min, maxF) }} />
-                <div className="faint num text-[12px]">{d.date.slice(8)}</div>
+                <div className="faint num text-xs">{d.date.slice(8)}</div>
               </div>
             ))}
           </div>
@@ -879,10 +899,10 @@ function StatsBlock({ stats, unpaid = 0, onUnpaid, timer = null, left = 0, onSta
             <div className="rule mt-2 animate-rise">
               {stats.clients.map((c) => (
                 <div key={c.client} className="row">
-                  <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-[12px]">{t('or.cc_orders_n', { count: c.orders }) + (c.total ? ` ${t('or.on', { m: money(c.total) })}` : '') + (c.open ? ` · ${t('tk.open_n', { n: c.open })}` : '') + (c.hours ? ` · ${hours(c.hours)}` : '') + (c.rate ? ` · ${money(c.rate)}/${T('unit.hour')}` : '')}</div></div>
+                  <div className="min-w-0 flex-1"><div className="truncate text-[14px] font-medium">{c.client}</div><div className="muted text-xs">{t('or.cc_orders_n', { count: c.orders }) + (c.total ? ` ${t('or.on', { m: money(c.total) })}` : '') + (c.open ? ` · ${t('tk.open_n', { n: c.open })}` : '') + (c.hours ? ` · ${hours(c.hours)}` : '') + (c.rate ? ` · ${money(c.rate)}/${T('unit.hour')}` : '')}</div></div>
                   <div className="num text-right">
-                    {c.paid > 0 ? <div className="text-[14px] font-medium">{money(c.paid)} <span className="faint text-[12px] font-normal">{t('or.st_received')}</span></div> : <div className="faint text-[12.5px]">{t('or.st_no_pays')}</div>}
-                    {c.unpaid > 0 && <button type="button" className="warn text-[12px]" onClick={onUnpaid}>{t('or.st_awaiting', { m: money(c.unpaid) })}</button>}
+                    {c.paid > 0 ? <div className="text-[14px] font-medium">{money(c.paid)} <span className="faint text-xs font-normal">{t('or.st_received')}</span></div> : <div className="faint text-sm">{t('or.st_no_pays')}</div>}
+                    {c.unpaid > 0 && <button type="button" className="warn text-xs" onClick={onUnpaid}>{t('or.st_awaiting', { m: money(c.unpaid) })}</button>}
                   </div>
                 </div>
               ))}
@@ -948,7 +968,7 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('or.what_do')}><input autoFocus className="input !text-[19px] !font-medium" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} required placeholder={t('or.what_do_ph')} /></Field>
         {hint && (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-[12.5px]" style={{ background: 'var(--sf2)' }}>
+          <div className="flex flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-sm" style={{ background: 'var(--sf2)' }}>
             <span className="muted">{t('or.similar', { what: hint.sample?.slice(0, 2).join(', ') })}</span>
             {hint.price ? <span>{t('or.usually', { m: money(hint.price) })}</span> : null}
             {hint.hours ? <span className="muted">≈{hint.hours} {t('unit.hour')}{hint.rate ? ` · ${money(hint.rate)}/${T('unit.hour')}` : ''}</span> : null}
@@ -963,7 +983,7 @@ export function OrderSheet({ open, order, onClose, onDone, onErr }) {
         </div>
 
         {/* чекбокс вместо непонятной подсказки про «старый заказ»: ставит «сдан» и открывает поле оплаты */}
-        <label className="flex min-h-[var(--tap)] cursor-pointer items-center gap-2.5 text-[13.5px]">
+        <label className="flex min-h-[var(--tap)] cursor-pointer items-center gap-2.5 text-md">
           <input type="checkbox" className="h-5 w-5 shrink-0 accent-[var(--acc)]" checked={f.done} onChange={(e) => toggleDone(e.target.checked)} />
           <span>{t('or.already_done')}</span>
         </label>
@@ -1020,7 +1040,7 @@ function PaySheet({ order, onClose, onDone, onErr, onJustClose }) {
           <Field label={t('common.comment')}><input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('or.pay_ph')} /></Field>
           <Field label={t('common.date')} hint={t('or.pay_date_hint')}><input type="date" className="input" value={date} max={toLocalISO(new Date()).slice(0, 10)} onChange={(e) => setDate(e.target.value)} /></Field>
         </div>
-        <div className="muted text-[12.5px]">{t('or.pay_note')}</div>
+        <div className="muted text-sm">{t('or.pay_note')}</div>
         <button className="btn-primary btn-lg w-full">{t('or.record')}</button>
         {onJustClose && <button type="button" className="btn-ghost w-full" onClick={() => onJustClose(order)}>{t('or.pay_already')}</button>}
       </form>

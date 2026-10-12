@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { Plus, Search as SearchIcon, X, ChevronRight, ChevronLeft, EyeOff, Pencil, Check, Settings2, SlidersHorizontal } from 'lucide-react'
 import { api, hhmm, isSameDay, isAllDay, shortDate } from '../lib/api'
-import { Num, Empty, ErrorState, Swipe, PRIORITY, useToast, useLeave, useArrived, ListSkeleton } from '../components/ui'
+import { Num, Empty, ErrorState, Swipe, PRIORITY, useToast, useLeave, useArrived, ListSkeleton, PageHead, Card } from '../components/ui'
 import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
@@ -16,7 +16,7 @@ import '../tasks-glass.css'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 /* pages/Tasks.jsx — «Задачи» в двух раскладках, одна разметка:
 
@@ -219,7 +219,7 @@ function PriorityFilter({ value, onChange, projects = [], proj = '', onProj }) {
         <SlidersHorizontal size={16} strokeWidth={1.8} aria-hidden="true" />
       </button>
       {open && (
-        <div className="tg-pp" role="dialog" aria-label={t('common.priority')}>
+        <div className="tg-pp glass-strong" role="dialog" aria-label={t('common.priority')}>
           <span className="tg-pp-note">{t('common.priority')}</span>
           <div className="tg-chs">
             {opts.map(([v, key, dot]) => (
@@ -505,7 +505,15 @@ export default function Tasks() {
     if (e && e.preventDefault) e.preventDefault()
     if (!quick.trim()) return
     try {
-      await api.chat(`задача: ${quick.trim()}`)   // фраза уходит в ядро — всегда по-русски   // i18n-raw
+      // быстрый ввод разбираем сами (те же правила, что в чипах-превью выше) —
+      // прямое создание вместо фразы ядру: без LLM-крута и лишнего запроса в чат
+      const raw = quick.trim()
+      const p = quickParse(raw)
+      const title = raw.replace(/(\d{1,2})[:.](\d{2})/, ' ').replace(/\s(послезавтра|завтра|сегодня)(?=\s)/i, ' ').replace(/\s(!+|важно)(?=\s)/i, ' ').trim().replace(/\s{2,}/g, ' ') || raw
+      const body = { title }
+      if (p.day != null) body.due = `${dateAt(p.day)}T${p.time || '23:59'}`
+      if (p.imp) body.priority = 1
+      await api.addTask(body)
       setQuick('')
       load()
       bump()
@@ -516,7 +524,7 @@ export default function Tasks() {
 
   const addQuickDirect = async (title) => {
     try {
-      await api.chat(`задача: ${title}`)   // фраза уходит в ядро — всегда по-русски   // i18n-raw
+      await api.addTask({ title })
       load()
       bump()
     } catch (err) {
@@ -744,22 +752,21 @@ export default function Tasks() {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-tasks" style={pageAcc.style}>
-      {/* Header: только крупный заголовок. Действия: «+» — в доке (контекстно),
-          настройка разделов — ниже, справа от переключателя вида. Переключатель
-          (.sg) остаётся внутри .top — на него ходят проверки e2e. */}
-      <header className="top">
-        <div className="min-w-0 flex-1">
-          <h1 className="r trunc" style={{ '--i': 0 }}>{t(view === 'aims' ? 'goals.title' : 'nav.tasks')}</h1>
-          <p className="sub r" style={{ '--i': 1 }}>
-            {view === 'aims' ? t('goals.active_n', { count: aims }) : kicker}
-          </p>
-        </div>
+      {/* Header через PageHead: счётчики и .sg остаются внутри .top для e2e. */}
+      <PageHead
+        title={t(view === 'aims' ? 'goals.title' : 'nav.tasks')}
+        sub={view === 'aims' ? t('goals.active_n', { count: aims }) : kicker}
+        right={view !== 'aims' && (
+          <button type="button" className="btn-primary btn-sm head-primary max-[820px]:!hidden shrink-0" onClick={() => setSheet('new')}>
+            + {t('tk.task')}
+          </button>
+        )}
+      >
         {blockOrder.includes('stats') && (
           <div className="r mt-3 flex w-full items-center gap-2" style={{ '--i': 2 }}>
             <div className="min-w-0 flex-1">
               <Counters items={counters} view={view} onChange={setView} label={t('nav.tasks')} />
             </div>
-            {/* Фильтр по важности — как .ib + .pp в макете (чипы всех/важные/обычные/низкие) */}
             {view !== 'aims' && (
               <PriorityFilter value={prio} onChange={setPrio} projects={projects} proj={proj} onProj={setProj} />
             )}
@@ -775,15 +782,9 @@ export default function Tasks() {
                 <Settings2 size={16} aria-hidden="true" />
               </button>
             )}
-            {/* На ПК добавление остаётся в шапке; на телефоне его заменяет «+» в доке */}
-            {view !== 'aims' && (
-              <button type="button" className="btn-primary btn-sm head-primary max-[820px]:!hidden shrink-0" onClick={() => setSheet('new')}>
-                + {t('tk.task')}
-              </button>
-            )}
           </div>
         )}
-      </header>
+      </PageHead>
 
       {view === 'aims' ? (
         <div className="mt-6">
@@ -799,7 +800,7 @@ export default function Tasks() {
               Строки без изменений разметки: dot приоритета, заголовок,
               чип due-tag, chevron — одевает tasks-glass.css. */}
           {blockOrder.includes('list') && (
-            <section className={`relative s12 tg-list ${cardM()}`} style={{ '--i': 1 }}>
+            <section className={`relative s12 tg-list glass ${cardM()}`} style={{ '--i': 1 }}>
               {ctl('list')}
               <div
                 className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"
@@ -893,7 +894,7 @@ export default function Tasks() {
               остаётся, стеком под списком. Те же данные, что уже загружены. */}
           {blockOrder.includes('list') && (
             <div className="s12 tg-side">
-              <section className={`tg-card ${cardM()}`} style={{ '--i': 2 }}>
+              <section className={`tg-card glass ${cardM()}`} style={{ '--i': 2 }}>
                 <div className="hd">
                   <h2 className="h3">{t('common.today')}</h2>
                   <small>{t('tk.open_n', { count: open.length })}</small>
@@ -924,7 +925,7 @@ export default function Tasks() {
                   </div>
                 </div>
               </section>
-              <section className={`tg-card ${cardM()}`} style={{ '--i': 3 }}>
+              <section className={`tg-card glass ${cardM()}`} style={{ '--i': 3 }}>
                 <div className="hd">
                   <h2 className="h3">{t('common.week')}</h2>
                   <small>{t('tk.done')} · <span className="num">{weekBars.total}</span></small>

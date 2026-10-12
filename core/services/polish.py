@@ -57,6 +57,24 @@ async def _llm_ready() -> bool:
     return await llm.local_available() or (llm.MODE == "cloud" and llm.cloud_enabled())
 
 
+POLISH_MAX_TRIES = 5  # столько неудач — и планировщик отстаёт: иначе одна кривая заметка дёргает LLM каждую минуту вечно
+
+
+def _bump_tries(table: str, obj_id: int) -> None:
+    """Неудачная попытка причёски: +1 к счётчику. Молча, падение тут никого не спасает."""
+    try:
+        from ..db import Link, Note
+        with session() as s:
+            row = s.get(Note if table == "note" else Link, obj_id)
+            if row is None:
+                return
+            row.polish_tries = (row.polish_tries or 0) + 1
+            s.add(row)
+            s.commit()
+    except Exception as e:  # pragma: no cover
+        log.warning("polish tries bump failed: %s", e)
+
+
 def _parse(text: str) -> dict | None:
     text = text.strip()
     m = re.search(r"\{.*\}", text, re.S)
@@ -89,6 +107,7 @@ async def polish_note(note_id: int) -> bool:
     try:
         data = await _llm_json(NOTE_PROMPT, raw)
         if not data or not data.get("text"):
+            _bump_tries("note", note_id)
             return False
         text = str(data["text"]).strip()
         # защита от «творчества»: если LLM раздула текст в 3 раза — оставляем оригинал
@@ -112,6 +131,7 @@ async def polish_note(note_id: int) -> bool:
         return True
     except Exception as e:
         log.warning("polish_note %s failed: %s", note_id, e)
+        _bump_tries("note", note_id)
         return False
 
 
@@ -127,6 +147,7 @@ async def polish_link(link_id: int) -> bool:
     try:
         data = await _llm_json(LINK_PROMPT, json.dumps(payload, ensure_ascii=False))
         if not data:
+            _bump_tries("link", link_id)
             return False
         with session() as s:
             l = s.get(Link, link_id)
@@ -149,16 +170,20 @@ async def polish_link(link_id: int) -> bool:
         return True
     except Exception as e:
         log.warning("polish_link %s failed: %s", link_id, e)
+        _bump_tries("link", link_id)
         return False
 
 
 async def polish_pending(limit: int = 10) -> int:
-    """Фоновая обработка всего, что не успели (например, Ollama была выключена)."""
+    """Фоновая обработка всего, что не успели (например, Ollama была выключена).
+
+    Записи с исчерпанными попытками (polish_tries >= POLISH_MAX_TRIES) не трогаем —
+    иначе одна кривая заметка дёргала бы LLM каждую минуту вечно."""
     if not await _llm_ready():
         return 0
     with session() as s:
-        notes = [n.id for n in s.exec(select(Note).where(Note.polished == False).order_by(Note.id.desc()).limit(limit))]  # noqa: E712
-        links = [l.id for l in s.exec(select(Link).where(Link.polished == False).order_by(Link.id.desc()).limit(limit))]  # noqa: E712
+        notes = [n.id for n in s.exec(select(Note).where(Note.polished == False, Note.polish_tries < POLISH_MAX_TRIES).order_by(Note.id.desc()).limit(limit))]  # noqa: E712
+        links = [l.id for l in s.exec(select(Link).where(Link.polished == False, Link.polish_tries < POLISH_MAX_TRIES).order_by(Link.id.desc()).limit(limit))]  # noqa: E712
     done = 0
     for nid in notes:
         done += await polish_note(nid)

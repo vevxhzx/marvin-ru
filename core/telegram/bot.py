@@ -165,7 +165,8 @@ async def cmd_quick(m: Message):
         r = await asyncio.wait_for(agent.handle(_QUICK_MAP[cmd].format(x=body), channel="tg"), timeout=handle_timeout())
     finally:
         typing.cancel()
-    await send_result(m, r.text or "…", getattr(r, "actions", []), getattr(r, "via", None))
+    await send_result(m, r.text or "…", getattr(r, "actions", []), getattr(r, "via", None),
+                      buttons=getattr(r, "buttons", None))
 
 
 @router.message(Command("find", "найди", "поиск"))
@@ -421,7 +422,7 @@ def _to_html_cap(text: str, limit: int = 1000) -> str:
     return _fmt.to_caption(localize(text), limit)
 
 
-async def _send(m: Message, html_text: str, plain_text: str) -> bool:
+async def _send(m: Message, html_text: str, plain_text: str, reply_markup=None) -> bool:
     """Отправить одно сообщение: HTML → при ошибке разметки чистый текст; при сетевой ошибке — 3 попытки.
     Каждый сбой пишется в лог, чтобы было видно, ПОЧЕМУ ответ не дошёл. Молча не падаем."""
     from aiogram.exceptions import TelegramBadRequest, TelegramNetworkError, TelegramRetryAfter
@@ -431,9 +432,9 @@ async def _send(m: Message, html_text: str, plain_text: str) -> bool:
         for attempt in range(1, 4):
             try:
                 if mode == "plain":
-                    await m.answer(text, parse_mode=None)
+                    await m.answer(text, parse_mode=None, reply_markup=reply_markup)
                 else:
-                    await m.answer(text, parse_mode=ParseMode.HTML)
+                    await m.answer(text, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
                 log.info("→ tg: отправлено (%d симв.%s)", len(text), "" if mode is None else ", чистый текст")
                 return True
             except TelegramRetryAfter as e:
@@ -453,16 +454,41 @@ async def _send(m: Message, html_text: str, plain_text: str) -> bool:
     return False
 
 
-async def send_long(m: Message, text: str, raw_prefix: bool = False) -> None:
-    """Отправить ответ любой длины: HTML через форматтер, нарезка по абзацам без рваных тегов."""
+async def send_long(m: Message, text: str, raw_prefix: bool = False, buttons: list[tuple[str, str]] | None = None) -> None:
+    """Отправить ответ любой длины: HTML через форматтер, нарезка по абзацам без рваных тегов.
+    Кнопки (если есть) — только на последнем пузыре."""
     if raw_prefix and "\n\n" in text:
         # голосовые: сверху уже готовая HTML-цитата расшифровки, снизу markdown-ответ
         head, body = text.split("\n\n", 1)
         html_text = head + "\n\n" + _to_html(body)
     else:
         html_text = _to_html(text)
-    for chunk in _fmt.split_html(html_text):
-        await _send(m, chunk, _fmt.to_plain(chunk))
+    chunks = _fmt.split_html(html_text)
+    kb = _answer_kb(buttons)
+    for i, chunk in enumerate(chunks):
+        last = i == len(chunks) - 1
+        await _send(m, chunk, _fmt.to_plain(chunk), reply_markup=kb if last else None)
+
+
+def _answer_kb(reply_or_buttons, per_row: int = 2) -> object | None:
+    """Умные кнопки ответа → инлайн-клавиатура. Нажатие = как будто написал текст кнопки.
+    Красиво: до двух кнопок в ряд. callback_data жёстко в лимите Telegram 64 байта
+    (проверяется тестами)."""
+    from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+    buttons = getattr(reply_or_buttons, "buttons", reply_or_buttons)
+    if not buttons:
+        return None
+    flat = []
+    for label, payload in buttons:
+        data = "ans:" + str(payload or "")
+        if len(data.encode("utf-8")) > 64:
+            log.warning("→ tg: кнопка «%s» не влезла в 64 байта callback — пропускаю", label)
+            continue
+        flat.append(InlineKeyboardButton(text=str(label)[:32], callback_data=data))
+    if not flat:
+        return None
+    rows = [flat[i:i + per_row] for i in range(0, len(flat), per_row)]
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def _answer_md(m: Message, text: str, **kw) -> None:
@@ -487,6 +513,7 @@ async def _send_photo(
     m: Message,
     path,
     caption_html: str | None = None,
+    reply_markup=None,
 ) -> bool:
     """Фото + подпись одним пузырём. Подпись — уже HTML из форматтера.
     При отказе разметки — чистая подпись, затем фото без неё. Молча не падаем."""
@@ -501,12 +528,13 @@ async def _send_photo(
             log.warning("→ tg: фото не ушло (%s: %s)", type(e).__name__, e)
             return False
     try:
-        await m.answer_photo(photo, caption=caption_html, parse_mode=ParseMode.HTML)
+        await m.answer_photo(photo, caption=caption_html, parse_mode=ParseMode.HTML, reply_markup=reply_markup)
         return True
     except TelegramBadRequest as e:
         log.warning("→ tg: подпись отвергнута (%s) — шлю чистым текстом", e.message)
         try:
-            await m.answer_photo(FSInputFile(str(path)), caption=_fmt.to_plain(caption_html), parse_mode=None)
+            await m.answer_photo(FSInputFile(str(path)), caption=_fmt.to_plain(caption_html), parse_mode=None,
+                                 reply_markup=reply_markup)
             return True
         except Exception as e2:  # pragma: no cover
             log.warning("→ tg: фото с чистой подписью не ушло: %s", e2)
@@ -521,23 +549,27 @@ async def _send_photo(
         return False
 
 
-async def send_result(m: Message, text: str, actions: list[str] | None = None, via: str | None = None) -> None:
+async def send_result(m: Message, text: str, actions: list[str] | None = None, via: str | None = None,
+                    buttons: list[tuple[str, str]] | None = None) -> None:
     """Ответ агента + карточка красиво: короткий текст с картинкой — одним пузырём
     (фото с подписью), длинный — текст пузырями + картинка с короткой подписью.
-    Маркер источника (via) — тихой курсивной строкой внизу."""
+    Маркер источника (via) — тихой курсивной строкой внизу. Кнопки — на пузыре с текстом."""
     from core.services import cards
     from ..brain import llm as _llm
     html_text = _fmt.finalize(text or "…", via=via, mark=bool(_llm.MARK_SOURCE))
+    kb = _answer_kb(buttons)
     path = None
     try:
         path = await asyncio.to_thread(cards.for_result, list(actions or []), text or "")
     except Exception as e:  # pragma: no cover
         log.debug("card follow-up: %s", e)
     if path and _fmt.fits_caption(html_text):
-        if await _send_photo(m, path, html_text):
+        if await _send_photo(m, path, html_text, reply_markup=kb):
             return
-    for chunk in _fmt.split_html(html_text):
-        await _send(m, chunk, _fmt.to_plain(chunk))
+    chunks = _fmt.split_html(html_text)
+    for i, chunk in enumerate(chunks):
+        last = i == len(chunks) - 1
+        await _send(m, chunk, _fmt.to_plain(chunk), reply_markup=kb if last else None)
     if path:
         await _send_photo(m, path, _fmt.short_caption(html_text) if len(html_text) > 200 else None)
 
@@ -603,7 +635,8 @@ async def any_text(m: Message):
     try:
         r = await asyncio.wait_for(agent.handle(m.text, channel=_channel_for(m)), timeout=handle_timeout())
         typing.cancel()
-        await send_result(m, r.text or "…", getattr(r, "actions", []), getattr(r, "via", None))
+        await send_result(m, r.text or "…", getattr(r, "actions", []), getattr(r, "via", None),
+                          buttons=getattr(r, "buttons", None))
         from core.voice import tts
         if tts.enabled() and tts.REPLY_VOICE == "always":
             await _reply_voice(m, r.text)
@@ -754,8 +787,8 @@ async def _drop_kb(cq: CallbackQuery, note: str) -> None:
     except Exception:
         try:
             await cq.message.answer(note)
-        except Exception:  # pragma: no cover
-            pass
+        except Exception as e:  # pragma: no cover
+            log.warning("→ tg: итог подтверждения голосового не доставлен: %s", e)
 
 
 async def _reply_voice(m: Message, text: str) -> None:
@@ -765,9 +798,12 @@ async def _reply_voice(m: Message, text: str) -> None:
     out = VOICE_DIR / f"out_{m.message_id}.ogg"
     try:
         await m.bot.send_chat_action(m.chat.id, ChatAction.RECORD_VOICE)
+        log.info("tts reply: синтез (%d симв.) движком %s", len(text or ""), tts.resolve_engine())
         p = await asyncio.wait_for(tts.speak_to_file(text, out), timeout=60)
+        log.info("tts reply: %s", "готово, отправляю" if p else "синтез не удался — молча пропускаю")
         if p:
             await m.answer_voice(FSInputFile(p))
+            log.info("tts reply: голосовое отправлено")
     except Exception as e:
         log.warning("tts reply failed: %s", e)
     finally:
@@ -780,6 +816,37 @@ async def _reply_voice(m: Message, text: str) -> None:
 @router.callback_query(F.from_user.id != OWNER_ID)
 async def cb_stranger(cq: CallbackQuery):
     await cq.answer("Это личный ассистент.", show_alert=False)
+
+
+@router.callback_query(F.from_user.id == OWNER_ID, F.data.startswith("ans:"))
+async def cb_answer(cq: CallbackQuery):
+    """Умные кнопки под уточнениями: нажатие = как будто написал текст кнопки.
+    Кнопки убираем сразу (повторный тап идёт обычным путём — pending уже снят)."""
+    text = (cq.data[4:] or "").strip()
+    if not text:
+        await cq.answer("Пусто — напишите текстом.")
+        return
+    await cq.answer("Принято")
+    try:
+        await cq.message.edit_reply_markup(reply_markup=None)
+    except Exception:
+        pass
+    log.info("← tg кнопка: %r", text[:80])
+    typing = asyncio.create_task(_keep_typing(cq.message))
+    try:
+        r = await asyncio.wait_for(agent.handle(text, channel=_channel_for(cq.message)), timeout=handle_timeout())
+        typing.cancel()
+        await send_result(cq.message, r.text or "…", getattr(r, "actions", []), getattr(r, "via", None),
+                          buttons=getattr(r, "buttons", None))
+    except asyncio.TimeoutError:
+        typing.cancel()
+        await _send(cq.message, "Долго думаю, сэр — попробуйте ещё раз.", "Долго думаю, сэр — попробуйте ещё раз.")
+    except Exception as e:
+        typing.cancel()
+        log.exception("button handle failed: %s", e)
+        await _send(cq.message, say("error"), say("error"))
+    finally:
+        typing.cancel()
 
 
 @router.callback_query(F.data.regexp(r"^(ev|task):\d+:(ok|done|hour|min15|evening|tomorrow|habit)$"))
@@ -1157,8 +1224,8 @@ async def cb_brain(cq: CallbackQuery):
         await cq.answer("Сохранил в мозг 🧠")
         try:
             await cq.message.edit_text("🧠 Фото сохранено в мозг.", reply_markup=None)
-        except Exception:
-            pass
+        except Exception as e:
+            log.warning("→ tg: подтверждение «в мозг» не доставлено: %s", e)
     except Exception as e:
         await cq.answer(f"Не вышло: {e}"[:180], show_alert=True)
 

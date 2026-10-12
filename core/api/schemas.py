@@ -513,6 +513,7 @@ class FactPatch(BaseModel):
     layer: Optional[str] = None
     category: Optional[str] = None
     core: Optional[bool] = None
+    is_private: Optional[bool] = None   # замок: True — в облако не уходит (только ручной тумблер)
 
 
 class StyleIn(BaseModel):

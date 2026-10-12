@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Женский голос — женский род («записала», а не «записал»). TDD: сначала красные."""
 import asyncio
 import os
 
 os.environ.setdefault("ASSISTANT_TEST", "1")
 
-from tests.test_core import fresh_db  # noqa: F401
 
 
 def test_voice_is_feminine(monkeypatch):
@@ -37,7 +36,7 @@ def test_feminize_keeps_quotes():
     assert feminize("«Ваня должен мне» — запомнил.") == "«Ваня должен мне» — запомнила."
 
 
-def test_handle_feminine_end_to_end(monkeypatch):
+def test_handle_feminine_end_to_end(fresh_db, monkeypatch):
     from core.brain import agent
     from core.voice import tts
     monkeypatch.setattr(tts, "ENGINE", "piper", raising=False)
@@ -47,7 +46,7 @@ def test_handle_feminine_end_to_end(monkeypatch):
     assert "записал" not in r.text.lower() or "записала" in r.text.lower()
 
 
-def test_handle_masculine_untouched(monkeypatch):
+def test_handle_masculine_untouched(fresh_db, monkeypatch):
     from core.brain import agent
     from core.voice import tts
     monkeypatch.setattr(tts, "ENGINE", "silero", raising=False)

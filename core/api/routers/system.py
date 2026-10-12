@@ -11,13 +11,7 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 
 from ...db import (
-    Event,
-    Link,
-    Note,
-    Task,
-    Transaction,
     get_setting,
-    session,
     set_setting,
 )
 from ...services import (
@@ -220,6 +214,13 @@ def settings_put(p: SettingsIn):
             # основное уехало на LM Studio — выгружаем модель Ollama сразу, иначе две
             # большие модели сидят в памяти одновременно и скорость падает
             llm.evict_ollama_main()
+    if any(k.startswith("voice.tts.piper_length") for k in changed):
+        # темп Piper применяем на лету — перезапуск не нужен
+        from ...voice import tts
+        try:
+            tts.PIPER_LENGTH = tts._clamp_length((p.changes.get("voice.tts.piper_length") or 1.0))
+        except Exception:
+            pass
     needs_restart = any(k.startswith(("telegram.", "backup.")) or (k.startswith("brain.ollama") and not k.startswith("brain.ollama.small_")) for k in changed)
     return {"changed": changed, "restart": needs_restart}
 
@@ -240,18 +241,12 @@ async def status():
     from ...brain import llm
     from ...config import cfg, DB_PATH
     from ...services.scheduler import last_backup
-    from ...db import ChatMessage
-    from sqlmodel import select
     ollama = await llm.ollama_available()
     diag = None if ollama else await llm.ollama_diagnose()
-    with session() as s:
-        last_tg = s.exec(select(ChatMessage).where(ChatMessage.channel.in_(["tg", "tg-voice"])).order_by(ChatMessage.id.desc())).first()
-        counts = {"events": len(s.exec(select(Event)).all()), "tasks": len(s.exec(select(Task)).all()),
-                  "notes": len(s.exec(select(Note)).all()), "links": len(s.exec(select(Link)).all()),
-                  "transactions": len(s.exec(select(Transaction)).all())}
-        from ...db import ActionLog as _AL, Memory as _Mem  # F6: размеры retention-таблиц + last (retention выключен, только чтение)
-        from sqlalchemy import func as _f
-        ret = {"chatmessage": int(s.exec(select(_f.count()).select_from(ChatMessage)).one() or 0), "memory": int(s.exec(select(_f.count()).select_from(_Mem)).one() or 0), "actionlog": int(s.exec(select(_f.count()).select_from(_AL)).one() or 0), "last": get_setting("retention:last")}
+    from ...services import system_status as _st
+    last_tg = _st.last_tg_message()
+    counts = _st.table_counts()
+    ret = _st.retention_counts()
     tg_enabled = bool(cfg.telegram.token and cfg.telegram.owner_id)
     from ... import VERSION
     from ..app import app  # тот же объект FastAPI (нужен для app.state)

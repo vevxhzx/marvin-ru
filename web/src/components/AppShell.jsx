@@ -93,13 +93,13 @@ export function TopTimer() {
   const brk = tmr.kind === 'break'
   const label = tmr.order || (brk ? t('unit.break') : t('unit.focus'))
   return (
-    <div className={`flex items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1 text-[12.5px] md:hidden ${brk ? 'soft-pos' : 'soft-accent'} ${left === 0 ? 'animate-pulse' : ''}`}>
+    <div className={`flex items-center gap-1.5 rounded-full py-1 pl-2.5 pr-1 text-sm md:hidden ${brk ? 'soft-pos' : 'soft-accent'} ${left === 0 ? 'animate-pulse' : ''}`}>
       <button className="flex items-center gap-1.5" onClick={() => nav('/orders')} data-tip={label}>
         <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'currentColor' }} />
         <span className="num font-medium tabular-nums">{mmss(left)}</span>
         {tmr.order && <span className="hidden max-w-[140px] truncate lg:inline">{tmr.order}</span>}
       </button>
-      <button className="grid h-6 w-6 place-items-center rounded-full transition hover:bg-[var(--fill)]" aria-label={t('pomo.stop')} data-tip={t('pomo.stop_short')} onClick={() => api.stopTimer().then(reload).catch(() => {})}><Square size={10} /></button>
+      <button className="grid h-6 w-6 place-items-center rounded-full transition hover:bg-[var(--fill)]" aria-label={t('pomo.stop')} data-tip={t('pomo.stop_short')} onClick={() => api.stopTimer().then(reload).catch((e) => toast(e?.message || t('common.error'), { kind: 'err' }))}><Square size={10} /></button>
     </div>
   )
 }
@@ -117,7 +117,7 @@ function SideTimer({ min }) {
   const R = min ? 11 : 13, C = 2 * Math.PI * R, S = R * 2 + 6
   const color = brk ? 'var(--pos)' : 'var(--accent)'
   const label = active ? (tmr.order || (brk ? t('unit.break') : t('unit.focus'))) : t('unit.pomodoro')
-  const run = (fn) => { if (busy) return; setBusy(true); fn().then(reload).catch(() => {}).finally(() => setBusy(false)) }
+  const run = (fn) => { if (busy) return; setBusy(true); fn().then(reload).catch((e) => toast(e?.message || t('common.error'), { kind: 'err' })).finally(() => setBusy(false)) }
   const ring = (
     <span className="relative grid shrink-0 place-items-center" style={{ width: S, height: S }}>
       <svg width={S} height={S} viewBox={`0 0 ${S} ${S}`} className="-rotate-90">
@@ -137,7 +137,7 @@ function SideTimer({ min }) {
   }
   if (!active) {
     return (
-      <button className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-[12.5px] transition hover:bg-[var(--fill)]" onClick={() => run(() => api.startTimer(null, null))} data-tip={t('pomo.start')}>
+      <button className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2 text-left text-sm transition hover:bg-[var(--fill)]" onClick={() => run(() => api.startTimer(null, null))} data-tip={t('pomo.start')}>
         {ring}
         <span className="num font-medium tabular-nums">{String(tmr?.focus_min || 25).padStart(2, '0')}:00</span>
         <span className="muted truncate">{tmr?.today_sessions ? t('pomo.today_n', { count: tmr.today_sessions }) : t('unit.pomodoro')}</span>
@@ -145,7 +145,7 @@ function SideTimer({ min }) {
     )
   }
   return (
-    <div className={`flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-1.5 text-[12.5px] ${brk ? 'soft-pos' : 'soft-accent'}`} style={{ animation: 'rise .25s var(--ease-out)' }}>
+    <div className={`flex items-center gap-2.5 rounded-xl py-2 pl-3 pr-1.5 text-sm ${brk ? 'soft-pos' : 'soft-accent'}`} style={{ animation: 'rise .25s var(--ease-out)' }}>
       <button className="flex min-w-0 flex-1 items-center gap-2.5" onClick={() => nav('/orders')} data-tip={label}>
         {ring}
         <span className="min-w-0 text-left leading-tight">
@@ -370,28 +370,31 @@ function InboxPanel({ inbox, onClose }) {
   }, [onClose])
   useEffect(() => { const t = setTimeout(inbox.markAll, 1200); return () => clearTimeout(t) }, []) // eslint-disable-line
   return (
+    <>
+    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" style={{ animation: 'fade .18s var(--ease-out)' }} onClick={onClose} aria-hidden="true" />
     <div ref={ref} className="elevated absolute right-5 top-[calc(100%+6px)] z-[75] w-[340px] max-w-[calc(100vw-24px)] overflow-hidden !p-0" style={{ animation: 'rise .22s var(--ease-out)' }}>
-      <div className="flex items-center justify-between border-b hair px-4 py-2.5">
-        <div className="text-[13px] font-medium">{t('inbox.title')}</div>
-        {inbox.items.length > 0 && <button className="faint text-[12px] hover:text-accent" onClick={inbox.clear}>{t('inbox.clear')}</button>}
+      <div className="flex min-h-[48px] items-center justify-between gap-3 border-b hair px-4 py-2">
+        <div className="min-w-0 truncate text-[15px] font-semibold leading-none tracking-tight">{t('inbox.title')}</div>
+        {inbox.items.length > 0 && <button className="faint -mr-2 shrink-0 rounded-full px-2.5 py-1.5 text-sm leading-none transition-colors hover:bg-[var(--fill-2)] hover:text-accent" onClick={inbox.clear}>{t('inbox.clear')}</button>}
       </div>
       <div className="scroll-thin max-h-[calc(60vh/var(--ui-zoom))] overflow-y-auto">
         {inbox.items.length === 0 ? (
-          <div className="px-4 py-8 text-center">
-            <div className="text-[14px] font-medium">{t('inbox.quiet')}</div>
-            <div className="muted mt-1 text-[12.5px]">{t('inbox.quiet_hint', { name: lower() })}</div>
+          <div className="px-5 py-8 text-center">
+            <div className="text-[14px] font-medium leading-snug">{t('inbox.quiet')}</div>
+            <div className="muted mt-1 text-sm">{t('inbox.quiet_hint', { name: lower() })}</div>
           </div>
         ) : inbox.items.map((it) => (
           <div key={it.id} className="flex items-start gap-3 border-b hair px-4 py-3 last:border-0">
-            <span className={`mt-1 h-2 w-2 shrink-0 rounded-full ${it.read ? '' : 'dot-live'}`} style={{ background: it.read ? 'var(--line-2)' : 'var(--accent)', color: 'var(--accent)' }} />
+            <span className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${it.read ? '' : 'dot-live'}`} style={{ background: it.read ? 'var(--line-2)' : 'var(--accent)', color: 'var(--accent)' }} />
             <div className="min-w-0 flex-1">
-              <div className="text-[13.5px] leading-snug">{it.title}</div>
-              <div className="faint mt-0.5 text-[11.5px]">{[it.sub, relTime(it.at)].filter(Boolean).join(' · ')}</div>
+              <div className="break-words text-md leading-snug">{it.title}</div>
+              <div className="faint mt-1 text-xs leading-snug">{[it.sub, relTime(it.at)].filter(Boolean).join(' · ')}</div>
             </div>
           </div>
         ))}
       </div>
     </div>
+    </>
   )
 }
 
@@ -486,7 +489,7 @@ function PomodoroPanel({ timer, left, onClose, onChanged, className = '' }) {
     setBusy(true)
     Promise.resolve(fn())
       .then(onChanged)
-      .catch(() => {})
+      .catch((e) => toast(e?.message || t('common.error'), { kind: 'err' }))
       .finally(() => setBusy(false))
   }
 
@@ -711,7 +714,7 @@ export default function AppShell({
 
           {health && !health.ok && (
             <div className="mb-6 animate-rise">
-              <div className="soft-neg flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-2.5 text-[13px]">
+              <div className="soft-neg flex flex-wrap items-center justify-between gap-2 rounded-2xl px-4 py-2.5 text-md">
                 <span>{t('shell.core_down')}</span>
                 <button className="btn-ghost btn-sm" onClick={() => api.health().then(() => onRefresh?.()).catch(() => {})}>{t('common.retry')}</button>
               </div>
@@ -721,7 +724,7 @@ export default function AppShell({
           {/* потянуть-обновить: индикатор под липкой шапкой, только transform + opacity */}
           <div className="relative" {...ptr.bind} ref={contentRef}>
             <div
-              className="flex items-center justify-center gap-2 text-[12px] text-accent"
+              className="flex items-center justify-center gap-2 text-xs text-accent"
               style={{ ...ptr.style, position: 'absolute', top: -(headH + 10), left: 0, right: 0, zIndex: 45 }}
               aria-hidden="true"
             >
@@ -762,14 +765,14 @@ export default function AppShell({
           <div className="space-y-1.5">
             {(hotkeys || []).map((hk) => (
               <div key={hk.id} className="flex items-center justify-between gap-4 rounded-xl px-3.5 py-3" style={{ background: 'var(--surface-2)' }}>
-                <span className="text-[13.5px]">{t(hk.label)}</span>
+                <span className="text-md">{t(hk.label)}</span>
                 <span className="flex shrink-0 gap-1.5">
                   {hk.combo.map((c) => <span key={c} className="kbd mono">{c}</span>)}
                 </span>
               </div>
             ))}
           </div>
-          <div className="faint mt-4 text-[12.5px]">{t('hot.footer')}</div>
+          <div className="faint mt-4 text-sm">{t('hot.footer')}</div>
         </SheetHost>
         <Toaster />
       </div>

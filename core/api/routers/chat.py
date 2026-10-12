@@ -63,9 +63,10 @@ def _patch_json(msgs: list[dict]) -> list[dict]:
     """Добавить suggest_fact в JSON-ответ /api/chat. Меняем тело только если это наш (200, JSON, есть «text»).
 
     Батч 4: предложения выключены по умолчанию — при suggest_enabled()==False
-    ничего не вшиваем (молча), слот не трогаем."""
-    if not memory.suggest_enabled():
-        return msgs
+    ничего не вшиваем (молча), слот не трогаем.
+    Рядом вшиваем used_fact_ids («использовано в ответе»): всегда, когда слот
+    памяти не пуст и ключа ещё нет. Пустой слот — тело не трогаем вообще
+    (старые тесты на suggest проверяют идентичность)."""
     start = next((m for m in msgs if m.get("type") == "http.response.start"), None)
     if not start or start.get("status") != 200:
         return msgs
@@ -77,9 +78,22 @@ def _patch_json(msgs: list[dict]) -> list[dict]:
         data = json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, ValueError):
         return msgs
-    if not isinstance(data, dict) or "text" not in data or "suggest_fact" in data:
+    if not isinstance(data, dict) or "text" not in data:
         return msgs
+    used = memory.pop_used_ids()
+    touched_used = used is not None and "used_fact_ids" not in data
+    if touched_used:
+        data["used_fact_ids"] = used
+    if not memory.suggest_enabled():
+        return _rebuild_json(msgs, data) if touched_used else msgs
+    if "suggest_fact" in data:
+        return _rebuild_json(msgs, data) if touched_used else msgs
     data["suggest_fact"] = memory.pop_suggest() or None
+    return _rebuild_json(msgs, data)
+
+
+def _rebuild_json(msgs: list[dict], data: dict) -> list[dict]:
+    """Пересобрать ASGI-сообщения с новым JSON-телом (длина пересчитана)."""
     new = json.dumps(data, ensure_ascii=False).encode("utf-8")
     out: list[dict] = []
     for m in msgs:
@@ -103,9 +117,8 @@ _SSE_PING_SEC = 5.0
 def _patch_sse(chunk: bytes) -> bytes | None:
     """Добавить suggest_fact в финальное событие `done` потока /api/chat/stream. None — не наш кусок.
 
-    Батч 4: при выключенных предложениях — всегда None (молча)."""
-    if not memory.suggest_enabled():
-        return None
+    Батч 4: при выключенных предложениях suggest не вшиваем (молча) — а used_fact_ids
+    («использовано в ответе») вшиваем всегда, когда слот памяти не пуст и ключа ещё нет."""
     try:
         s = chunk.decode("utf-8")
     except UnicodeDecodeError:
@@ -120,8 +133,15 @@ def _patch_sse(chunk: bytes) -> bytes | None:
         data = json.loads(payload)
     except ValueError:
         return None
-    if not isinstance(data, dict) or "text" not in data or "suggest_fact" in data:
+    if not isinstance(data, dict) or "text" not in data:
         return None
+    used = None if "used_fact_ids" in data else memory.pop_used_ids()
+    if used is not None:
+        data["used_fact_ids"] = used
+    if not memory.suggest_enabled():
+        return (head + json.dumps(data, ensure_ascii=False) + tail).encode("utf-8") if used is not None else None
+    if "suggest_fact" in data:
+        return (head + json.dumps(data, ensure_ascii=False) + tail).encode("utf-8") if used is not None else None
     data["suggest_fact"] = memory.pop_suggest() or None
     return (head + json.dumps(data, ensure_ascii=False) + tail).encode("utf-8")
 

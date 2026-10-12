@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Траты с выбранного счёта + защита от минуса. TDD: сначала красные."""
 import asyncio
 import os
 
 os.environ.setdefault("ASSISTANT_TEST", "1")
 
-from tests.test_core import fresh_db  # noqa: F401
 
 
 def _offline(monkeypatch):
@@ -37,28 +36,28 @@ def _mk(monkeypatch):
     _offline(monkeypatch)
     from core.services import finance
     finance.set_balance(finance.main_account_name(), 1_000)
-    finance.add_account("Кубышка", kind="bank", balance=5_000)
+    finance.add_account("ТестКуб", kind="bank", balance=5_000)
     return finance
 
 
-def test_expense_from_named_account(monkeypatch):
+def test_expense_from_named_account(fresh_db, monkeypatch):
     f = _mk(monkeypatch)
-    r = _h("потратил 700 с кубышки", "tg")
+    r = _h("потратил 700 с тесткуба", "tg")
     assert "add_expense" in r.actions
     txs = f.list_transactions(30, 100)
-    assert len(txs) == 1 and txs[0].account == "Кубышка"
-    assert next(a for a in f.list_accounts() if a.name == "Кубышка").balance == 4_300
+    assert len(txs) == 1 and txs[0].account == "ТестКуб"
+    assert next(a for a in f.list_accounts() if a.name == "ТестКуб").balance == 4_300
     assert next(a for a in f.list_accounts() if a.name == f.main_account_name()).balance == 1_000
 
 
-def test_expense_unknown_account_goes_main(monkeypatch):
+def test_expense_unknown_account_goes_main(fresh_db, monkeypatch):
     f = _mk(monkeypatch)
     r = _h("потратил 700 с марса", "tg")
     assert "add_expense" in r.actions
     assert f.list_transactions(30, 100)[0].account == f.main_account_name()
 
 
-def test_expense_category_not_eaten_as_account(monkeypatch):
+def test_expense_category_not_eaten_as_account(fresh_db, monkeypatch):
     """«потратил 700 на такси» — «на такси» категория, а не счёт."""
     f = _mk(monkeypatch)
     r = _h("потратил 700 на такси", "tg")
@@ -68,25 +67,25 @@ def test_expense_category_not_eaten_as_account(monkeypatch):
     assert tx.category == "Транспорт"
 
 
-def test_overdraft_warns_but_writes(monkeypatch):
+def test_overdraft_warns_but_writes(fresh_db, monkeypatch):
     f = _mk(monkeypatch)
-    r = _h("потратил 6000 с кубышки", "tg")
+    r = _h("потратил 6000 с тесткуба", "tg")
     assert "add_expense" in r.actions
     assert "минус" in r.text.lower() or "осторожно" in r.text.lower()
-    assert next(a for a in f.list_accounts() if a.name == "Кубышка").balance == -1_000
+    assert next(a for a in f.list_accounts() if a.name == "ТестКуб").balance == -1_000
 
 
-def test_overdraft_blocked_by_setting(monkeypatch):
+def test_overdraft_blocked_by_setting(fresh_db, monkeypatch):
     from core import config
     f = _mk(monkeypatch)
     monkeypatch.setattr(config.cfg, "finance", config._Node({"allow_overdraft": False, "main_account": "Основной", "currency": "RUB"}), raising=False)
     import pytest
     with pytest.raises(Exception, match="не хватает"):
-        f.add_transaction(5_001, "expense", "Еда", "тест", account="Кубышка")
+        f.add_transaction(5_001, "expense", "Еда", "тест", account="ТестКуб")
     assert f.list_transactions(30, 100) == []
 
 
-def test_credit_card_may_go_negative(monkeypatch):
+def test_credit_card_may_go_negative(fresh_db, monkeypatch):
     """Кредитка в минус — нормально, защита её не касается."""
     from core import config
     f = _mk(monkeypatch)
@@ -101,7 +100,7 @@ async def _evil_judge(text, allowed):
     return "expense", "test"
 
 
-def test_exact_templates_ignore_evil_judge(monkeypatch):
+def test_exact_templates_ignore_evil_judge(fresh_db, monkeypatch):
     """Регресс флакающего test_core::test_expense_income_balance: при запущенной Ollama
     судья крал «баланс т-банк 10000» и «долг ...» в траты."""
     from core.services import judge

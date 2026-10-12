@@ -219,6 +219,30 @@ def _load():
         return _model
 
 
+def unload_stt() -> bool:
+    """Выгрузить whisper из памяти (игровой режим освобождает видеокарту).
+    Лениво поднимется сам при следующем голосовом. True — что-то выгрузили."""
+    global _model
+    if _model is None:
+        return False
+    with _lock:
+        m, _model = _model, None
+    try:
+        del m
+    except Exception:
+        pass
+    import gc
+    gc.collect()
+    try:  # faster-whisper держит веса в CUDA — сбрасываем кэш, если torch вообще стоит
+        import torch
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+    log.info("whisper выгружен из памяти (игровой режим)")
+    return True
+
+
 def available() -> bool:
     try:
         import faster_whisper  # noqa: F401

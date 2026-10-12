@@ -28,7 +28,7 @@ import { stagger } from '../lib/motion'
    (recharts в проекте нет: серии этого графика рисует SVG ниже, цвета задаются здесь
    и в легенде Today.jsx — обе точки берут цвет из cashFact.) */
 const isDark = () => typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
-export const cashFact = (dark) => (dark ? '#ffb37e' : '#ff9f5c')
+export const cashFact = (dark) => (dark ? 'color-mix(in srgb, var(--warn) 55%, #ffffff)' : 'var(--warn)')
 const W = 600, H = 200                       // система координат viewBox
 const dm = (iso) => `${iso.slice(8, 10)}.${iso.slice(5, 7)}`   // без new Date(iso) — иначе минус день у клиента в UTC−
 // события прошедших дней: операции приходят отдельным запросом и в ряду их нет
@@ -177,7 +177,7 @@ export default function CashChart({ f, height = 200, compact = false, txs = null
           {/* линия нуля — подписана, чтобы «точка выше пунктира» читалось однозначно */}
           <line x1="0" x2={W} y1={geo.zero} y2={geo.zero} stroke={geo.negative ? 'var(--neg)' : 'var(--ink3)'} strokeWidth="1" strokeDasharray="3 5" opacity="0.8" vectorEffect="non-scaling-stroke" />
           <path d={geo.fill} fill="url(#cc-fill)" />
-          <path d={geo.fact} fill="none" stroke={cashFact(isDark())} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{ filter: 'drop-shadow(0 0 6px rgba(255,159,92,.55))' }} />
+          <path d={geo.fact} fill="none" stroke={cashFact(isDark())} strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" style={{ filter: 'drop-shadow(0 0 6px color-mix(in srgb, var(--warn) 55%, transparent))' }} />
           <path d={geo.future} fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" strokeDasharray="5 4" vectorEffect="non-scaling-stroke" style={{ filter: 'drop-shadow(0 0 6px var(--acc))' }} />
           {/* маркер «сегодня» — последняя точка факта, а не первый день прогноза */}
           <line x1={geo.X(todayIdx)} x2={geo.X(todayIdx)} y1="0" y2={H} stroke="var(--ink3)" strokeWidth="1" strokeDasharray="4 6" opacity="0.45" vectorEffect="non-scaling-stroke" />

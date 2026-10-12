@@ -3,7 +3,8 @@
    Visual-only: values/strings/logic stay in Finance.jsx — this file only dresses them.
    Surfaces (glass bg/border/blur) apply on desktop (>=821px) only; on the phone the
    light card (CARD_M_LIGHT in Finance.jsx + index.css #p-fin .bento rule) is untouched.
-   Static SVG/CSS only — no animation library. index.css is NOT touched (other agent).
+   Static SVG/CSS only — no animation library. Shared glass (.glass) lives in
+   index.css (JSX adds the class); here only unique widgets.
    Skipped ref blocks (no data equivalent, no fake visuals): .pcard credit-card visual,
    .fc2 custom forecast SVG (CashChart component stays the source of truth). */
 
@@ -69,7 +70,7 @@
 /* Runway ring (ref .ringw/.ct/.tk): static 30-tick SVG, ticks via JS lines in JSX. */
 #p-fin .fg-ringw {
   position: relative;
-  width: min(100%, 250px);
+  width: min(100%, 210px);
   aspect-ratio: 1;
   margin: 0 auto;
 }
@@ -182,21 +183,8 @@
   box-shadow: 0 0 12px color-mix(in srgb, var(--acc) 55%, transparent);
 }
 
-/* Desktop-only glass surfaces: phone keeps the light card look. */
-@media (min-width: 821px) {
-  #p-fin .fg-card {
-    background:
-      linear-gradient(135deg, color-mix(in srgb, var(--acc) 10%, transparent), transparent 55%),
-      var(--sf);
-    border: 1px solid var(--glass-ring);
-    -webkit-backdrop-filter: blur(14px) saturate(150%);
-    backdrop-filter: blur(14px) saturate(150%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.5),
-      inset 0 0 0 1px var(--glass-ring),
-      var(--shadow-1);
-  }
-}
+/* Desktop-only glass surfaces: phone keeps the light card look.
+   Стекло карточек — .glass из index.css (класс ставит JSX). */
 
 /* Mobile: hero stat cells stack vertically; ring shrinks (single column comes
    from the index.css #p-fin .bento rule — not duplicated here). */
@@ -510,7 +498,7 @@
 
 #p-fin .fg-tech-ring {
   /* мокап ver6: колесо 250px (кольца 104/80/56 в системе 240) */
-  width: min(100%, 250px);
+  width: min(100%, 210px);
 }
 
 #p-fin .fg-legend {
@@ -559,3 +547,7 @@
     transition: none;
   }
 }
+
+/* Hero баланса тянется по высоте соседа: цифры сверху, строки статистики прижаты вниз — без пустой зоны под ними */
+#p-fin .fg-hero { display: flex; flex-direction: column; }
+#p-fin .fg-hero > .fg-stats { margin-top: auto; }

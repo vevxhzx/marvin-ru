@@ -130,7 +130,7 @@ def test_long_message_claim_is_corrected_not_lying(monkeypatch):
     monkeypatch.setattr(agent, "_chat", plan)
     monkeypatch.setattr(agent.llm, "MODE", "hybrid")
     monkeypatch.setattr(agent.llm, "ollama_available", lambda force=False: asyncio.sleep(0, result=True))
-    monkeypatch.setattr(agent, "_turn_context", lambda t, with_lessons=True: asyncio.sleep(0, result=("", "")))
+    monkeypatch.setattr(agent, "_turn_context", lambda t, with_lessons=True, include_private=True: asyncio.sleep(0, result=("", "")))
     r = asyncio.run(agent.via_ollama(long_text, "t-long"))
     assert "не записал" in r.text.lower(), r.text
     assert not brain_notes.list_notes(10) and not tasks.list_tasks()
@@ -157,7 +157,7 @@ def test_nudge_makes_model_call_tools(monkeypatch):
     monkeypatch.setattr(agent, "_chat", chat)
     monkeypatch.setattr(agent.llm, "MODE", "hybrid")
     monkeypatch.setattr(agent.llm, "ollama_available", lambda force=False: asyncio.sleep(0, result=True))
-    monkeypatch.setattr(agent, "_turn_context", lambda t, with_lessons=True: asyncio.sleep(0, result=("", "")))
+    monkeypatch.setattr(agent, "_turn_context", lambda t, with_lessons=True, include_private=True: asyncio.sleep(0, result=("", "")))
     r = asyncio.run(agent.via_ollama("запиши мне задачи на завтра: позвонить маме и купить корм", "t-nudge"))
     assert len(calls) >= 2, len(calls)
     assert any("НИ ОДНОГО инструмента" in (m.get("content") or "") for m in calls[1]), "нет повтора с указанием"

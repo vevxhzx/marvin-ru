@@ -178,6 +178,42 @@ def crm_delete_check(cid: int):
     return {"ok": True}
 
 
+@router.get("/clients/summary")
+def crm_clients_summary(ids: str = ""):
+    """Батч для экрана People: stage + next_step + card одним запросом (вместо N*2).
+
+    Неизвестные id пропускаются молча, пустые ids → {"clients": {}}. Лимит 200 id.
+    Регистрируется ВЫШЕ /clients/{cid}/* (порядок важен для Starlette).
+    """
+    raw = (ids or "").split(",")
+    want: list[int] = []
+    seen: set[int] = set()
+    for tok in raw:
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            cid = int(tok)
+        except ValueError:
+            continue
+        if cid not in seen:
+            seen.add(cid)
+            want.append(cid)
+        if len(want) >= 200:
+            break
+    out: dict[str, dict] = {}
+    for cid in want:
+        card = service.customer_card(cid)
+        if not card:
+            continue
+        try:
+            stage = client_stages.get(cid).get("stage", "")
+        except client_stages.ClientStageError:
+            continue
+        out[str(cid)] = {"stage": stage, "next_step": card.get("next_step") or "", "card": card}
+    return {"clients": out}
+
+
 @router.get("/clients/{cid}/card")
 def crm_client_card(cid: int):
     card = service.customer_card(cid)

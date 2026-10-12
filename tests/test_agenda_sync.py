@@ -256,13 +256,13 @@ def test_memory_block_goes_to_user_turn_not_system(monkeypatch):
     async def _up():
         return True
 
-    async def fake_ctx(text):
-        return "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ:\n— Есть кот Барсик\n"
+    async def fake_ctx(text, **kw):
+        return "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ:\n— Есть кот Барсик\n", []
     monkeypatch.setattr(llm, "ollama_chat", fake_chat)
     monkeypatch.setattr(llm, "ollama_available", _up)
     monkeypatch.setattr(llm, "MODE", "hybrid")
     monkeypatch.setattr(llm, "cloud_enabled", lambda: False)
-    monkeypatch.setattr(memory, "context", fake_ctx)
+    monkeypatch.setattr(memory, "context_with_ids", fake_ctx)
     monkeypatch.setattr(agent, "_history", lambda *a, **k: [])
     asyncio.run(agent.via_ollama("как назвать кота?", "web"))
     # «Ок.» — вода вместо ответа, поэтому модель ещё раз дёргается с уточнением; память ищем в ПЕРВОЙ user-реплике

@@ -210,6 +210,7 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "voice.tts.edge_voice": ("str", "Голос Microsoft (если engine = edge)", False),
     "voice.tts.piper_voice": ("str", "Голос Piper (если engine = piper): ru_RU-denis-medium / dmitri / irina / ruslan", False),
     "voice.tts.piper_model": ("str", "Свой .onnx Piper (пусто — скачается сам в data/models/piper/)", False),
+    "voice.tts.piper_length": ("str", "Темп Piper: 1.0 норма, 1.15–1.3 медленнее и чётче (ударения), 0.8 быстрее", False),
     "voice.tts.reply_in_telegram": ("str", "Голосовые ответы в Telegram: never (только текст) / voice (голосом на голосовые) / always", False),
     "voice.pc.hotkey": ("str", "Голос на ПК: горячая клавиша «слушать» (voice.bat)", False),
     "voice.pc.mic": ("str", "Голос на ПК: микрофон (пусто — по умолчанию; номер из «voice.bat --mics»)", False),

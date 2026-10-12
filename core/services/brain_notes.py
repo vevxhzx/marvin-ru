@@ -10,7 +10,7 @@ import httpx
 from sqlmodel import select
 
 from ..config import DATA_DIR
-from ..db import diff_text, icontains, Link, Memory, Note, remember, session, log_action
+from ..db import diff_text, icontains, ChatMessage, Link, Memory, Note, remember, session, log_action
 
 URL_RE = re.compile(r"https?://[^\s<>\"']+")
 
@@ -291,3 +291,12 @@ def search_memory(query: str, limit: int = 20) -> list[Memory]:
     with session() as s:
         return list(s.exec(select(Memory).where(icontains(Memory.text, query))
                            .order_by(Memory.created_at.desc()).limit(limit)))
+
+
+def recent_chat(limit: int = 40) -> list[ChatMessage]:
+    """Общая история чата (TG + сайт): последние `limit`, старые раньше.
+
+    Вынесено из GET /api/chat/history — роутер только форматирует в JSON.
+    """
+    with session() as s:
+        return list(s.exec(select(ChatMessage).order_by(ChatMessage.id.desc()).limit(max(1, limit))).all())

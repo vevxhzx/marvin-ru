@@ -93,7 +93,7 @@ function BoardRow({ b, archived, onRestore }) {
         </span>
         <span className="block flex-1 p-4">
           <span className="block h3" style={{ overflowWrap: 'anywhere' }}>{b.title}</span>
-          <span className="muted mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12.5px]">
+          <span className="muted mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
             <span>{t('bd.objects_n', { count })}</span>
             {b.order_title && <span className="flex min-w-0 items-center gap-1"><Briefcase size={12} />{b.order_title}</span>}
             {b.aim_title && <span className="flex min-w-0 items-center gap-1"><Target size={12} />{b.aim_title}</span>}
@@ -128,7 +128,7 @@ function NewBoardSheet({ open, onClose, onDone, onErr, orderId, aimId }) {
         <Field label={t('common.title')}><input autoFocus className="input" value={f.title} onChange={(e) => setF({ ...f, title: e.target.value })} placeholder={t('bd.ph_title')} /></Field>
         <Field label={t('bd.kind')}>
           <Pills value={f.kind} onChange={(v) => setF({ ...f, kind: v })} options={[['storyboard', t('bd.k_storyboard')], ['script', t('bd.k_script')], ['free', t('bd.k_free')]]} />
-          <div className="muted mt-2 text-[12.5px]">{t(f.kind === 'storyboard' ? 'bd.d_storyboard' : f.kind === 'script' ? 'bd.d_script' : 'bd.d_free')}</div>
+          <div className="muted mt-2 text-sm">{t(f.kind === 'storyboard' ? 'bd.d_storyboard' : f.kind === 'script' ? 'bd.d_script' : 'bd.d_free')}</div>
         </Field>
         {f.kind === 'storyboard' && <div className="grid grid-cols-2 gap-3">
           <Field label={t('bd.frames_word')}><input type="number" min={0} max={60} className="input num" value={f.frames} onChange={(e) => setF({ ...f, frames: e.target.value })} /></Field>
@@ -236,7 +236,7 @@ function BoardEditor({ id }) {
         <div className="min-w-0 flex-1">
           {renaming ? <input autoFocus className="input !h-8 max-w-[360px] !text-[14px]" defaultValue={board.title} onBlur={(e) => rename(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') setRenaming(false) }} />
             : <button className="max-w-full truncate text-left text-[15px] font-semibold tracking-[-0.01em] hover:opacity-70" onClick={() => setRenaming(true)} title={t('common.rename')} aria-label={t('common.rename')}>{board.title}</button>}
-          <div className="muted flex flex-wrap items-center gap-2 text-[12px]">
+          <div className="muted flex flex-wrap items-center gap-2 text-xs">
             <span>{t(KIND_RU[board.kind])}</span>
             {board.order_title && <span className="hidden items-center gap-1 sm:flex"><Briefcase size={11} />{board.order_title}</span>}
             {frames.length > 0 && <span className="hidden sm:inline">· {t('bd.frames_n', { count: frames.length })}{total ? ` · ${fmtSec(total)}` : ''}</span>}
@@ -248,7 +248,7 @@ function BoardEditor({ id }) {
           <button className="btn-icon" onClick={() => controls.current.redo()} data-tip={t('bd.redo_tip')} aria-label={t('bd.redo')} title={t('bd.redo_tip')}><Redo2 size={15} /></button>
           <div className="mx-1 h-5 w-px" style={{ background: 'var(--line)' }} />
           <button className="btn-icon" onClick={() => controls.current.zoomOut()} aria-label={t('bd.zoom_out')} data-tip="Ctrl −"><Minus size={15} /></button>
-          <button className="mono min-w-[54px] rounded-md px-1.5 py-1 text-center text-[12px] hover:bg-[var(--fill)]" onClick={() => controls.current.zoomTo(1)} data-tip="100% · Ctrl+0">{Math.round(zoom * 100)}%</button>
+          <button className="mono min-w-[54px] rounded-md px-1.5 py-1 text-center text-xs hover:bg-[var(--fill)]" onClick={() => controls.current.zoomTo(1)} data-tip="100% · Ctrl+0">{Math.round(zoom * 100)}%</button>
           <button className="btn-icon" onClick={() => controls.current.zoomIn()} aria-label={t('bd.zoom_in')} data-tip="Ctrl +"><Plus size={15} /></button>
           <button className="btn-icon" onClick={() => controls.current.fit()} data-tip={t('bd.fit_tip')} aria-label={t('bd.fit')} title={t('bd.fit_tip')}><Maximize2 size={15} /></button>
           {selection.length > 0 && <button className="btn-icon" onClick={() => controls.current.fitSelection()} data-tip={t('bd.fit_sel_tip')} aria-label={t('bd.fit_sel')} title={t('bd.fit_sel_tip')}><Focus size={15} /></button>}
@@ -258,7 +258,7 @@ function BoardEditor({ id }) {
         </div>
         <div className="relative">
           <button className="btn-icon" onClick={() => setMenu((v) => !v)} aria-label={t('bd.menu')} title={t('bd.menu')}><MoreHorizontal size={16} /></button>
-          {menu && <div className="elevated absolute right-0 top-[42px] z-[70] w-[250px] !p-1.5 text-[13px]" onMouseLeave={() => setMenu(false)}>
+          {menu && <div className="elevated absolute right-0 top-[42px] z-[70] w-[250px] !p-1.5 text-md" onMouseLeave={() => setMenu(false)}>
             <MenuItem icon={Download} onClick={() => { setMenu(false); exportPng(false) }}>{t('bd.export_all')}</MenuItem>
             {selection.length > 0 && <MenuItem icon={Download} onClick={() => { setMenu(false); exportPng(true) }}>{t('bd.export_sel')}</MenuItem>}
             {frames.length > 0 && <MenuItem icon={Film} onClick={() => { setMenu(false); exportStoryboard() }}>{t('bd.export_pdf')}</MenuItem>}
@@ -274,12 +274,12 @@ function BoardEditor({ id }) {
       </div>
 
       {/* контекстная панель — своя строка под шапкой, ничего не перекрывает (десктоп) */}
-      <div className="board-ctx hidden h-[44px] shrink-0 items-center gap-x-3 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b hair px-3 text-[12.5px] md:flex" style={{ background: 'var(--surface)' }}>
+      <div className="board-ctx hidden h-[44px] shrink-0 items-center gap-x-3 overflow-x-auto overflow-y-hidden whitespace-nowrap border-b hair px-3 text-sm md:flex" style={{ background: 'var(--surface)' }}>
         {!showTextBar && !showStickyBar && !showPenBar && !showFrameBar && <span className="muted">{t(tool === 'hand' ? 'bd.hint_hand' : tool === 'select' ? 'bd.hint_select' : tool === 'eraser' ? 'bd.hint_eraser' : tool === 'image' ? 'bd.hint_image' : 'bd.hint_default')}</span>}
         {showStickyBar && <Group label={t('page_accent.short')}>{Object.keys(STICKY).map((c) => <Swatch key={c} color={STICKY[c][document.documentElement.classList.contains('dark') ? 'dark' : 'light']} on={(sel1?.type === 'sticky' ? sel1.data.color : style.stickyColor) === c} onClick={() => { setStyle({ ...style, stickyColor: c }); if (types.has('sticky')) patchSel({ color: c }) }} label={c} />)}</Group>}
-        {showFrameBar && <Group label={t('board.frame')}>{Object.keys(RATIOS).map((r) => <button key={r} onClick={() => { setStyle({ ...style, ratio: r }); if (types.has('frame')) patchSel({ ratio: r }) }} className={`mono rounded-full px-2 py-0.5 text-[11px] ${(types.has('frame') ? sel1?.data?.ratio === r : style.ratio === r) ? 'bg-[var(--ink)] text-[var(--bg)]' : 'hover:bg-[var(--fill)]'}`}>{r}</button>)}
-          {sel1?.type === 'frame' && <><span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /><label className="flex items-center gap-1.5"><Clock size={12} className="faint" /><input type="number" min={0} step={0.5} className="input !h-7 !w-[64px] num !px-2 !text-[12px]" aria-label={t('bd.duration')} value={sel1.data.seconds || ''} placeholder={t('unit.sec')} onChange={(e) => patchSel({ seconds: Number(e.target.value) || 0 })} /></label>
-            <button className="btn-soft btn-sm !h-7" onClick={() => fileRef.current?.click()}><ImageIcon size={12} /> {t('bd.image')}</button>{sel1.data.image && <button className="btn-icon !h-7 !w-7" data-tip={t('bd.remove_img')} aria-label={t('bd.remove_img')} title={t('bd.remove_img')} onClick={() => patchSel({ image: null })}><X size={12} /></button>}</>}
+        {showFrameBar && <Group label={t('board.frame')}>{Object.keys(RATIOS).map((r) => <button key={r} onClick={() => { setStyle({ ...style, ratio: r }); if (types.has('frame')) patchSel({ ratio: r }) }} className={`mono rounded-full px-2 py-0.5 text-xs ${(types.has('frame') ? sel1?.data?.ratio === r : style.ratio === r) ? 'bg-[var(--ink)] text-[var(--bg)]' : 'hover:bg-[var(--fill)]'}`}>{r}</button>)}
+          {sel1?.type === 'frame' && <><span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /><label className="flex items-center gap-1.5"><Clock size={12} className="faint" /><input type="number" min={0} step={0.5} className="input input--sm !h-7 !w-[64px] num !px-2 !text-xs" aria-label={t('bd.duration')} value={sel1.data.seconds || ''} placeholder={t('unit.sec')} onChange={(e) => patchSel({ seconds: Number(e.target.value) || 0 })} /></label>
+            <button className="btn-soft btn-sm !h-7" onClick={() => fileRef.current?.click()}><ImageIcon size={12} /> {t('bd.image')}</button>{sel1.data.image && <button className="btn-icon btn-icon--sm" data-tip={t('bd.remove_img')} aria-label={t('bd.remove_img')} title={t('bd.remove_img')} onClick={() => patchSel({ image: null })}><X size={12} /></button>}</>}
         </Group>}
         {showPenBar && <Group label={t(tool === 'arrow' || types.has('arrow') ? 'bd.line' : 'bd.pencil')}>
           {INK_COLORS.map((c) => <Swatch key={c} color={themeColor(c, document.documentElement.classList.contains('dark'))} on={(types.has('ink') || types.has('arrow') ? (sel1?.data?.color || 'ink') : style.inkColor) === c} onClick={() => { setStyle({ ...style, inkColor: c }); if (types.has('ink') || types.has('arrow')) patchSel({ color: c }) }} label={c} />)}
@@ -288,25 +288,25 @@ function BoardEditor({ id }) {
           {types.has('arrow') && <><span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /><Seg value={sel1?.data?.style || 'arrow'} onChange={(v) => patchSel({ style: v })} options={[['arrow', t('bd.arrow')], ['line', t('bd.line')]]} /></>}
         </Group>}
         {showTextBar && first && <Group label={t('board.text')}>
-          <select className="input !h-7 !w-[92px] !rounded-lg !px-2 !text-[12px]" value={first.data.font || 'inter'} onChange={(e) => patchSel({ font: e.target.value })} aria-label={t('bd.font')}>{Object.keys(FONTS).map((f) => <option key={f} value={f}>{FONT_LABEL[f]}</option>)}</select>
+          <select className="input input--sm !h-7 !w-[92px] !rounded-lg !px-2 !text-xs" value={first.data.font || 'inter'} onChange={(e) => patchSel({ font: e.target.value })} aria-label={t('bd.font')}>{Object.keys(FONTS).map((f) => <option key={f} value={f}>{FONT_LABEL[f]}</option>)}</select>
           <SizeInput value={Math.round(fontSize(first))} onChange={(v) => patchSel({ font_size: v })} />
-          <button className={`btn-icon !h-7 !w-7 ${first.data.bold ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ bold: !first.data.bold })} aria-label={t('bd.bold')} data-tip={t('bd.bold')} title={t('bd.bold')}><Bold size={13} /></button>
-          <button className={`btn-icon !h-7 !w-7 ${first.data.italic ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ italic: !first.data.italic })} aria-label={t('bd.italic')} data-tip={t('bd.italic')} title={t('bd.italic')}><Italic size={13} /></button>
-          {[['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]].map(([a, I]) => <button key={a} className={`btn-icon !h-7 !w-7 ${(first.data.align || 'left') === a ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ align: a })} aria-label={a} title={a}><I size={13} /></button>)}
+          <button className={`btn-icon btn-icon--sm ${first.data.bold ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ bold: !first.data.bold })} aria-label={t('bd.bold')} data-tip={t('bd.bold')} title={t('bd.bold')}><Bold size={13} /></button>
+          <button className={`btn-icon btn-icon--sm ${first.data.italic ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ italic: !first.data.italic })} aria-label={t('bd.italic')} data-tip={t('bd.italic')} title={t('bd.italic')}><Italic size={13} /></button>
+          {[['left', AlignLeft], ['center', AlignCenter], ['right', AlignRight]].map(([a, I]) => <button key={a} className={`btn-icon btn-icon--sm ${(first.data.align || 'left') === a ? 'bg-[var(--fill-2)]' : ''}`} onClick={() => patchSel({ align: a })} aria-label={a} title={a}><I size={13} /></button>)}
           <span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} />
           {TEXT_COLORS.map((c) => <Swatch key={c} color={themeColor(c, document.documentElement.classList.contains('dark'))} on={(first.data.text_color || (first.type === 'sticky' ? '' : 'ink')) === c} onClick={() => patchSel({ text_color: c })} label={c} />)}
-          <input type="color" className="h-6 w-7 cursor-pointer rounded border-0 bg-transparent p-0" value={/^#/.test(first.data.text_color || '') ? first.data.text_color : '#3b5bff'} onChange={(e) => patchSel({ text_color: e.target.value })} aria-label={t('bd.custom_color')} title={t('bd.custom_color')} />
+          <input type="color" className="h-6 w-7 cursor-pointer rounded border-0 bg-transparent p-0" value={/^#/.test(first.data.text_color || '') ? first.data.text_color : '#3458f5'} onChange={(e) => patchSel({ text_color: e.target.value })} aria-label={t('bd.custom_color')} title={t('bd.custom_color')} />
         </Group>}
         {selection.length > 0 && <div className="ml-auto flex shrink-0 items-center gap-0.5 pl-3">
-          {selection.length > 1 && <>{[['left', 'bd.al_left'], ['hcenter', 'bd.al_hcenter'], ['right', 'bd.al_right'], ['top', 'bd.al_top'], ['vcenter', 'bd.al_vcenter'], ['bottom', 'bd.al_bottom'], ['row', 'bd.al_row']].map(([h, lk]) => <button key={h} className="rounded-md px-1.5 py-0.5 text-[11.5px] hover:bg-[var(--fill)]" onClick={() => controls.current.alignSel(h)}>{t(lk)}</button>)}<span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /></>}
-          <button className="btn-icon !h-7 !w-7" onClick={() => controls.current.duplicateSel()} data-tip={t('bd.dup_tip')} aria-label={t('bd.dup')} title={t('bd.dup_tip')}><Copy size={13} /></button>
-          <button className="btn-icon !h-7 !w-7 neg" onClick={() => controls.current.deleteSel()} data-tip={t('bd.del_tip')} aria-label={t('common.delete')} title={t('bd.del_tip')}><Trash2 size={13} /></button>
+          {selection.length > 1 && <>{[['left', 'bd.al_left'], ['hcenter', 'bd.al_hcenter'], ['right', 'bd.al_right'], ['top', 'bd.al_top'], ['vcenter', 'bd.al_vcenter'], ['bottom', 'bd.al_bottom'], ['row', 'bd.al_row']].map(([h, lk]) => <button key={h} className="rounded-md px-1.5 py-0.5 text-xs hover:bg-[var(--fill)]" onClick={() => controls.current.alignSel(h)}>{t(lk)}</button>)}<span className="mx-1 h-4 w-px" style={{ background: 'var(--line)' }} /></>}
+          <button className="btn-icon btn-icon--sm" onClick={() => controls.current.duplicateSel()} data-tip={t('bd.dup_tip')} aria-label={t('bd.dup')} title={t('bd.dup_tip')}><Copy size={13} /></button>
+          <button className="btn-icon btn-icon--sm neg" onClick={() => controls.current.deleteSel()} data-tip={t('bd.del_tip')} aria-label={t('common.delete')} title={t('bd.del_tip')}><Trash2 size={13} /></button>
         </div>}
       </div>
 
       {/* телефон: те же действия крупными кнопками (зона нажатия — --tap), детали — в шторках */}
       <div className="board-ctx flex shrink-0 items-center gap-2 overflow-x-auto border-b hair px-3 py-1 md:hidden" style={{ background: 'var(--surface)', minHeight: 'var(--tap)' }}>
-        {!showTextBar && !showStickyBar && !showPenBar && !showFrameBar && !withFrames && <span className="muted min-w-0 flex-1 truncate text-[12.5px]">{t(tool === 'hand' ? 'bd.hint_hand' : tool === 'select' ? 'bd.hint_select' : tool === 'eraser' ? 'bd.hint_eraser' : tool === 'image' ? 'bd.hint_image' : 'bd.hint_default')}</span>}
+        {!showTextBar && !showStickyBar && !showPenBar && !showFrameBar && !withFrames && <span className="muted min-w-0 flex-1 truncate text-sm">{t(tool === 'hand' ? 'bd.hint_hand' : tool === 'select' ? 'bd.hint_select' : tool === 'eraser' ? 'bd.hint_eraser' : tool === 'image' ? 'bd.hint_image' : 'bd.hint_default')}</span>}
         {showTextBar && <BarBtn icon={Type} onClick={() => setTextSheet(true)} label={t('board.text')} />}
         {showFrameBar && sel1?.type === 'frame' && <BarBtn icon={ImageIcon} onClick={() => fileRef.current?.click()} label={t('bd.image')} />}
         {withFrames && <BarBtn icon={Film} onClick={() => setFramesSheet(true)} label={t('bd.frames_label')} count={frames.length} />}
@@ -316,7 +316,7 @@ function BoardEditor({ id }) {
         {selection.length > 0 && <BarBtn icon={Trash2} onClick={() => controls.current.deleteSel()} label={t('common.delete')} danger />}
       </div>
 
-      {conflict && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b hair px-3 py-1.5 text-[12.5px]" style={{ background: 'var(--warn-soft)' }}>
+      {conflict && <div className="flex shrink-0 flex-wrap items-center gap-2 border-b hair px-3 py-1.5 text-sm" style={{ background: 'var(--warn-soft)' }}>
         <RefreshCw size={13} /> {t('bd.conflict')}
         <button className="btn-soft btn-sm !h-7" onClick={() => { controls.current.adoptFresh(conflict, true); setConflict(null); setStatus('saved') }}>{t('bd.conflict_keep')}</button>
         <button className="btn-ghost btn-sm !h-7" onClick={() => { controls.current.adoptFresh(conflict, false); setConflict(null); setStatus('saved') }}>{t('bd.conflict_take')}</button>
@@ -338,11 +338,11 @@ function BoardEditor({ id }) {
 
         {side && withFrames && frames.length > 0 && (
           <aside aria-label={t('board.frames')} className="hidden w-[250px] shrink-0 overflow-y-auto border-l hair p-3 lg:block" style={{ background: 'var(--surface)' }}>
-            <div className="mb-2 flex items-center justify-between"><div className="label">{t('bd.frames_label')} · {frames.length}{total ? ` · ${fmtSec(total)}` : ''}</div><button className="btn-icon !h-7 !w-7" onClick={() => setSide(false)} aria-label={t('bd.hide')} title={t('bd.hide')}><X size={13} /></button></div>
+            <div className="mb-2 flex items-center justify-between"><div className="label">{t('bd.frames_label')} · {frames.length}{total ? ` · ${fmtSec(total)}` : ''}</div><button className="btn-icon btn-icon--sm" onClick={() => setSide(false)} aria-label={t('bd.hide')} title={t('bd.hide')}><X size={13} /></button></div>
             <div className="space-y-0.5">{frames.map((f) => (
               <button key={f.id} onClick={() => controls.current.focusItem(f.id)} className={`flex w-full items-start gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-[var(--fill)] ${sel1?.id === f.id ? 'bg-[var(--fill)]' : ''}`}>
-                <span className="mono mt-0.5 w-5 shrink-0 text-[11.5px] font-semibold" style={{ color: 'var(--ink-2)' }}>{f.data.n}</span>
-                <span className="min-w-0 flex-1"><span className={`block truncate text-[13px] ${f.data.label ? '' : 'faint'}`}>{f.data.label || t('bd.no_caption')}</span><span className="faint mono text-[11px]">{f.data.image ? t('bd.image') : t('bd.empty')}{f.data.seconds ? ` · ${fmtSec(f.data.seconds)}` : ''}</span></span>
+                <span className="mono mt-0.5 w-5 shrink-0 text-xs font-semibold" style={{ color: 'var(--ink-2)' }}>{f.data.n}</span>
+                <span className="min-w-0 flex-1"><span className={`block truncate text-md ${f.data.label ? '' : 'faint'}`}>{f.data.label || t('bd.no_caption')}</span><span className="faint mono text-xs">{f.data.image ? t('bd.image') : t('bd.empty')}{f.data.seconds ? ` · ${fmtSec(f.data.seconds)}` : ''}</span></span>
               </button>))}</div>
             <button className="btn-soft btn-sm mt-3 w-full" onClick={() => { controls.current.addFrameNext(); setRev((r) => r + 1) }}><Plus size={14} /> {t('board.frame')}</button>
           </aside>
@@ -362,7 +362,7 @@ function BoardEditor({ id }) {
       <Confirm open={confirmArch} onClose={() => setConfirmArch(false)} title={t('bd.arch_q')} text={t('bd.arch_note')} onOk={async () => { try { await controls.current.flushNow(); await api.del(`/api/boards/${id}`); bump(); nav('/board') } catch (e) { show.err(e) } }} />
       <Sheet open={gridSheet} onClose={() => setGridSheet(false)} title={t('bd.grid')}><GridForm ratio={style.ratio} onDone={(n, ratio) => { setGridSheet(false); controls.current.addFramesGrid(n, ratio); setRev((r) => r + 1) }} /></Sheet>
       <Sheet open={keysSheet} onClose={() => setKeysSheet(false)} title={t('hot.title')} wide>
-        <div className="grid gap-x-6 gap-y-1.5 text-[13px] sm:grid-cols-2">{SHORTCUTS.map(([k, v]) => <div key={k} className="flex items-baseline justify-between gap-3 border-b hair py-1.5"><span className="mono text-[12px]" style={{ color: 'var(--ink-2)' }}>{k}</span><span className="text-right">{t(v)}</span></div>)}</div>
+        <div className="grid gap-x-6 gap-y-1.5 text-md sm:grid-cols-2">{SHORTCUTS.map(([k, v]) => <div key={k} className="flex items-baseline justify-between gap-3 border-b hair py-1.5"><span className="mono text-xs" style={{ color: 'var(--ink-2)' }}>{k}</span><span className="text-right">{t(v)}</span></div>)}</div>
       </Sheet>
 
       {/* Раскадровка: сетка кадров 2–3 колонки, тап — перейти к кадру на холсте,
@@ -382,13 +382,13 @@ function BoardEditor({ id }) {
                     <span className="relative block w-full overflow-hidden" style={{ aspectRatio: String(RATIOS[f.data.ratio] || 1.78), background: 'var(--sf2)', borderRadius: 'var(--r-sm)' }}>
                       {f.data.image
                         ? <img src={`/media/${f.data.image}`} alt="" className="absolute inset-0 h-full w-full" style={{ objectFit: 'cover' }} />
-                        : <span className="mono absolute inset-0 grid place-items-center text-[13px]" style={{ color: 'var(--ink-3)' }}>{f.data.n}</span>}
+                        : <span className="mono absolute inset-0 grid place-items-center text-md" style={{ color: 'var(--ink-3)' }}>{f.data.n}</span>}
                     </span>
-                    <span className="clamp-2 mt-1.5 block text-[12.5px] leading-snug">{f.data.label || t('bd.no_caption')}</span>
-                    <span className="faint mono block text-[12px]">{f.data.seconds ? fmtSec(f.data.seconds) : t('bd.empty')}</span>
+                    <span className="clamp-2 mt-1.5 block text-sm leading-snug">{f.data.label || t('bd.no_caption')}</span>
+                    <span className="faint mono block text-xs">{f.data.seconds ? fmtSec(f.data.seconds) : t('bd.empty')}</span>
                   </button>
                   <div className="mt-1 flex items-center justify-between">
-                    <span className="mono text-[12px]" style={{ color: 'var(--ink-2)' }}>#{f.data.n}</span>
+                    <span className="mono text-xs" style={{ color: 'var(--ink-2)' }}>#{f.data.n}</span>
                     <span className="flex items-center">
                       <button type="button" className="btn-icon !h-9 !w-9" disabled={i === 0} onClick={() => moveFrame(i, -1)} aria-label={t('bd.al_left')} title={t('bd.al_left')}><ArrowLeft size={15} /></button>
                       <button type="button" className="btn-icon !h-9 !w-9" disabled={i === frames.length - 1} onClick={() => moveFrame(i, 1)} aria-label={t('bd.al_right')} title={t('bd.al_right')}><ArrowRight size={15} /></button>
@@ -442,7 +442,7 @@ function BoardEditor({ id }) {
                     <span className="h-5 w-5 rounded-full" style={{ background: themeColor(c, document.documentElement.classList.contains('dark')), boxShadow: (first.data.text_color || (first.type === 'sticky' ? '' : 'ink')) === c ? '0 0 0 2px var(--ink)' : 'inset 0 0 0 1px var(--line-2)' }} />
                   </button>
                 ))}
-                <input type="color" className="h-[var(--tap)] w-[var(--tap)] cursor-pointer rounded-xl border-0 bg-transparent p-0" value={/^#/.test(first.data.text_color || '') ? first.data.text_color : '#3b5bff'} onChange={(e) => patchSel({ text_color: e.target.value })} aria-label={t('bd.custom_color')} title={t('bd.custom_color')} />
+                <input type="color" className="h-[var(--tap)] w-[var(--tap)] cursor-pointer rounded-xl border-0 bg-transparent p-0" value={/^#/.test(first.data.text_color || '') ? first.data.text_color : '#3458f5'} onChange={(e) => patchSel({ text_color: e.target.value })} aria-label={t('bd.custom_color')} title={t('bd.custom_color')} />
               </div>
             </div>
           </div>
@@ -456,7 +456,7 @@ function BoardEditor({ id }) {
 function BarBtn({ icon: I, onClick, label, count, danger }) {
   return (
     <button type="button" onClick={onClick} aria-label={label} title={label}
-      className={`btn-soft shrink-0 !h-[var(--tap)] gap-1.5 rounded-full px-3.5 text-[13px] ${danger ? 'neg' : ''}`}>
+      className={`btn-soft shrink-0 !h-[var(--tap)] gap-1.5 rounded-full px-3.5 text-md ${danger ? 'neg' : ''}`}>
       {I && <I size={15} />}{label}{count != null ? <span className="num opacity-60">{count}</span> : null}
     </button>
   )
@@ -471,17 +471,17 @@ function BigToggle({ on, onClick, label, children }) {
     </button>
   )
 }
-function Group({ label, children }) { return <div className="flex shrink-0 items-center gap-1"><span className="label mr-1 !text-[12px]">{label}</span>{children}</div> }
+function Group({ label, children }) { return <div className="flex shrink-0 items-center gap-1"><span className="label mr-1 !text-xs">{label}</span>{children}</div> }
 function Swatch({ color, on, onClick, label }) { return <button type="button" onClick={onClick} aria-label={label} title={label} aria-pressed={!!on} className="h-6 w-6 rounded-full border-2 transition hover:scale-110" style={{ background: color, borderColor: on ? 'var(--ink)' : 'transparent', boxShadow: on ? '0 0 0 1px var(--bg) inset' : '0 0 0 1px var(--line) inset' }} /> }
 function SizeInput({ value, onChange }) {
   const { t } = useI18n()
   const [v, setV] = useState(value); useEffect(() => setV(value), [value])
   const commit = (n) => { n = Math.max(6, Math.min(240, Math.round(Number(n) || value))); setV(n); if (n !== value) onChange(n) }
   return <div className="flex items-center">
-    <button type="button" className="btn-icon !h-7 !w-6" onClick={() => commit(FONT_SIZES.filter((s) => s < value).pop() || value - 1)} aria-label={t('bd.smaller')} title={t('bd.smaller')}>−</button>
-    <input className="input !h-7 !w-[46px] num !px-1 !text-center !text-[12px]" value={v} list="board-font-sizes" onChange={(e) => setV(e.target.value)} onBlur={(e) => commit(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} aria-label={t('bd.font_size')} />
+    <button type="button" className="btn-icon btn-icon--sm !h-7 !w-6" onClick={() => commit(FONT_SIZES.filter((s) => s < value).pop() || value - 1)} aria-label={t('bd.smaller')} title={t('bd.smaller')}>−</button>
+    <input className="input input--sm !h-7 !w-[46px] num !px-1 !text-center !text-xs" value={v} list="board-font-sizes" onChange={(e) => setV(e.target.value)} onBlur={(e) => commit(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') e.currentTarget.blur() }} aria-label={t('bd.font_size')} />
     <datalist id="board-font-sizes">{FONT_SIZES.map((s) => <option key={s} value={s} />)}</datalist>
-    <button type="button" className="btn-icon !h-7 !w-6" onClick={() => commit(FONT_SIZES.find((s) => s > value) || value + 1)} aria-label={t('bd.bigger')} title={t('bd.bigger')}>+</button>
+    <button type="button" className="btn-icon btn-icon--sm !h-7 !w-6" onClick={() => commit(FONT_SIZES.find((s) => s > value) || value + 1)} aria-label={t('bd.bigger')} title={t('bd.bigger')}>+</button>
   </div>
 }
 function MenuItem({ icon: I, children, onClick, danger }) { return <button type="button" className={`flex w-full min-h-[var(--tap)] items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left hover:bg-[var(--fill)] ${danger ? 'neg' : ''}`} onClick={onClick}><I size={14} className="faint" />{children}</button> }

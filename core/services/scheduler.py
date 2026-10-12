@@ -27,7 +27,6 @@ Notifier = Callable[[str], Awaitable[None]]
 
 def morning_facts() -> dict:
     """Факты утра одним словарём — для живой первой строки (persona.opener). Без сумм и балансов."""
-    from ..brain.dates import is_all_day
     d = datetime.now()
     evs = calendar.events_today()
     ts = tasks.list_tasks(limit=50)

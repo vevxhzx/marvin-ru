@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, hhmm, isAllDay, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLocalISO, dayLabel, shortDate, fullDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
-import { Sheet, Field, DateTimeField, Empty, useToast, ListSkeleton } from '../components/ui'
+import { Sheet, Field, DateTimeField, Empty, useToast, ListSkeleton, PageHead, Card, ErrorState } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, Settings2 } from 'lucide-react'
 import { useCardLayout, CardCtl, useWide } from '../lib/layout'
@@ -11,7 +11,7 @@ import { useI18n, localeOf, t as T } from '../lib/i18n'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 /* pages/Calendar.jsx — «Календарь» as an editorial hierarchy:
 
@@ -48,7 +48,7 @@ const SEG_BTN = { minHeight: 'var(--tap)', padding: '0 16px' }
 const NAV_BTN = { minHeight: 'var(--tap)', minWidth: 'var(--tap)', padding: '0 14px' }
 const MONTH_MIN_W = 420          // клетки месяца не сжимаются ниже ~56px — листается бок
 
-export function EventSheet({ open, ev, day, onClose, onDone }) {
+export function EventSheet({ open, ev, day, onClose, onDone, tasks: tasksProp, orders: ordersProp }) {
   const { t } = useI18n()
   const isNew = ev === 'new' || !ev?.id
   // событие-проекция (задача/дедлайн заказа) в календаре правится в своей карточке — здесь только просмотр
@@ -72,10 +72,14 @@ export function EventSheet({ open, ev, day, onClose, onDone }) {
     setTaskId(ev?.task_id ? String(ev.task_id) : '')
     setOrderId(ev?.order_id ? String(ev.order_id) : '')
     if (!synthetic) {
-      api.tasks(true, false).then((l) => setTasks((l || []).filter((t) => t.kind !== 'event'))).catch(() => setTasks([]))
-      api.orders(true).then((l) => setOrders(l || [])).catch(() => setOrders([]))
+      // списки для привязок обычно уже есть у страницы (Calendar тянет их один раз) —
+      // переиспользуем, а не грузим заново при каждом открытии шторки
+      if (tasksProp) setTasks(tasksProp.filter((t) => t.kind !== 'event'))
+      else api.tasks(true, false).then((l) => setTasks((l || []).filter((t) => t.kind !== 'event'))).catch(() => setTasks([]))
+      if (ordersProp) setOrders(ordersProp)
+      else api.orders(true).then((l) => setOrders(l || [])).catch(() => setOrders([]))
     }
-  }, [open, ev, day, isNew])
+  }, [open, ev, day, isNew, tasksProp, ordersProp])
 
   const save = async (e) => {
     if (e) e.preventDefault()
@@ -259,6 +263,7 @@ export default function Calendar() {
   const [linkTasks, setLinkTasks] = useState([])
   const [linkOrders, setLinkOrders] = useState([])
   const [sheet, setSheet] = useState(null)
+  const [loadErr, setLoadErr] = useState(false)
   const [view, setView] = useState('month') // 'month' | 'week'
   const [loaded, setLoaded] = useState(false)
   const { tick, bump } = useRefresh()
@@ -275,7 +280,7 @@ export default function Calendar() {
     return [start, end]
   }, [cursor])
 
-  const load = () => api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then(setEvents).catch(() => setEvents([])).finally(() => setLoaded(true))
+  const load = () => { setLoadErr(false); return api.events(toLocalISO(range[0]), toLocalISO(range[1]), true).then((ev) => setEvents(ev)).catch(() => { setEvents([]); setLoadErr(true) }).finally(() => setLoaded(true)) }
   useEffect(() => { load() }, [range, tick])
   // «+» дока на календаре открывает форму новой встречи (AppShell шлёт calendar:add)
   useEffect(() => {
@@ -283,10 +288,10 @@ export default function Calendar() {
     window.addEventListener('calendar:add', on)
     return () => window.removeEventListener('calendar:add', on)
   }, [])
-  // справочники для привязок «встреча → задача/заказ»: тянем один раз
+  // справочники для привязок «встреча → задача/заказ»: тянем один раз, молча не глотаем — пустой список как фолбэк
   useEffect(() => {
-    api.tasks(true, false).then((l) => setLinkTasks((l || []).filter((tk) => tk.kind !== 'event'))).catch(() => {})
-    api.orders(true).then((l) => setLinkOrders(l || [])).catch(() => {})
+    api.tasks(true, false).then((l) => setLinkTasks((l || []).filter((tk) => tk.kind !== 'event'))).catch(() => setLinkTasks([]))
+    api.orders(true).then((l) => setLinkOrders(l || [])).catch(() => setLinkOrders([]))
   }, [])
 
   /* Завершение встречи/задачи/дедлайна заказа — сервер закрывает связанные сущности,
@@ -506,13 +511,28 @@ export default function Calendar() {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-cal" style={pageAcc.style}>
-      {/* Header: заголовок + спокойная панель управления под ним. «+» — в доке.
-          Панель держит .sg внутри .top — на них ходят проверки e2e («‹»/«сегодня»/«›»). */}
-      <header className="top">
-        <div className="min-w-0 flex-1">
-          <h1 className="r" style={{ '--i': 0 }}>{headTitle}</h1>
-          <p className="sub r" style={{ '--i': 1 }}>{view === 'week' ? weekRange : cursor.getFullYear()}</p>
-        </div>
+      {/* Header через PageHead: .sg внутри .top сохранены для e2e («‹»/«сегодня»/«›»). */}
+      <PageHead
+        title={headTitle}
+        sub={view === 'week' ? weekRange : cursor.getFullYear()}
+        right={<>
+          {shown.length > 1 && (
+            <button
+              type="button"
+              className="btn-icon outlined shrink-0"
+              onClick={() => setCardsEdit((v) => !v)}
+              title={t('tk.layout_tip')}
+              aria-label={t('tk.layout')}
+              aria-pressed={cardsEdit}
+            >
+              <Settings2 size={16} aria-hidden="true" />
+            </button>
+          )}
+          <button type="button" className="btn-primary btn-sm head-primary max-[820px]:!hidden shrink-0" onClick={() => setSheet('new')}>
+            + {t('cal.event')}
+          </button>
+        </>}
+      >
         <div className="calg-tb flex w-full flex-wrap items-center justify-between gap-2 r" style={{ '--i': 2 }}>
           <div className={`sg ${SEG_ROW_M}`} role="group" aria-label={t('nav.calendar')}>
             <button
@@ -545,31 +565,17 @@ export default function Calendar() {
               <span aria-hidden="true">›</span>
             </button>
           </div>
-          {shown.length > 1 && (
-            <button
-              type="button"
-              className="btn-icon outlined shrink-0"
-              onClick={() => setCardsEdit((v) => !v)}
-              title={t('tk.layout_tip')}
-              aria-label={t('tk.layout')}
-              aria-pressed={cardsEdit}
-            >
-              <Settings2 size={16} aria-hidden="true" />
-            </button>
-          )}
-          {/* На ПК добавление в шапке; на телефоне — «+» в доке */}
-          <button type="button" className="btn-primary btn-sm head-primary max-[820px]:!hidden shrink-0" onClick={() => setSheet('new')}>
-            + {t('cal.event')}
-          </button>
         </div>
-      </header>
+      </PageHead>
+
+      {loadErr && <div className="mt-3"><ErrorState onRetry={load} /></div>}
 
       {/* Bento сетка календаря */}
       <div className="bento">
         {/* Вид «Месяц» */}
         {view === 'month' && (
           <>
-            <section className={`c s8 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 3, minHeight: phone ? undefined : '560px', ...cardSt('month') }}>
+            <Card className={`s8 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 3, minHeight: phone ? undefined : '560px', ...cardSt('month') }}>
               {cardCtl('month')}
               <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2 className="h3">{MONTHS_GEN[cursor.getMonth()]} {cursor.getFullYear()}</h2>
@@ -643,9 +649,9 @@ export default function Calendar() {
                   <Plus size={14} strokeWidth={2.4} aria-hidden="true" /> {t('cal.add_event')}
                 </button>
               </div>
-            </section>
+            </Card>
 
-            <section className={`c s4 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 4, minHeight: '560px', ...cardSt('day') }}>
+            <Card className={`s4 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 4, minHeight: '560px', ...cardSt('day') }}>
               {cardCtl('day')}
               <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2>{isSameDay(selected, today) ? t('common.today') : dayLabel(selected)}</h2>
@@ -712,13 +718,13 @@ export default function Calendar() {
                   <Plus size={14} strokeWidth={2.4} aria-hidden="true" /> {t('cal.add_event')}
                 </button>
               </div>
-            </section>
+            </Card>
           </>
         )}
 
         {/* Вид «Неделя» */}
         {view === 'week' && (
-          <section className={`c s12 r ${CARD_M_LIGHT}`} style={{ '--i': 3, ...cardSt('week') }}>
+          <Card className={`s12 r ${CARD_M_LIGHT}`} style={{ '--i': 3, ...cardSt('week') }}>
             {cardCtl('week')}
             <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
               <h2 className="h3">{t('cal.week_plan')}</h2>
@@ -808,12 +814,12 @@ export default function Calendar() {
                 </div>
               ))}
             </div>
-          </section>
+          </Card>
         )}
 
         {/* Карточка: Ближайшие события (s12) — класс cal-upcoming: на телефоне строки
             перекладываем в две линии (см. cal-glass.css), список «Сегодня» не трогаем */}
-        <section className={`c s12 r ${CARD_M_LIGHT} cal-upcoming`} style={{ '--i': 5, ...cardSt('upcoming') }}>
+        <Card className={`s12 r ${CARD_M_LIGHT} cal-upcoming`} style={{ '--i': 5, ...cardSt('upcoming') }}>
           {cardCtl('upcoming')}
           <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
             <h2 className="h3">{t('nextup.title')}</h2>
@@ -866,10 +872,10 @@ export default function Calendar() {
               })}
             </div>
           )}
-        </section>
+        </Card>
       </div>
 
-      <EventSheet open={!!sheet} ev={sheet} day={selected} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }} />
+      <EventSheet open={!!sheet} ev={sheet} day={selected} tasks={linkTasks} orders={linkOrders} onClose={() => setSheet(null)} onDone={() => { setSheet(null); load(); bump() }} />
     </div>
   )
 }

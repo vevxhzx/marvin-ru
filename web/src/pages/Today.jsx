@@ -22,7 +22,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check, EyeOff, Play, Plus, RotateCcw, Sparkles, Square } from 'lucide-react'
 import { api, hhmm, money, relTime, shortDate, WD_SHORT_MON as WD_SHORT } from '../lib/api'
-import { Empty, Rowi, Sheet, Skeleton, useToast } from '../components/ui'
+import { Empty, Rowi, Sheet, Skeleton, useToast, PageHead, Card, ErrorState } from '../components/ui'
 import { BigMoney, HeroLine, useNumFormats, useReveal } from '../components/Widgets'
 import { CountUp } from '../components/CountUp'
 import { motionOff } from '../lib/motion'
@@ -43,7 +43,7 @@ import { usePhone } from '../lib/motion'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 /* Лёгкая карточка телефона (≤820px): поверхность остаётся, но блок становится легче —
    отступ 21px и радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), без тени и без рамки-хайрлайна:
@@ -157,6 +157,7 @@ export default function Today({ openChat, address = '' }) {
   const [missed, setMissed] = useState(null)
   // данные главной загружены (хоть бы попытка была): блоки рисуют Skeleton, а не выдуманные суммы
   const [loaded, setLoaded] = useState(false)
+  const [loadErr, setLoadErr] = useState(false)
   const { tick, bump } = useRefresh()
   const [prefs, setPrefs] = usePrefs()
   const [, show] = useToast()
@@ -199,6 +200,8 @@ export default function Today({ openChat, address = '' }) {
       if (fe) setFc(fe)
       if (sc) setScreenData(sc)
       if (ms) setMissed(ms)
+      // все пять источников молча отвалились — вместо пустых заглушек честная ошибка с повтором
+      setLoadErr(!dash && !f && !fe && !sc && !ms)
     }).finally(() => setLoaded(true))
   }
 
@@ -641,6 +644,19 @@ export default function Today({ openChat, address = '' }) {
             </div>
             <div className="progress mt-3"><div style={{ width: `${Math.max(2, debtClosedPct)}%` }} /></div>
             <div className="mt-1.5 text-[length:var(--fs-xs)] text-[var(--ink-3)]">{t('td.closed_pct', { pct: debtClosedPct })}</div>
+            {(d?.debts || []).filter((x) => (x.total - (x.paid || 0)) > 0).slice(0, 4).map((x) => {
+              const left = x.total - (x.paid || 0)
+              const pct = x.total > 0 ? Math.round(((x.paid || 0) / x.total) * 100) : 0
+              return (
+                <div key={x.id} className="mt-2.5">
+                  <div className="flex items-baseline justify-between gap-2">
+                    <div className="min-w-0 truncate text-md">{x.title}</div>
+                    <div className="num shrink-0 text-md">{money(left)}</div>
+                  </div>
+                  <div className="progress mt-1"><div style={{ width: `${Math.max(2, pct)}%` }} /></div>
+                </div>
+              )
+            })}
           </section>
         )
 
@@ -708,7 +724,7 @@ export default function Today({ openChat, address = '' }) {
                   <defs>
                     <linearGradient id="pomoTodayGrad" x1="0" y1="0" x2="1" y2="1">
                       <stop offset="0%" stopColor="var(--acc)" />
-                      <stop offset="100%" stopColor="color-mix(in srgb, var(--acc) 55%, #ffffff)" />
+                      <stop offset="100%" stopColor="color-mix(in srgb, var(--acc) 55%, var(--hero-ink))" />
                     </linearGradient>
                   </defs>
                   <circle className="bg" cx="40" cy="40" r="34" />
@@ -899,18 +915,14 @@ export default function Today({ openChat, address = '' }) {
         <i className="liq-bl liq-b3" /><i className="liq-bl liq-b4" />
         <i className="liq-orb liq-o1" /><i className="liq-orb liq-o2" />
       </div>
-      {/* 1. Строка-статус: день мельче, имя крупно. h1 нужен и TitleHeader телефона.
-          На телефоне верхней шапки нет — дата стоит здесь, над именем, как в макете. */}
-      <header className="top" data-reveal>
-        <div className="min-w-0">
-          <div className="text-[length:var(--fs-md)] text-[var(--ink3)] max-[380px]:text-[length:var(--fs-xs)]">{daySubtitle}</div>
-          <h1 className="trunc" title={`${greeting}, ${ownerName}`}>{greeting}, {ownerName}</h1>
-        </div>
-      </header>
+      {/* Шапка через PageHead: kicker=дата сверху, title=приветствие (h1 для TitleHeader). */}
+      <PageHead kicker={daySubtitle} title={`${greeting}, ${ownerName}`} />
+
+      {loadErr && <div className="mt-3"><ErrorState onRetry={() => { setLoadErr(false); load() }} /></div>}
 
       {/* Панель режима правки главной страницы */}
       {editMode && (
-        <div className="c s12 my-4 flex flex-wrap items-center justify-between gap-4 !p-4" style={{ border: '2px dashed var(--acc)', background: 'var(--sf2)', borderRadius: '24px' }}>
+        <Card className="s12 my-4 flex flex-wrap items-center justify-between gap-4 !p-4" style={{ border: '2px dashed var(--acc)', background: 'var(--sf2)', borderRadius: '24px' }}>
           <div className="flex items-center gap-3">
             <span className="flex h-10 w-10 items-center justify-center rounded-full bg-[var(--acc)] text-white">
               <Sparkles size={18} />
@@ -947,7 +959,7 @@ export default function Today({ openChat, address = '' }) {
               <Check size={15} /> {t('common.done')}
             </button>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* 3–4. Блоки: ширина по настройке, появление каскадом --i (70мс, CSS up).

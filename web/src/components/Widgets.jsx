@@ -167,7 +167,7 @@ export function Streak({ streak }) {
       </div>
       <div>
         <div className="num text-[26px] font-medium leading-none tracking-[-0.04em]">{streak.current}<span className="muted ml-1 text-[14px] font-normal">{t('streak.in_row', { count: streak.current })}</span></div>
-        <div className="muted mt-1 text-[12px]">{t('streak.best', { n: streak.best })} · {streak.today_done ? t('streak.today_done') : t('streak.today_empty')}</div>
+        <div className="muted mt-1 text-xs">{t('streak.best', { n: streak.best })} · {streak.today_done ? t('streak.today_done') : t('streak.today_empty')}</div>
       </div>
     </div>
   )
@@ -189,7 +189,7 @@ export function Forecast({ f, compact = false, txs = null }) {
     <div>
       <CashChart f={f} height={h} compact={compact} txs={txs} />
       {!compact && (
-        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-[13px]">
+        <div className="mt-3 flex flex-wrap gap-x-6 gap-y-1 text-md">
           {perDay != null && <span className="muted">{t('fc.avg')} <b className="num" style={{ color: 'var(--ink)' }}>{money(perDay)}</b>{t('fc.per_day')}</span>}
           {f.safe_per_day != null && <span className="muted">{t('fc.safe')} <b className="num accent">{money(f.safe_per_day)}</b>{t('fc.safe_tail', { days: f.days_to_income })}</span>}
           {low != null && <span className={ok ? 'muted' : 'neg font-medium'}>{ok ? t('fc.min', { m: money(low) }) : t('fc.minus', { m: money(low), date: dm(lowDate) })}</span>}

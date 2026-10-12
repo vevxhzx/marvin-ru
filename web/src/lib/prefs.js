@@ -50,6 +50,7 @@ export const DEFAULTS = {
   showGreeting: true, showContext: true, showQuick: true, density: 'calm',
   hiddenBlocks: ['upcoming', 'recent'], // блоки главной, скрытые по умолчанию
   tasksSort: 'priority', // сортировка внутри групп задач: priority | due | new
+  mindView: 'auto', // раскладка «мозга»: auto (телефон — список, десктоп — masonry) | grid | list
   // свой цвет у каждой вкладки: { page: '#hex' }. Локально, на сервер не уходит.
   pageAccents: {},
 }
@@ -58,7 +59,7 @@ const subs = new Set()
 function load() { try { return { ...DEFAULTS, ...JSON.parse(localStorage.getItem(KEY) || '{}') } } catch { return { ...DEFAULTS } } }
 
 export const CLIENT_ID = (() => { let id = sessionStorage.getItem('client.id'); if (!id) { id = Math.random().toString(36).slice(2); sessionStorage.setItem('client.id', id) } return id })()
-const SYNC_KEYS = ['accent', 'accentHex', 'tint', 'font', 'radius', 'motion', 'compactNav', 'address', 'hiddenNav', 'tabbar', 'showGreeting', 'showContext', 'showQuick', 'density', 'hiddenBlocks', 'tasksSort', 'theme', 'todayOrder', 'todayWidgets']
+const SYNC_KEYS = ['accent', 'accentHex', 'tint', 'font', 'radius', 'motion', 'compactNav', 'address', 'hiddenNav', 'tabbar', 'showGreeting', 'showContext', 'showQuick', 'density', 'hiddenBlocks', 'tasksSort', 'mindView', 'theme', 'todayOrder', 'todayWidgets']
 let pushTimer
 function pushRemote() {
   clearTimeout(pushTimer)

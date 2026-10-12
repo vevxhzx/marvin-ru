@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Bell, BellOff, Download, HardDriveDownload, RefreshCw, Eye, EyeOff, Smartphone, Volume2, ChevronDown, X } from 'lucide-react'
 import { playChime } from '../lib/sound'
 import { api, relTime, kb } from '../lib/api'
-import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm, useSheetPresence, Pressable } from '../components/ui'
+import { Card, Field, PageHead, Section, useToast, Skeleton, Seg, Switch, ListSkeleton, Confirm, useSheetPresence, Pressable, ErrorState } from '../components/ui'
 import { renderMd } from '../components/Chat'
 import { useSheetDrag, SHEET_SNAPS, SNAP_RATIO } from '../lib/gestures'
 import { useMedia } from '../lib/motion'
@@ -18,7 +18,7 @@ import { useI18n, t as T } from '../lib/i18n'
 
 /* Подписи полей на узком телефоне (≤380px) — на ступень мельче: длинная подпись
    вроде «дата следующего шага» на 375px съедала строку и отжимала само поле. */
-const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:11px]'
+const FIELD_LABEL_M = 'max-[380px]:[&_.label]:text-[length:var(--fs-xs)]'
 
 /* Лёгкая карточка телефона (≤820px): та же поверхность, но без тени и без хайрлайна —
    отступ 21px, радиус из токена (--r-lg; макет называет 24px — значение ведёт index.css), разделение тоном (макет).
@@ -87,6 +87,7 @@ export default function Settings({ health }) {
   const [status, setStatus] = useState(null)
   const [diag, setDiag] = useState(undefined) // самопроверка: undefined — не грузили, null — не ответил
   const [saving, setSaving] = useState(false)
+  const [loadErr, setLoadErr] = useState(false)
   const [restart, setRestart] = useState(false)
   const [, show] = useToast()
   const [notif, setNotif] = useState(notifyState())
@@ -136,7 +137,7 @@ export default function Settings({ health }) {
   const load = () => Promise.all([api.settings().then(setData), api.status().then(setStatus),
     api.get('/api/llm').then(setLlm).catch(() => setLlm(null)),
     // самопроверка — отдельно: если /api/diagnose не ответил, остальное грузить не мешает
-    api.get('/api/diagnose').then(setDiag).catch(() => setDiag(null))]).catch(show.err)
+    api.get('/api/diagnose').then(setDiag).catch(() => setDiag(null))]).then(() => setLoadErr(false)).catch((e) => { setLoadErr(true); show.err(e) })
   useEffect(() => { load() }, [])
 
   // сервер может не вернуть пункт (например, brain.cloud.provider) — страница не должна от этого падать
@@ -269,12 +270,12 @@ export default function Settings({ health }) {
           </div>
         )}
         {status && (
-          <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] sm:grid-cols-3 lg:grid-cols-4">
+          <dl className="mt-5 grid grid-cols-2 gap-x-6 gap-y-3 text-md sm:grid-cols-3 lg:grid-cols-4">
             {[[t('st.core'), `v${status.version}`], [t('st.base'), t('st.mb', { v: (status.db.size / 1024 / 1024).toFixed(1) })], [t('st.events'), status.db.events], [t('graph.kind_tasks'), status.db.tasks], [t('st.txs'), status.db.transactions], [t('st.notes'), status.db.notes], [t('st.links'), status.db.links], [t('st.vision'), status.vision || '—']].map(([k, v]) => (
-              <div key={k}><dt className="label !text-[10px]">{k}</dt><dd className="num mt-0.5 font-medium">{v}</dd></div>
+              <div key={k}><dt className="label">{k}</dt><dd className="num mt-0.5 font-medium">{v}</dd></div>
             ))}
             {status.errors.length > 0 && (
-              <div className="col-span-full neg text-[12.5px]">{t('st.errors_colon5')} {status.errors.length} · {status.errors[status.errors.length - 1].text} <span className="faint">{t('st.errors_more2')}</span></div>
+              <div className="col-span-full neg text-sm">{t('st.errors_colon5')} {status.errors.length} · {status.errors[status.errors.length - 1].text} <span className="faint">{t('st.errors_more2')}</span></div>
             )}
           </dl>
         )}
@@ -360,25 +361,23 @@ export default function Settings({ health }) {
 
   return (
     <div className={`pg on ${FIELD_LABEL_M}`} id="p-set">
-      <div className="top">
-        <div>
-          <h1 className="r" style={{ '--i': 0 }}>{t('st.settings')}</h1>
-          <p className="sub r" style={{ '--i': 1 }}>{t('st.cfg_only2')}</p>
-        </div>
-        <div className="hr r" style={{ '--i': 1 }}>
-          {dirty && (
-            <button className="btn" disabled={saving} onClick={save}>
-              {saving ? t('people.saving') : t('st.save_n', { n: Object.keys(draft).length })}
-            </button>
-          )}
-        </div>
-      </div>
+      <PageHead
+        title={t('st.settings')}
+        sub={t('st.cfg_only2')}
+        right={dirty && (
+          <button className="btn" disabled={saving} onClick={save}>
+            {saving ? t('people.saving') : t('st.save_n', { n: Object.keys(draft).length })}
+          </button>
+        )}
+      />
+
+      {loadErr && !data && <div className="mt-3"><ErrorState onRetry={load} /></div>}
 
       {restart && (
-        <div className="panel animate-rise flex flex-wrap items-center justify-between gap-3 p-4 mb-6" style={{ borderColor: 'var(--warn)' }}>
+        <Card className="animate-rise flex flex-wrap items-center justify-between gap-3 p-4 mb-6" style={{ borderColor: 'var(--warn)' }}>
           <div className="text-[14px]"><span className="warn font-medium">{t('st.restart_needed')}</span> <span className="muted">{t('st.restart_hint2')}</span></div>
           <button className="btn-ghost btn-sm" onClick={() => setRestart(false)}>{t('st.got_it')}</button>
-        </div>
+        </Card>
       )}
 
       {phone
@@ -600,7 +599,7 @@ function Appearance() {
   const [p, set] = usePrefs()
   const [mode, setMode] = useTheme()
   const [colorsOpen, setColorsOpen] = useState(false) // «цвет для каждого раздела» — аккордеон, по умолчанию закрыт
-  const activeAcc = p.accentHex || '#0a3cff'
+  const activeAcc = p.accentHex || '#3458f5'
 
   const applyAccent = (hex) => set({ accentHex: hex })
   const resetPageAccents = () => PREFS.set({ pageAccents: {} }) // возврат всех разделов к цвету приложения
@@ -723,14 +722,14 @@ function Freelance() {
   if (!p) return <Section title={t('st.freelance_mode')}><Skeleton h={160} /></Section>
   const save = (patch) => { const next = { ...p, ...patch }; setP(next); api.saveFreelance(patch).then((r) => { setP(r); bump(); window.dispatchEvent(new CustomEvent('freelance:changed', { detail: r })) }).catch(show.err) }
   const Row = ({ title, sub, k }) => (
-    <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{title}</div><div className="muted text-[12.5px]">{sub}</div></div><Switch on={!!p[k]} onChange={(v) => save({ [k]: v })} /></div>
+    <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{title}</div><div className="muted text-sm">{sub}</div></div><Switch on={!!p[k]} onChange={(v) => save({ [k]: v })} /></div>
   )
   const Slot = ({ children }) => <div className="py-4">{children}</div>
   return (
     <Section title={t('st.freelance_mode')} hint={t('st.freelance_desc2')}>
       {/* строки с волоском между ними, а не коробка одинаковых плиток */}
       <div className="divide-y hair">
-        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[15px] font-medium">{t('st.i_am_freelancer')}</div><div className="muted text-[12.5px]">{t('st.freelancer_hint')}</div></div><Switch on={p.enabled} onChange={(v) => save({ enabled: v })} /></div>
+        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[15px] font-medium">{t('st.i_am_freelancer')}</div><div className="muted text-sm">{t('st.freelancer_hint')}</div></div><Switch on={p.enabled} onChange={(v) => save({ enabled: v })} /></div>
         {p.enabled && (
           <>
             <Row k="late_nudge" title={t('st.watch_payments')} sub={t('st.watch_pay_desc')} />
@@ -774,7 +773,7 @@ function Pomodoro() {
       <Block label={label} hint={hint}>
         <div className="flex items-center gap-2">
           <input type="range" min={min} max={max} step={1} value={p[key]} onChange={(e) => setP({ ...p, [key]: Number(e.target.value) })} onMouseUp={(e) => save({ [key]: Number(e.target.value) })} onTouchEnd={(e) => save({ [key]: Number(e.target.value) })} onKeyUp={(e) => save({ [key]: Number(e.target.value) })} className="range flex-1" />
-          <span className="num w-[52px] text-right text-[13px] font-medium tabular-nums">{p[key]} мин</span>
+          <span className="num w-[52px] text-right text-md font-medium tabular-nums">{p[key]} мин</span>
         </div>
       </Block>
     </div>
@@ -792,7 +791,7 @@ function Pomodoro() {
             <Seg value={String(p.long_every)} onChange={(v) => save({ long_every: Number(v) })} options={[['0', t('common.never')], ['2', '2'], ['3', '3'], ['4', '4'], ['6', '6']]} />
           </Block>
         </Slot>
-        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{t('st.break_alone2')}</div><div className="muted text-[12.5px]">{t('st.auto_break_hint')}</div></div><Switch on={p.auto_break} onChange={(v) => save({ auto_break: v })} /></div>
+        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{t('st.break_alone2')}</div><div className="muted text-sm">{t('st.auto_break_hint')}</div></div><Switch on={p.auto_break} onChange={(v) => save({ auto_break: v })} /></div>
         <Slot>
           <Block label={t('st.sound_done')} hint={t('st.here_and_pc')}>
             <div className="flex flex-wrap items-center gap-3">
@@ -808,7 +807,7 @@ function Pomodoro() {
             </Block>
           </Slot>
         )}
-        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{t('live.speak')}</div><div className="muted text-[12.5px]">{t('st.speak_hint')}</div></div><Switch on={p.voice} onChange={(v) => save({ voice: v })} /></div>
+        <div className="flex items-center justify-between gap-4 py-4"><div className="min-w-0"><div className="text-[14px] font-medium">{t('live.speak')}</div><div className="muted text-sm">{t('st.speak_hint')}</div></div><Switch on={p.voice} onChange={(v) => save({ voice: v })} /></div>
       </div>
     </Section>
   )
@@ -816,7 +815,7 @@ function Pomodoro() {
 
 const Block = ({ label, hint, children, className = '' }) => (
   <div className={className}>
-    <div className="mb-1.5 flex items-baseline justify-between"><span className="label">{label}</span>{hint && <span className="faint text-[11px]">{hint}</span>}</div>
+    <div className="mb-1.5 flex items-baseline justify-between"><span className="label">{label}</span>{hint && <span className="faint text-xs">{hint}</span>}</div>
     {children}
   </div>
 )
@@ -840,24 +839,37 @@ function VoicePicker({ show }) {
     try { await audio.play() } catch (e) { setPlaying(null) }
   }
   const pick = (v) => api.post('/api/voice/pick', { engine: v.engine, voice: v.id }).then(() => { show(t('st.voice_picked', { name: v.name })); load() }).catch(show.err)
+  const tempo = Number(data.current.piper_length || 1)
+  const setTempo = (v) => api.saveSettings({ 'voice.tts.piper_length': String(v) }).then(load).catch(show.err)
   return (
     <div className="mb-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
       {data.voices.map((v) => {
         const cur = isCur(v)
         return (
           <Card key={v.engine + v.id} className={`${CARD_M_FLAT} !p-3 flex items-center gap-3 ${cur ? 'ring-1 ring-[var(--accent)]' : ''}`}>
-            <button className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${playing === v.id ? 'bg-accent text-accent-ink' : 'btn-ghost !p-0'}`} onClick={() => play(v)} title={t('st.listen2')}>
+            <button className={`grid h-10 w-10 shrink-0 place-items-center rounded-full ${playing === v.id ? 'bg-accent text-accent-ink' : 'btn-ghost !p-0'}`} onClick={() => play(v)} title={t('st.listen2')} aria-label={t('st.listen2')}>
               {playing === v.id ? '■' : '▶'}
             </button>
             <div className="min-w-0 flex-1">
-              <div className="h4 truncate">{v.name}{cur && <span className="ml-2 text-[11px] font-normal text-accent">{t('st.selected')}</span>}</div>
-              <div className="muted truncate text-[12px]">{v.kind}{(v.engine === 'silero' || v.engine === 'piper') ? t('st.offline') : ''}</div>
+              <div className="h4 truncate">{v.name}{cur && <span className="ml-2 text-xs font-normal text-accent">{t('st.selected')}</span>}</div>
+              <div className="muted truncate text-xs">{v.kind}{(v.engine === 'silero' || v.engine === 'piper') ? t('st.offline') : ''}</div>
             </div>
-            {!cur && <button className="btn-ghost !py-1 !text-[12px]" onClick={() => pick(v)}>{t('common.select')}</button>}
+            {!cur && <button className="btn-ghost !py-1 !text-xs" onClick={() => pick(v)}>{t('common.select')}</button>}
           </Card>
         )
       })}
-      <div className="faint text-[12px] sm:col-span-2 lg:col-span-3">{t('st.voice_first2')}</div>
+      <div className="faint text-xs sm:col-span-2 lg:col-span-3">{t('st.voice_first2')}</div>
+      {data.current.engine === 'piper' && (
+        <div className="sm:col-span-2 lg:col-span-3">
+          <div className="flex items-center gap-3">
+            <span className="w-24 shrink-0 text-xs">{t('st.piper_tempo')}</span>
+            <input type="range" min={0.7} max={1.5} step={0.05} value={tempo}
+              onChange={(e) => setTempo(Number(e.target.value))} className="range flex-1" />
+            <span className="num w-10 shrink-0 text-right text-xs">{tempo.toFixed(2)}×</span>
+          </div>
+          <div className="faint mt-1 text-xs">{t('st.piper_tempo_hint')}</div>
+        </div>
+      )}
     </div>
   )
 }
@@ -969,7 +981,7 @@ function GoogleConnect({ show, dirty }) {
         <span className={`inline-block h-2.5 w-2.5 rounded-full ${ok ? 'bg-emerald-500' : st.connected ? 'bg-amber-500' : 'bg-neutral-400'}`} />
         <div>
           <div className="h4">{!st.configured ? t('st.need_keys') : !st.connected ? t('st.not_connected') : ok ? t('st.connected') + (st.email ? ' · ' + st.email : '') : st.last_error ? t('st.sync_error') : t('st.connected_off')}</div>
-          <div className="muted text-[13px]">
+          <div className="muted text-md">
             {!st.configured ? <>{t('st.gcal_keys_hint2')} <code>{st.redirect_uri}</code></>
               : !st.connected ? <>{t('st.press_connect2')} <b>{t('st.on_this_pc')}</b> ({t('st.gcal_returns')} <code>localhost</code>{t('st.gcal_then2')}</>
               : st.last_error ? st.last_error
@@ -1001,7 +1013,7 @@ function PhoneAccess() {
     setRotating(true)
     try { await api.post('/api/phone/rotate'); setInfo(await api.get('/api/phone')) } catch (e) { setErr(e.message) } finally { setRotating(false) }
   }
-  if (err) return <Card><div className="neg text-[13px]">{/403/.test(err) ? t('st.qr_only_pc') : err}</div></Card>
+  if (err) return <Card><div className="neg text-md">{/403/.test(err) ? t('st.qr_only_pc') : err}</div></Card>
   if (!info) return <Skeleton h={120} />
   const remote = info.opened_from && !/^(localhost|127\.0\.0\.1)/.test(info.opened_from)
   return (
@@ -1024,7 +1036,7 @@ function PhoneAccess() {
               <div className="min-w-0">
                 <div className="label">{it.title}</div>
                 <a className="h4 mt-1 block truncate text-accent" href={it.url} target="_blank" rel="noreferrer">{it.url.replace(/\?t=.*$/, '')}</a>
-                <div className="faint mt-2 text-[12px]">{info.note || t('st.step5')}</div>
+                <div className="faint mt-2 text-xs">{info.note || t('st.step5')}</div>
               </div>
             </Card>
           ))}
@@ -1033,13 +1045,13 @@ function PhoneAccess() {
       {info.can_rotate !== false && (
         <div className="flex flex-wrap items-center gap-3">
           <button className="btn-ghost" onClick={() => setAskRotate(true)} disabled={rotating}><RefreshCw size={14} className={rotating ? 'animate-spin' : ''} /> {t('st.new_access_key')}</button>
-          <span className="faint text-[12px]">{t('st.new_key_desc2')}</span>
+          <span className="faint text-xs">{t('st.new_key_desc2')}</span>
         </div>
       )}
       <Confirm open={askRotate} onClose={() => !rotating && setAskRotate(false)} title={t('st.new_key_q')}
         text={t('st.new_key_text2')}
         onOk={rotate} danger />
-      <div className="faint text-[12px]">
+      <div className="faint text-xs">
         {remote ? <span className="pos">{t('st.not_from_pc5')} ({info.opened_from}) — {t('st.access_ok')}</span>
           : info.local_only
             ? <>{t('st.localhost_only2')}<code>127.0.0.1</code>{t('st.localhost_only_tail')} <code>HOST=0.0.0.0</code>.</>
@@ -1066,7 +1078,7 @@ function MiniApp({ current, onUse }) {
         <span className="inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: ok ? 'var(--pos)' : current ? 'var(--warn)' : 'var(--ink-3)' }} />
         <div>
           <div className="h4">{t('st.tg_app5')} {ok ? t('st.dot_connected') : current ? t('st.tunnel_unknown') : t('st.dot_not_connected')}</div>
-          <div className="muted mt-0.5 text-[13px]">
+          <div className="muted mt-0.5 text-md">
             {!st.local ? t('st.tunnel_pc_only')
               : f.installed === false ? <>{t('st.tailscale_first2')} <code>funnel.bat</code>.</>
               : f.on && url ? <>{t('st.tunnel_ok')} <span className="num">{url}</span>{matches ? t('st.tunnel_also_bot') : t('st.tunnel_press_use')}</>
@@ -1103,19 +1115,19 @@ function BackupRestore({ show }) {
       <div className="flex items-center justify-between gap-2">
         <div>
           <div className="h4">{t('st.restore_from2')}</div>
-          <div className="muted text-[12.5px]">{t('st.restore_hint')}</div>
+          <div className="muted text-sm">{t('st.restore_hint')}</div>
         </div>
         <button className="btn-icon outlined" data-tip={t('st.refresh_list')} onClick={load} aria-label={t('st.refresh')}><RefreshCw size={14} /></button>
       </div>
       {list === null ? <Skeleton h={72} /> : list.length === 0 ? (
-        <div className="muted text-[13px]">{t('st.no_copies2')}</div>
+        <div className="muted text-md">{t('st.no_copies2')}</div>
       ) : (
         <ul className="divide-y hair max-h-[280px] overflow-y-auto">
           {list.map((b) => (
             <li key={b.name} className="flex items-center gap-3 py-2.5">
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[13.5px] font-medium">{b.pre_restore ? t('st.restore_backup_note') : relTime(b.at)} <span className="faint mono text-[11px]">· {b.name.replace(/^backup-(?:pre-restore-)?/, '').replace(/\.db$/, '')}</span></div>
-                <div className="faint text-[12px]">{fmtSize(b.size)}{b.pre_restore ? ' · pre-restore' : ''}</div>
+                <div className="truncate text-md font-medium">{b.pre_restore ? t('st.restore_backup_note') : relTime(b.at)} <span className="faint mono text-xs">· {b.name.replace(/^backup-(?:pre-restore-)?/, '').replace(/\.db$/, '')}</span></div>
+                <div className="faint text-xs">{fmtSize(b.size)}{b.pre_restore ? ' · pre-restore' : ''}</div>
               </div>
               <button className="btn-soft btn-sm !h-7" onClick={() => setPick(b)}>{t('st.restore')}</button>
             </li>
@@ -1125,7 +1137,7 @@ function BackupRestore({ show }) {
       <Confirm open={!!pick} onClose={() => !busy && setPick(null)} title={t('st.restore_q')}
         text={pick ? t('st.restore_q', { name: pick.name, when: relTime(pick.at) }) : ''}
         onOk={doRestore} danger />
-      {busy && <div className="muted text-[12.5px]">{t('st.restoring')}</div>}
+      {busy && <div className="muted text-sm">{t('st.restoring')}</div>}
     </Card>
   )
 }
@@ -1201,7 +1213,7 @@ function CloudBackups({ show }) {
           placeholder={on ? t('st.dots_saved') : key === 'enc' ? t('st.set_password') : t('st.pass_or_token')}
           autoComplete="new-password" onChange={(e) => set(fld, e.target.value)} />
         <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 faint"
-          onClick={() => setRev((r) => ({ ...r, [key]: !r[key] }))}>{rev[key] ? <EyeOff size={15} /> : <Eye size={15} />}</button>
+          onClick={() => setRev((r) => ({ ...r, [key]: !r[key] }))} aria-label={t(rev[key] ? 'st.hide_password' : 'st.show_password')} title={t(rev[key] ? 'st.hide_password' : 'st.show_password')}>{rev[key] ? <EyeOff size={15} /> : <Eye size={15} />}</button>
       </div>
     )
   }
@@ -1216,10 +1228,10 @@ function CloudBackups({ show }) {
             <Switch on={f.enabled} onChange={(v) => set('enabled', v)} label={t('st.cloud_backups2')} />
             <div>
               <div className="h4">{f.enabled ? t('st.on') : t('st.off')}</div>
-              <div className="muted text-[12.5px]">{st.configured ? `${st.url} · ${st.dir}` : t('st.addr_not_set')}</div>
+              <div className="muted text-sm">{st.configured ? `${st.url} · ${st.dir}` : t('st.addr_not_set')}</div>
             </div>
           </div>
-          {st.enabled && <div className="muted text-[12.5px]">{t('st.sched_sends5')} {st.every_hours} {t('unit.hour')} · {t('st.keeps', { n: st.keep })}</div>}
+          {st.enabled && <div className="muted text-sm">{t('st.sched_sends5')} {st.every_hours} {t('unit.hour')} · {t('st.keeps', { n: st.keep })}</div>}
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1249,7 +1261,7 @@ function CloudBackups({ show }) {
         </div>
 
         {f.enabled && !st.encrypt_pass_set && !f.encrypt_pass && (
-          <div className="warn text-[12.5px]">{t('st.no_enc_pass2')}</div>
+          <div className="warn text-sm">{t('st.no_enc_pass2')}</div>
         )}
 
         <div className="flex flex-wrap items-center gap-2">
@@ -1257,11 +1269,11 @@ function CloudBackups({ show }) {
           <button className="btn-ghost" disabled={!!busy} onClick={checkConn}>{busy === 'test' ? t('st.checking') : t('st.test_conn')}</button>
           <button className="btn-soft" disabled={!!busy || !f.enabled} onClick={up}>{busy === 'upload' ? t('st.sending') : t('st.send_now')}</button>
         </div>
-        {check && <div className={`text-[13px] ${check.ok ? 'pos' : 'neg'}`}>{check.ok ? `${check.detail} · ${check.auth}` : check.error}</div>}
+        {check && <div className={`text-md ${check.ok ? 'pos' : 'neg'}`}>{check.ok ? `${check.detail} · ${check.auth}` : check.error}</div>}
 
-        <div className="space-y-1 text-[13px]">
+        <div className="space-y-1 text-md">
           {st.last_uploaded
-            ? <div>{t('st.last_send2b')} <b>{relTime(st.last_uploaded.at)}</b> · <span className="faint mono text-[11.5px]">{st.last_uploaded.name}</span> · {sz(st.last_uploaded.size)}</div>
+            ? <div>{t('st.last_send2b')} <b>{relTime(st.last_uploaded.at)}</b> · <span className="faint mono text-xs">{st.last_uploaded.name}</span> · {sz(st.last_uploaded.size)}</div>
             : <div className="muted">{t('st.never_sent2')}</div>}
           {st.last_error && <div className="neg">{t('st.last_try5')} {relTime(st.last_attempt)} — {t('st.failed_colon')} {st.last_error}</div>}
           {!st.last_error && st.last_ok && <div className="muted">{t('st.last_try_ok5')} {relTime(st.last_ok)}</div>}
@@ -1274,14 +1286,14 @@ function CloudBackups({ show }) {
             <button className="btn-ghost btn-sm" disabled={!!busy} onClick={load}>{t('st.refresh_list')}</button>
           </div>
           {st.remote.length === 0 ? (
-            <div className="muted text-[13px]">{st.enabled ? t('st.cloud_empty') : t('st.cloud_off_hint')}</div>
+            <div className="muted text-md">{st.enabled ? t('st.cloud_empty') : t('st.cloud_off_hint')}</div>
           ) : (
             <ul className="divide-y hair max-h-[300px] overflow-y-auto">
               {st.remote.map((r) => (
                 <li key={r.name} className="flex items-center gap-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-[13.5px] font-medium">{r.mtime ? relTime(r.mtime) : t('st.date_unknown')} <span className="faint mono text-[11px]">· {r.name.replace(/\.enc$/, '')}</span></div>
-                    <div className="faint text-[12px]">{sz(r.size)}{r.name.endsWith('.enc') ? t('st.encrypted') : ''}</div>
+                    <div className="truncate text-md font-medium">{r.mtime ? relTime(r.mtime) : t('st.date_unknown')} <span className="faint mono text-xs">· {r.name.replace(/\.enc$/, '')}</span></div>
+                    <div className="faint text-xs">{sz(r.size)}{r.name.endsWith('.enc') ? t('st.encrypted') : ''}</div>
                   </div>
                   {own(r.name) && <>
                     <button className="btn-soft btn-sm !h-7" disabled={!!busy} onClick={() => down(r.name)}>{busy === 'd:' + r.name ? t('st.downloading') : t('common.copy_dl')}</button>
@@ -1291,7 +1303,7 @@ function CloudBackups({ show }) {
               ))}
             </ul>
           )}
-          <div className="muted mt-2 text-[12.5px]">{t('st.cloud_download_hint')}</div>
+          <div className="muted mt-2 text-sm">{t('st.cloud_download_hint')}</div>
         </div>
 
         <Confirm open={!!del} onClose={() => !busy && setDel(null)} title={t('st.del_cloud_q')}
@@ -1307,7 +1319,7 @@ function FileOrganizer({ show }) {
   const [path, setPath] = useState('')
   const [logs, setLogs] = useState([])
   const [preview, setPreview] = useState(null)
-  const load = () => Promise.all([api.get('/api/pc/organize/log').then(setLogs), api.organizePreview().then((p) => setPreview(p.status === 'ready' ? p : null))]).catch(() => {})
+  const load = () => Promise.all([api.get('/api/pc/organize/log').then(setLogs), api.organizePreview().then((p) => setPreview(p.status === 'ready' ? p : null))]).catch((e) => show.err(e))
   useEffect(() => { load() }, [])
   const run = async () => {
     if (!path.trim()) return show(t('st.set_mnt_path'))
@@ -1331,24 +1343,24 @@ function FileOrganizer({ show }) {
           <input className="input flex-1" value={path} onChange={(e) => setPath(e.target.value)} placeholder={t('st.mnt_path_ph4')} />
           <button className="btn-primary" onClick={run}>{t('st.show_plan')}</button>
         </div>
-        <div className="muted text-[12px]">{t('st.organise_hint')}</div>
+        <div className="muted text-xs">{t('st.organise_hint')}</div>
         {preview && (
           <div className="rounded-2xl border border-accent/30 bg-accent/5 p-4">
-            <div className="flex flex-wrap items-center justify-between gap-2"><b>{t('st.preview_ready')}</b><span className="muted text-[12px]">{preview.root}</span></div>
-            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{Object.entries(preview.by_category || {}).map(([k, n]) => <div key={k} className="fill rounded-xl p-3"><div className="text-[12px]">{k}</div><div className="num mt-1 text-lg font-semibold">{n}</div></div>)}</div>
-            <div className="mt-3 text-[13px]">{t('st.total_files')} <b>{preview.total}</b>. {preview.profile === 'sound' && <><b>{t('st.sounds_in_sfx')}</b> </>}{t('st.nothing_moved')} {preview.cleanup_dirs?.length ? t('st.empty_old_dirs', { n: preview.cleanup_dirs.length }) : ''} {t('st.confirm_yes')} {t('st.accept_plan2')}</div>
-            <details className="mt-3"><summary className="cursor-pointer text-[12px]">{t('st.show_moves2')}</summary><div className="mt-2 max-h-48 overflow-auto text-[11px]">{(preview.moves || []).map((m, i) => <div key={i} className="py-0.5">{m.src} → {m.dst}</div>)}</div></details>
+            <div className="flex flex-wrap items-center justify-between gap-2"><b>{t('st.preview_ready')}</b><span className="muted text-xs">{preview.root}</span></div>
+            <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">{Object.entries(preview.by_category || {}).map(([k, n]) => <div key={k} className="fill rounded-xl p-3"><div className="text-xs">{k}</div><div className="num mt-1 text-lg font-semibold">{n}</div></div>)}</div>
+            <div className="mt-3 text-md">{t('st.total_files')} <b>{preview.total}</b>. {preview.profile === 'sound' && <><b>{t('st.sounds_in_sfx')}</b> </>}{t('st.nothing_moved')} {preview.cleanup_dirs?.length ? t('st.empty_old_dirs', { n: preview.cleanup_dirs.length }) : ''} {t('st.confirm_yes')} {t('st.accept_plan2')}</div>
+            <details className="mt-3"><summary className="cursor-pointer text-xs">{t('st.show_moves2')}</summary><div className="mt-2 max-h-48 overflow-auto text-xs">{(preview.moves || []).map((m, i) => <div key={i} className="py-0.5">{m.src} → {m.dst}</div>)}</div></details>
           </div>
         )}
         <div className="flex items-center justify-between"><div className="label">{t('st.log2')}</div><button className="btn-ghost btn-sm" onClick={load}>{t('st.refresh3')}</button></div>
-        {!logs.length ? <div className="muted text-[13px]">{t('st.no_ops')}</div> : (
+        {!logs.length ? <div className="muted text-md">{t('st.no_ops')}</div> : (
           <div className="space-y-2">
             {logs.map((l, i) => (
-              <div key={i} className="fill rounded-xl p-3 text-[13px]">
+              <div key={i} className="fill rounded-xl p-3 text-md">
                 <div className="flex justify-between gap-3"><b>{l.kind === 'organize_undo' ? t('st.cancel_organise') : t('st.organise_done')}</b><span className="muted">{l.at}</span></div>
                 <div className="muted mt-1">{l.text}</div>
-                {(l.log?.moved || []).slice(0, 8).map((m, j) => <div key={j} className="mt-1 truncate text-[11px]">{m.src} → {m.dst}</div>)}
-                {(l.log?.moved || []).length > 8 && <div className="muted mt-1 text-[11px]">{t('st.and_more5')} {l.log.moved.length - 8}</div>}
+                {(l.log?.moved || []).slice(0, 8).map((m, j) => <div key={j} className="mt-1 truncate text-xs">{m.src} → {m.dst}</div>)}
+                {(l.log?.moved || []).length > 8 && <div className="muted mt-1 text-xs">{t('st.and_more5')} {l.log.moved.length - 8}</div>}
               </div>
             ))}
           </div>
@@ -1368,7 +1380,7 @@ function StatusCard({ ok, warn, title, line1, line2, action }) {
         {action}
       </div>
       <div className="h4 mt-2 truncate" title={line1}>{line1}</div>
-      {line2 && <div className="muted mt-1 line-clamp-3 text-[12px] leading-snug" title={line2}>{line2}</div>}
+      {line2 && <div className="muted mt-1 line-clamp-3 text-xs leading-snug" title={line2}>{line2}</div>}
     </Card>
   )
 }
@@ -1387,7 +1399,7 @@ function CloudHint({ prov, providers }) {
   const { t } = useI18n()
   const [text, url, steps] = PROV_HINT[prov] || PROV_HINT.custom
   return (
-    <div className="rounded-2xl fill px-4 py-3 text-[13px] leading-relaxed">
+    <div className="rounded-2xl fill px-4 py-3 text-md leading-relaxed">
       <div>{text}</div>
       {steps && <div className="muted mt-1">{t('st.how_to_key5')} {steps}</div>}
       {url && <a className="text-accent mt-1 inline-block" href={url} target="_blank" rel="noreferrer">{t('st.open_keys2')}</a>}
@@ -1410,16 +1422,16 @@ function CloudPreview() {
   return (
     <div className="rounded-2xl fill px-4 py-3">
       <div className="label">{t('st.what_goes')}</div>
-      <div className="faint mt-1 text-[12.5px]">{t('st.preview_hint2')}</div>
+      <div className="faint mt-1 text-sm">{t('st.preview_hint2')}</div>
       <textarea className="input mt-2 w-full" rows={2} value={text} onChange={(e) => setText(e.target.value)}
                 placeholder={t('st.ph_example')} />
       <div className="mt-2 flex flex-wrap items-center gap-2">
         <button className="btn-ghost btn-sm" disabled={busy || !text.trim()} onClick={run}>{busy ? '…' : t('st.show')}</button>
-        {res && <span className="faint text-[12px]">{res.will_send ? t('st.will_go') : t('st.wont_go')}{res.anonymized ? t('st.anonymised') : ''}</span>}
+        {res && <span className="faint text-xs">{res.will_send ? t('st.will_go') : t('st.wont_go')}{res.anonymized ? t('st.anonymised') : ''}</span>}
       </div>
-      {res && <pre className="mt-2 whitespace-pre-wrap break-words text-[12.5px]">{res.text || '—'}</pre>}
+      {res && <pre className="mt-2 whitespace-pre-wrap break-words text-sm">{res.text || '—'}</pre>}
       {res && res.mode === 'cloud' && (
-        <div className="faint mt-2 text-[12px]">
+        <div className="faint mt-2 text-xs">
           {res.personal_tools
             ? t('st.cloud_instead_on')
             : t('st.cloud_instead2')}
@@ -1487,7 +1499,7 @@ function SettingField({ it, value, onChange, providers }) {
       <div className="relative">
         <input className="input pr-10" type={it.secret && !reveal ? 'password' : 'text'} inputMode={it.type === 'int' ? 'numeric' : undefined}
           value={it.secret && value === it.value ? '' : (value ?? '')} onChange={(e) => onChange(e.target.value)} placeholder={it.secret && it.set ? it.value : ''} autoComplete="off" />
-        {it.secret && <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 faint" onClick={() => setReveal((v) => !v)}>{reveal ? <EyeOff size={15} /> : <Eye size={15} />}</button>}
+        {it.secret && <button type="button" className="absolute right-3 top-1/2 -translate-y-1/2 faint" onClick={() => setReveal((v) => !v)} aria-label={t(reveal ? 'st.hide_password' : 'st.show_password')}>{reveal ? <EyeOff size={15} /> : <Eye size={15} />}</button>}
       </div>
     </SRow>
   )
@@ -1528,7 +1540,7 @@ function DesktopClientSection() {
             <span>{t('st.win_client_title')}</span>
             <span className="badge pos">{t('state.ready')}</span>
           </div>
-          <div className="muted mt-1 text-[13px] leading-relaxed">
+          <div className="muted mt-1 text-md leading-relaxed">
             {t('st.win_proj_desc2')}
           </div>
         </div>
@@ -1543,8 +1555,8 @@ function DesktopClientSection() {
       <div className="rounded-xl border hair p-4 space-y-3" style={{ background: 'var(--surface-2)' }}>
         <div className="flex items-center justify-between">
           <div>
-            <div className="font-medium text-[13.5px]">{t('st.version_profile2')}</div>
-            <div className="muted text-[12.5px] mt-0.5">
+            <div className="font-medium text-md">{t('st.version_profile2')}</div>
+            <div className="muted text-sm mt-0.5">
               {edition === 'marvin'
                 ? t('st.profile_marvin_desc')
                 : t('st.profile_jarvis_desc')}
@@ -1552,13 +1564,13 @@ function DesktopClientSection() {
           </div>
           <div className="flex items-center rounded-lg p-1 border hair" style={{ background: 'var(--fill)' }}>
             <button
-              className={`px-3 py-1 text-[12.5px] rounded-md font-medium transition ${edition === 'jarvis' ? 'bg-[var(--surface)] shadow-sm text-accent' : 'faint hover:text-ink'}`}
+              className={`px-3 py-1 text-sm rounded-md font-medium transition ${edition === 'jarvis' ? 'bg-[var(--surface)] shadow-sm text-accent' : 'faint hover:text-ink'}`}
               onClick={() => switchEdition('jarvis')}
             >
               {t('st.z_jarvis2')}
             </button>
             <button
-              className={`px-3 py-1 text-[12.5px] rounded-md font-medium transition ${edition === 'marvin' ? 'bg-[var(--surface)] shadow-sm text-accent' : 'faint hover:text-ink'}`}
+              className={`px-3 py-1 text-sm rounded-md font-medium transition ${edition === 'marvin' ? 'bg-[var(--surface)] shadow-sm text-accent' : 'faint hover:text-ink'}`}
               onClick={() => switchEdition('marvin')}
             >
               {t('st.z_marvin')}
@@ -1567,17 +1579,17 @@ function DesktopClientSection() {
         </div>
       </div>
 
-      <div className="rule pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-[13px]">
+      <div className="rule pt-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-md">
         <div className="rounded-xl border hair p-3.5" style={{ background: 'var(--fill)' }}>
           <div className="label mb-1">{t('st.no_bat2')}</div>
           <div className="font-medium mt-1">{t('st.one_script2')}</div>
-          <code className="mono block mt-1.5 p-2 rounded-lg bg-[var(--surface-2)] text-[12px]">npm run desktop</code>
-          <div className="muted text-[12px] mt-2">{t('st.win_client_hint')}</div>
+          <code className="mono block mt-1.5 p-2 rounded-lg bg-[var(--surface-2)] text-xs">npm run desktop</code>
+          <div className="muted text-xs mt-2">{t('st.win_client_hint')}</div>
         </div>
 
         <div className="rounded-xl border hair p-3.5" style={{ background: 'var(--fill)' }}>
           <div className="label mb-1">{t('st.sysint2')}</div>
-          <div className="space-y-1.5 mt-1.5 text-[12.5px]">
+          <div className="space-y-1.5 mt-1.5 text-sm">
             <div className="flex items-center gap-2">
               <span className="h-2 w-2 rounded-full" style={{ background: 'var(--pos)' }} />
               <span>{t('st.single2')}</span>
@@ -1659,79 +1671,79 @@ function Diagnostics({ status, diag, onRefresh }) {
           {/* версии и база */}
           <Card>
             <div className="label mb-2">{t('st.versions_db')}</div>
-            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-[13px] sm:grid-cols-4">
+            <dl className="grid grid-cols-2 gap-x-6 gap-y-3 text-md sm:grid-cols-4">
               {[[t('st.core'), `v${status.version}`], [t('st.web'), `v${WEB_VER}`],
                 [t('st.base'), t('st.mb', { v: (db.size / 1024 / 1024).toFixed(1) })], [t('st.records'), total],
                 [t('mem.k_events'), db.events], [t('nav.tasks'), db.tasks],
                 [t('st.txs2'), db.transactions], [t('st.notes_links'), `${db.notes} · ${db.links}`]].map(([k, v]) => (
-                <div key={k}><dt className="label !text-[10px]">{k}</dt><dd className="num mt-0.5 font-medium">{v}</dd></div>
+                <div key={k}><dt className="label">{k}</dt><dd className="num mt-0.5 font-medium">{v}</dd></div>
               ))}
             </dl>
-            <div className="faint mt-3 truncate text-[11.5px]" title={db.path}>{t('st.db_file4')} {db.path}</div>
+            <div className="faint mt-3 truncate text-xs" title={db.path}>{t('st.db_file4')} {db.path}</div>
           </Card>
 
           {/* ошибки этой сессии */}
           <Card>
             <div className="flex items-center justify-between gap-2">
               <div className="label">{t('st.session_errors')}</div>
-              <span className="num text-[12px] font-medium" style={{ color: errs.length ? 'var(--neg)' : 'var(--pos)' }}>{errs.length}</span>
+              <span className="num text-xs font-medium" style={{ color: errs.length ? 'var(--neg)' : 'var(--pos)' }}>{errs.length}</span>
             </div>
             {errs.length === 0 ? (
-              <div className="muted mt-2 text-[13px]">{t('st.no_errors2')}</div>
+              <div className="muted mt-2 text-md">{t('st.no_errors2')}</div>
             ) : (
               <ul className="mt-1 divide-y hair">
                 {[...errs].reverse().map((e, i) => (
                   <li key={i} className="flex items-start gap-3 py-2">
                     <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: 'var(--neg)' }} />
-                    <span className="min-w-0 flex-1 break-words text-[13px]">{e.text}</span>
-                    <span className="faint shrink-0 text-[11.5px]">{e.at ? relTime(e.at) : ''}</span>
+                    <span className="min-w-0 flex-1 break-words text-md">{e.text}</span>
+                    <span className="faint shrink-0 text-xs">{e.at ? relTime(e.at) : ''}</span>
                   </li>
                 ))}
               </ul>
             )}
-            <div className="faint mt-2 text-[11.5px]">{t('st.errs_in_memory2')}</div>
+            <div className="faint mt-2 text-xs">{t('st.errs_in_memory2')}</div>
           </Card>
 
           {/* самопроверка */}
           <Card>
             <div className="flex items-center justify-between gap-2">
               <div className="label">{t('st.selfcheck')}</div>
-              {diag?.at && <span className="faint text-[11.5px]">{relTime(diag.at)}</span>}
+              {diag?.at && <span className="faint text-xs">{relTime(diag.at)}</span>}
             </div>
             {diag === undefined ? <Skeleton h={72} className="mt-2" />
-              : diag === null ? <div className="muted mt-2 text-[13px]">Самопроверка недоступна: /api/diagnose не ответил. Нажмите «обновить».</div>
-              : !diag.items?.length ? <div className="mt-2 text-[13px] pos">{t('st.selfcheck_ok2')}</div>
+              : diag === null ? <div className="muted mt-2 text-md">Самопроверка недоступна: /api/diagnose не ответил. Нажмите «обновить».</div>
+              : !diag.items?.length ? <div className="mt-2 text-md pos">{t('st.selfcheck_ok2')}</div>
               : (
                 <ul className="mt-2 space-y-2">
                   {diag.items.map((it, i) => (
                     <li key={i} className="flex items-start gap-2.5">
                       <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: lvlDot(it.level) }} />
                       <span className="min-w-0 flex-1">
-                        <span className="text-[13px]">{it.what}</span>
-                        {it.fix && <span className="faint block text-[12px]">→ {it.fix}</span>}
+                        <span className="text-md">{it.what}</span>
+                        {it.fix && <span className="faint block text-xs">→ {it.fix}</span>}
                       </span>
                     </li>
                   ))}
                 </ul>
               )}
-            {diag?.ok === false && <div className="neg mt-2 text-[12.5px]">{t('st.selfcheck_bad2')}</div>}
+            {diag?.ok === false && <div className="neg mt-2 text-sm">{t('st.selfcheck_bad2')}</div>}
           </Card>
 
           {/* бэкап: дата последнего + результат проверки */}
           <Card>
             <div className="flex items-center justify-between gap-2">
               <div className="label">{t('st.backup')}</div>
-              {status.backup.last && <span className="faint text-[11.5px]">{relTime(status.backup.last)}</span>}
+              {status.backup.last && <span className="faint text-xs">{relTime(status.backup.last)}</span>}
             </div>
             {!status.backup.enabled ? (
-              <div className="muted mt-2 text-[13px]">{t('st.backup_off_desc2')}</div>
+              <div className="muted mt-2 text-md">{t('st.backup_off_desc2')}</div>
             ) : (
-              <div className="mt-2 space-y-1.5 text-[13px]">
+              <div className="mt-2 space-y-1.5 text-md">
                 <div>{t('st.last4')} {status.backup.last ? relTime(status.backup.last) : t('st.not_done_yet')} · копий: {status.backup.count}{status.backup.size ? ` · ${fmtSize(status.backup.size)}` : ''}</div>
-                <div className="faint truncate text-[12px]" title={status.backup.dir}>{t('st.folder4')} {status.backup.dir}{status.backup.extra_dir ? t('st.second_dir', { x: status.backup.extra_dir }) : ''}</div>
+                <div className="faint truncate text-xs" title={status.backup.dir}>{t('st.folder4')} {status.backup.dir}{status.backup.extra_dir ? t('st.second_dir', { x: status.backup.extra_dir }) : ''}</div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: bkDot }} />
-                  <span className="muted text-[12.5px]">{t('st.check_label4')} {bkCheck?.text || t('st.checking_files')}</span>
+                  <span className="muted text-sm">{t('st.check_label4')} {bkCheck?.text || t('st.checking_files')}</span>
                 </div>
               </div>
             )}
@@ -1742,17 +1754,17 @@ function Diagnostics({ status, diag, onRefresh }) {
             <Card className={`${CARD_M_FLAT} !p-4`}>
               <div className="label">{t('st.ollama2')}</div>
               <div className="h4 mt-1.5 truncate">{status.ollama.ok ? (status.ollama.model || t('st.model_ok')) : t('st.not_responding')}</div>
-              <div className="faint mt-0.5 line-clamp-3 text-[12px]">{status.ollama.ok ? (status.ollama.gpu || status.ollama.url || '') : (status.ollama.diag || t('st.start_ollama'))}</div>
+              <div className="faint mt-0.5 line-clamp-3 text-xs">{status.ollama.ok ? (status.ollama.gpu || status.ollama.url || '') : (status.ollama.diag || t('st.start_ollama'))}</div>
             </Card>
             <Card className={`${CARD_M_FLAT} !p-4`}>
               <div className="label">telegram</div>
               <div className="h4 mt-1.5">{!status.telegram.configured ? t('st.not_configured') : status.telegram.running ? t('st.bot_ok') : t('st.cfg_not_run')}</div>
-              <div className="faint mt-0.5 line-clamp-3 text-[12px]">{status.telegram.last_message ? t('st.last_message', { when: relTime(status.telegram.last_message) }) : t('st.no_messages')}</div>
+              <div className="faint mt-0.5 line-clamp-3 text-xs">{status.telegram.last_message ? t('st.last_message', { when: relTime(status.telegram.last_message) }) : t('st.no_messages')}</div>
             </Card>
             <Card className={`${CARD_M_FLAT} !p-4`}>
               <div className="label">{t('st.cloud_colon4')} {status.gemini.title || status.gemini.provider}</div>
               <div className="h4 mt-1.5 truncate">{!status.gemini.enabled ? t('st.disabled2') : status.gemini.last_error ? t('st.error') : t('st.connected')}</div>
-              <div className="faint mt-0.5 line-clamp-3 text-[12px]">
+              <div className="faint mt-0.5 line-clamp-3 text-xs">
                 {status.gemini.last_error
                   ? status.gemini.last_error
                   : !status.gemini.enabled ? t('st.cloud_hint')
@@ -1833,7 +1845,7 @@ function English() {
         <div>
           <div className="mb-2 flex items-baseline justify-between gap-3">
             <span className="label">{t('st.direction')}</span>
-            <span className="faint text-[11px]">
+            <span className="faint text-xs">
               {track === 'custom' ? t('st.your_texts_count', { n: mine.items.length, limit: mine.limit }) : t('st.builtin_count', { n: st.tracks_count[track] || 0 })}
             </span>
           </div>
@@ -1843,7 +1855,7 @@ function English() {
                 className={`chip !mt-0 ${track === id ? 'on' : ''}`} onClick={() => setTrack(id)}>{label}</button>
             ))}
           </div>
-          <div className="muted mt-2 text-[12.5px]">
+          <div className="muted mt-2 text-sm">
             {track === 'custom'
               ? t('st.today_from_own2')
               : st.tracks.find((t) => t.id === track)?.title}
@@ -1857,7 +1869,7 @@ function English() {
           <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
             <div className="flex items-baseline gap-2">
               <span className="h4">{t('st.paragraph')}</span>
-              {day.title && <span className="faint text-[12px]">· {day.title}</span>}
+              {day.title && <span className="faint text-xs">· {day.title}</span>}
             </div>
             <div className="flex items-center gap-2">
               <span className="chip !mt-0 !py-0.5">{EN_SOURCES[day.source] || day.source}</span>
@@ -1865,7 +1877,7 @@ function English() {
             </div>
           </div>
           {day.empty ? (
-            <div className="muted text-[13px]">{t('st.no_own_texts2')}</div>
+            <div className="muted text-md">{t('st.no_own_texts2')}</div>
           ) : (
             <>
               <div className="text-[16px] leading-relaxed">{day.text_en}</div>
@@ -1880,9 +1892,9 @@ function English() {
                     <li key={w.word} className="py-2">
                       <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                         <b className="text-[14px] font-medium">{w.word}</b>
-                        <span className="mono faint text-[12.5px]">{w.phonetic}</span>
+                        <span className="mono faint text-sm">{w.phonetic}</span>
                       </div>
-                      {w.note && <div className="muted text-[12.5px]">{w.note}</div>}
+                      {w.note && <div className="muted text-sm">{w.note}</div>}
                     </li>
                   ))}
                 </ul>
@@ -1901,10 +1913,10 @@ function English() {
 
         {/* прогресс */}
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          <div><div className="label !text-[10px]">{t('st.streak')}</div><div className="num mt-0.5 text-[17px] font-medium">{prog.streak ? t('st.days_n', { n: prog.streak }) : '—'}</div></div>
-          <div><div className="label !text-[10px]">{t('st.total_days')}</div><div className="num mt-0.5 text-[17px] font-medium">{prog.total_days || '—'}</div></div>
-          <div><div className="label !text-[10px]">{t('st.last_time')}</div><div className="num mt-0.5 text-[17px] font-medium">{prog.last_date ? relTime(prog.last_date) : '—'}</div></div>
-          <div><div className="label !text-[10px]">{t('st.direction')}</div><div className="num mt-0.5 text-[17px] font-medium">{EN_TRACK_CHIPS.find((c) => c[0] === track)?.[1] || track}</div></div>
+          <div><div className="label">{t('st.streak')}</div><div className="num mt-0.5 text-[17px] font-medium">{prog.streak ? t('st.days_n', { n: prog.streak }) : '—'}</div></div>
+          <div><div className="label">{t('st.total_days')}</div><div className="num mt-0.5 text-[17px] font-medium">{prog.total_days || '—'}</div></div>
+          <div><div className="label">{t('st.last_time')}</div><div className="num mt-0.5 text-[17px] font-medium">{prog.last_date ? relTime(prog.last_date) : '—'}</div></div>
+          <div><div className="label">{t('st.direction')}</div><div className="num mt-0.5 text-[17px] font-medium">{EN_TRACK_CHIPS.find((c) => c[0] === track)?.[1] || track}</div></div>
         </div>
         {prog.by_track && Object.keys(prog.by_track).length > 1 && (
           <div className="chips !m-0 !gap-1.5">
@@ -1920,14 +1932,14 @@ function English() {
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0">
             <div className="text-[14px] font-medium">{t('st.gen_ai2')}</div>
-            <div className="muted text-[12.5px]">
+            <div className="muted text-sm">
               {t('st.gen_off_desc2')}
             </div>
           </div>
           <Switch on={st.llm} onChange={setLlm} label={t('st.gen_ai')} />
         </div>
         {st.llm && day.source === 'builtin' && (
-          <div className="warn text-[12.5px]">{t('st.gen_fallback2')}</div>
+          <div className="warn text-sm">{t('st.gen_fallback2')}</div>
         )}
 
         <div className="rule" />
@@ -1936,7 +1948,7 @@ function English() {
         <div>
           <div className="mb-3 flex items-baseline justify-between gap-3">
             <span className="h4">{t('st.own_texts')}</span>
-            <span className="faint text-[11px]">{mine.items.length} из {mine.limit}</span>
+            <span className="faint text-xs">{mine.items.length} из {mine.limit}</span>
           </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <Field label={t('st.en_text')} hint={t('st.what_read')}>
@@ -1960,15 +1972,15 @@ function English() {
           </div>
 
           {mine.items.length === 0 ? (
-            <div className="muted mt-4 text-[13px]">{t('st.texts_empty2')}</div>
+            <div className="muted mt-4 text-md">{t('st.texts_empty2')}</div>
           ) : (
             <ul className="divide-y hair mt-4 max-h-[320px] overflow-y-auto">
               {mine.items.map((r, i) => (
                 <li key={`${i}-${r.text_en.slice(0, 12)}`} className="flex items-start gap-3 py-3">
                   <div className="min-w-0 flex-1">
                     <div className="text-[14px] leading-snug">{r.text_en}</div>
-                    {r.text_ru && <div className="muted mt-0.5 text-[12.5px]">{r.text_ru}</div>}
-                    <div className="faint mt-1 text-[11.5px]">{[r.note, r.at ? relTime(r.at) : ''].filter(Boolean).join(' · ')}</div>
+                    {r.text_ru && <div className="muted mt-0.5 text-sm">{r.text_ru}</div>}
+                    <div className="faint mt-1 text-xs">{[r.note, r.at ? relTime(r.at) : ''].filter(Boolean).join(' · ')}</div>
                   </div>
                   <button type="button" className="btn-ghost btn-sm shrink-0 !h-7" disabled={!!busy} onClick={() => setDel(i)}>{t('common.delete')}</button>
                 </li>
@@ -2014,7 +2026,7 @@ function InstallApp() {
         <Smartphone size={20} className={avail ? 'text-accent' : 'faint'} />
         <div>
           <div className="h4">{t('st.install_app2')}</div>
-          <div className="muted text-[13px]">
+          <div className="muted text-md">
             {avail
               ? t('st.pwa_desc')
               : t('st.install_when2')}

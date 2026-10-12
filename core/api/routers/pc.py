@@ -207,7 +207,7 @@ DEMO_TEXT = "Доброе утро, сэр. Минус семьсот рубле
 @router.get("/api/voice/voices")
 async def voice_list():
     from ...voice import tts
-    return {"voices": VOICES, "current": {"engine": tts.ENGINE, "speaker": tts.SPEAKER, "edge_voice": tts.EDGE_VOICE, "piper_voice": tts.PIPER_VOICE, "reply": tts.REPLY_VOICE},
+    return {"voices": VOICES, "current": {"engine": tts.ENGINE, "speaker": tts.SPEAKER, "edge_voice": tts.EDGE_VOICE, "piper_voice": tts.PIPER_VOICE, "piper_length": tts.PIPER_LENGTH, "reply": tts.REPLY_VOICE},
             "silero": tts.silero_available(), "piper": tts._piper_available()}
 
 

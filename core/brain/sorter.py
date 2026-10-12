@@ -391,7 +391,7 @@ async def sort(text: str, channel: str, confirm_amount: float = 100_000):
         return None
     if confirm_enabled():
         _pending_set(channel, "sorter|" + json.dumps({"items": items, "via": via}, ensure_ascii=False))
-        return Reply(preview_text(items), [], via)
+        return Reply(preview_text(items), [], via, buttons=[("✅ Да", "да"), ("❌ Нет", "нет")])
     return await commit(items, channel, via, confirm_amount)
 
 

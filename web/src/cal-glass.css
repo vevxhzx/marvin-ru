@@ -290,7 +290,7 @@
   max-width: 160px;
   overflow: hidden;
   text-overflow: ellipsis;
-  font-size: 12px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
   text-align: center;
   line-height: 1.35;
@@ -300,7 +300,7 @@
 #p-cal .calg-nd > span > small {
   display: block;
   color: var(--ink3);
-  font-size: 11px;
+  font-size: var(--fs-xs);
   white-space: nowrap;
 }
 

@@ -85,7 +85,7 @@ export default function LifeRegime({ info, onChanged }) {
           {!cur.open && <span className="faint">· {t('reg.chip_closed')}</span>}
         </span>
       ) : (
-        <span className="muted text-[12px]">{t('reg.empty')}</span>
+        <span className="muted text-xs">{t('reg.empty')}</span>
       )}
 
       {cur && (

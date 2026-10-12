@@ -47,13 +47,19 @@ def _slow_ollama(monkeypatch, calls: list[str] | None = None):
         await asyncio.sleep(STEP)
         return "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ:\n— кот Чиназес\n"
 
+    async def context_with_ids(text, **kw):
+        if calls is not None:
+            calls.append("memory")
+        await asyncio.sleep(STEP)
+        return "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ:\n— кот Чиназес\n", []
+
     async def lessons(text, vectors=None):
         if calls is not None:
             calls.append("lessons")
         await asyncio.sleep(STEP)
         return ""
 
-    return embed_available, embed, context, lessons
+    return embed_available, embed, context, context_with_ids, lessons
 
 
 def test_memory_and_lessons_prepare_in_parallel(monkeypatch):
@@ -61,10 +67,10 @@ def test_memory_and_lessons_prepare_in_parallel(monkeypatch):
     from core.brain import agent
 
     calls: list[str] = []
-    embed_available, embed, context, lessons = _slow_ollama(monkeypatch, calls)
+    embed_available, embed, context, context_with_ids, lessons = _slow_ollama(monkeypatch, calls)
     monkeypatch.setattr(agent.llm, "embed_available", embed_available)
     monkeypatch.setattr(agent.llm, "embed", embed)
-    monkeypatch.setattr(agent.memory, "context", context)
+    monkeypatch.setattr(agent.memory, "context_with_ids", context_with_ids)
     monkeypatch.setattr(agent, "_lessons_block", lessons)
 
     t0 = time.perf_counter()
@@ -81,10 +87,10 @@ def test_turn_embedding_is_computed_once(monkeypatch):
     from core.brain import agent
 
     calls: list[str] = []
-    embed_available, embed, context, lessons = _slow_ollama(monkeypatch, calls)
+    embed_available, embed, context, context_with_ids, lessons = _slow_ollama(monkeypatch, calls)
     monkeypatch.setattr(agent.llm, "embed_available", embed_available)
     monkeypatch.setattr(agent.llm, "embed", embed)
-    monkeypatch.setattr(agent.memory, "context", context)
+    monkeypatch.setattr(agent.memory, "context_with_ids", context_with_ids)
     monkeypatch.setattr(agent, "_lessons_block", lessons)
 
     asyncio.run(agent._turn_context("что там по заказам"))
@@ -98,14 +104,14 @@ def test_turn_context_survives_broken_lessons(monkeypatch):
     async def boom(*a, **k):
         raise RuntimeError("уроки сломались")
 
-    async def context(text):
-        return "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ:\n— кот Чиназес\n"
+    async def context_with_ids(text, **kw):
+        return "ЧТО ТЫ ЗНАЕШЬ О ХОЗЯИНЕ:\n— кот Чиназес\n", []
 
     async def embed_available():
         return False
 
     monkeypatch.setattr(agent.llm, "embed_available", embed_available)
-    monkeypatch.setattr(agent.memory, "context", context)
+    monkeypatch.setattr(agent.memory, "context_with_ids", context_with_ids)
     monkeypatch.setattr(agent, "_lessons_block", boom)
     les, ctx = asyncio.run(agent._turn_context("привет"))
     assert les == "" and "кот" in ctx

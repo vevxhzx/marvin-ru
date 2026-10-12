@@ -252,6 +252,7 @@ class Note(SQLModel, table=True):
     raw: Optional[str] = None          # оригинал, как написал пользователь
     tags: str = ""                     # через запятую
     polished: bool = Field(default=False, index=True)
+    polish_tries: int = Field(default=0)  # попыток причёски LLM: после 5 неудач планировщик отстаёт (иначе вечный ретрай каждую минуту)
     image: Optional[str] = None        # картинка к мысли: относительный путь в data/media (фото из TG / с сайта)
     source: str = "tg"
     created_at: datetime = Field(default_factory=now, index=True)
@@ -261,6 +262,7 @@ class Link(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     url: str
     polished: bool = Field(default=False, index=True)
+    polish_tries: int = Field(default=0)  # как у Note: после 5 неудач отстаём
     title: Optional[str] = None
     description: Optional[str] = None
     image: Optional[str] = None
@@ -453,11 +455,14 @@ class Fact(SQLModel, table=True):
     core: bool = False                                  # ядро портрета: всегда в промпте
     confidence: float = 0.7
     source_msg: Optional[int] = None                    # ChatMessage.id, откуда взято
+    source_ref: Optional[str] = None                    # мост «Мозг → Память»: "note:{id}" / "link:{id}" для дедупа
     replaced_by: Optional[int] = None                   # факт устарел — какой его заменил
     archive_reason: str = ""                            # заменён / забыл по просьбе / не пригодился / устарел
     vector: str = ""                                    # эмбеддинг (JSON), для подтягивания по смыслу
     uses: int = 0                                       # сколько раз попадал в контекст
     last_used: Optional[datetime] = None
+    due: Optional[str] = None                           # дата из текста (ISO) или null — только метка, без автокалендаря
+    is_private: bool = False                            # замок: в облако не уходит, локально в контексте есть
     last_seen_at: Optional[datetime] = None      # когда последний раз реально всплывал (затухание веса)
     confirmed_at: Optional[datetime] = None      # подтверждён хозяином — не гаснет никогда
     archived_at: Optional[datetime] = None       # устарел и ушёл в архив: из контекста ушёл, но не удалён
@@ -631,8 +636,8 @@ DEFAULT_BUCKETS = {"Еда": "need", "Транспорт": "need", "Жильё":
 # init_db мог ДО первой правки спросить «есть ли что менять» — и только тогда снимать бэкап.
 _LEGACY_COLUMNS: dict[str, dict[str, str]] = {
     "board": {"revision": "INTEGER DEFAULT 0", "last_sync": "VARCHAR DEFAULT '{}'"},
-    "note": {"title": "VARCHAR", "raw": "VARCHAR", "polished": "BOOLEAN DEFAULT 0", "image": "VARCHAR"},
-    "link": {"polished": "BOOLEAN DEFAULT 0", "summary": "VARCHAR", "excerpt": "VARCHAR"},
+    "note": {"title": "VARCHAR", "raw": "VARCHAR", "polished": "BOOLEAN DEFAULT 0", "image": "VARCHAR", "polish_tries": "INTEGER DEFAULT 0"},
+    "link": {"polished": "BOOLEAN DEFAULT 0", "summary": "VARCHAR", "excerpt": "VARCHAR", "polish_tries": "INTEGER DEFAULT 0"},
     "transaction": {"debt_id": "INTEGER", "order_id": "INTEGER", "goal_id": "INTEGER"},
     "category": {"budget": "FLOAT DEFAULT 0", "custom": "BOOLEAN DEFAULT 0", "bucket": "VARCHAR DEFAULT ''"},
     "event": {"repeat": "VARCHAR DEFAULT ''", "repeat_days": "VARCHAR DEFAULT ''", "repeat_until": "DATETIME",
@@ -642,6 +647,7 @@ _LEGACY_COLUMNS: dict[str, dict[str, str]] = {
     "task": {"remind_stage": "INTEGER DEFAULT 0", "aim_id": "INTEGER", "milestone_id": "INTEGER", "blocked_by": "VARCHAR DEFAULT ''"},
     "client": {"kind": "VARCHAR DEFAULT 'client'", "aliases": "VARCHAR DEFAULT ''", "birthday": "VARCHAR", "tags": "VARCHAR DEFAULT ''",
                "pay_mode": "VARCHAR DEFAULT 'each'", "pay_every": "INTEGER DEFAULT 14", "pay_days": "VARCHAR DEFAULT ''"},
+    "fact": {"due": "VARCHAR", "is_private": "BOOLEAN DEFAULT 0", "source_ref": "VARCHAR"},
 }
 
 

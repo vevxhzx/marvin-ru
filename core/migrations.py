@@ -257,6 +257,43 @@ def _v12_account_debt_link(conn) -> None:
     add_column(conn, "account", "debt_id", "INTEGER DEFAULT NULL")
 
 
+def _v13_polish_tries(conn) -> None:
+    """Счётчик неудачных причёсок: `note.polish_tries` / `link.polish_tries` (INTEGER DEFAULT 0).
+
+    Только ADD COLUMN — старые записи получают 0 и проходят обычный цикл
+    (до 5 попыток), застрявшие перестают дёргать LLM каждую минуту.
+    Идемпотентна через add_column()."""
+    add_column(conn, "note", "polish_tries", "INTEGER DEFAULT 0")
+    add_column(conn, "link", "polish_tries", "INTEGER DEFAULT 0")
+
+
+def _v16_fact_source_ref(conn) -> None:
+    """Мост «Мозг → Память»: `fact.source_ref` (VARCHAR) — "note:{id}" / "link:{id}" для дедупа.
+
+    Только ADD COLUMN. Раньше ссылку клали строкой в INTEGER-колонку source_msg
+    (SQLite это терпит, но хрупко) — новые мосты пишут сюда, source_msg остаётся
+    строго ChatMessage.id. Идемпотентна через add_column()."""
+    add_column(conn, "fact", "source_ref", "VARCHAR")
+
+
+def _v14_fact_due(conn) -> None:
+    """Память: дата-метка факта `fact.due` (ISO-строка или NULL).
+
+    Только ADD COLUMN — старые факты получают NULL (без даты), данные не трогаем.
+    Календарный эвент по ней НЕ создаётся автоматически — это лишь метка для экрана.
+    Идемпотентна через add_column()."""
+    add_column(conn, "fact", "due", "VARCHAR")
+
+
+def _v15_fact_private(conn) -> None:
+    """Память: замок факта `fact.is_private` (BOOLEAN DEFAULT 0).
+
+    Только ADD COLUMN — старые факты открытые (0), данные не трогаем.
+    Ставится только вручную тумблером (PUT /api/facts/{id}), автоопределения нет.
+    Идемпотентна через add_column()."""
+    add_column(conn, "fact", "is_private", "BOOLEAN DEFAULT 0")
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
@@ -272,6 +309,10 @@ MIGRATIONS: list[Migration] = [
     (10, "сирота schemaversion: DROP пустой таблицы-двойника SchemaVersion (непустую не трогаем, только warning)", _v10_drop_stray_schemaversion),
     (11, "задачи: task.auto_roll (автоперенос на завтра, дефолт выкл)", _v11_task_auto_roll),
     (12, "финансы: account.debt_id (связка долг ↔ кредитка 1-к-1)", _v12_account_debt_link),
+    (13, "причёска: note/link.polish_tries (стоп ретраев LLM после 5 неудач)", _v13_polish_tries),
+    (14, "память: fact.due (дата-метка из текста, ISO или NULL, без автокалендаря)", _v14_fact_due),
+    (15, "память: fact.is_private (замок: в облако не уходит, дефолт открыт)", _v15_fact_private),
+    (16, "мост: fact.source_ref (ссылка note:/link: для дедупа, вместо строки в INTEGER)", _v16_fact_source_ref),
 ]
 
 

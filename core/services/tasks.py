@@ -139,6 +139,22 @@ def list_tasks(include_done: bool = False, limit: int = 50) -> list[Task]:
         return list(s.exec(q.order_by(Task.done, Task.priority, Task.due, Task.created_at).limit(limit)))
 
 
+def list_tasks_with_due(start: datetime | None = None, end: datetime | None = None,
+                        limit: int = 1000) -> list[Task]:
+    """Задачи с дедлайном в окне [start, end] — для проекции в календарь.
+
+    Вынесено из GET /api/events (tasks_too): роутер только отбрасывает
+    закрытые (кроме закрытых внутри окна) и форматирует через _task_as_event.
+    """
+    with session() as s:
+        q = select(Task).where(Task.due != None)  # noqa: E711
+        if start:
+            q = q.where(Task.due >= start)
+        if end:
+            q = q.where(Task.due <= end)
+        return list(s.exec(q.limit(limit)).all())
+
+
 def complete_task(query: str | int) -> Task | None:
     """Закрыть задачу по id или по части названия."""
     with session() as s:

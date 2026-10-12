@@ -56,7 +56,7 @@ export default function ClientNextStep({ cid, card, onErr, onSaved, className = 
     } catch (e) { if (onErr) onErr(e); else show.err(e) } finally { setBusy(false) }
   }
 
-  if (!loaded) return <div className={`faint text-[12px] ${className}`}>{t('next_step.loading')}</div>
+  if (!loaded) return <div className={`faint text-xs ${className}`}>{t('next_step.loading')}</div>
 
   return (
     <div className={className}>
@@ -68,7 +68,7 @@ export default function ClientNextStep({ cid, card, onErr, onSaved, className = 
           {busy ? t('common.loading') : t('common.save')}
         </button>
       </div>
-      <div className="faint mt-1 text-[12px] leading-snug">
+      <div className="faint mt-1 text-xs leading-snug">
         {note ? <span className="pos">{note}</span> : at ? t('next_step.hint_dated', { when: dayLabel(at) }) : t('next_step.hint_nodate')}
       </div>
     </div>

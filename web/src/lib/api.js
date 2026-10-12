@@ -2,7 +2,35 @@ const BASE = ''
 import { getLang, localeOf, t, fmtDate, fmtNumber, fmtMoney, pluralIndex } from './i18n'
 import { tg } from './tg'
 
-async function req(method, path, body, timeoutMs = 30000) {
+/* Кэш GET + дедупликация одновременных одинаковых запросов (без зависимостей).
+   TTL короткий: обычное 10 с, статистика (stats/analytics/pulse/followups) 30 с.
+   Мутации POST/PUT/PATCH/DELETE чистят кэш своего префикса (/api/orders, /api/crm…);
+   chat/undo меняют что угодно — чистят весь кэш. Эпоха защищает от гонки
+   «GET в полёте + мутация»: прилетевший после мутации ответ не кэшируется. */
+const GET_CACHE = new Map()   // path -> { at, ttl, data }
+const INFLIGHT = new Map()    // path -> promise
+let CACHE_EPOCH = 0
+const DEF_TTL = 10000
+const ttlFor = (path) => (/stats|analytics|pulse|followups/.test(path) ? 30000 : DEF_TTL)
+function prefixOf(path) {
+  const clean = String(path).split('?')[0]
+  const parts = clean.split('/').filter(Boolean)
+  if (parts[0] === 'api' && parts[1]) return `/api/${parts[1]}`
+  return clean || '/'
+}
+function dropPrefix(pre) {
+  for (const k of [...GET_CACHE.keys()]) {
+    const ck = k.split('?')[0]
+    if (ck === pre || ck.startsWith(`${pre}/`)) GET_CACHE.delete(k)
+  }
+}
+/** Вручную сбросить кэш GET (например, после потокового чата вне req). */
+export function invalidateCache(prefix) {
+  if (!prefix) GET_CACHE.clear()
+  else dropPrefix(prefix)
+}
+
+async function fetchOnce(method, path, body, timeoutMs = 30000) {
   const ctrl = new AbortController()
   const timer = setTimeout(() => ctrl.abort(), timeoutMs)
   let r
@@ -38,6 +66,28 @@ async function req(method, path, body, timeoutMs = 30000) {
   }
   const ct = r.headers.get('content-type') || ''
   return ct.includes('json') ? r.json() : r.text()
+}
+
+async function req(method, path, body, timeoutMs = 30000) {
+  if (method === 'GET') {
+    const hit = GET_CACHE.get(path)
+    if (hit && Date.now() - hit.at < hit.ttl) return hit.data
+    const flying = INFLIGHT.get(path)
+    if (flying) return flying
+    const myEpoch = CACHE_EPOCH
+    const ttl = ttlFor(path)
+    const p = fetchOnce(method, path, body, timeoutMs).then((data) => {
+      if (myEpoch === CACHE_EPOCH) GET_CACHE.set(path, { at: Date.now(), ttl, data })
+      return data
+    }).finally(() => { if (INFLIGHT.get(path) === p) INFLIGHT.delete(path) })
+    INFLIGHT.set(path, p)
+    return p
+  }
+  const data = await fetchOnce(method, path, body, timeoutMs)
+  CACHE_EPOCH += 1
+  if (path === '/api/chat' || path === '/api/undo') GET_CACHE.clear()
+  else dropPrefix(prefixOf(path))
+  return data
 }
 
 export const api = {
@@ -98,10 +148,12 @@ export const api = {
   },
   delNote: (id) => req('DELETE', `/api/notes/${id}`),
   editNote: (id, patch) => req('PUT', `/api/notes/${id}`, patch),
+  rememberNote: (id) => req('POST', `/api/notes/${id}/remember`),
   links: (q) => req('GET', `/api/links${q ? `?q=${encodeURIComponent(q)}` : ''}`),
   addLink: (url, comment) => req('POST', '/api/links', { url, comment }),
   delLink: (id) => req('DELETE', `/api/links/${id}`),
   editLink: (id, patch) => req('PUT', `/api/links/${id}`, patch),
+  rememberLink: (id) => req('POST', `/api/links/${id}/remember`),
   patchTask: (id, p) => req('PUT', `/api/tasks/${id}`, p),
   undo: () => req('POST', '/api/undo'),
   budgets: () => req('GET', '/api/finance/budgets'),
@@ -113,6 +165,8 @@ export const api = {
   backups: () => req('GET', '/api/backups'),
   restoreBackup: (name) => req('POST', '/api/backups/restore', { name }),
   semantic: (q, limit = 12) => req('GET', `/api/search/semantic?q=${encodeURIComponent(q)}&limit=${limit}`),
+  relatedNote: (id) => req('GET', `/api/notes/${id}/related`),
+  relatedLink: (id) => req('GET', `/api/links/${id}/related`),
   reindex: () => req('POST', '/api/search/reindex'),
   // заказы / фриланс
   orders: (all = false) => req('GET', `/api/orders${all ? '?all=true' : ''}`),
@@ -126,6 +180,7 @@ export const api = {
   orderStats: (months = 6) => req('GET', `/api/orders/stats?months=${months}`),
   // люди и граф связей
   people: () => req('GET', '/api/people'),
+  addPerson: (p) => req('POST', '/api/people', p),
   updatePerson: (id, p) => req('PUT', `/api/people/${id}`, p),
   clients: () => req('GET', '/api/orders/clients'),
   timer: () => req('GET', '/api/orders/timer'),
@@ -144,6 +199,11 @@ export const api = {
   crmToggleCheck: (cid, done = null) => req('PATCH', `/api/crm/checklist/${cid}`, { done }),
   crmDelCheck: (cid) => req('DELETE', `/api/crm/checklist/${cid}`),
   crmClientCard: (id) => req('GET', `/api/crm/clients/${id}/card`),
+  crmClientsSummary: (ids) => {
+    const list = [...new Set((ids || []).filter((x) => x != null))]
+    if (!list.length) return Promise.resolve({ clients: {} })
+    return req('GET', `/api/crm/clients/summary?ids=${list.join(',')}`)
+  },
   crmUpdateClient: (id, p) => req('PUT', `/api/crm/clients/${id}`, p),
   crmFollowups: (all = false) => req('GET', `/api/crm/followups${all ? '?all=true' : ''}`),
   crmScanFollowups: () => req('POST', '/api/crm/followups/scan'),
@@ -155,11 +215,13 @@ export const api = {
   delGoal: (id) => req('DELETE', `/api/finance/goals/${id}`),
   putGoal: (id, amount, extra = {}) => req('POST', `/api/finance/goals/${id}/put`, { amount, ...extra }),
   techniques: () => req('GET', '/api/finance/techniques'),
-  facts: (layer) => req('GET', `/api/facts${layer ? `?layer=${layer}` : ''}`),
+  facts: (layer, q) => req('GET', `/api/facts${layer ? `?layer=${layer}` : ''}${q ? `${layer ? '&' : '?'}q=${encodeURIComponent(q)}` : ''}`),
   addFact: (b) => req('POST', '/api/facts', b),
   updateFact: (id, b) => req('PUT', `/api/facts/${id}`, b),
   forgetFact: (id) => req('POST', `/api/facts/${id}/forget`),
   restoreFact: (id) => req('POST', `/api/facts/${id}/restore`),
+  wrongFact: (id) => req('POST', `/api/facts/${id}/wrong`),
+  confirmFact: (id) => req('POST', `/api/facts/${id}/confirm`),
   rebuildPortrait: () => req('POST', '/api/facts/portrait'),
   memoryTidy: () => req('POST', '/api/facts/nightly'),
   rebuildStyle: () => req('POST', '/api/facts/style'),
@@ -187,7 +249,7 @@ export async function chatStream(text, onToken) {
       if (!ev || data == null) continue
       const parsed = JSON.parse(data)
       if (ev === 'token') onToken?.(parsed)
-      else if (ev === 'done') return parsed
+      else if (ev === 'done') { CACHE_EPOCH += 1; GET_CACHE.clear(); return parsed }
     }
   }
   throw new Error('stream ended')
@@ -260,10 +322,10 @@ export const MONTHS_NOM = Array.from({ length: 12 }, (_, i) => new Date(2024, i,
    словарь t.cat_* в i18n.js (см. catLabel). */
 export const CAT_COLORS = {
   'Еда': '#ff9f0a', 'Транспорт': '#0a84ff', 'Жильё': '#5e5ce6', 'Подписки': '#bf5af2', 'Здоровье': '#30d158',
-  'Развлечения': '#ff375f', 'Одежда': '#64d2ff', 'Техника': '#ffd60a', 'Долги': '#ff453a', 'Другое': '#8e8e93',
+  'Развлечения': '#ff375f', 'Одежда': '#64d2ff', 'Техника': '#ffd60a', 'Долги': '#ff453a', 'Другое': 'var(--ink-3)',
   'Зарплата': '#30d158', 'Фриланс': '#64d2ff', 'Прочий доход': '#30d158',
 }
-export const catColor = (c) => CAT_COLORS[c] || '#8e8e93'
+export const catColor = (c) => CAT_COLORS[c] || 'var(--ink-3)'
 export const CAT_ICONS = { 'Еда': '🍔', 'Транспорт': '🚕', 'Жильё': '🏠', 'Подписки': '📱', 'Здоровье': '💊', 'Развлечения': '🎮', 'Одежда': '👕', 'Техника': '💻', 'Долги': '💳', 'Другое': '📦', 'Зарплата': '💰', 'Фриланс': '🧑‍💻', 'Прочий доход': '🎁' }
 export const catIcon = (c) => CAT_ICONS[c] || '•'
 /* Подпись категории для показа: EN переводит только «штучные» названия из БД,

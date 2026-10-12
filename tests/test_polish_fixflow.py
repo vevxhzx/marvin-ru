@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """Починка догадки голым словом + «самокат» это транспорт. TDD: сначала красные."""
 import asyncio
 import os
 
 os.environ.setdefault("ASSISTANT_TEST", "1")
 
-from tests.test_core import fresh_db  # noqa: F401  (временная БД, autouse)
 
 
 def _offline(monkeypatch):
@@ -37,7 +36,7 @@ async def _evil_order_judge(text, allowed):
     return "order", "test"
 
 
-def test_amount_first_known_category_ignores_judge(monkeypatch):
+def test_amount_first_known_category_ignores_judge(fresh_db, monkeypatch):
     """«767 самокат» — самокат теперь транспорт: судья вообще не зовётся, сразу трата."""
     from core.services import finance, judge
     _offline(monkeypatch)
@@ -49,7 +48,7 @@ def test_amount_first_known_category_ignores_judge(monkeypatch):
     assert len(txs) == 1 and txs[0].amount == 767 and txs[0].category == "Транспорт"
 
 
-def test_bare_kind_fixes_guess(monkeypatch):
+def test_bare_kind_fixes_guess(fresh_db, monkeypatch):
     """Догадка «заказ» + голое «трата» → переложил в трату, заказ откачен, урок записан."""
     from core.services import finance, judge, orders
     _offline(monkeypatch)
@@ -65,7 +64,7 @@ def test_bare_kind_fixes_guess(monkeypatch):
     assert len(txs) == 1 and txs[0].amount == 8000
 
 
-def test_bare_kind_without_guess_is_harmless(monkeypatch):
+def test_bare_kind_without_guess_is_harmless(fresh_db, monkeypatch):
     """Голое «трата» без свежей догадки — ничего не пишет и не падает."""
     from core.services import finance
     _offline(monkeypatch)
@@ -74,7 +73,7 @@ def test_bare_kind_without_guess_is_harmless(monkeypatch):
     assert finance.list_transactions(30, 100) == []
 
 
-def test_explicit_fix_still_works(monkeypatch):
+def test_explicit_fix_still_works(fresh_db, monkeypatch):
     """«это трата» как раньше чинит."""
     from core.services import finance, judge, orders
     _offline(monkeypatch)

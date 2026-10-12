@@ -72,7 +72,7 @@ export function MorningDigestCard({ data, ownerName }) {
         {/* Баланс - карточка с градиентом */}
         <div className="c hero !p-4 !rounded-2xl">
           <div className="hd !mb-2">
-            <h3 className={`text-[13px] font-semibold opacity-90 ${F_XS}`}>{t('rc.balance')}</h3>
+            <h3 className={`text-md font-semibold opacity-90 ${F_XS}`}>{t('rc.balance')}</h3>
             <small className={`opacity-75 ${F_XS}`}>{t('rc.free')}</small>
           </div>
           <div className="text-[26px] font-semibold tracking-[-0.03em]"><Num value={balance} /> ₽</div>
@@ -81,7 +81,7 @@ export function MorningDigestCard({ data, ownerName }) {
         {/* Можно тратить в день - p2 изумрудный градиент */}
         <div className="c p2 !p-4 !rounded-2xl">
           <div className="hd !mb-2">
-            <h3 className={`text-[13px] font-semibold ${F_XS}`}>{t('rc.can_spend')}</h3>
+            <h3 className={`text-md font-semibold ${F_XS}`}>{t('rc.can_spend')}</h3>
             <small className={F_XS}>{t('rc.per_day')}</small>
           </div>
           <div className="text-[26px] font-semibold tracking-[-0.03em] text-[var(--pos)]">
@@ -102,8 +102,8 @@ export function MorningDigestCard({ data, ownerName }) {
           <div className="space-y-1.5 mt-2">
             {events.map((ev, i) => (
               <div key={i} className="report-item-row">
-                <span className="mono text-[12px] opacity-75">{ev.time || '15:00'}</span>
-                <span className="font-medium text-[13.5px] truncate">{ev.title}</span>
+                <span className="mono text-xs opacity-75">{ev.time || '15:00'}</span>
+                <span className="font-medium text-md truncate">{ev.title}</span>
               </div>
             ))}
           </div>
@@ -123,7 +123,7 @@ export function MorningDigestCard({ data, ownerName }) {
             {tasks.map((t, i) => (
               <div key={i} className="report-item-row">
                 <span className="w-2 h-2 rounded-full bg-[var(--acc)] shrink-0"></span>
-                <span className="font-medium text-[13.5px] truncate">{t.title}</span>
+                <span className="font-medium text-md truncate">{t.title}</span>
               </div>
             ))}
           </div>
@@ -162,7 +162,7 @@ export function WeekSummaryCard({ data, ownerName }) {
       const earned = w7?.earned || 0
       const prev = Math.max(0, (w14?.spent || 0) - spent)
       const cats = Object.entries(w7?.by_category || {}).slice(0, 5).map(([name, amount]) => ({
-        name, amount, pct: spent ? Math.round((amount / spent) * 100) : 0, color: '#3b5bff',
+        name, amount, pct: spent ? Math.round((amount / spent) * 100) : 0, color: 'var(--acc)',
       }))
       const budgets = w7?.budgets || []
       setLive({
@@ -204,7 +204,7 @@ export function WeekSummaryCard({ data, ownerName }) {
       <div className="report-header">
         <div className="flex items-center justify-between">
           <span className="report-tag">
-            <Sparkles size={13} className="text-[#a07bff]" />
+            <Sparkles size={13} className="text-[var(--violet)]" />
             {t('rc.weekly_report')}
           </span>
           <span className="mono text-[11px] opacity-50">
@@ -247,9 +247,9 @@ export function WeekSummaryCard({ data, ownerName }) {
             const aria = `${name}: ${money(cat.amount)}, ${t('tip.share', { p: cat.pct })}`
             return (
               <div key={idx} className="category-progress-item chart-pt rounded-lg" {...catTip.bind(idx, aria, 'group')}>
-                <div className="flex justify-between items-baseline text-[13.5px]">
+                <div className="flex justify-between items-baseline text-md">
                   <span className="font-medium text-[var(--ink)]">{name}</span>
-                  <span className="mono font-semibold text-[13.5px]">{money(cat.amount)}</span>
+                  <span className="mono font-semibold text-md">{money(cat.amount)}</span>
                 </div>
                 <div className="progress-bar-track mt-1.5">
                   <div
@@ -301,7 +301,7 @@ export function WeekSummaryCard({ data, ownerName }) {
             {limits.map((lim, idx) => (
               <div key={idx} className="limit-item chart-pt rounded-lg"
                 {...limTip.bind(idx, `${lim.name}: ${t('tip.of_limit', { p: lim.pct })}`, 'group')}>
-                <div className="flex justify-between items-center text-[13.5px]">
+                <div className="flex justify-between items-center text-md">
                   <span className="font-medium">{lim.name}</span>
                   <span className="mono font-semibold text-[var(--warn)]">{lim.pct}%</span>
                 </div>
