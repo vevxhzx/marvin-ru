@@ -26,8 +26,11 @@ _PROBE = (
     "sys.meta_path.insert(0, B())\n"
     "import wsgi\n"
     "assert wsgi.application is not None\n"
+    "import inspect\n"
+    "sig = inspect.signature(wsgi.application.__call__)\n"
+    "assert list(sig.parameters) == ['environ', 'start_response'], 'application обязан быть WSGI (a2wsgi)'\n"
     "from fastapi.testclient import TestClient\n"
-    "r = TestClient(wsgi.application, raise_server_exceptions=False).get('/api/health')\n"
+    "r = TestClient(wsgi.app, raise_server_exceptions=False).get('/api/health')\n"
     "assert r.status_code == 200, r.text\n"
     "print('slim-ok')\n"
 ) % (list(BLOCKED),)

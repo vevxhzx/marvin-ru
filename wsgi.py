@@ -2,13 +2,13 @@
 
 Использование на PythonAnywhere (вкладка Web → Add a new web app → Manual → Python 3.x):
   Source code: путь к копии проекта (git clone).
-  Virtualenv: окружение с `pip install -r requirements.txt` (без voice/gpu — лёгкий набор).
-  WSGI file: указать этот файл.
+  Virtualenv: окружение с `pip install -r requirements-mom.txt` (лёгкий набор, уже включает a2wsgi).
+  WSGI file: указать этот файл (4 строки: sys.path + from wsgi import application).
   Static files: /assets/ → <проект>/web/site/assets (остальное отдаёт сам FastAPI).
 
 Первый запуск: откроется мастер? Нет — мастер только локальный. Перед заливкой заполните
 config.yaml (brain.mode=cloud, brain.cloud.*, server.password, owner.*) — см. docs/mom-deploy.md.
-Переменные окружения вместо секретов в файле: ASSISTANT_CLOUD_KEY, ASSISTANT_PASSWORD.
+Переменные окружения вместо секретов в файле: CLOUD_API_KEY, ASSISTANT_PASSWORD.
 """
 import os
 import sys
@@ -37,10 +37,17 @@ except Exception as _e:  # pragma: no cover
     logging.getLogger("jarvis.deploy").warning("scheduler not built: %s", _e)
     _sch = None
 
-from core.api.app import app as application  # noqa: E402,F401
+from core.api.app import app  # noqa: E402  (ASGI; локально крутится через uvicorn в run.py)
+
+try:  # PythonAnywhere free умеет только WSGI — заворачиваем ASGI через a2wsgi
+    from a2wsgi import ASGIMiddleware  # noqa: E402
+
+    application = ASGIMiddleware(app)  # noqa: F401  (WSGI: application(environ, start_response))
+except ImportError:  # pragma: no cover — локально a2wsgi не нужен
+    application = app  # type: ignore[assignment]
 
 
-@application.on_event("startup")
+@app.on_event("startup")
 async def _wsgi_startup() -> None:
     """Планировщик в процессе воркера (АП, бесплатный тариф без крона).
     Воркер обычно один — дубли jobs не страшны; напоминания без Telegram

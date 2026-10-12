@@ -5,6 +5,7 @@
 # --- HTTP и сервер ---
 fastapi>=0.115
 uvicorn[standard]>=0.30
+a2wsgi>=1.7                      # WSGI-мост для PythonAnywhere (FastAPI=ASGI, там только WSGI)
 python-multipart>=0.0.9          # формы на сайте (загрузка файлов)
 
 # --- БД ---
