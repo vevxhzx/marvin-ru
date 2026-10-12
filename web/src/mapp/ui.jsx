@@ -215,9 +215,9 @@ export function Pill({ tone = 'gray', children, className, dot, icon: Icon }) {
 }
 
 /* ───────── поверхности ───────── */
-export function Card({ className, children, onClick, style, testid }) {
+export function Card({ className, children, style, testid }) {
   return (
-    <div onClick={onClick} style={style} data-testid={testid} className={cx('m-card rounded-[28px]', className)}>
+    <div style={style} data-testid={testid} className={cx('m-card rounded-[28px]', className)}>
       {children}
     </div>
   )

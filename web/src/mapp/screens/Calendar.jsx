@@ -403,7 +403,9 @@ function EventSheet({ ev, day, onClose, onDone, notify }) {
   }
 
   return (
-    <div className="anim-fade fixed inset-0 z-50 flex items-end justify-center bg-black/60 p-4" onClick={onClose}>
+    <div className="anim-fade fixed inset-0 z-50" aria-hidden="true">
+      <button type="button" aria-label={t('common.close')} onClick={onClose} className="absolute inset-0 cursor-default border-0 bg-black/60 p-0" />
+      <div className="absolute inset-x-0 bottom-0 flex justify-center p-4">
       <div className="anim-sheet m-card w-full max-w-[420px] rounded-[26px] p-5" onClick={(e) => e.stopPropagation()}>
         {synthetic ? (
           <>
@@ -463,6 +465,7 @@ function EventSheet({ ev, day, onClose, onDone, notify }) {
             </div>
           </form>
         )}
+      </div>
       </div>
     </div>
   )

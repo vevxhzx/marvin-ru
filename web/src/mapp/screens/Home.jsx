@@ -199,7 +199,7 @@ export default function MHome(props = {}) {
       </div>
 
       <div className="mt-3 px-4">
-        <div onClick={() => go('finance')} className="m-hero holo-border relative cursor-pointer overflow-hidden rounded-[30px] p-5 transition active:scale-[0.985]">
+        <div onClick={() => go('finance')} role="button" tabIndex={0} aria-label={t('m.balance')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go('finance') } }} className="m-hero holo-border relative cursor-pointer overflow-hidden rounded-[30px] p-5 transition active:scale-[0.985]">
           <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/20 blur-2xl" />
           <div className="relative flex items-center justify-between">
             <span className="text-[15px] font-semibold">{t('m.balance')}</span>

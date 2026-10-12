@@ -379,13 +379,24 @@ def _clamp_length(x) -> float:
         return 1.0
 
 
+try:
+    from piper.config import SynthesisConfig
+except ImportError:  # piper-tts не стоит (CI, облако мамы): конфиг-шим тех же полей
+    from dataclasses import dataclass
+
+    @dataclass
+    class SynthesisConfig:
+        speaker_id: object = None
+        length_scale: object = None
+        noise_scale: object = None
+        noise_w_scale: object = None
+        normalize_audio: bool = True
+        volume: float = 1.0
+
+
 def _piper_syn_config():
     """SynthesisConfig из настроек (темп/выразительность) или None — тогда дефолт модели."""
     length = _clamp_length(PIPER_LENGTH)
-    try:
-        from piper.config import SynthesisConfig
-    except ImportError:
-        return None
     kw = {}
     if abs(length - 1.0) > 1e-9:
         kw["length_scale"] = length

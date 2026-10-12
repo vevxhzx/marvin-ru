@@ -371,7 +371,7 @@ function InboxPanel({ inbox, onClose }) {
   useEffect(() => { const t = setTimeout(inbox.markAll, 1200); return () => clearTimeout(t) }, []) // eslint-disable-line
   return (
     <>
-    <div className="fixed inset-0 z-[70] bg-black/40 backdrop-blur-[2px]" style={{ animation: 'fade .18s var(--ease-out)' }} onClick={onClose} aria-hidden="true" />
+    <button type="button" aria-label={t('common.close')} onClick={onClose} className="fixed inset-0 z-[70] cursor-default border-0 bg-black/40 p-0 backdrop-blur-[2px]" style={{ animation: 'fade .18s var(--ease-out)' }} />
     <div ref={ref} className="elevated absolute right-5 top-[calc(100%+6px)] z-[75] w-[340px] max-w-[calc(100vw-24px)] overflow-hidden !p-0" style={{ animation: 'rise .22s var(--ease-out)' }}>
       <div className="flex min-h-[48px] items-center justify-between gap-3 border-b hair px-4 py-2">
         <div className="min-w-0 truncate text-[15px] font-semibold leading-none tracking-tight">{t('inbox.title')}</div>

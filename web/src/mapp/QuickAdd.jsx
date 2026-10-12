@@ -182,11 +182,12 @@ export default function MQuickAdd({ onClose, toast, go }) {
 
   return (
     <div data-testid="m-qa" className="absolute inset-0 z-[55]">
-      <div
+      <button
+        type="button"
         onClick={close}
-        aria-hidden="true"
+        aria-label={t('common.close')}
         className={cx(
-          'absolute inset-0 bg-[#060a24]/55 backdrop-blur-[3px] transition-opacity duration-300',
+          'absolute inset-0 cursor-default border-0 bg-[#060a24]/55 p-0 backdrop-blur-[3px] transition-opacity duration-300',
           closing ? 'opacity-0' : 'anim-fade',
         )}
       />

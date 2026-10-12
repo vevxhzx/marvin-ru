@@ -143,6 +143,10 @@ export default function MSettings({ go }) {
                 <div
                   key={r.key}
                   data-testid={`m-set-row-${r.key}`}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={title}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && r.type !== 'bool' && !editing) { e.preventDefault(); startEdit(r) } }}
                   onClick={() => { if (r.type !== 'bool' && !editing) startEdit(r) }}
                   className={cx(
                     'flex items-center gap-3 px-4 py-3.5 transition active:bg-white/[0.04]',

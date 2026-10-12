@@ -191,6 +191,10 @@ voice:
 server:
   host: "0.0.0.0"
   port: 8765
+  password: ""              # вход на сайт (пусто — только токен-ссылка); или env ASSISTANT_PASSWORD
+
+setup:
+  done: false               # мастер первого запуска; для готовой копии ставь true
 
 google:
   enabled: false

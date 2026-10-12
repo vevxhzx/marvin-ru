@@ -41,7 +41,10 @@ venv/
 Thumbs.db
 *.log
 logs/
-shots/
+# дизайн-скрины design-audit/shots трекаются (для аудита); временные — нет
+/shots/
+design-audit/shots/mapp/
+**/_verify-*
 
 # --- локальные скриншоты/временные файлы ---
 *.tmp
