@@ -7,7 +7,7 @@
    (components/TitleHeader) и проверка «эта ли вкладка активна».
 */
 
-import { Sparkles, CheckSquare, CalendarDays, Wallet, Briefcase, Brain, Clapperboard, Users, History, Settings as SettingsIcon } from 'lucide-react'
+import { Sparkles, CheckSquare, CalendarDays, Wallet, Briefcase, Brain, Clapperboard, Users, History, Gauge, Settings as SettingsIcon } from 'lucide-react'
 
 /* Навигация по смыслу: рабочее пространство и система. */
 export const NAV_GROUPS = [
@@ -23,6 +23,9 @@ export const NAV_GROUPS = [
   ] },
   { title: 'nav.g_sys', items: [
     { to: '/memory', label: 'nav.memory', icon: History, key: '7' },
+    /* key намеренно пустой: цифры 0–9 уже заняты остальными разделами, а перехватывать
+       чужую горячую клавишу ради нового раздела — значит сломать её у старого. Открыть: /stats. */
+    { to: '/stats', label: 'nav.stats', icon: Gauge, key: '' },
     { to: '/settings', label: 'nav.settings', icon: SettingsIcon, key: '8' },
   ] },
 ]
@@ -69,6 +72,7 @@ export const ROUTE_HEADS = {
   '/board':    { title: 'nav.board',    sub: 'title.board_sub' },
   '/people':   { title: 'nav.people',   sub: 'title.people_sub' },
   '/memory':   { title: 'nav.memory',   sub: 'title.memory_sub' },
+  '/stats':    { title: 'nav.stats',    sub: 'title.stats_sub' },
   '/settings': { title: 'nav.settings', sub: 'title.settings_sub' },
 }
 

@@ -35,6 +35,8 @@ const SERVER_VRAM = 'целиком' // i18n-raw
 const LMS_USE = { ru: { main: 'основные ответы', small: 'мини-задачи' }, en: { main: 'main answers', small: 'mini tasks' } } // i18n-raw
 const LMS_ROLE = { ru: { main: 'отвечает вместо модели Ollama', small: 'мини-задачи вместо малой модели', off: 'выключен — всё через Ollama' }, en: { main: 'answers instead of the Ollama model', small: 'mini tasks instead of the small model', off: 'off — everything via Ollama' } } // i18n-raw
 const LMS_TWO = { ru: 'Два движка сразу: Ollama держит основную, малую и эмбеддинги — LM Studio забирает то, что отдашь ему ниже.', en: 'Two engines at once: Ollama keeps main, small and embeddings — LM Studio takes what you assign below.' } // i18n-raw
+/* Пояснение к двум последним строкам блока: без цены экран статистики честно молчит про деньги. */
+const PRICE_TWO = { ru: 'Учёт денег: цена за 1 млн токенов (вход / выход). Отсюда — openrouter.ai/models, колонка Pricing. Пусто = расход не считается, экран «статистика» покажет токены и скажет «задай цену». Свою цену конкретной модели — в config.yaml, brain.pricing.models.', en: 'Spend tracking: the price per 1M tokens (input / output). Source: openrouter.ai/models, the Pricing column. Empty means spend is not counted and the “stats” screen shows tokens and asks you to set a price. A per-model price goes into config.yaml, brain.pricing.models.' } // i18n-raw
 
 /* Версия веба — из package.json проекта (ядро приходит из /api/status → version) */
 const WEB_VER = pkg.version
@@ -185,10 +187,14 @@ export default function Settings({ health }) {
       items = [...items].sort((a, b) => rank(a.key) - rank(b.key))
     }
     if (prefix === 'brain.cloud') {
-      items = data.items.filter((it) => it.key.startsWith('brain.cloud.') || CLOUD_EXTRA.includes(it.key) || (provNow === 'gemini' && it.key.startsWith('brain.gemini.') && !CLOUD_EXTRA.includes(it.key)))
+      items = data.items.filter((it) => it.key.startsWith('brain.cloud.') || it.key.startsWith('brain.pricing.') || CLOUD_EXTRA.includes(it.key) || (provNow === 'gemini' && it.key.startsWith('brain.gemini.') && !CLOUD_EXTRA.includes(it.key)))
       items = items.filter((it) => it.key !== 'brain.cloud.base_url' || provNow === 'custom')
       if (provNow === 'gemini') items = items.filter((it) => !['brain.cloud.api_key', 'brain.cloud.model', 'brain.cloud.proxy'].includes(it.key))
-      items.sort((a, b) => (a.key === 'brain.cloud.provider' ? -1 : b.key === 'brain.cloud.provider' ? 1 : 0))
+      // цены — в самый низ блока облака: это про деньги, а не про подключение
+      items.sort((a, b) => {
+        const p = (k) => (k === 'brain.cloud.provider' ? -1 : k.startsWith('brain.pricing.') ? 1 : 0)
+        return p(a.key) - p(b.key)
+      })
     }
     if (prefix === 'voice') items = items.filter((it) => !['voice.tts.engine', 'voice.tts.speaker', 'voice.tts.edge_voice', 'voice.tts.piper_voice', 'voice.tts.piper_model'].includes(it.key))
     if (!items.length) return null
@@ -200,6 +206,7 @@ export default function Settings({ health }) {
         {prefix === 'telegram' && <MiniApp current={val(items.find((it) => it.key === 'telegram.webapp_url')) || ''} onUse={(u) => setDraft((d) => ({ ...d, 'telegram.webapp_url': u }))} />}
         {/* настройки — спокойными строками: подпись слева, значение справа, между строками волосок */}
         {prefix === 'brain' && <div className="faint" style={{ fontSize: 'var(--fs-xs)', padding: '2px 0 8px' }}>{LMS_TWO[lang] || LMS_TWO.ru}</div>}
+        {prefix === 'brain.cloud' && <div className="faint" style={{ fontSize: 'var(--fs-xs)', padding: '2px 0 8px' }}>{PRICE_TWO[lang] || PRICE_TWO.ru}</div>}
         <div className="divide-y hair">
           {items.map((it) => <SettingField key={it.key} it={it} value={val(it)} onChange={(v) => setDraft((d) => ({ ...d, [it.key]: v }))} providers={status?.gemini?.providers} />)}
         </div>

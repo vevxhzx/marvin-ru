@@ -5,6 +5,15 @@
 
 ---
 
+## 13.10.2026: учёт токенов и денег, экран «Статистика» (ветка feat-token-accounting, не пушить в main без отмашки)
+- Хозяин платит OpenRouter и хочет видеть расход. Считаем ВСЁ: токены со всех провайдеров (OpenRouter/OpenAI — `usage.prompt_tokens/completion_tokens`, Ollama — `prompt_eval_count/eval_count`, Gemini — `usageMetadata`), деньги — по цене из настроек.
+- Как отдаём usage: **аккумулятор в ContextVar** (`core/brain/llm/base.py`: `usage_note/usage_now/usage_reset`), а НЕ новый параметр в возврате. Сигнатуры `cloud_chat/ollama_chat/small_chat/…` остались `str | None` — их зовут agent.py, memory/*, persona.py, sorter.py, judge.py, quick.py; возврат кортежем сломал бы их всех. Провайдер сам отмечает свой ответ, читает журнал (`core/services/trace.py::finish`).
+- Миграция v17 (`core/migrations.py`): `run.prompt_tokens/completion_tokens INTEGER DEFAULT 0`, `run.cost_usd FLOAT DEFAULT 0.0`. Только ADD COLUMN, идемпотентна, старые строки = «учёта ещё не было». Бэкап боевой БД снят в `data/backups/`.
+- Деньги НЕ хардкодятся: `brain.pricing.models` в `config.example.yaml` (цена за 1 млн токенов prompt/completion) + запасные `brain.pricing.default_prompt/default_completion` в `core/config.py::EDITABLE` (меняются с сайта). Нет цены → `cost_usd` = 0 и флаг `uncpriced`, а в статистике видно «нет цены», а не выдуманное число. Откуда брать цены — ссылка в комментарии конфига (openrouter.ai/models, колонка Pricing).
+- API: `GET /api/runs` — в каждом ходе `prompt_tokens/completion_tokens/tokens/cost_usd/priced`; `GET /api/runs/report` — блок `spend` (total_usd, tokens_in/out, by_route, by_model, uncpriced, priced). `report_text()` (идёт в Telegram) про деньги молчит, пока цена не задана.
+- Веб: новый раздел `web/src/pages/Stats.jsx` (маршрут `/stats`, ключ `nav.stats`, группа «система»), сводка + разбивка по путям и моделям + список последних ходов с колонкой «токены/стоимость» + честное пустое состояние «задай цену» с вводом цены прямо на экране. Собран в `web/site`.
+- Тесты: `tests/test_token_accounting.py` (37 шт.) + один в `tests/test_trace.py`. Ruff чистый, `npm run build` зелёный, i18n-проверка и `color_contrast.test.mjs` зелёные.
+
 ## 13.10.2026: аудит напоминаний + логика уточнений (main, запушено)
 - Нативный ресайз карточек (Соннет, OpenRouter): зажал в режиме правки — тянешь ширину вживую со снапом, отпустил — встала (Сегодня/Задачи/Календарь/Финансы, только широкий экран). Кнопки и клавиатура как были.
 - Скрин-корни: тире-время «в 16-10», чистка заголовков (`_clean_event_title`), snooze без дублей (stage=1 / разовый пинг), слот пополнения `transfer_pending`, точное «Напомню в 15:40», страж прошлого. Тесты tests/test_remind_audit.py (28 шт.).

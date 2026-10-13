@@ -26,6 +26,7 @@ const Finance = lazy(() => import('./pages/Finance'))
 const BoardPage = lazy(() => import('./pages/Board'))
 const Memory = lazy(() => import('./pages/Memory'))
 const Settings = lazy(() => import('./pages/Settings'))
+const Stats = lazy(() => import('./pages/Stats'))
 /* Мобильная копия (mapp/): отдельный чанк — десктоп его не тянет. */
 const MApp = lazy(() => import('./mapp/shell'))
 
@@ -335,6 +336,7 @@ function Shell({ inbox }) {
           <Route path="/board/:id" element={<BoardPage />} />
           <Route path="/people" element={<People />} />
           <Route path="/memory" element={<Memory />} />
+          <Route path="/stats" element={<Stats />} />
           <Route path="/settings" element={<Settings health={health} />} />
           <Route path="*" element={<NotFound />} />
         </Routes>

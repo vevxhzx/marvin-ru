@@ -165,6 +165,11 @@ export const api = {
   undo: () => req('POST', '/api/undo'),
   budgets: () => req('GET', '/api/finance/budgets'),
   updateCategory: (id, c) => req('PUT', `/api/finance/categories/${id}`, c),
+  // журнал работы: ходы с токенами и стоимостью (учёт денег, /api/runs* в core/api/routers/system.py)
+  runs: (limit = 50, channel = null, onlyBad = false) =>
+    req('GET', `/api/runs?limit=${limit}${channel ? `&channel=${encodeURIComponent(channel)}` : ''}${onlyBad ? '&only_bad=true' : ''}`),
+  runsReport: (days = 7) => req('GET', `/api/runs/report?days=${days}`),
+
   settings: () => req('GET', '/api/settings'),
   saveSettings: (changes) => req('PUT', '/api/settings', { changes }),
   status: () => req('GET', '/api/status'),
