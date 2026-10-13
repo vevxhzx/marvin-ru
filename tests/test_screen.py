@@ -117,6 +117,12 @@ def test_write_settings_creates_nested_section(tmp_path, monkeypatch):
     src = re.sub(r"\n    screen_time:.*?keep_days: 90[^\n]*\n", "\n", src, flags=re.S)
     assert "screen_time" not in src
     monkeypatch.setattr(config, "ROOT", tmp_path)
+    # Тест подменяет ROOT, а core/config.py::_config_file() сначала смотрит JARVIS_CONFIG/ASSISTANT_CONFIG
+    # и только потом падает обратно на ROOT. Сессионная фикстура tests/conftest.py::_config_file_isolated
+    # держит JARVIS_CONFIG ради остальных тестов — здесь он мешал бы, поэтому убираем обе переменные,
+    # чтобы запись шла именно в tmp_path/"config.yaml", как тест и ожидает.
+    monkeypatch.delenv("JARVIS_CONFIG", raising=False)
+    monkeypatch.delenv("ASSISTANT_CONFIG", raising=False)
     (tmp_path / "config.example.yaml").write_text(src, encoding="utf-8")
     (tmp_path / "config.yaml").write_text(src, encoding="utf-8")
     assert config.write_settings({"voice.pc.screen_time.enabled": True, "voice.pc.screen_time.idle_min": 7}) == ["voice.pc.screen_time.enabled", "voice.pc.screen_time.idle_min"]
