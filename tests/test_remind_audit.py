@@ -389,7 +389,11 @@ def test_same_day_past_writes_with_honest_tail(monkeypatch):
     r = _handle("напомни сегодня в 13:00 позвонить", "past-day")
     assert "add_event" in r.actions, (r.actions, r.text)
     assert "уже прошло" in r.text.lower(), r.text
-    assert len(calendar.list_events(limit=50)) == 1
+    # Окно задаём явно: list_events() по умолчанию начинает с РЕАЛЬНОГО сегодняшнего дня,
+    # а событие легло на 12-е (вчерашнее относительно закреплённых 13.10 14:00). Тест с
+    # умолчанием ждал ровно до полуночи 13→14 октября, после чего отваливался сам по себе.
+    _from = datetime(2026, 10, 1)
+    assert len(calendar.list_events(_from, _from + timedelta(days=60), limit=50)) == 1
 
 
 VENT = ("всё пойдет, чет пустовато себя ощущаю\n"
