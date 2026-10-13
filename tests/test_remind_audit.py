@@ -352,3 +352,97 @@ def test_past_datetime_is_not_written_silently(monkeypatch):
     assert "add_task" not in r2.actions, (r2.actions, r2.text)
     assert tasks.list_tasks() == []
     assert "прошло" in r2.text.lower(), r2.text
+
+
+# ------------------------------------------------- 9. ответы с довеском (аудит #4) + мелочи (#8)
+def _events():
+    with db.session() as s:
+        return s.exec(db.select(db.Event)).all()
+
+
+def test_clarify_answer_with_tail_still_matches(monkeypatch):
+    """«календарь, и напомни за час» — хвост съеден, событие в календаре (а не утечка дальше)."""
+    _offline(monkeypatch)
+    ch = "tail1"
+    r1 = _handle("поставь напоминание что в 16-10 ресаются лимиты в клод для написания курса", ch)
+    assert "clarify" in r1.actions, (r1.actions, r1.text)
+    r2 = _handle("календарь, и напомни за час", ch)
+    assert "add_event" in r2.actions, (r2.actions, r2.text)
+    evs = _events()
+    assert len(evs) == 1 and "лимиты" in evs[0].title.lower(), [(e.title, e.start) for e in evs]
+    assert "напомни" not in evs[0].title.lower() and "час" not in evs[0].title.lower(), evs[0].title
+
+
+def test_clarify_prefix_does_not_swallow_real_commands(monkeypatch):
+    """Префикс-матч только с явным хвостом-связкой: «задача: купить молоко» не гасит слот и не режется."""
+    from core.brain.agent import CLARIFY_RX, _CLARIFY_TAIL_RX
+    for s in ("задача: купить молоко", "задача, купить молоко", "напоминание на завтра", "нет, в календарь"):
+        assert not CLARIFY_RX.match(s) and not _CLARIFY_TAIL_RX.match(s), s
+    assert _CLARIFY_TAIL_RX.match("календарь, и напомни за час")
+    assert _CLARIFY_TAIL_RX.match("задача и поставь на пятницу")
+
+
+def test_remind_answer_with_tail_keeps_clean_title(monkeypatch):
+    """«завтра в 10, и это очень важно» как ответ на «когда?» — заголовок без хвоста."""
+    _offline(monkeypatch)
+    ch = "tail2"
+    assert "clarify" in _handle("напомни маме позвонить", ch).actions
+    r = _handle("завтра в 10, и это очень важно", ch)
+    assert "add_event" in r.actions, (r.actions, r.text)
+    evs = _events()
+    assert len(evs) == 1 and "важно" not in evs[0].title.lower(), [(e.title, e.start) for e in evs]
+    assert "позвонить" in evs[0].title.lower(), evs[0].title
+
+
+def test_remind_empty_what_time_only_answer_asks_what(monkeypatch):
+    """«напомни» → «завтра в 10» (без дела, или только хвост) — не пишем событие с мусорным заголовком."""
+    _offline(monkeypatch)
+    for i, ans in enumerate(("завтра в 10", "завтра в 10, и это очень важно")):
+        ch = f"empty{i}"
+        assert "clarify" in _handle("напомни", ch).actions
+        r = _handle(ans, ch)
+        assert "add_event" not in r.actions and "clarify" in r.actions, (ans, r.actions, r.text)
+        assert _events() == [], [(e.title, e.start) for e in _events()]
+
+
+def test_remind_empty_what_answer_with_task_still_works(monkeypatch):
+    _offline(monkeypatch)
+    ch = "empty-ok"
+    assert "clarify" in _handle("напомни", ch).actions
+    r = _handle("завтра в 10 позвонить маме", ch)
+    assert "add_event" in r.actions, (r.actions, r.text)
+    assert _events()[0].title == "Позвонить маме", _events()[0].title
+
+
+def test_repeat_title_uses_shared_cleaner(monkeypatch):
+    """Повторяющееся: «что надо не забыть» срезается тем же _clean_event_title, что и обычное событие."""
+    _offline(monkeypatch)
+    r = _handle("напомни что надо не забыть позвонить маме каждый пн в 19", "rep-clean")
+    assert "add_event" in r.actions, (r.actions, r.text)
+    ev = _events()[0]
+    assert ev.repeat == "weekly" and ev.title == "Позвонить маме", (ev.title, ev.repeat)
+
+
+def test_transfer_answer_with_tail_cuts_account_name(monkeypatch):
+    """«1039 на т-банк и побыстрее» / «…на т-банк, пожалуйста» — счёт «т-банк», а не «т-банк и побыстрее»."""
+    _offline(monkeypatch)
+    for i, ans in enumerate(("1039 на т-банк и побыстрее", "1039 на т-банк, пожалуйста")):
+        _money_fixture()
+        ch = f"tr-tail{i}"
+        assert "clarify" in _handle("пополни с кубышки", ch).actions
+        b0 = _balance("Т-Банк")
+        r = _handle(ans, ch)
+        assert "add_transfer" in r.actions, (ans, r.actions, r.text)
+        assert _balance("Т-Банк") == pytest.approx(b0 + 1039)
+    from core.services import finance
+    names = [a.name.lower() for a in finance.list_accounts()] if hasattr(finance, "list_accounts") else []
+    assert not any("побыстрее" in n or "пожалуйста" in n for n in names), names
+
+
+def test_system_prompt_has_tool_honesty_guard():
+    """Аудит #7: промпт запрещает заявлять о записях/отменах, которых не делал (деньги и записи — только инструментами)."""
+    from core.brain.persona import system_prompt
+    for compact in (False, True):
+        p = system_prompt(compact)
+        assert "ТОЛЬКО через инструменты" in p, compact
+        assert "не заявляй" in p, compact

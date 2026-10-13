@@ -459,11 +459,14 @@ def transfer_ask(text: str, channel: str) -> Result | None:
         _transfer_pending_clear(channel)
         return "Ок, не записываю.", []
     amount, rest = parse_amount(text)
-    tm = re.search(r"\b(?:на|в|во)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:с|со|из)\s+|$)", rest, re.I)
-    sm = re.search(r"\b(?:с|со|из)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:на|в|во)\s+|$)", rest, re.I)
+    # довесок в ответе: «на карту, и побыстрее» → «карту» (пунктуация — в пробел, хвост от связки режем)
+    rest = re.sub(r"[,;.!?]+", " ", rest)
+    tm = re.search(r"\b(?:на|в|во)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:с|со|из)\s+|$)", rest.strip(), re.I)
+    sm = re.search(r"\b(?:с|со|из)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:на|в|во)\s+|$)", rest.strip(), re.I)
+    _cut = lambda g: re.split(r"\s+(?:и|но|а|да|только|причём|причем|пожалуйста|плиз)(?:\s|$)", g.strip(), maxsplit=1, flags=re.I)[0].strip()
     amount = amount or d.get("amount")
-    src = (sm.group(1).strip() if sm else None) or d.get("src")
-    to = (tm.group(1).strip() if tm else None) or d.get("to")
+    src = (_cut(sm.group(1)) if sm else None) or d.get("src")
+    to = (_cut(tm.group(1)) if tm else None) or d.get("to")
     if amount and to:
         _transfer_pending_clear(channel)
         r = _do_transfer(amount, to, src, channel)

@@ -93,6 +93,8 @@ PAST_RX = re.compile(r"\b(вчера|позавчера|только\s+что|б
                      r"пришл[аио]|приехал[аи]?|узнал[аи]?|нашл[аи]|видел[аи]?|встретил[аи]?|поговорил[аи]?|договорил[аи]сь|закончил[аи]?|обещал[аи]?)\b", re.I)
 HEALTH_RX = re.compile(r"\b(давлени\w*|температур\w*|сахар\b|пульс\w*|вес\s+\d|самочувстви\w*|болит|болел[аи]?|таблетк\w*|укол\w*|капл[иь])\b", re.I)
 CLARIFY_RX = re.compile(r"^\s*(в\s+)?(задач\w*|дел[оа]|календар\w*|событи\w*|напомина\w*|заметк\w*|мысл\w*|мозг|нет|отмена|не надо|забудь|ничего)\s*[.!]?\s*$", re.I)
+# «календарь, и напомни за час» — ответ с довеском: только слова-типы (не «нет») и только с явной связкой-хвостом
+_CLARIFY_TAIL_RX = re.compile(r"^\s*(в\s+)?(задач\w*|дел[оа]|календар\w*|событи\w*|напомина\w*|заметк\w*|мысл\w*|мозг)\s*[.!]?\s*(?:[,;—-]\s*)?(?:и|а|но|плюс|причём|причем|ещё|еще)\s+\S", re.I)
 
 # ожидающие уточнения: channel -> "ts|qid|текст" (qid — короткий nonce вопроса).
 # «да» раньше цеплялось к любому висящему слоту: просроченный вопрос A, заданный
@@ -855,9 +857,7 @@ def rules(text: str, channel: str) -> Reply | None:
     if rule:
         dt0, rest_r = parse_datetime(rest_r)
         start = first_occurrence(rule, dt0)
-        title = re.sub(r"^(напомни(?:\s+мне)?|у меня|мне|запланируй|добавь|поставь)\s+", "", rest_r, flags=re.I)
-        title = _strip_fillers(title) or "Событие"
-        title = title[0].upper() + title[1:]
+        title = _clean_event_title(rest_r)
         m_ev = EVENT_RX.match(title)
         if m_ev and title[m_ev.end():].strip():
             title = title[m_ev.end():].strip(); title = title[0].upper() + title[1:]
@@ -1168,7 +1168,10 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
         dt, rest2 = parse_datetime(text)
         if not dt:
             return None   # это не ответ на вопрос — обычная фраза
-        title = (what or rest2.strip() or text.strip())
+        # без what название — из ответа, но не хвост («, и это важно») и не голое время: переспрашиваем, слот жив
+        title = what or ("" if re.match(r"^[\s,;.\-—]*(?:и|а|но|да|ну|плюс|причём|причем|ещё|еще)\b", rest2 or "", re.I) else (rest2 or "").strip(" ,;.-—"))
+        if not title:
+            return Reply(f"Время понял — {fmt_dt(dt)}. А что напомнить, сэр?", ["clarify"])
         title = title[0].upper() + title[1:]
         if (pr := _past_reply(title, dt)):
             return pr   # слот жив — можно сразу назвать новое время
@@ -1176,7 +1179,7 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
         rm = 0 if re.search(r"через", text, re.I) else 10
         ev = calendar.add_event(title, dt, remind_minutes=rm, source=channel)
         return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, rm)), ["add_event"])
-    m = CLARIFY_RX.match(text)
+    m = CLARIFY_RX.match(text) or _CLARIFY_TAIL_RX.match(text)
     if not m:
         return None
     _pending_clear(channel)
