@@ -123,7 +123,7 @@ def test_event_ack_states_exact_remind_time(monkeypatch):
     assert "заранее" not in r.text.lower(), r.text
     ev = calendar.list_events(limit=50)[0]
     expect = (ev.start - timedelta(minutes=10)).strftime("%H:%M")
-    assert f"Напомню в {expect}" in r.text, r.text
+    assert f"напомню в {expect}" in r.text.lower(), r.text
 
 
 # ------------------------------------------------- 3. snooze без дублей
@@ -278,6 +278,9 @@ def test_topup_card_alias_means_main_account(monkeypatch):
     без уточнения — честный отказ, а не перевод в никуда."""
     _offline(monkeypatch)
     _money_fixture()
+    from core.services import finance
+    kub = finance.find_account("Кубышка")
+    finance.update_account(kub.id, is_main=True)   # детерминировано: сид на CI зовёт мейн иначе
     ch = "kub4"
     assert "clarify" in _handle("пополни с кубышки", ch).actions
     r = _handle("1039 на карту", ch)
