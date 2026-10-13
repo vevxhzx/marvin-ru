@@ -293,6 +293,50 @@ def test_topup_amount_only_asks_target_no_guessing(monkeypatch):
     assert _tx_count() == 0
 
 
+# ------------------------------------------------- 6. остаток матрицы сценариев
+def test_garbage_input_never_crashes_nor_writes(monkeypatch):
+    """Пустой/мусорный ввод: без исключений и без записей (ответить может как угодно)."""
+    from core.services import calendar, tasks
+    _offline(monkeypatch)
+    for i, g in enumerate(("", "   ", "ываываыва", "!" * 250)):
+        r = _handle(g, f"garbage-{i}")
+        assert isinstance(r.text, str) and r.text, (g, r)
+    assert calendar.list_events(limit=50) == []
+    assert tasks.list_tasks() == []
+    with db.session() as s:
+        assert s.exec(db.select(db.Transaction)).all() == []
+
+
+def test_bare_remind_asks_not_writes(monkeypatch):
+    _offline(monkeypatch)
+    from core.services import calendar
+    r = _handle("напомни", "bare")
+    assert "clarify" in r.actions, (r.actions, r.text)
+    assert calendar.list_events(limit=50) == []
+
+
+def test_two_different_events_same_time_both_fire():
+    """Два разных события на одно время — оба напоминают (дедуп только по тому же названию)."""
+    from core.services import calendar
+    now = datetime.now().replace(second=0, microsecond=0)
+    calendar.add_event("Созвон А", now + timedelta(minutes=10), remind_minutes=30, source="test")
+    calendar.add_event("Созвон Б", now + timedelta(minutes=10), remind_minutes=30, source="test")
+    assert sorted(e.title for e in calendar.due_reminders()) == ["Созвон А", "Созвон Б"]
+
+
+def test_weekly_repeat_creates_one_rule(monkeypatch):
+    """«каждый пн ср пт в 19» — одно правило weekly, первое вхождение — пн/ср/пт 19:00."""
+    _offline(monkeypatch)
+    r = _handle("тренировка каждый пн ср пт в 19", "rep")
+    assert "add_event" in r.actions, (r.actions, r.text)
+    with db.session() as s:
+        rows = s.exec(db.select(db.Event)).all()
+    assert len(rows) == 1, [(e.title, e.start) for e in rows]
+    ev = rows[0]
+    assert ev.repeat == "weekly" and ev.repeat_days == "0,2,4", (ev.repeat, ev.repeat_days)
+    assert ev.start.weekday() in (0, 2, 4) and (ev.start.hour, ev.start.minute) == (19, 0)
+
+
 # ------------------------------------------------- 5. прошлое не пишем молча
 def test_past_datetime_is_not_written_silently(monkeypatch):
     """Явно прошедшее время без слов прошлого («напомни 01.01 в 10:00…») —
