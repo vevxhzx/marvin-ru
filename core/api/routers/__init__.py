@@ -69,6 +69,10 @@ def register(app) -> None:
     (он берёт последний из известных ему доменов — это `system`), поэтому
     подключать `setup` после `system` нельзя. Пути мастера уникальны и с
     `/api/state`, `/api/status` и catch-all не конфликтуют.
+    И домен `demo` (3 роута: `/api/demo/*` — демо-данные первого запуска:
+    загрузить пример, стереть, спросить состояние). По той же причине ПЕРЕД
+    `system`: иначе catch-all SPA `/{path:path}` в `app.py` перехватит
+    `/api/demo/*` и вернёт 404 даже с верным ключом.
     Оба SSE (`/api/events/stream`, `/api/chat/stream`) и статика/SPA остаются
     в `core/api/app.py` — см. докстринг модуля.
     Порядок вызовов = порядок модулей из `reviews/P7_refactor.md` §2.2 —
@@ -76,7 +80,7 @@ def register(app) -> None:
 
     Вызывается из `core/api/app.py` ДО регистрации статики и SPA-catch-all.
     """
-    from . import boards, chat, finance, learn, mind, orders, pc, people, setup, system, tasks
+    from . import boards, chat, demo, finance, learn, mind, orders, pc, people, setup, system, tasks
 
     finance.register(app)
     orders.register(app)
@@ -88,4 +92,5 @@ def register(app) -> None:
     chat.register(app)     # «да/нет» по предложенному факту + suggest_fact в ответы /api/chat(+/stream), см. chat.py
     learn.register(app)    # обучение английскому: /api/english/* (абзац дня, прогресс, свои тексты)
     setup.register(app)    # мастер первой установки: /api/setup/* (пишет config.yaml, качает модели, перезапускает ядро)
+    demo.register(app)     # демо-данные первого запуска: /api/demo/* — тоже до system, иначе его съест SPA-catch-all
     system.register(app)  # ← ПОСЛЕДНИМ: статика/SPA в app.py регистрируются ещё позже

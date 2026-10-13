@@ -105,6 +105,12 @@ export const api = {
   health: () => req('GET', '/api/health'),
   login: (password) => req('POST', '/api/login', { password }),
   dashboard: () => req('GET', '/api/dashboard'),
+  // Демо-данные первого запуска: загрузить пример / стереть / спросить состояние.
+  // `message` приходит готовой строкой с бэкенда — она зависит от состояния (empty/demo/mixed/own),
+  // поэтому переводить её в i18n нельзя: под каждый случай нужен свой текст.
+  demoStatus: () => req('GET', '/api/demo/status'),
+  demoSeed: () => req('POST', '/api/demo/seed', {}, 60000),
+  demoClear: () => req('POST', '/api/demo/clear', {}, 60000),
   missed: () => req('GET', '/api/missed'),
   chat: (text) => req('POST', '/api/chat', { text, channel: 'web' }, 120000),   // ответ ядра (LLM) может идти долго
   chatHistory: (limit = 40) => req('GET', `/api/chat/history?limit=${limit}`),

@@ -87,6 +87,64 @@ export default function MMore({ go }) {
           sub={t('m.load_err_sub')}
         />
       )}
+
+      <DemoCard onDone={load} />
     </div>
+  )
+}
+
+/* Демо-данные первого запуска. Показывается всегда: когда данных нет — кнопка
+   «загрузить пример», когда демо уже в базе — «очистить и начать с нуля».
+   Очистка на бэкенде трогает ТОЛЬКО демо (core/services/demo_seed.py), но
+   подтверждение спрашиваем всё равно: кнопка удаляет данные и должна выглядеть
+   так, чтобы человек не нажал её машинально. */
+function DemoCard({ onDone }) {
+  const { t } = useI18n()
+  const [demo, setDemo] = useState(null)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+
+  const loadDemo = () => {
+    setErr('')
+    api.demoStatus().then(setDemo).catch(() => setDemo(null))
+  }
+  useEffect(() => { loadDemo() }, [])
+
+  const run = async (seed) => {
+    if (!seed && !window.confirm(t('m.demo_confirm'))) return
+    setBusy(true)
+    setErr('')
+    try {
+      await (seed ? api.demoSeed() : api.demoClear())
+      await api.demoStatus().then(setDemo)
+      onDone?.()
+    } catch (e) {
+      setErr(String(e?.message || e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const has = !!demo?.has_demo
+  return (
+    <section className="mt-4 px-4">
+      <div className="m-card rounded-[26px] p-4">
+        <div className="text-[15px] font-semibold">{t('m.demo_title')}</div>
+        <div className="mt-1 text-[12.5px] leading-snug text-white/60">
+          {demo ? demo.message : t('m.demo_load_sub')}
+        </div>
+        {err && <div className="mt-2 text-[12px] text-[#ff8da1]">{err}</div>}
+        <button
+          type="button"
+          disabled={busy || !demo}
+          onClick={() => run(!has)}
+          data-testid="m-demo-toggle"
+          className="mt-3 inline-flex h-10 items-center gap-1.5 rounded-full bg-white px-4 text-[14px] font-semibold text-[#2b3a9a] transition active:scale-95 disabled:opacity-50"
+        >
+          {busy ? t('m.demo_busy') : has ? t('m.demo_clear') : t('m.demo_load')}
+        </button>
+        {has && <div className="mt-2 text-[11.5px] text-white/45">{t('m.demo_clear_sub')}</div>}
+      </div>
+    </section>
   )
 }

@@ -2637,6 +2637,17 @@ export const DICT = {
   'm.set_sub': { ru: 'только то, что есть в config.yaml — ничего лишнего', en: 'only what is in config.yaml — nothing extra' },
   'm.more_sub': { ru: 'все разделы марвина', en: 'all marvin sections' },
   'm.more_ask': { ru: 'спросить марвина', en: 'ask marvin' },
+  // Демо-данные первого запуска (см. core/services/demo_seed.py).
+  // Текст состояния (`demo.message`) приходит с бэкенда готовым — он зависит от
+  // того, что в базе, поэтому в i18n его нет и переводить нечего.
+  'm.demo_title': { ru: 'Пример данных', en: 'Sample data' },
+  'm.demo_load': { ru: 'Загрузить пример данных', en: 'Load sample data' },
+  'm.demo_load_sub': { ru: 'деньги, задачи, встречи, клиенты — чтобы посмотреть, как это работает', en: 'money, tasks, meetings, clients — to see how it works' },
+  'm.demo_clear': { ru: 'Очистить пример и начать с нуля', en: 'Clear sample and start over' },
+  'm.demo_clear_sub': { ru: 'удалит только демо-данные, твои записи не тронет', en: 'removes only the sample data, your own records stay' },
+  'm.demo_confirm': { ru: 'Удалить демо-данные? Свои записи останутся.', en: 'Delete sample data? Your own records will stay.' },
+  'm.demo_busy': { ru: 'Минуту…', en: 'One moment…' },
+  'm.demo_done': { ru: 'Готово', en: 'Done' },
   'm.more_ask_sub': { ru: 'отвечу и запишу, что нужно', en: "I'll answer and save what matters" },
   'm.more_set_sub': { ru: 'вид, язык и подключения', en: 'look, language and connections' },
   'm.set_g_main': { ru: 'основное', en: 'general' },

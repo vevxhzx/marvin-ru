@@ -149,6 +149,10 @@
       <div class="faint" style="margin-top:6px">Откройте <a id="botLink" href="#" target="_blank">бота</a>, нажмите «Start» (или отправьте что угодно), затем нажмите кнопку — ID подставится сам.</div>
       <div class="status" id="ownerSt"></div>
     </div>
+    <label class="row" style="margin-top:12px;align-items:flex-start;gap:8px;cursor:pointer">
+      <input type="checkbox" id="demoChk" checked />
+      <span>Загрузить пример данных — деньги, задачи, встречи, клиенты. Чтобы сразу было видно, как это работает. Потом сотрётся одной кнопкой.</span>
+    </label>
     <div class="nav"><button class="btn" onclick="go(4)">← назад</button><div class="row"><button class="btn" onclick="finish(true)">без Telegram</button><button class="btn primary" id="finishBtn" onclick="finish(false)">готово ✓</button></div></div>
   </section>
 
@@ -310,6 +314,11 @@ async function finish(noTg) {
     const px = $('#tgProxy').value.trim(); if (px) ch['telegram.proxy'] = px
   }
   await api('POST', '/api/setup/save', { changes: ch })
+  // Пример данных — сразу после сохранения конфига, до перезапуска ядра:
+  // так новичок после перезагрузки видит живого ассистента, а не пустую базу.
+  // Снять их потом можно одной кнопкой (раздел «ещё» / настройки), и она
+  // трогает ТОЛЬКО демо — реальные записи остаются (core/services/demo_seed.py).
+  if ($('#demoChk') && $('#demoChk').checked) await api('POST', '/api/demo/seed').catch(() => {})
   go(6); $('#h1').innerHTML = name.toLowerCase() + '<span class="a">*</span>'
   $('#doneH').textContent = name + ' готов'
   $('#doneSub').textContent = noTg ? 'Перезапускаюсь. Telegram можно подключить позже: ⚙ Настройки → telegram.' : `Перезапускаюсь. Через несколько секунд ${name} напишет вам в Telegram.`
