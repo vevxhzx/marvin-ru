@@ -788,10 +788,15 @@ def _schedule_exit(delay: float = 1.2) -> None:
     threading.Thread(target=_bye, daemon=True).start()
 
 
+def _is_test_run() -> bool:
+    """Тесты/стенды (ASSISTANT_TEST=1) ядро не перезапускают — иначе pytest просто умрёт."""
+    return bool(os.getenv("ASSISTANT_TEST") or os.getenv("JARVIS_TEST"))
+
+
 def _restart_plan() -> dict:
     """Что реально можно сделать. Честность важнее удобства: если надёжно нельзя —
     так и говорим «перезапустите вручную»."""
-    if os.getenv("ASSISTANT_TEST") or os.getenv("JARVIS_TEST"):
+    if _is_test_run():
         return {"ok": False, "manual": True, "how": "test",
                 "detail": "тестовый запуск — ядро не перезапускаю"}
     argv = _relaunch_argv()

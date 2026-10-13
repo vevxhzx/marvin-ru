@@ -536,9 +536,49 @@ def test_spend_stats_without_prices_is_honest(fresh_db, no_price):
     trace.finish("gemini", [])
     sp = trace.spend_stats(7)
     assert sp["total_usd"] == 0.0
-    assert sp["priced"] is False
+    assert sp["priced"] is False and sp["counted"] is False
     assert sp["uncpriced"] == 1
     assert sp["tokens_in"] == 10_000
+
+
+def test_money_recorded_earlier_survives_price_removal(fresh_db, monkeypatch):
+    """Цену посчитали, потом убрали из настроек — потраченные деньги остаются потраченными.
+
+    Обратный случай «цены нет, но деньги посчитаны» тоже возможен: нечего отменять задним
+    числом. Поэтому у spend два флага: priced (цена настроена сейчас) и counted (стоимость
+    известна хоть для части ходов). Считать их одним было бы враньё в обе стороны."""
+    monkeypatch.setattr(llm_base, "cfg",
+                        _Node({"brain": _pricing(models={DS: {"prompt": 1.0, "completion": 2.0}})}),
+                        raising=False)
+    trace.start("спроси", "web")
+    llm_base.usage_note(DS, 1_000_000, 1_000_000)
+    trace.finish("gemini", [])
+    # хозяин убрал цену (например переехал на другого провайдера)
+    monkeypatch.setattr(llm_base, "cfg", _Node({"brain": _pricing()}), raising=False)
+
+    sp = trace.spend_stats(7)
+    assert sp["total_usd"] == pytest.approx(3.0, rel=1e-6), "потраченное не должно обнуляться"
+    assert sp["priced"] is False          # настройки сейчас пусты
+    assert sp["counted"] is True          # но стоимость известна
+    assert sp["uncpriced"] == 0
+    assert trace.recent()[0]["priced"] is True
+
+    txt = trace.report_text(7)
+    assert "$" in txt, "посчитанные деньги должны упоминаться, даже если цена убрана"
+
+
+def test_free_model_is_not_uncpriced(fresh_db, monkeypatch):
+    """Явно нулевая цена = «бесплатно»: ход посчитан, «без цены» про него не говорим."""
+    monkeypatch.setattr(llm_base, "cfg", _Node({"brain": _pricing(models={DS: {"prompt": 0, "completion": 0}})}),
+                        raising=False)
+    trace.start("спроси", "web")
+    llm_base.usage_note(DS, 5_000, 400)
+    trace.finish("gemini", [])
+    sp = trace.spend_stats(7)
+    assert sp["total_usd"] == 0.0
+    assert sp["uncpriced"] == 0
+    assert sp["counted"] is True
+    assert trace.recent()[0]["priced"] is True
 
 
 # ============================================================ 5. API

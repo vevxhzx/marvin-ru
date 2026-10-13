@@ -71,13 +71,14 @@ def _routes() -> set[tuple[str, str]]:
 
 
 WIZARD_CALLS = _html_calls()
+SETUP_CALLS = [(m, p) for m, p in WIZARD_CALLS if p.startswith("/api/setup/")]
 
 
 def test_wizard_page_calls_at_least_ten_setup_addresses():
     """Страница зовёт 10+ адресов /api/setup/* — если это перестало быть правдой,
-    значит страницу переписали и тест ниже (контракт) надо перечитать руками."""
-    assert len(WIZARD_CALLS) >= 10
-    assert all(p.startswith("/api/setup/") for _, p in WIZARD_CALLS)
+    значит страницу переписали и тесты контракта ниже надо перечитать руками."""
+    assert len(SETUP_CALLS) >= 10
+    assert all(p.startswith("/api/setup/") for _, p in SETUP_CALLS)
 
 
 @pytest.mark.parametrize("method,path", WIZARD_CALLS)
@@ -87,15 +88,15 @@ def test_every_address_from_the_page_exists(method, path):
     Адрес с конкатенацией (`'/api/setup/ollama/pull/' + S.model`) сверяем по префиксу.
     """
     have = _routes()
-    if method in have and any(m == method and p.startswith(path) for m, p in have):
-        return
-    raise AssertionError(f"страница зовёт {method} {path}, а такого роута нет")
+    ok = any(m == method and p == path for m, p in have) or any(m == method and p.startswith(path) for m, p in have)
+    assert ok, f"страница зовёт {method} {path}, а такого роута нет"
 
 
 def test_no_setup_route_is_dead_code():
     """Обратная сторона контракта: каждый роут мастера зовётся страницей."""
-    called = {p for _, p in WIZARD_CALLS}
-    dead = sorted(p for m, p in _routes() if p.startswith("/api/setup/") and not any(c.startswith(p) for c in called))
+    called = [re.sub(r"\{[^}]+\}", "", p) for _, p in WIZARD_CALLS]
+    dead = sorted(p for _, p in _routes() if p.startswith("/api/setup/")
+                  and not any(c.startswith(re.sub(r"\{[^}]+\}", "", p)) for c in called))
     assert not dead, f"роуты мастера, которых не зовёт страница: {dead}"
 
 
@@ -225,6 +226,7 @@ def mock_http(monkeypatch):
     monkeypatch.setattr(setup_api, "_sync_client", sync_client)
     monkeypatch.setattr(setup_api, "_cloud_client", async_client)
     monkeypatch.setattr(setup_api, "_proxy_client", async_client)
+    monkeypatch.setattr(setup_api, "_sync_proxy_client", sync_client)
     return state
 
 
@@ -324,8 +326,6 @@ NDJSON = b'{"status":"pulling manifest"}\n' \
 
 
 def test_pull_reports_progress_and_finishes(cfg_file, mock_http):
-    seen = {}
-
     def handler(req):
         if req.url.path.endswith("/api/pull"):
             return httpx.Response(200, content=NDJSON)
@@ -334,8 +334,7 @@ def test_pull_reports_progress_and_finishes(cfg_file, mock_http):
     mock_http["handler"] = handler
     r = _client().post("/api/setup/ollama/pull", json={"model": "qwen2.5:3b"})
     assert r.status_code == 200
-    body = r.json()
-    assert body["ok"] is True
+    assert r.json()["ok"] is True
     deadline = time.monotonic() + 15
     status = {}
     while time.monotonic() < deadline:
@@ -345,7 +344,6 @@ def test_pull_reports_progress_and_finishes(cfg_file, mock_http):
         time.sleep(0.05)
     assert status["status"] == "success", status
     assert status["total"] == 2048 and status["done"] == 2048, status
-    assert seen  # (заполняется ниже, если прогресс читался)
 
 
 def test_pull_of_downloaded_model_is_a_noop(cfg_file, mock_http):
@@ -593,6 +591,8 @@ WIZARD_SAVE = {
     "brain.cloud.provider": "groq",
     "brain.cloud.api_key": SECRET_CLOUD,
     "brain.vision.where": "cloud",
+    "telegram.token": SECRET_TOKEN,
+    "telegram.owner_id": 4242,
     "setup.done": True,
 }
 
@@ -603,12 +603,16 @@ def test_save_writes_config_and_reports_restart_keys(cfg_file):
     body = r.json()
     assert body["ok"] is True
     text = cfg_file.read_text(encoding="utf-8")
-    assert "Марвин" in text and SECRET_CLOUD in text, "настройки должны лечь в config.yaml"
+    assert "Марвин" in text and SECRET_CLOUD in text and SECRET_TOKEN in text, \
+        "настройки должны лечь в config.yaml"
     # честный ответ: что применится сразу, что — только после перезапуска
-    assert "brain.ollama.model" in body["restart"]
-    assert "telegram.token" in body["restart"]
+    assert "brain.ollama.model" in body["restart"], "модель Ollama читается один раз при старте"
+    assert "telegram.token" in body["restart"], "бот поднимается только на старте"
+    assert "assistant.name" in body["restart"], "имя зашито в core/identity.py при импорте"
     assert "persona.style" not in body["restart"], "характер применяется на лету"
+    assert "brain.cloud.api_key" not in body["restart"], "облако применяется на лету"
     assert body["done"] is True
+    assert SECRET_CLOUD not in r.text and SECRET_TOKEN not in r.text
 
 
 def test_save_never_echoes_secrets(cfg_file):
@@ -645,49 +649,63 @@ def test_save_of_masked_secret_does_not_wipe_it(secret_cfg_file):
 # ============================ 9. /restart ============================
 @pytest.fixture
 def restart_state(monkeypatch):
-    """Чистое состояние перезапуска и подменённые «убить процесс» / «spawn» — pytest не убьём."""
+    """Чистое состояние перезапуска и подменённые «spawn»/«выход» — pytest не убьём."""
     monkeypatch.setattr(setup_api, "_RESTART_RESULT", None)
     calls = {"spawn": 0, "exit": 0}
-    monkeypatch.setattr(setup_api, "_spawn_relauncher", lambda *a, **k: calls.__setitem__("spawn", calls["spawn"] + 1) or True)
-    monkeypatch.setattr(setup_api, "_schedule_exit", lambda *a, **k: calls.__setitem__("exit", calls["exit"] + 1))
+    monkeypatch.setattr(setup_api, "_spawn_relauncher",
+                        lambda *a, **k: calls.__setitem__("spawn", calls["spawn"] + 1) or True)
+    monkeypatch.setattr(setup_api, "_schedule_exit",
+                        lambda *a, **k: calls.__setitem__("exit", calls["exit"] + 1))
     monkeypatch.setattr(setup_api, "_supervisor", lambda: "start.bat")
-    monkeypatch.delenv("ASSISTANT_TEST", raising=False)
-    monkeypatch.delenv("JARVIS_TEST", raising=False)
+    monkeypatch.setattr(setup_api, "_is_test_run", lambda: False)
     return calls
 
 
 def test_restart_is_honest_and_idempotent(restart_state):
     first = _client().post("/api/setup/restart").json()
     assert first["ok"] is True
-    assert first.get("manual") is not True
-    assert restart_state["spawn"] + restart_state["exit"] >= 1
+    assert first["manual"] is not True
+    assert first["how"] == "supervisor"
+    assert restart_state["exit"] == 1, "ядро должно уйти, чтобы скрипт его поднял"
+    assert restart_state["spawn"] == 0, "при надзирателе второй экземпляр не нужен"
     second = _client().post("/api/setup/restart").json()
     assert second["already"] is True, "второй клик не должен плодить процессы"
-    assert restart_state["spawn"] == first.get("_spawns", restart_state["spawn"])
+    assert restart_state["exit"] == 1 and restart_state["spawn"] == 0
     assert second["how"] == first["how"]
 
 
-def test_restart_refuses_to_kill_the_test_process(restart_state):
+def test_restart_spawns_new_core_without_supervisor(monkeypatch, restart_state):
+    monkeypatch.setattr(setup_api, "_supervisor", lambda: None)
+    monkeypatch.setattr(setup_api, "_relaunch_argv", lambda: ["python", "run.py"])
+    body = _client().post("/api/setup/restart").json()
+    assert body["ok"] is True and body["how"] == "spawn"
+    assert restart_state["spawn"] == 1
+    _client().post("/api/setup/restart")
+    assert restart_state["spawn"] == 1, "повторный клик не должен поднимать второе ядро"
+
+
+def test_restart_refuses_to_kill_the_test_process(monkeypatch):
     """Под тестами (ASSISTANT_TEST=1) ядро не перезапускаем — честно говорим «вручную»."""
-    import os
-    os.environ["ASSISTANT_TEST"] = "1"
-    try:
-        body = _client().post("/api/setup/restart").json()
-    finally:
-        os.environ.pop("ASSISTANT_TEST", None)
+    monkeypatch.setattr(setup_api, "_RESTART_RESULT", None)
+    monkeypatch.setattr(setup_api, "_is_test_run", lambda: True)
+    monkeypatch.setattr(setup_api, "_spawn_relauncher",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("перезапуск в тестах нельзя")))
+    monkeypatch.setattr(setup_api, "_schedule_exit",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("выход в тестах нельзя")))
+    body = _client().post("/api/setup/restart").json()
     assert body["ok"] is False
     assert body["manual"] is True and body["detail"]
 
 
 def test_restart_without_launcher_says_manual(monkeypatch):
-    """Запуск не через run.py (uvicorn/wsgi/тест) — перезапуск себе не вернуть:
+    """Запуск не через run.py (uvicorn/wsgi/стенд) — перезапуск себе не вернуть:
     говорим правду, а не изображаем перезапуск."""
     monkeypatch.setattr(setup_api, "_RESTART_RESULT", None)
     monkeypatch.setattr(setup_api, "_relaunch_argv", lambda: None)
-    monkeypatch.delenv("ASSISTANT_TEST", raising=False)
-    monkeypatch.delenv("JARVIS_TEST", raising=False)
+    monkeypatch.setattr(setup_api, "_is_test_run", lambda: False)
     body = _client().post("/api/setup/restart").json()
     assert body["ok"] is False and body["manual"] is True
+    assert "ручн" in body["detail"].lower()
 
 
 # ============================ 10. мастер и редирект /setup ============================

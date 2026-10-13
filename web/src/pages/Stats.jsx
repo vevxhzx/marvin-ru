@@ -59,7 +59,11 @@ export default function Stats() {
     return paid.length ? paid.reduce((a, r) => a + r.cost_usd, 0) / paid.length : 0
   }, [sp, items])
 
-  const showMoney = !!sp?.priced
+  /* Деньги показываем, если стоимость хоть части ходов известна (counted). Это не то же самое,
+   * что «цена настроена сейчас»: посчитать можно было вчера, а убрать цену — сегодня, и
+   * деньги от этого не перестают быть потраченными. */
+  const showMoney = !!sp?.counted
+  /* А вот пустое состояние с полем цены — только когда цена не настроена и есть что считать. */
   const noPrice = !!sp && !sp.priced && (sp.tokens_in > 0 || sp.tokens_out > 0)
 
   return (
@@ -94,12 +98,17 @@ export default function Stats() {
                     fmt={(n) => `$${(Number(n) || 0).toFixed(4)}`}
                     className="text-[40px] font-semibold tracking-[-0.04em] leading-none"
                   />
-                  {!showMoney ? (
-                    <span className="mono text-[13px] text-[var(--ink-3)]">{t('st.spend_no_price_hint')}</span>
+                  {sp.uncpriced && showMoney ? (
+                    <span className="mono text-[13px] text-[var(--warn)]">
+                      {t('st.spend_uncpriced_n', { count: sp.uncpriced })}
+                    </span>
                   ) : null}
                 </div>
                 {showMoney ? (
-                  <div className="muted mt-2 text-md">{t('st.spend_per_turn')}: ${perTurn.toFixed(4)}</div>
+                  <div className="muted mt-2 text-md">
+                    {t('st.spend_per_turn')}: ${perTurn.toFixed(4)}
+                    {sp.uncpriced ? ` · ${t('st.spend_uncpriced_n', { count: sp.uncpriced })}` : ''}
+                  </div>
                 ) : null}
               </div>
 
@@ -140,7 +149,7 @@ export default function Stats() {
                   n: v.n,
                   tokens: v.tokens_in + v.tokens_out,
                   usd: v.usd,
-                  priced: !!sp.priced && !v.uncpriced,
+                  priced: showMoney && !v.uncpriced,
                   free: isFreeRoute(k),
                 }))}
                 showMoney={showMoney}
@@ -160,7 +169,7 @@ export default function Stats() {
                     n: v.n,
                     tokens: v.tokens_in + v.tokens_out,
                     usd: v.usd,
-                    priced: !!sp.priced && !v.uncpriced,
+                    priced: showMoney && !v.uncpriced,
                   }))}
                 showMoney={showMoney}
                 fmtNumber={fmtNumber}

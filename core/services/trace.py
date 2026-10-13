@@ -218,9 +218,15 @@ def recent(limit: int = 50, channel: str | None = None, only_bad: bool = False) 
 
 
 def _is_priced(r) -> bool:
-    """Цена для модели этого хода СЕЙЧАС известна? Считаем по настройкам, а не по cost_usd:
-    явно заданный ноль — это «бесплатно» (цена есть), а нулевой cost при ноль-ценных токенах —
-    «цены нет». Так хозяин видит разницу между «потратил $0» и «не знаю, сколько»."""
+    """Стоимость этого хода ИЗВЕСТНА — можно ли показывать деньги?
+
+    Три случая, и их надо различать (иначе хозяин видит неправду):
+      • cost_usd > 0 — деньги посчитаны и записаны. Правда даже если цену с тех пор убрали:
+        деньги-то потрачены, отменить их удалением настройки нельзя;
+      • цена есть в brain.pricing и равна нулю — модель бесплатная, $0.00 — это правда;
+      • ни того, ни другого — цену не задавали, стоимость 0 означает «не знаю», а не «бесплатно»."""
+    if float(r.cost_usd or 0.0) > 0:
+        return True
     try:
         from ..brain.llm import base as llm_base
         return bool(llm_base.pricing_for(r.model))
@@ -269,9 +275,11 @@ def tool_stats(days: int = 14) -> list[dict]:
 def spend_stats(days: int = 7) -> dict:
     """Сколько токенов и денег ушло за период. Главное для хозяина: он платит облаку.
 
-    Честность вместо удобства: `uncpriced` — ходы, где токены были, а цена модели в brain.pricing
-    не задана. Их стоимость НЕ приравнивается к нулю молча — в статистике видно, сколько ещё
-    не посчитано, и настройка цены это закрывает."""
+    Честность вместо удобства: `uncpriced` — ходы, где токены были, а стоимость НЕИЗВЕСТНА
+    (цены модели в brain.pricing нет и записывать было нечего). Их стоимость НЕ приравнивается
+    к нулю молча — видно, сколько ещё не посчитано, и настройка цены это закрывает.
+    Обратный случай тоже честный: ход, посчитанный по цене, остаётся посчитанным, даже если цену
+    потом убрали из настроек — деньги-то потрачены."""
     since = datetime.now() - timedelta(days=days)
     with session() as s:
         rows = list(s.exec(select(Run).where(Run.created_at >= since)))
@@ -288,7 +296,7 @@ def spend_stats(days: int = 7) -> dict:
         total += usd
         if p or c:
             priced_n += 1 if is_priced else 0
-            uncpriced += 0 if is_priced else 1
+            uncpriced += 1 if not is_priced else 0
         key = r.route or "none"
         dr = by_route.setdefault(key, {"ru": ROUTE_RU.get(key, key), "n": 0, "usd": 0.0,
                                        "tokens_in": 0, "tokens_out": 0, "uncpriced": 0})
@@ -306,11 +314,17 @@ def spend_stats(days: int = 7) -> dict:
         dm["uncpriced"] += 1 if (p or c) and not is_priced else 0
     try:
         from ..brain.llm import base as llm_base
-        has_price = llm_base.pricing_ready()
+        configured = llm_base.pricing_ready()
     except Exception:  # pragma: no cover
-        has_price = bool(total)
+        configured = bool(total)
     return {"days": days, "total_usd": round(total, 6), "tokens_in": tok_in, "tokens_out": tok_out,
-            "runs": len(rows), "priced": has_price, "uncpriced": uncpriced,
+            "runs": len(rows),
+            # priced — цена настроена СЕЙЧАС (по этому флагу сайт зовёт «задайте цену»).
+            # counted — стоимость хотя бы части ходов известна (записана раньше или посчитана
+            # по явному нулю «бесплатно»). Два флага, потому что одно не выводится из другого:
+            # цену могли посчитать вчера и убрать сегодня — деньги потрачены, а настройки нет.
+            "priced": configured, "counted": bool(total) or priced_n > 0,
+            "priced_runs": priced_n, "uncpriced": uncpriced,
             "by_route": by_route, "by_model": by_model}
 
 
@@ -367,12 +381,16 @@ def report_text(days: int = 7) -> str:
     sp = d.get("spend") or {}
     # Деньги — только когда они посчитаны. Молчание о цене честнее «$0.00»: это значит
     # «не знаю», а не «бесплатно», и хозяин пойдёт вписывать цену модели в настройки.
+    # Если часть ходов посчитана, а часть — нет, говорим и то и то: сумма честная,
+    # но неполная, и молчать про «не знаю» было бы враньём.
     if sp.get("total_usd"):
+        tail = (f" Не посчитал ещё {sp['uncpriced']} ходов — цены их моделей нет."
+                if sp.get("uncpriced") else "")
         lines.append(f"Потрачено на модели: ${sp['total_usd']:.4f} "
-                     f"({sp['tokens_in']} ток. вход + {sp['tokens_out']} выход).")
+                     f"({sp['tokens_in']} ток. вход + {sp['tokens_out']} выход).{tail}")
     elif sp.get("uncpriced"):
         lines.append(f"Токенов: {sp['tokens_in']} вход + {sp['tokens_out']} выход. "
-                     f"Сколько это в деньгах — не знаю: цены моделей не заданы (настройки → мозг → учёт токенов).")
+                     f"Сколько это в деньгах — не знаю: цены моделей не заданы (настройки → мозг → облако).")
     if len(lines) == 2 and not d["failed"] and not d["corrected"]:
         lines.append("Жалоб нет, сэр.")
     return "\n".join(lines)

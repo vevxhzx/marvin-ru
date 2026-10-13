@@ -1755,6 +1755,7 @@ export const DICT = {
   'st.spend_price_out': { ru: 'выход', en: 'output' },
   'st.spend_price_saved': { ru: 'цена сохранена — новые ходы считаются по ней', en: 'price saved — new turns are counted with it' },
   'st.spend_uncpriced': { ru: 'без цены', en: 'no price' },
+  'st.spend_uncpriced_n': { ru: ['без цены: {count}', 'без цены: {count}', 'без цены: {count}'], en: ['no price: {count}', 'no price: {count}'] },
   'st.spend_uncpriced_hint': { ru: 'Сколько стоили эти ходы — не знаю: цену модели надо вписать. Токены считаю честно, деньги не выдумываю.', en: 'I do not know what these turns cost: the model price has to be set. Tokens are counted honestly, money is not invented.' },
   'st.spend_per_turn': { ru: 'за ход', en: 'per turn' },
   'st.spend_route_rules': { ru: 'правила (без модели)', en: 'rules (no model)' },
