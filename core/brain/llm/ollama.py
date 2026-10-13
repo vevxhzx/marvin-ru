@@ -197,6 +197,8 @@ async def small_chat(system: str, user: str, json_mode: bool = True, num_predict
         r = await c.post(f"{_base.OLLAMA_URL}/api/chat", json=payload)
         r.raise_for_status()
         out = strip_think((r.json().get("message") or {}).get("content") or "")
+        _p, _c = _base.tokens_ollama(r.json())
+        _base.usage_note(_base.SMALL_MODEL or "ollama", _p, _c)
     log.info("малая модель %s ответила за %.1f с", _base.SMALL_MODEL, time.monotonic() - t0)
     SMALL_LAST.update({"at": time.time(), "seconds": round(time.monotonic() - t0, 1), "task": (system[:40] + "…") if len(system) > 40 else system})
     return out
@@ -313,6 +315,9 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
                         stats = chunk
                         break
     _log_ollama_stats(stats, bool(tools))
+    # учёт токенов: локальная модель бесплатна, но число токенов показываем хозяину (объём, скорость)
+    _p, _c = _base.tokens_ollama(stats)
+    _base.usage_note(_base.OLLAMA_MODEL or "ollama", _p, _c)
     calls = []
     for tc in msg.get("tool_calls", []) or []:
         f = tc.get("function", {})

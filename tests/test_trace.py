@@ -236,6 +236,19 @@ def test_disabled_trace_writes_nothing(monkeypatch):
     assert trace.recent() == []
 
 
+def test_disabled_trace_still_resets_usage(monkeypatch):
+    """Выключенный журнал не копит токены: start() обнуляет счётчик и когда trace.enabled = false.
+
+    Иначе выключенный trace копил бы вызовы в контексте запроса, а читать их некому — и
+    «накопленное» тихо росло бы до конца запроса."""
+    monkeypatch.setattr(trace, "enabled", lambda: False)
+    from core.brain.llm import base as llm_base
+    llm_base.usage_note("qwen3:4b", 500, 50)
+    assert llm_base.usage_now().n_calls == 1
+    trace.start("фраза", "web")
+    assert llm_base.usage_now().n_calls == 0
+
+
 def test_cleanup_removes_old_rows():
     from datetime import datetime, timedelta
     trace.start("старое", "web"); trace.finish("rules", [])

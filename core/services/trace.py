@@ -75,6 +75,13 @@ def _key(t: str) -> str:
 
 def start(text: str, channel: str) -> None:
     """Начало обработки фразы. Вызывается один раз из agent.handle()."""
+    # счётчик токенов обнуляем ВСЕГДА, даже когда журнал выключен: иначе выключенный trace
+    # копил бы вызовы в памяти контекста запроса, а читать их всё равно некому.
+    try:
+        from ..brain import llm
+        llm.usage_reset()
+    except Exception:  # pragma: no cover
+        pass
     if not enabled():
         return
     try:
@@ -102,17 +109,25 @@ def step(model: str = "") -> None:
 
 
 def finish(route: str = "none", actions: list[str] | None = None, ok: bool = True, error: str = "") -> int | None:
-    """Конец обработки: пишем строку. Возвращает id (или None, если журнал выключен)."""
+    """Конец обработки: пишем строку. Возвращает id (или None, если журнал выключен).
+
+    Токены и деньги подтягиваются из счётчика провайдера (brain/llm/base.py). За ход модель
+    зовётся обычно один раз, но в цикле «модель → инструмент → модель» — два-четыре: накопленное
+    уже суммировано, поэтому просто забираем. Цена считается по модели КАЖДОГО вызова — локальная
+    бесплатна, облако платное, и в одном ходе они чередуются."""
     c = _cur.get()
     _cur.set(None)
     if c is None:
         return None
     acts = list(actions or [])
     try:
-        row = Run(text=c.text, channel=c.channel, route=route or "none", model=c.model,
+        last_model = _last_model()          # ДО сброса счётчика: usage_now() его обнулит
+        prompt, completion, cost = _usage_of(c)
+        row = Run(text=c.text, channel=c.channel, route=route or "none", model=c.model or last_model,
                   tools=",".join(c.tools)[:500], actions=",".join(acts)[:300], steps=c.steps,
                   ms=int((time.monotonic() - c.t0) * 1000),
-                  ok=bool(ok) and route != "none", asked="clarify" in acts, error=(error or "")[:300])
+                  ok=bool(ok) and route != "none", asked="clarify" in acts, error=(error or "")[:300],
+                  prompt_tokens=prompt, completion_tokens=completion, cost_usd=cost)
         with session() as s:
             s.add(row)
             s.commit()
@@ -120,6 +135,30 @@ def finish(route: str = "none", actions: list[str] | None = None, ok: bool = Tru
     except Exception as e:  # pragma: no cover
         log.debug("trace.finish: %s", e)
         return None
+
+
+def _usage_of(c: "_Current") -> tuple[int, int, float]:
+    """(prompt, completion, доллары) за текущий ход. Любой сбой — честные нули."""
+    try:
+        from ..brain.llm import base as llm_base
+        u = llm_base.usage_now()
+        llm_base.usage_reset()
+        cost, _priced = u.cost()
+        return (u.prompt_tokens, u.completion_tokens, cost)
+    except Exception as e:  # pragma: no cover
+        log.debug("trace.usage: %s", e)
+        return (0, 0, 0.0)
+
+
+def _last_model() -> str:
+    """Модель, которая ответила последней, — если trace.step() её не назвал (бывает: локальный
+    путь не зовёт step). Иначе в разбивке «по моделям» половина строк была бы без модели."""
+    try:
+        from ..brain.llm import base as llm_base
+        models = llm_base.usage_now().models
+        return models[-1] if models else ""
+    except Exception:  # pragma: no cover
+        return ""
 
 
 def mark_corrected(channel: str | None = None, text: str | None = None, within_min: int = 60) -> None:
@@ -170,7 +209,23 @@ def recent(limit: int = 50, channel: str | None = None, only_bad: bool = False) 
              "route": r.route, "route_ru": ROUTE_RU.get(r.route, r.route), "model": r.model,
              "tools": [t for t in r.tools.split(",") if t], "actions": [a for a in r.actions.split(",") if a],
              "steps": r.steps, "ms": r.ms, "ok": r.ok, "asked": r.asked, "corrected": r.corrected,
-             "error": r.error} for r in rows]
+             "error": r.error,
+             "prompt_tokens": r.prompt_tokens or 0, "completion_tokens": r.completion_tokens or 0,
+             "tokens": (r.prompt_tokens or 0) + (r.completion_tokens or 0),
+             "cost_usd": round(float(r.cost_usd or 0.0), 6),
+             "priced": _is_priced(r)}
+            for r in rows]
+
+
+def _is_priced(r) -> bool:
+    """Цена для модели этого хода СЕЙЧАС известна? Считаем по настройкам, а не по cost_usd:
+    явно заданный ноль — это «бесплатно» (цена есть), а нулевой cost при ноль-ценных токенах —
+    «цены нет». Так хозяин видит разницу между «потратил $0» и «не знаю, сколько»."""
+    try:
+        from ..brain.llm import base as llm_base
+        return bool(llm_base.pricing_for(r.model))
+    except Exception:  # pragma: no cover
+        return False
 
 
 def route_stats(days: int = 14) -> dict[str, dict]:
@@ -211,6 +266,54 @@ def tool_stats(days: int = 14) -> list[dict]:
     return sorted(agg.values(), key=lambda d: (-d["fail"], -d["n"]))
 
 
+def spend_stats(days: int = 7) -> dict:
+    """Сколько токенов и денег ушло за период. Главное для хозяина: он платит облаку.
+
+    Честность вместо удобства: `uncpriced` — ходы, где токены были, а цена модели в brain.pricing
+    не задана. Их стоимость НЕ приравнивается к нулю молча — в статистике видно, сколько ещё
+    не посчитано, и настройка цены это закрывает."""
+    since = datetime.now() - timedelta(days=days)
+    with session() as s:
+        rows = list(s.exec(select(Run).where(Run.created_at >= since)))
+    total = 0.0
+    tok_in = tok_out = uncpriced = priced_n = 0
+    by_route: dict[str, dict] = {}
+    by_model: dict[str, dict] = {}
+    for r in rows:
+        p, c = int(r.prompt_tokens or 0), int(r.completion_tokens or 0)
+        usd = round(float(r.cost_usd or 0.0), 8)
+        is_priced = _is_priced(r)
+        tok_in += p
+        tok_out += c
+        total += usd
+        if p or c:
+            priced_n += 1 if is_priced else 0
+            uncpriced += 0 if is_priced else 1
+        key = r.route or "none"
+        dr = by_route.setdefault(key, {"ru": ROUTE_RU.get(key, key), "n": 0, "usd": 0.0,
+                                       "tokens_in": 0, "tokens_out": 0, "uncpriced": 0})
+        dr["n"] += 1
+        dr["usd"] = round(dr["usd"] + usd, 8)
+        dr["tokens_in"] += p
+        dr["tokens_out"] += c
+        dr["uncpriced"] += 1 if (p or c) and not is_priced else 0
+        mk = r.model or "—"
+        dm = by_model.setdefault(mk, {"n": 0, "usd": 0.0, "tokens_in": 0, "tokens_out": 0, "uncpriced": 0})
+        dm["n"] += 1
+        dm["usd"] = round(dm["usd"] + usd, 8)
+        dm["tokens_in"] += p
+        dm["tokens_out"] += c
+        dm["uncpriced"] += 1 if (p or c) and not is_priced else 0
+    try:
+        from ..brain.llm import base as llm_base
+        has_price = llm_base.pricing_ready()
+    except Exception:  # pragma: no cover
+        has_price = bool(total)
+    return {"days": days, "total_usd": round(total, 6), "tokens_in": tok_in, "tokens_out": tok_out,
+            "runs": len(rows), "priced": has_price, "uncpriced": uncpriced,
+            "by_route": by_route, "by_model": by_model}
+
+
 def report(days: int = 7) -> dict:
     """Сводка за период — то, из чего собирается человеческий отчёт и что отдаётся сайту."""
     since = datetime.now() - timedelta(days=days)
@@ -227,6 +330,7 @@ def report(days: int = 7) -> dict:
         "slowest": [{"text": r.text, "route": r.route, "ms": r.ms} for r in slow[:3]],
         "routes": route_stats(days),
         "tools": tool_stats(days)[:8],
+        "spend": spend_stats(days),
         "corrections": [{"text": r.text, "actions": [a for a in r.actions.split(",") if a]}
                         for r in rows if r.corrected][-5:],
         "errors": [{"text": r.text, "error": r.error} for r in rows if r.error][-5:],
@@ -260,6 +364,15 @@ def report_text(days: int = 7) -> str:
     if d["slow"]:
         s0 = d["slowest"][0]
         lines.append(f"Медленнее {SLOW_MS // 1000} с: {d['slow']} раз, дольше всего — «{s0['text'][:40]}» ({s0['ms'] / 1000:.0f} с).")
+    sp = d.get("spend") or {}
+    # Деньги — только когда они посчитаны. Молчание о цене честнее «$0.00»: это значит
+    # «не знаю», а не «бесплатно», и хозяин пойдёт вписывать цену модели в настройки.
+    if sp.get("total_usd"):
+        lines.append(f"Потрачено на модели: ${sp['total_usd']:.4f} "
+                     f"({sp['tokens_in']} ток. вход + {sp['tokens_out']} выход).")
+    elif sp.get("uncpriced"):
+        lines.append(f"Токенов: {sp['tokens_in']} вход + {sp['tokens_out']} выход. "
+                     f"Сколько это в деньгах — не знаю: цены моделей не заданы (настройки → мозг → учёт токенов).")
     if len(lines) == 2 and not d["failed"] and not d["corrected"]:
         lines.append("Жалоб нет, сэр.")
     return "\n".join(lines)

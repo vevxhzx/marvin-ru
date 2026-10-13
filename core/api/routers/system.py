@@ -232,6 +232,11 @@ def settings_put(p: SettingsIn):
     if any(k.startswith(("brain.cloud.", "brain.gemini.", "brain.mode", "brain.vision.", "brain.sorter.")) for k in changed):
         from ...brain import llm
         llm.reload_cloud_settings()
+    # цены токенов тоже на лету: пересчитывать прошлые ходы нельзя (они уже записаны),
+    # но новые сразу считаются по новой цене, и экран статистики перестаёт говорить «нет цены»
+    if any(k.startswith("brain.pricing.") for k in changed):
+        from ...config import refresh as _cfg_refresh
+        _cfg_refresh()
     if any(k.startswith("google.") for k in changed):
         _gcal_reload()
     if any(k.startswith(("owner.", "persona.")) for k in changed):
@@ -375,14 +380,21 @@ async def phone_access(request: Request):
 
 @router.get("/api/runs")
 def runs(limit: int = 50, channel: str | None = None, only_bad: bool = False):
-    """Журнал работы: последние ходы — путь, инструменты, время, где переспросил и где его поправили."""
+    """Журнал работы: последние ходы — путь, инструменты, время, где переспросил и где его поправили.
+
+    В каждом ходе ещё токены и стоимость (prompt_tokens / completion_tokens / cost_usd) —
+    хозяин платит за облако и хочет видеть это по каждой реплике, а не «где-то в логах»."""
     from ...services import trace
     return {"items": trace.recent(limit, channel, only_bad), "enabled": trace.enabled()}
 
 
 @router.get("/api/runs/report")
 def runs_report(days: int = 7):
-    """Сводка «как я работал» за период + текст для чата."""
+    """Сводка «как я работал» за период + текст для чата.
+
+    В блоке `spend` — расход: total_usd, токены, разбивка по маршрутам и по моделям.
+    uncpriced — ходы, где токены были, а цена модели в brain.pricing не задана (такие считаются
+    честно «нет цены», а не «$0.00»)."""
     from ...services import trace
     return {**trace.report(days), "text": trace.report_text(days)}
 

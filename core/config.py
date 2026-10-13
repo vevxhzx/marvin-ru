@@ -192,6 +192,8 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "brain.cloud.max_tokens": ("int", "Потолок ответа облака, токенов (1024; большие пачки — 2048–4096)", False),
     "brain.cloud.timeout": ("int", "Секунд ждать ответ облака (45; длинным ответам — 60–90)", False),
     "brain.cloud.personal_tools": ("bool", "Режим «облако вместо ПК» (brain.mode=cloud): отдавать облачной модели личные данные — заметки, память, карточки людей, сводки по деньгам и заказам. Выключено = облако только пишет, но не читает ваши данные", False),
+    "brain.pricing.default_prompt": ("str", "Цена входных токенов за 1 млн, доллары (например 0.14). Пусто = расход не считается, цены не выдумываются", False),
+    "brain.pricing.default_completion": ("str", "Цена выходных токенов за 1 млн, доллары (например 0.28). Пусто = расход не считается", False),
     "brain.gemini.auto": ("bool", "Разговор и общие вопросы — в облако (иначе только по слову «облако, …»)", False),
     "brain.gemini.api_key": ("str", "Ключ Google Gemini (только если провайдер gemini)", True),
     "brain.gemini.model": ("str", "Модель Google Gemini (auto)", False),

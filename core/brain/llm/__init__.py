@@ -10,6 +10,9 @@ from . import lmstudio as _lmstudio
 from . import ollama as _ollama
 from . import vision as _vision
 
+# Счётчик токенов и цены — в base.py, наружу отдаём тем же фасадом (см. _CANON ниже)
+from .base import Usage  # noqa: F401
+
 # Дефолты безопасности живут в base.py (не здесь). tests/test_overnight_fase6_security.py
 # проверяет их через inspect.getsource(llm), а для пакета это возвращает данный файл,
 # поэтому строки продублированы указателем (реальный код — в base.py, поведение 1:1):
@@ -52,6 +55,7 @@ __all__ = [
     "SMALL_KEEP_ALIVE",
     "SMALL_LAST",
     "SMALL_MODEL",
+    "Usage",
     "VISION_CLOUD_OK",
     "VISION_MODEL",
     "VISION_WHERE",
@@ -65,6 +69,7 @@ __all__ = [
     "cloud_timeout",
     "cloud_title",
     "cloud_tools_chat",
+    "cost_usd",
     "describe_image",
     "embed",
     "embed_available",
@@ -88,6 +93,8 @@ __all__ = [
     "ollama_available",
     "ollama_chat",
     "ollama_diagnose",
+    "pricing_for",
+    "pricing_ready",
     "reasoning_mode",
     "reload_cloud_settings",
     "reload_lmstudio",
@@ -102,7 +109,13 @@ __all__ = [
     "small_model_active",
     "strip_think",
     "token_sink",
+    "tokens_gemini",
+    "tokens_ollama",
+    "tokens_openai",
     "unload_ollama",
+    "usage_note",
+    "usage_now",
+    "usage_reset",
     "user_recent",
     "vision_hint",
     "vision_status",

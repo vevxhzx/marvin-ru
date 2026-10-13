@@ -294,6 +294,20 @@ def _v15_fact_private(conn) -> None:
     add_column(conn, "fact", "is_private", "BOOLEAN DEFAULT 0")
 
 
+def _v17_run_tokens(conn) -> None:
+    """Учёт денег в журнале работы: `run.prompt_tokens` / `run.completion_tokens` (INTEGER DEFAULT 0)
+    и `run.cost_usd` (FLOAT DEFAULT 0.0) — сколько токенов съела модель за ход и сколько это стоило.
+
+    Только ADD COLUMN со значениями по умолчанию: старые строки получают 0, то есть «учёта ещё не было».
+    Ноль у cost_usd означает не «бесплатно», а «цена не задана в brain.pricing» — статистика
+    (trace.spend_stats) показывает это флагом `uncpriced`, а не притворяется, что потрачено $0.00.
+    Идемпотентна через add_column() (повторный прогон ничего не меняет).
+    Бэкап — штатный backup_before_migration() в apply()."""
+    add_column(conn, "run", "prompt_tokens", "INTEGER DEFAULT 0")
+    add_column(conn, "run", "completion_tokens", "INTEGER DEFAULT 0")
+    add_column(conn, "run", "cost_usd", "FLOAT DEFAULT 0.0")
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
@@ -313,6 +327,7 @@ MIGRATIONS: list[Migration] = [
     (14, "память: fact.due (дата-метка из текста, ISO или NULL, без автокалендаря)", _v14_fact_due),
     (15, "память: fact.is_private (замок: в облако не уходит, дефолт открыт)", _v15_fact_private),
     (16, "мост: fact.source_ref (ссылка note:/link: для дедупа, вместо строки в INTEGER)", _v16_fact_source_ref),
+    (17, "учёт денег: run.prompt_tokens/completion_tokens/cost_usd (0 = цена не задана, не «бесплатно»)", _v17_run_tokens),
 ]
 
 

@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import time
+from dataclasses import dataclass, field, replace
 import httpx
 from typing import Awaitable, Callable
 from ...config import cfg
@@ -95,11 +96,14 @@ __all__ = [
     "cloud_personal_tools",
     "cloud_timeout",
     "cloud_title",
+    "cost_usd",
+    "pricing_ready",
     "gemini_enabled",
     "lms_last_error",
     "local_only",
     "log",
     "mark_user_active",
+    "pricing_for",
     "reasoning_mode",
     "reload_cloud_settings",
     "reload_lmstudio_settings",
@@ -108,6 +112,13 @@ __all__ = [
     "short_mode",
     "strip_think",
     "token_sink",
+    "tokens_gemini",
+    "Usage",
+    "tokens_ollama",
+    "tokens_openai",
+    "usage_note",
+    "usage_now",
+    "usage_reset",
     "user_recent",
 ]
 
@@ -609,3 +620,208 @@ CLOUD_VISION_MODELS = {"groq": ["qwen/qwen3.6-27b", "qwen/qwen3.8-27b", "meta-ll
                        "nvidia": ["meta/llama-4-scout-17b-16e-instruct", "qwen/qwen2.5-vl-72b-instruct"]}
 _CLOUD_VISION_GOOD: dict[str, str] = {}
 _VISION_LOCAL_OK: bool | None = None
+
+
+# ------------------------------------------------------- учёт токенов и денег
+# Сколько токенов съела модель и сколько это стоило. Нужно хозяину: он платит
+# провайдеру (OpenRouter/DeepSeek) и хочет видеть расход, а не только «ответили».
+#
+# ПОЧЕМУ АККУМУЛЯТОР, А НЕ ВОЗВРАТ. Три варианта были на столе:
+#   1) вернуть из cloud_chat/ollama_chat кортеж (текст, prompt, completion) — ломает
+#      ВСЕ вызывающие: agent.py, memory/*, persona.py, sorter.py, judge.py, quick.py.
+#      Их десятки, подпись типа str | None уезжает в TypeError по всему мозгу. Отклонено;
+#   2) отдельный объект Usage, который каждый вызывающий обязан прокинуть вниз и наверх —
+#      то же самое, только переименованное, плюс лишний параметр в публичных функциях. Отклонено;
+#   3) аккумулятор в ContextVar — провайдер САМ отмечает, сколько потратил, ничего не меняя
+#      сигнатур. Читает его trace.finish() в конце хода. Выбрано.
+#
+# ПОЧЕМУ ContextVar, А НЕ ГЛОБАЛЬНЫЙ СЧЁТЧИК. Один asyncio-процесс обслуживает и хозяина,
+# и фоновые задачи (уборка памяти, майнджер уведомлений). Общий счётчик смешал бы фоновой
+# вызов с ходом. ContextVar копируется вместе с контекстом задачи: set() внутри фоновой
+# задачи не виден основному ходу, поэтому лишнего не припишется.
+#
+# ЧЕСТНОСТЬ. Цена модели берётся из настроек хозяина (brain.pricing). Нет цены — расход 0,
+# и флаг priced=False: в статистике это видно как «нет цены», а не как «потратил ноль».
+@dataclass(frozen=True)
+class Usage:
+    """Сколько токенов накоплено за текущий ход. Неизменяемый: set() вместо мутации —
+    так видна, кому принадлежит счётчик (своя копия у фоновой задачи)."""
+
+    calls: tuple[tuple[str, int, int], ...] = field(default=())   # (модель, prompt, completion) по каждому вызову
+
+    @property
+    def n_calls(self) -> int:
+        """Сколько ответов модели учтено за ход."""
+        return len(self.calls)
+
+    @property
+    def prompt_tokens(self) -> int:
+        return sum(c[1] for c in self.calls)
+
+    @property
+    def completion_tokens(self) -> int:
+        return sum(c[2] for c in self.calls)
+
+    @property
+    def tokens(self) -> int:
+        return self.prompt_tokens + self.completion_tokens
+
+    @property
+    def models(self) -> list[str]:
+        """Модели, которые реально отвечали, по порядку и без повторов."""
+        out: list[str] = []
+        for m, _, _ in self.calls:
+            if m and m not in out:
+                out.append(m)
+        return out
+
+    def cost(self) -> tuple[float, bool]:
+        """(доллары, посчитано ли). Каждый вызов тарифицируется по СВОЕЙ модели: в одном ходе
+        локальная модель (бесплатно) и облако (платно) чередуются."""
+        total, priced = 0.0, False
+        for model, p, c in self.calls:
+            usd, ok = cost_usd(model, p, c)
+            total += usd
+            priced = priced or ok
+        return (round(total, 8), priced)
+
+    def add(self, model: str, prompt: int, completion: int) -> "Usage":
+        return replace(self, calls=self.calls + ((str(model or ""), int(prompt), int(completion)),))
+
+
+_usage: contextvars.ContextVar[Usage] = contextvars.ContextVar("llm_usage", default=Usage())
+
+
+def usage_now() -> Usage:
+    """Накоплено за текущий ход (пусто — ни одного ответа модели не было)."""
+    return _usage.get()
+
+
+def usage_reset() -> None:
+    """Обнулить счётчик. Зовёт trace.start() в начале каждого хода."""
+    _usage.set(Usage())
+
+
+def usage_note(model: str, prompt: int, completion: int) -> None:
+    """Провайдер отметил один ответ. Мусор и нули игнорируются — вызов без счётчиков
+    (LM Studio без usage) не должен превращаться в строку журнала с нулём."""
+    try:
+        p, c = int(prompt or 0), int(completion or 0)
+    except (TypeError, ValueError):
+        return
+    if p <= 0 and c <= 0:
+        return
+    _usage.set(_usage.get().add(model, max(0, p), max(0, c)))
+
+
+def _int(value) -> int:
+    """Токены от провайдера: int или None. Строки, мусор и отрицательные — ноль."""
+    try:
+        n = int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+    return n if n > 0 else 0
+
+
+def tokens_openai(data) -> tuple[int, int]:
+    """OpenRouter, Groq, DeepSeek, LM Studio и любой OpenAI-совместимый: usage.prompt_tokens/completion_tokens."""
+    usage = (data or {}).get("usage") or {} if isinstance(data, dict) else {}
+    return _int(usage.get("prompt_tokens")), _int(usage.get("completion_tokens"))
+
+
+def tokens_ollama(data) -> tuple[int, int]:
+    """Ollama /api/chat: prompt_eval_count (промпт) и eval_count (ответ)."""
+    d = data if isinstance(data, dict) else {}
+    return _int(d.get("prompt_eval_count")), _int(d.get("eval_count"))
+
+
+def tokens_gemini(data) -> tuple[int, int]:
+    """Gemini: usageMetadata.promptTokenCount/candidatesTokenCount."""
+    meta = (data or {}).get("usageMetadata") or {} if isinstance(data, dict) else {}
+    return _int(meta.get("promptTokenCount")), _int(meta.get("candidatesTokenCount"))
+
+
+def _pricing_cfg():
+    return getattr(getattr(cfg, "brain", None), "pricing", None)
+
+
+def _pricing_models() -> dict:
+    """Карта «модель → цена» из brain.pricing.models. Пустая, если её нет.
+
+    Ключи в YAML содержат «/» и точки, поэтому читаем словарь у _Node, а не через getattr."""
+    raw = getattr(_pricing_cfg(), "models", None)
+    if isinstance(raw, dict):
+        return {str(k).lower(): v for k, v in raw.items()}
+    if hasattr(raw, "__dict__"):
+        return {str(k).lower(): getattr(raw, k) for k in vars(raw)}
+    return {}
+
+
+def _float(value) -> float | None:
+    try:
+        f = float(value)
+    except (TypeError, ValueError):
+        return None
+    return f if f >= 0 else None
+
+
+def _price_pair(value) -> tuple[float, float] | None:
+    """Цена из настройки в любом из двух видов: {prompt, completion} или [prompt, completion]."""
+    if isinstance(value, (list, tuple)) and len(value) >= 2:
+        a, b = _float(value[0]), _float(value[1])
+    else:
+        if isinstance(value, dict):
+            get = value.get
+        else:
+            get = lambda k, d=None: getattr(value, k, d)  # noqa: E731 — _Node из config.yaml
+        a, b = _float(get("prompt")), _float(get("completion"))
+    return (a, b) if a is not None and b is not None else None
+
+
+def pricing_for(model: str) -> tuple[float, float] | None:
+    """Цена за 1 млн токенов (prompt, completion) в долларах. None — цена неизвестна.
+
+    Порядок: точное имя модели → то же без хвоста («:free» у OpenRouter, «-latest» у Ollama) →
+    самая длинная подстрока-префикс → default_prompt/default_completion. Ноль в настройке —
+    честное «бесплатно», а не «нет цены»."""
+    name = str(model or "").strip().lower()
+    if not name:
+        return None
+    models = _pricing_models()
+    if models:
+        for cand in (name, name.split(":", 1)[0]):
+            if cand in models:
+                pair = _price_pair(models[cand])
+                if pair:
+                    return pair
+        # префикс: «deepseek/deepseek-v4.1-flash» подходит и для «deepseek/deepseek-v4.1-flash:beta»
+        best = ""
+        for key in models:
+            if key and name.startswith(key) and len(key) > len(best):
+                best = key
+        if best:
+            pair = _price_pair(models[best])
+            if pair:
+                return pair
+    default = _price_pair({"prompt": getattr(_pricing_cfg(), "default_prompt", ""),
+                           "completion": getattr(_pricing_cfg(), "default_completion", "")})
+    return default
+
+
+def cost_usd(model: str, prompt: int, completion: int) -> tuple[float, bool]:
+    """Стоимость одного вызова в долларах и посчитали ли мы её.
+
+    Возвращает (0.0, False), если цены нет: выдумывать «примерную» стоимость нельзя —
+    хозяин платит настоящие деньги, и неправда здесь дороже нуля."""
+    price = pricing_for(model)
+    if not price:
+        return (0.0, False)
+    usd = (max(0, _int(prompt)) / 1_000_000) * price[0] + (max(0, _int(completion)) / 1_000_000) * price[1]
+    return (round(usd, 8), True)
+
+
+def pricing_ready() -> bool:
+    """Задана ли хоть какая-то цена — по этому флагу сайт зовёт пустое состояние «задайте цену»."""
+    if _pricing_models():
+        return True
+    return bool(getattr(_pricing_cfg(), "default_prompt", "") or getattr(_pricing_cfg(), "default_completion", ""))

@@ -133,6 +133,8 @@ async def _lmstudio_chat(messages: list[dict], temperature: float = 0.3,
         except Exception as e:
             _lms_fail(_lms_why(e, _base.LMSTUDIO_BASE))
             raise
+        _p, _c = _base.tokens_openai(r.json())
+        _base.usage_note(model, _p, _c)
         msg = ((r.json().get("choices") or [{}])[0].get("message") or {})
         content = msg.get("content") or ""
         if isinstance(content, list):  # content-блоки — склеиваем текст
@@ -194,6 +196,8 @@ async def _lmstudio_tools_chat(messages: list[dict], tools: list[dict],
         except Exception as e:
             _lms_fail(_lms_why(e, _base.LMSTUDIO_BASE))
             raise
+        _p, _c = _base.tokens_openai(r.json())
+        _base.usage_note(model, _p, _c)
         msg = (r.json().get("choices") or [{}])[0].get("message") or {}
         calls = []
         for tc in msg.get("tool_calls") or []:

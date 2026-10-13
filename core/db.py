@@ -429,6 +429,13 @@ class Run(SQLModel, table=True):
     asked: bool = False                                # переспросил вместо того, чтобы сделать
     corrected: bool = Field(default=False, index=True) # хозяин следом отменил или поправил тип записи
     error: str = ""                                    # причина сбоя, если был
+    # Учёт денег (миграция v17). Хозяин платит облаку (OpenRouter/DeepSeek) и хочет видеть расход.
+    prompt_tokens: int = 0                             # токенов ушло в модель за ход (все вызовы суммой)
+    completion_tokens: int = 0                         # токенов модель ответила (все вызовы суммой)
+    # cost_usd — ДОЛЛАРЫ, и здесь намеренно float, а не копейки (миграция v8): один ход стоит
+    # доли цента, целые копейки округлили бы его в ноль и статистика соврала бы. Суммируем только
+    # на экране (trace.spend_stats), там округление до 6 знаков.
+    cost_usd: float = 0.0                              # 0 = цена модели не задана (brain.pricing) — не «бесплатно»
     created_at: datetime = Field(default_factory=now, index=True)
 
 

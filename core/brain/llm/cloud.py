@@ -33,6 +33,16 @@ __all__ = [
 LAST_CLOUD_MODEL: str = ""          # модель, которая реально ответила в последний раз (после фолбэков) — показываем в настройках
 
 
+def _note_cloud_usage(data: dict, model: str = "") -> None:
+    """Отметить токены одного ответа облака (см. base.usage_note). Повторы тоже считаются:
+    провайдер списывает деньги за КАЖДЫЙ принятый запрос, поэтому честно считаем все."""
+    try:
+        p, c = _base.tokens_openai(data)
+        _base.usage_note(model or _cloud_model(), p, c)
+    except Exception as e:  # pragma: no cover — счётчик токенов не имеет права ломать ответ
+        log.debug("usage cloud: %s", e)
+
+
 async def resolve_cloud_model(force: bool = False) -> str:
     """Для «auto» у OpenRouter — выбрать живую бесплатную модель. Для остальных — как в настройках."""
     want = _base.CLOUD_MODEL or PROVIDERS.get(_base.CLOUD_PROVIDER, {}).get("model", "")
@@ -134,11 +144,17 @@ async def _cloud_stream(body: dict, headers: dict, sink) -> str | None:
     routes = _cloud_routes()
     if _base._CLOUD_ROUTE_OK in routes:
         routes = [_base._CLOUD_ROUTE_OK] + [r for r in routes if r != _base._CLOUD_ROUTE_OK]
+    # usage в стриме приезжает последним куском, только если провайдеру сказано его прислать
+    stream_body = {**body, "stream": True}
+    if _base.CLOUD_PROVIDER == "openrouter":
+        stream_body["usage"] = {"include": True}
+    elif _base.CLOUD_PROVIDER == "groq":
+        stream_body["stream_options"] = {"include_usage": True}
     for name, proxy in routes:
         text = ""
         try:
             async with _cloud_client(45, proxy) as c:
-                async with c.stream("POST", f"{_cloud_base_url()}/chat/completions", json={**body, "stream": True}, headers=headers) as r:
+                async with c.stream("POST", f"{_cloud_base_url()}/chat/completions", json=stream_body, headers=headers) as r:
                     if r.status_code != 200:
                         _base._CLOUD_ROUTE_OK = (name, proxy)
                         body_txt = (await r.aread())[:200].decode("utf-8", "ignore")
@@ -154,7 +170,14 @@ async def _cloud_stream(body: dict, headers: dict, sink) -> str | None:
                         if data == "[DONE]":
                             break
                         try:
-                            delta = ((json.loads(data).get("choices") or [{}])[0].get("delta") or {})
+                            chunk = json.loads(data)
+                        except Exception:
+                            continue
+                        # последний кучек стрима несёт usage (если провайдер его присылает)
+                        if isinstance(chunk, dict) and chunk.get("usage"):
+                            _note_cloud_usage(chunk, str(chunk.get("model") or body.get("model", "")))
+                        try:
+                            delta = ((chunk.get("choices") or [{}])[0].get("delta") or {})
                         except Exception:
                             continue
                         piece = delta.get("content") or ""
@@ -288,6 +311,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
         if True:
             r.raise_for_status()
             data = r.json()
+            _note_cloud_usage(data, body.get("model", ""))
             msg = (data.get("choices") or [{}])[0].get("message") or {}
             text = strip_think(msg.get("content") or "")
             # Пустой content при заполненном reasoning НИКОГДА не отдаём как ответ: раньше тут стоял
@@ -308,6 +332,7 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 r = await _cloud_post("/chat/completions", body, headers)
                 r.raise_for_status()
                 data = r.json()
+                _note_cloud_usage(data, body.get("model", ""))
                 msg = (data.get("choices") or [{}])[0].get("message") or {}
                 text = strip_think(msg.get("content") or "")
                 _reasoning_only = not text and bool((msg.get("reasoning") or msg.get("reasoning_content") or "").strip())
@@ -322,6 +347,8 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 r = await _cloud_post("/chat/completions", body, headers)
                 r.raise_for_status()
                 data = r.json()
+                _note_cloud_usage(data, body.get("model", ""))
+                _note_cloud_usage(data, body.get("model", ""))
                 msg = (data.get("choices") or [{}])[0].get("message") or {}
                 text = strip_think(msg.get("content") or "")
                 _reasoning_only = not text and bool((msg.get("reasoning") or msg.get("reasoning_content") or "").strip())
@@ -436,6 +463,7 @@ async def cloud_tools_chat(messages: list[dict], tools: list[dict], temperature:
             body["model"] = await groq_tools_model(force=True)
             r = await _cloud_post("/chat/completions", body, headers, timeout=max(60.0, cloud_timeout()))
         r.raise_for_status()
+        _note_cloud_usage(r.json(), body.get("model", ""))
         msg = (r.json().get("choices") or [{}])[0].get("message") or {}
         calls = []
         for tc in msg.get("tool_calls") or []:
@@ -592,6 +620,11 @@ async def gemini_chat(system: str, user_text: str, history: list[dict] | None = 
             r.raise_for_status()
             data = r.json()
             cand = (data.get("candidates") or [{}])[0]
+            try:
+                _gp, _gc = _base.tokens_gemini(data)
+                _base.usage_note(model, _gp, _gc)
+            except Exception:  # pragma: no cover
+                pass
             parts = cand.get("content", {}).get("parts") or []
             # у reasoning-моделей Gemini отдаёт мысли отдельными parts с флагом thought=true — их в чат не даём
             text = "".join(p.get("text", "") for p in parts if not p.get("thought")).strip()
