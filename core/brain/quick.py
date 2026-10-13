@@ -381,8 +381,98 @@ def debts(text: str, channel: str) -> Result | None:
 
 
 # ------------------------------------------------------------------ переводы, наличные
-TRANSFER_RX = re.compile(r"^\s*(?:перевел\w*|перевёл|перевод|переведи|перекинул\w*|перекинь|закинул\w*|положил\w*|пополнил\w*)\s+(.+)$", re.I)
+TRANSFER_RX = re.compile(r"^\s*(?:перевел\w*|перевёл|перевод|переведи|перекинул\w*|перекинь|закинул\w*|положил\w*|пополн\w*)\s+(.+)$", re.I)
 CASH_RX = re.compile(r"^\s*(?:снял\w*|обналичил\w*|снять)\s+(.+)$", re.I)
+# свой слот (как regime_pending): вопрос про сумму/счета перевода — чужие pending не трогаем
+_TRANSFER_KEY = "transfer_pending:{ch}"
+_TRANSFER_TTL = 300
+_TRANSFER_NO_RX = re.compile(r"^\s*(нет|не надо|отмена|отбой|стоп|неа|забудь|ничего)\s*[.!]?\s*$", re.I)
+
+
+def _transfer_pending_get(channel: str) -> tuple[dict, datetime] | None:
+    raw = get_setting(_TRANSFER_KEY.format(ch=channel)) or ""
+    if "|" not in raw:
+        return None
+    ts, payload = raw.split("|", 1)
+    try:
+        return json.loads(payload), datetime.fromisoformat(ts)
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def _transfer_pending_set(channel: str, payload: dict) -> None:
+    set_setting(_TRANSFER_KEY.format(ch=channel), f"{datetime.now().isoformat()}|{json.dumps(payload, ensure_ascii=False)}")
+
+
+def _transfer_pending_clear(channel: str) -> None:
+    set_setting(_TRANSFER_KEY.format(ch=channel), "")
+
+
+def _transfer_ask_text(amount: float | None, src: str | None, to: str | None) -> Result:
+    """Что спросить, когда переводу не хватает кусков. Без гаданий — только вопрос."""
+    ctx = ""
+    if src and to:
+        ctx = f" с {src} на {to}"
+    elif src:
+        ctx = f" с {src}"
+    elif to:
+        ctx = f" на {to}"
+    if amount is None and not to:
+        q = "сколько и на какой счёт"
+    elif amount is None:
+        q = "сколько"
+    else:
+        q = "на какой счёт"
+    eg = int(amount) if amount else 1000
+    return (f"Перевод{ctx} — {q}, сэр? Например: «{eg} на карту». Или скажите «нет».", ["clarify"])
+
+
+def _do_transfer(amount: float, to_name: str | None, src_name: str | None, channel: str) -> Result | None:
+    """Собственно запись перевода между своими счетами (инвариант долг/карта держит finance)."""
+    to = finance.find_account(to_name)
+    if not to:
+        if not re.search(r"\b(сч[её]т|карт|банк|сбер|тинь|т-банк|тбанк|альфа|втб|наличн|кэш|кеш|вклад|копилк|накоп)", to_name, re.I):
+            return None   # «переведи 5000 на подарок» — не счёт: ниже разберём как трату
+        to = finance.add_account(to_name.title(), "bank", 0)
+    src = finance.find_account(src_name) if src_name else None
+    if src and src.id == to.id:
+        return "Перевод на тот же счёт — деньги устанут, сэр.", []
+    try:
+        finance.add_transaction(amount, "transfer", None, None, src.name if src else None, to.name, source=channel)
+    except finance.FinanceError as e:
+        return f"Не записал: {e}.", []
+    src_lbl = src.name if src else finance.main_account_name()
+    return f"Перевод {money(amount)}: {src_lbl} → {to.name}. Общий баланс тот же, сэр.", ["add_transfer"]
+
+
+def transfer_ask(text: str, channel: str) -> Result | None:
+    """Ответ на вопрос про сумму/счета перевода (свой слот transfer_pending).
+    Пишем только когда есть сумма И счёт-получатель — иначе переспрашиваем, слот живёт 5 минут."""
+    p = _transfer_pending_get(channel)
+    if not p:
+        return None
+    d, ts = p
+    if (datetime.now() - ts).total_seconds() > _TRANSFER_TTL:
+        _transfer_pending_clear(channel)
+        return None
+    if _TRANSFER_NO_RX.match(text):
+        _transfer_pending_clear(channel)
+        return "Ок, не записываю.", []
+    amount, rest = parse_amount(text)
+    tm = re.search(r"\b(?:на|в|во)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:с|со|из)\s+|$)", rest, re.I)
+    sm = re.search(r"\b(?:с|со|из)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:на|в|во)\s+|$)", rest, re.I)
+    amount = amount or d.get("amount")
+    src = (sm.group(1).strip() if sm else None) or d.get("src")
+    to = (tm.group(1).strip() if tm else None) or d.get("to")
+    if amount and to:
+        _transfer_pending_clear(channel)
+        r = _do_transfer(amount, to, src, channel)
+        if r:
+            return r
+        _transfer_pending_set(channel, {"amount": amount, "src": src, "to": to})
+        return f"Счёт «{to}» не нашёл, сэр. Уточните название — или скажите «нет».", ["clarify"]
+    _transfer_pending_set(channel, {"amount": amount, "src": src, "to": to})
+    return _transfer_ask_text(amount, src, to)
 
 
 def transfers(text: str, channel: str) -> Result | None:
@@ -409,8 +499,6 @@ def transfers(text: str, channel: str) -> Result | None:
     if m:
         body = m.group(1)
         amount, rest = parse_amount(body)
-        if amount is None:
-            return None
         to_name = src_name = None
         tm = re.search(r"\b(?:на|в|во)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:с|со|из)\s+|$)", rest, re.I)
         sm = re.search(r"\b(?:с|со|из)\s+([а-яёa-z0-9\- ]+?)(?=\s+(?:на|в|во)\s+|$)", rest, re.I)
@@ -418,16 +506,25 @@ def transfers(text: str, channel: str) -> Result | None:
             to_name = tm.group(1).strip()
         if sm:
             src_name = sm.group(1).strip()
+        if amount is None:
+            # «пополни с кубышки» — счёт есть, суммы нет: спрашиваем, а не молчим
+            # (иначе фраза утекает в модель и там выдумывается — скрин с «пивом»).
+            if to_name or src_name:
+                _transfer_pending_set(channel, {"amount": None, "src": src_name, "to": to_name})
+                return _transfer_ask_text(None, src_name, to_name)
+            return None
         if not to_name:
             # «перевёл 5000 маме» / «перевёл Ване 2000» — перевод человеку: это трата (или платёж по долгу, если долг есть)
             who = re.sub(r"\b(руб\w*|р)\b", " ", rest).strip(" ,.-—:")
-            if re.match(r"^\s*(переведи|перекинь)\b", text, re.I):
-                return (f"Переводить деньги я не умею, сэр, — только вести учёт. Если уже перевели, скажите «перевёл {int(amount)} {who or 'на сбер'}»."), []
+            if re.match(r"^\s*(переведи|перекинь|пополн\w*)\b", text, re.I):
+                # повеление исполнить нельзя — но детали спросим и запишем перевод слотом
+                _transfer_pending_set(channel, {"amount": amount, "src": src_name, "to": None})
+                return _transfer_ask_text(amount, src_name, None)
             if not who:
                 # Батч 1: сумма есть, счетов нет — не гадаем, спрашиваем «с какого на какой».
                 # Между своими счетами это transfer, а не трата.
-                return (f"Перевод {money(amount)} — с какого на какой счёт, сэр? "
-                        f"Например: «перевёл {int(amount)} со сбера на наличные»."), ["clarify"]
+                _transfer_pending_set(channel, {"amount": amount, "src": None, "to": None})
+                return _transfer_ask_text(amount, None, None)
             d = finance.find_debt(who)
             if d:
                 try:
@@ -437,20 +534,7 @@ def transfers(text: str, channel: str) -> Result | None:
                 return f"Платёж {money(amount)} по «{d.title}». Остаток **{money(d.remaining)}**." + (" Долг закрыт 🎉" if d.closed else ""), ["pay_debt"]
             tx = finance.add_transaction(amount, "expense", None, f"Перевод: {who}", source=channel)
             return f"Перевод {money(tx.amount)} ({who}) записал как трату · {tx.category}. Если это был долг — скажите «долг {who} …».", ["add_expense"]
-        to = finance.find_account(to_name)
-        if not to:
-            if not re.search(r"\b(сч[её]т|карт|банк|сбер|тинь|т-банк|тбанк|альфа|втб|наличн|кэш|кеш|вклад|копилк|накоп)", to_name, re.I):
-                return None   # «переведи 5000 на подарок» — не счёт: ниже разберём как трату
-            to = finance.add_account(to_name.title(), "bank", 0)
-        src = finance.find_account(src_name) if src_name else None
-        if src and src.id == to.id:
-            return "Перевод на тот же счёт — деньги устанут, сэр.", []
-        try:
-            finance.add_transaction(amount, "transfer", None, None, src.name if src else None, to.name, source=channel)
-        except finance.FinanceError as e:
-            return f"Не записал: {e}.", []
-        src_lbl = src.name if src else finance.main_account_name()
-        return f"Перевод {money(amount)}: {src_lbl} → {to.name}. Общий баланс тот же, сэр.", ["add_transfer"]
+        return _do_transfer(amount, to_name, src_name, channel)
     return None
 
 
@@ -843,6 +927,9 @@ def run(text: str, channel: str) -> Result | None:
     if r:
         return r
     r = _regime_confirm(t, channel)   # «да/нет» по отложенному режиму
+    if r:
+        return r
+    r = transfer_ask(t, channel)   # ответ про сумму/счета перевода (свой слот)
     if r:
         return r
     r = regimes(t, channel)

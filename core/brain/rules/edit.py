@@ -32,12 +32,14 @@ from ..agent import (
     _FIX_BARE_RX,
     _FIX_KIND,
     _channel_where,
+    _clean_event_title,
     _past_date,
     _pending_clear,
     _pending_consume,
     _pending_get,
     _pending_set,
     _plural_ru,
+    _remind_at,
     _strip_fillers,
     fmt_dt,
     fmt_due,
@@ -116,9 +118,9 @@ def write_as(kind: str, text: str, channel: str) -> Reply | None:
         dt, rest = _pd(t)
         if not dt:
             return None
-        title = _strip_fillers(re.sub(r"^\s*(встреча|событие|у\s+меня|напомни(?:\s+мне)?)\s*[:\-—]?\s*", "", rest, flags=re.I)) or "Событие"
+        title = _clean_event_title(re.sub(r"^\s*(встреча|событие|у\s+меня)\s*[:\-—]?\s*", "", rest, flags=re.I))
         ev = calendar.add_event(title[0].upper() + title[1:], dt, remind_minutes=30, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start)), ["add_event"])
+        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, 30)), ["add_event"])
     if kind == "note":
         brain_notes.add_note(re.sub(r"^\s*(мозг|мысль|заметка|запомни)\s*[:\-—,]?\s*", "", t, flags=re.I) or t, source=channel)
         return Reply(say("note"), ["add_note"])

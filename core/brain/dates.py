@@ -106,10 +106,22 @@ def parse_datetime_ex(text: str, now: datetime | None = None) -> tuple[datetime 
         else:
             date = now + timedelta(**{unit: n})
         t = t.replace(m.group(0), " ")
-        return date.replace(second=0, microsecond=0), t.final(), unit in ("minutes", "hours")
+        daypart = False
+        if unit in ("days", "weeks", "months"):
+            for _word, _h in PARTS_OF_DAY.items():
+                if _word in t:
+                    date = date.replace(hour=_h, minute=0)
+                    daypart = True
+                    t = t.replace(_word, " ")
+        else:
+            for _word in PARTS_OF_DAY:  # «через полчаса после обеда» — контекст съеден, в заголовок не утекает
+                if _word in t:
+                    t = t.replace(_word, " ")
+        return date.replace(second=0, microsecond=0), t.final(), daypart or unit in ("minutes", "hours")
 
-    # --- время: 15:00, 15.30, «в 15», «в 3 часа дня», «в пол третьего» (упрощённо) ---
-    m = re.search(r"(?:в|на|к)\s+(\d{1,2})[:.](\d{2})", t) or re.search(r"\b(\d{1,2})[:](\d{2})\b", t)
+    # --- время: 15:00, 15.30, 15-10 («в 16-10» — дефис с предлогом тоже время;
+    # голое «16-10» без предлога временем не считаем — может быть датой/артикулом) ---
+    m = re.search(r"(?:в|на|к)\s+(\d{1,2})[:.\-–](\d{2})", t) or re.search(r"\b(\d{1,2})[:](\d{2})\b", t)
     if m and not (0 <= int(m.group(1)) <= 23 and 0 <= int(m.group(2)) <= 59):
         m = None   # «25:70» — не время (иначе replace(hour=25) роняет весь разбор)
     if m:

@@ -59,7 +59,9 @@ def update_task(task_id: int, **fields) -> Task | None:
         if "due" in fields:
             d = fields["due"]
             t.due = (d if isinstance(d, datetime) else datetime.fromisoformat(str(d))) if d else None
-            t.remind_stage = 0
+            # срок поменяли вручную — напоминания заводятся заново; snooze из-под
+            # напоминания передаёт remind_stage явно (иначе дубль через 5 минут).
+            t.remind_stage = int(fields["remind_stage"]) if "remind_stage" in fields else 0
         if fields.get("priority") is not None:
             t.priority = int(fields["priority"])
         if "project" in fields:

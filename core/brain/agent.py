@@ -249,6 +249,40 @@ def _strip_fillers(t: str) -> str:
     return t.strip(" ,.-—:")
 
 
+def _clean_event_title(rest: str) -> str:
+    """Заголовок события из остатка после вырезания даты: срезаем командные слова
+    («поставь напоминание что», «напомни», «запланируй»…) — иначе они утекают в название
+    (скрин: «Поставь напоминание что -10 ресаются…» вместо «Ресаются лимиты…»).
+    Тот же вход по форме, что у прямой ветки и у ответа на «календарь или задача?»."""
+    title = re.sub(r"^(напомни(?:\s+мне)?|у меня|мне)\s+", "", rest, flags=re.I)
+    # «напомни … что надо не забыть вычесть жкх» → «вычесть жкх»
+    title = re.sub(r"^(?:что\s+|чтобы\s+)?(?:(?:мне\s+)?(?:надо|нужно|стоит|пора)\s+(?:бы\s+)?)?(?:не\s+забыть|не\s+забудь)?\s*(?:что\s+)?(?:(?:мне\s+)?(?:надо|нужно)\s+)?", "", title, flags=re.I)
+    title = re.sub(r"^(запиши\s+встречу|запланируй|добавь\s+(?:в\s+)?календар\w*|событие)\s*[:\-—]?\s*", "", title, flags=re.I)
+    # «поставь событие что я иду на др» → «я иду на др»
+    title = re.sub(r"^(поставь|создай|добавь|запиши|сделай)\s+(событие|встречу|напоминание|в\s+календарь)?\s*(,?\s*(что|о\s+том,?\s+что|про\s+то,?\s+что)\s+)?", "", title, flags=re.I)
+    title = _strip_fillers(title) or "Событие"
+    # «встреча с Ваней» → сохраняем «Встреча с Ваней», а не «С Ваней»
+    return title[0].upper() + title[1:]
+
+
+def _remind_at(start: datetime, remind_minutes: int) -> str:
+    """Точное время пинга для подтверждения («Напомню в 15:30», а не «заранее»)."""
+    return (start - timedelta(minutes=remind_minutes or 0)).strftime("%H:%M")
+
+
+def _past_reply(title: str, dt: datetime | None) -> Reply | None:
+    """Явно прошедший ДЕНЬ («напомни 01.01 в 10:00» в октябре): мёртвое событие/задачу
+    не пишем — честно говорим, что время прошло, и подсказываем оба выхода.
+    Внутри сегодняшнего дня пишем как раньше (голдены требуют запись «сегодня в 10»
+    даже постфактум) — это осознанный остаточный риск, см. комментарий ниже.
+    None — время живое."""
+    now = datetime.now()
+    if dt is not None and dt.date() < now.date() and dt < now - timedelta(minutes=5):
+        return Reply(f"«{title}» — это уже прошло ({fmt_dt(dt)}). "
+                     "Если это факт — скажите «запомни: …», если ошибся временем — повторите, сэр.", [])
+    return None
+
+
 def _pull_account(rest: str, with_na: bool = False) -> tuple[str | None, str]:
     """«потратил 700 с кубышки / со сбера / с карты Т-Банк» → (имя счёта, остаток текста).
 
@@ -862,20 +896,14 @@ def rules(text: str, channel: str) -> Reply | None:
                      f"Ответьте «ночью» или «днём», сэр.", ["clarify"],
                      buttons=[("🌙 Ночью", "ночью"), ("☀️ Днём", "днём")])
     if dt and not is_deadline and not explicit_task and not action_task and (m or EVENT_NOUN_RX.search(low) or (has_clock and len(rest.split()) <= 8)):
-        title = re.sub(r"^(напомни(?:\s+мне)?|у меня|мне)\s+", "", rest, flags=re.I)
-        # «напомни … что надо не забыть вычесть жкх» → «вычесть жкх»
-        title = re.sub(r"^(?:что\s+|чтобы\s+)?(?:(?:мне\s+)?(?:надо|нужно|стоит|пора)\s+(?:бы\s+)?)?(?:не\s+забыть|не\s+забудь)?\s*(?:что\s+)?(?:(?:мне\s+)?(?:надо|нужно)\s+)?", "", title, flags=re.I)
-        title = re.sub(r"^(запиши\s+встречу|запланируй|добавь\s+(?:в\s+)?календар\w*|событие)\s*[:\-—]?\s*", "", title, flags=re.I)
-        # «поставь событие что я иду на др» → «я иду на др»
-        title = re.sub(r"^(поставь|создай|добавь|запиши|сделай)\s+(событие|встречу|напоминание|в\s+календарь)?\s*(,?\s*(что|о\s+том,?\s+что|про\s+то,?\s+что)\s+)?", "", title, flags=re.I)
-        title = _strip_fillers(title) or "Событие"
-        # «встреча с Ваней» → сохраняем «Встреча с Ваней», а не «С Ваней»
-        title = title[0].upper() + title[1:]
+        title = _clean_event_title(rest)
         remind = 10 if low.startswith("напомни") else 30
         if low.startswith("напомни") and re.search(r"через\s+\S+\s*(мин|полчаса|час)", low):
             remind = 0   # «напомни через 20 минут» — ровно тогда
+        if (pr := _past_reply(title, dt)):
+            return pr
         ev = calendar.add_event(title, dt, remind_minutes=remind, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start)), ["add_event"])
+        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, remind)), ["add_event"])
 
     # ---- «напомни маме позвонить» без времени: спрашиваем когда ----
     if not dt and re.match(r"^\s*напомни\b", low) and len(t.split()) <= 10:
@@ -902,6 +930,8 @@ def rules(text: str, channel: str) -> Reply | None:
         due, body, time_set = parse_datetime_ex(body)
         due = task_due(due, time_set)   # «сегодня» / «через 3 дня» без времени = задача на весь день
         if body:
+            if (pr := _past_reply(body[0].upper() + body[1:], due)):
+                return pr
             from ..services import aims
             body, link = aims.split_link(body)
             tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel, auto_roll=auto_roll)
@@ -1138,22 +1168,26 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
         dt, rest2 = parse_datetime(text)
         if not dt:
             return None   # это не ответ на вопрос — обычная фраза
-        _pending_clear(channel)
         title = (what or rest2.strip() or text.strip())
         title = title[0].upper() + title[1:]
-        ev = calendar.add_event(title, dt, remind_minutes=0 if re.search(r"через", text, re.I) else 10, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start)), ["add_event"])
+        if (pr := _past_reply(title, dt)):
+            return pr   # слот жив — можно сразу назвать новое время
+        _pending_clear(channel)
+        rm = 0 if re.search(r"через", text, re.I) else 10
+        ev = calendar.add_event(title, dt, remind_minutes=rm, source=channel)
+        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, rm)), ["add_event"])
     m = CLARIFY_RX.match(text)
     if not m:
         return None
     _pending_clear(channel)
     kind = m.group(2).lower()
     dt, rest = parse_datetime(orig)
-    title = (rest or orig).strip(" ,.-—:")
-    title = title[0].upper() + title[1:] if title else "Событие"
+    title = _clean_event_title(rest or orig)
+    if (pr := _past_reply(title, dt)):
+        return pr
     if kind.startswith(("календар", "событи", "напомина")):
         ev = calendar.add_event(title, dt, remind_minutes=30, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start)), ["add_event"])
+        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, 30)), ["add_event"])
     if kind.startswith(("задач", "дел")):
         dt = task_due(dt, parse_datetime_ex(orig)[2])
         tk = tasks.add_task(title, dt, source=channel)
@@ -1994,7 +2028,7 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                                 content = say("task", title=title) + f" Дедлайн {fmt_dt(dt)}."
                             else:
                                 ev = calendar.add_event(title, dt, source=channel); actions.append("add_event")
-                                content = say("event", title=ev.title, when=fmt_dt(ev.start))
+                                content = say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, ev.remind_minutes or 0))
                         elif ACTION_VERB_RX.match(text):
                             tk = tasks.add_task(text[0].upper() + text[1:], source=channel); actions.append("add_task")
                             content = say("task", title=tk.title)

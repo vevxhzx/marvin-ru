@@ -887,13 +887,17 @@ async def cb_reminder(cq: CallbackQuery):
                 msg = (f"📅 «{t.title}» — перенёс на завтра" + ("." if is_all_day(t.due) else f", {t.due:%H:%M}.")) if t else "Задача не найдена."
             else:
                 due = when_due()
-                t = tsk.update_task(oid, due=due)
+                # snooze, а не ручной перенос: утренний stage уже отработан кнопкой,
+                # иначе update_task сбросит его в 0 и поллинг повторит пинг через 5 минут
+                t = tsk.update_task(oid, due=due, remind_stage=1)
                 msg = f"⏰ «{t.title}» — напомню в {due:%H:%M}." if t else "Задача не найдена."
         else:
             if act == "ok":
                 msg = "Принято, сэр. Не опаздывайте."
             else:
-                e = cal.move_event(oid, when_due())
+                # snooze события: один пинг ровно в новое время (remind_minutes=0),
+                # иначе advance от нового старта сработает сразу/раньше
+                e = cal.update_event(oid, start=when_due(), remind_minutes=0)
                 if not e:
                     msg = "Событие не найдено."
                 elif act == "tomorrow":
