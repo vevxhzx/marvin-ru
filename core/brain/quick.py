@@ -408,6 +408,11 @@ def _transfer_pending_clear(channel: str) -> None:
     set_setting(_TRANSFER_KEY.format(ch=channel), "")
 
 
+def transfer_pending_state(channel: str) -> tuple[dict, datetime] | None:
+    """Публичный peek в слот перевода (для newest-wins в _resolve_pending)."""
+    return _transfer_pending_get(channel)
+
+
 def _transfer_ask_text(amount: float | None, src: str | None, to: str | None) -> Result:
     """Что спросить, когда переводу не хватает кусков. Без гаданий — только вопрос."""
     ctx = ""

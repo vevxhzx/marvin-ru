@@ -191,7 +191,10 @@ def test_task_snooze_button_end_to_end(monkeypatch):
         cur = s.get(db.Task, t.id)
         assert cur.remind_stage == 1, "snooze обязан пометить утренний stage, а не сбрасывать в 0"
         due = cur.due
-    # сразу после snooze поллинг молчит…
+    # сразу после snooze — максимум один hour-before пинг (если срок в пределах часа),
+    # дальше тишина: никакого дубля утреннего stage
+    first = [tk for tk, _ in tasks.due_task_reminders() if tk.id == t.id]
+    assert len(first) <= 1, [ (tk.due, tk.remind_stage) for tk, _ in tasks.due_task_reminders() ]
     assert [tk for tk, _ in tasks.due_task_reminders() if tk.id == t.id] == []
     # …а за час до нового срока — один пинг «ОСТАЛОСЬ»
     real_now = datetime.now()
@@ -291,6 +294,126 @@ def test_topup_amount_only_asks_target_no_guessing(monkeypatch):
     r = _handle("1039", ch)
     assert "clarify" in r.actions, (r.actions, r.text)
     assert _tx_count() == 0
+
+
+# ------------------------------------------------- 7. пять решений + тихая болтовня
+def test_overwritten_question_is_announced(monkeypatch):
+    """Q1 «календарь?» затирается Q2 «когда?» — в Q2 одна строка, что прошлый снят."""
+    _offline(monkeypatch)
+    ch = "slot-disp"
+    assert "clarify" in _handle("в пятницу молоко", ch).actions
+    r = _handle("напомни маме позвонить", ch)
+    assert "clarify" in r.actions, (r.actions, r.text)
+    low = r.text.lower()
+    assert "прошлый вопрос" in low and "пятницу" in low, r.text
+
+
+def test_pay_ask_survives_unrelated_chatter(monkeypatch, fresh_db):
+    """pay_ask: чужое сообщение слот не снимает (peek), ответ — работает как раньше."""
+    import json
+    from core.brain import agent as _agent
+    from core.brain.rules.orders import pay_ask_rule
+    ch = "pay-peek"
+    _agent._pending_set(ch, "pay_ask|" + json.dumps(
+        {"amount": 10000, "q": "ролик", "oid": None, "date": None}, ensure_ascii=False))
+    assert pay_ask_rule("пополни с кубышки", "пополни с кубышки", ch) is None
+    assert _agent._pending_get(ch) is not None, "чужое сообщение сняло pay_ask"
+    r = pay_ask_rule("доход", "доход", ch)
+    assert r is not None and "add_income" in r.actions, (r.text if r else None)
+
+
+def test_pay_ask_answer_flow_still_writes(monkeypatch, fresh_db):
+    """«пришёл аванс 10к за ролик» → «доход» → запись дохода (consume при ответе)."""
+    _offline(monkeypatch)
+    ch = "pay-flow"
+    assert "clarify" in _handle("пришёл аванс 10к за ролик", ch).actions
+    r = _handle("доход", ch)
+    assert "add_income" in r.actions, (r.actions, r.text)
+
+
+def test_no_cancels_newest_transfer_question(monkeypatch):
+    """«нет» при двух вопросах гасит свежий (перевод), календарный живёт дальше."""
+    _offline(monkeypatch)
+    _money_fixture()
+    ch = "no-newest"
+    assert "clarify" in _handle("в пятницу молоко", ch).actions
+    assert "clarify" in _handle("пополни с кубышки", ch).actions
+    r = _handle("нет", ch)
+    assert "не записываю" in r.text.lower(), (r.actions, r.text)
+    assert _tx_count() == 0
+    r2 = _handle("календарь", ch)
+    assert "add_event" in r2.actions, (r2.actions, r2.text)
+
+
+def test_correction_takes_last_date():
+    """«в пятницу, нет, в субботу» → суббота, заголовок чистый."""
+    wed = datetime(2026, 10, 14, 12, 0)
+    dt, rest = parse_datetime("встреча в пятницу, нет, в субботу", wed)
+    assert dt == datetime(2026, 10, 17, 10, 0), (dt, rest)
+    assert rest == "встреча", rest
+
+
+def test_correction_keeps_first_time():
+    """«в пятницу в 15, нет, в субботу» → суббота в 15:00."""
+    wed = datetime(2026, 10, 14, 12, 0)
+    dt, rest = parse_datetime("в пятницу в 15, нет, в субботу", wed)
+    assert dt == datetime(2026, 10, 17, 15, 0), (dt, rest)
+
+
+def test_no_marker_first_date_wins():
+    """Без маркера исправления — как раньше: первая дата, без сюрпризов."""
+    wed = datetime(2026, 10, 14, 12, 0)
+    dt, _ = parse_datetime("напомни в пятницу про субботу", wed)
+    assert dt == datetime(2026, 10, 16, 10, 0), dt
+    assert parse_datetime("позвони маме, нет, напиши маме", wed)[0] is None
+
+
+def test_same_day_past_writes_with_honest_tail(monkeypatch):
+    """Внутридневное прошлое пишется (голден), но в ответе честно: огонь не сработает."""
+    import core.brain.agent as _agent
+    import core.brain.dates as _dates
+    from core.services import calendar
+    _offline(monkeypatch)
+    holder = {"now": datetime(2026, 10, 13, 14, 0)}
+
+    class _DT(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return holder["now"]
+
+    monkeypatch.setattr(_agent, "datetime", _DT)
+    monkeypatch.setattr(_dates, "datetime", _DT)
+    r = _handle("напомни сегодня в 13:00 позвонить", "past-day")
+    assert "add_event" in r.actions, (r.actions, r.text)
+    assert "уже прошло" in r.text.lower(), r.text
+    assert len(calendar.list_events(limit=50)) == 1
+
+
+VENT = ("всё пойдет, чет пустовато себя ощущаю\n"
+        "чуть тревожно от скорых изменений всяких\n"
+        "чувствую что стал худшей версией себя если так выразится\n"
+        "чет потолстел пузо отрастил, сижу дома постоянно\n"
+        "забыл как общаться нахер, еле разговариваю\n"
+        "слова глотаю чисто сыч домашний\n"
+        "хз брат как дела, потихоньку")
+
+
+def test_venting_monologue_is_not_a_batch():
+    """Личный рассказ с переносами строк — не список: сортировщик не разбирает."""
+    from core.brain import sorter
+    assert sorter.looks_like_batch(VENT) is False
+    assert sorter.looks_like_batch("хлеб 120, молоко 90, яйца 150") is True
+    assert sorter.looks_like_batch("купить молоко\nпозвонить маме\nоплатить аренду") is True
+
+
+def test_vent_end_to_end_no_memory_dump(monkeypatch):
+    """Вент в чате: без «Разобрал, получилось N» и без пачки записей."""
+    from core.services import calendar, tasks
+    _offline(monkeypatch)
+    r = _handle(VENT, "vent")
+    assert "разобрал" not in r.text.lower(), r.text
+    assert "add_event" not in r.actions and "add_task" not in r.actions, (r.actions, r.text)
+    assert calendar.list_events(limit=50) == [] and tasks.list_tasks() == []
 
 
 # ------------------------------------------------- 6. остаток матрицы сценариев

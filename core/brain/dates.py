@@ -80,8 +80,9 @@ def is_all_day(dt: datetime | None) -> bool:
     return bool(dt) and dt.hour == 23 and dt.minute == 59
 
 
-def parse_datetime_ex(text: str, now: datetime | None = None) -> tuple[datetime | None, str, bool]:
-    """Как parse_datetime, плюс флаг: было ли во фразе время (а не только день)."""
+def parse_datetime_ex(text: str, now: datetime | None = None, _depth: int = 0) -> tuple[datetime | None, str, bool]:
+    """Как parse_datetime, плюс флаг: было ли во фразе время (а не только день).
+    _depth — внутренний guard от рекурсии исправлений («нет, в субботу»)."""
     now = now or datetime.now()
     t = _Text(" " + text + " ")
     date: datetime | None = None
@@ -244,7 +245,29 @@ def parse_datetime_ex(text: str, now: datetime | None = None) -> tuple[datetime 
     if deadline and not time_set:
         hour, minute = 23, 59
     dt = date.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if _depth == 0 and dt is not None:
+        # исправление на лету («в пятницу, нет, в субботу»): в остатке маркер поправки
+        # и вторая дата — побеждает последняя, мусор обоих проходов вырезан.
+        # Без маркера («напомни в пятницу про субботу») — как раньше, первая.
+        rest_s = t.final()
+        if _CORRECTION_RX.search(rest_s):
+            dt2, rest2, ts2 = parse_datetime_ex(rest_s, now, _depth=1)
+            if dt2 is not None:
+                if not ts2 and time_set:
+                    dt2 = dt2.replace(hour=hour, minute=minute)  # «в пятницу в 15, нет, в субботу» — в 15
+                    ts2 = True
+                # ошмёток маркера («встреча, нет») — не заголовок: сегменты из одного
+                # слова-маркера выкидываем, остальное («нет билетов») не трогаем
+                segs = [s for s in re.split(r"[,;]", rest2)
+                        if s.strip() and not _CORRECTION_RX.fullmatch(s.strip())]
+                return dt2, _clean(", ".join(segs)), ts2
     return dt, t.final(), time_set
+
+
+# маркер поправки на лету: «в пятницу, нет, в субботу», «ой, в субботу», «точнее 25-го».
+# Безопасны только потому, что ниже требуется вторая найденная дата: одиночное
+# «давай встретимся в пятницу» никуда не сворачивает (в остатке даты нет).
+_CORRECTION_RX = re.compile(r"\b(нет|ой|точнее|вернее|сорри|извини|пардон|давай|давайте|лучше|на самом деле|имел\w* в виду|а не)\b", re.I)
 
 
 NIGHT_HOUR_RX = re.compile(r"(?:\b(?:в|на|к)\s+)([0-6])(?:\s*(?:час\w*|ч\b))?(?![\dк:.]|\s*(?:утра|дня|вечера|ночи|минут|тыс|руб|₽|%|-го|го\b|числ|сентябр|октябр|ноябр|декабр|январ|феврал|март|апрел|ма[йя]|июн|июл|август|дн[яей]|недел|мес))", re.I)

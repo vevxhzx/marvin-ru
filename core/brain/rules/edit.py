@@ -34,6 +34,7 @@ from ..agent import (
     _channel_where,
     _clean_event_title,
     _past_date,
+    _past_tail,
     _pending_clear,
     _pending_consume,
     _pending_get,
@@ -113,7 +114,7 @@ def write_as(kind: str, text: str, channel: str) -> Reply | None:
         due = _td(due, time_set)
         body = re.sub(r"^\s*(задача|надо\s+бы|надо|нужно|не\s+забыть)\s*[:\-—]?\s*", "", body, flags=re.I).strip() or t
         tk = tasks.add_task(body[0].upper() + body[1:], due, source=channel, auto_roll=auto_roll)
-        return Reply(say("task", title=tk.title) + fmt_due(due) + (" · автоперенос вкл" if auto_roll else ""), ["add_task"])
+        return Reply(say("task", title=tk.title) + fmt_due(due) + (" · автоперенос вкл" if auto_roll else "") + _past_tail(due), ["add_task"])
     if kind == "event":
         dt, rest = _pd(t)
         if not dt:

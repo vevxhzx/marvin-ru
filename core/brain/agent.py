@@ -117,6 +117,40 @@ def _pending_set(channel: str, text: str) -> str:
     return qid
 
 
+# Слоты с машинным содержимым (JSON/id) — их вытеснение вслух не объявляем,
+# только человеческие вопросы (сырой текст, remind|).
+_NONHUMAN_SLOT_RX = re.compile(r"^(bulk|confirm|sorter|pay_ask|judge|undo|nighthour|done_future|fix)\|")
+
+
+def _ask(channel: str, text: str) -> tuple[str, str]:
+    """Вопрос в общий слот + суффикс-уведомление, если вытеснили живой человеческий вопрос.
+    Возвращает (qid, notice): notice дописать в конец текста вопроса (пусто, если вытеснять нечего)."""
+    notice = ""
+    prev = _pending_parse(get_setting(f"pending:{channel}"))
+    if prev is not None:
+        ptext, pts, _pq = prev
+        if (datetime.now() - pts).total_seconds() <= PENDING_TTL_SEC and ptext != text \
+                and not _NONHUMAN_SLOT_RX.match(ptext):
+            show = ptext[7:] if ptext.startswith("remind|") else ptext
+            notice = f" Прошлый вопрос («{show[:40]}») снял — ответь на новый."
+    return _pending_set(channel, text), notice
+
+
+def _pending_peek(channel: str, prefix: str) -> tuple[str, datetime] | None:
+    """Заглянуть в чужой слот не снимая: (текст, время) или None (нет/просрочен/чужой).
+    Пара к _pending_consume для веток, где чужое сообщение вопрос снимать не должно."""
+    p = _pending_parse(get_setting(f"pending:{channel}"))
+    if not p:
+        return None
+    text, ts, _qid = p
+    if not text.startswith(prefix):
+        return None
+    if (datetime.now() - ts).total_seconds() > PENDING_TTL_SEC:
+        _pending_clear(channel)
+        return None
+    return text, ts
+
+
 def _pending_parse(raw: str | None) -> tuple[str, datetime, str | None] | None:
     """(текст, время, qid|None). Понимает и новый формат ts|qid|text, и legacy ts|text."""
     if not raw or "|" not in raw:
@@ -283,6 +317,14 @@ def _past_reply(title: str, dt: datetime | None) -> Reply | None:
         return Reply(f"«{title}» — это уже прошло ({fmt_dt(dt)}). "
                      "Если это факт — скажите «запомни: …», если ошибся временем — повторите, сэр.", [])
     return None
+
+
+def _past_tail(dt: datetime | None) -> str:
+    """Внутридневное прошлое пишем (того требуют голдены), но честно: огня не будет."""
+    now = datetime.now()
+    if dt is not None and dt.date() == now.date() and dt < now - timedelta(minutes=5):
+        return " (это время уже прошло — записал как факт, напоминание не сработает, сэр)"
+    return ""
 
 
 def _pull_account(rest: str, with_na: bool = False) -> tuple[str | None, str]:
@@ -845,8 +887,8 @@ def rules(text: str, channel: str) -> Reply | None:
             return Reply(say("done", title=ev.title), ["complete_event"])
         if ev and ev.start > datetime.now() + timedelta(hours=12) and not calendar.is_done(ev):
             # раньше отвечал «не нашёл», хотя событие есть — просто впереди. Честно: спросить, закрыть ли заранее
-            _pending_set(channel, f"done_future|{ev.id}")
-            return Reply(f"«{ev.title}» у вас {fmt_dt(ev.start)} — ещё не наступило. Отметить сделанным заранее? «Да» или «нет», сэр.", ["clarify"],
+            _, _d = _ask(channel, f"done_future|{ev.id}")
+            return Reply(f"«{ev.title}» у вас {fmt_dt(ev.start)} — ещё не наступило. Отметить сделанным заранее? «Да» или «нет», сэр.{_d}", ["clarify"],
                          buttons=[("✅ Да", "да"), ("❌ Нет", "нет")])
         if len(what.split()) <= 6:
             # раньше «готово: X» / «сделал X» без такой задачи проваливалось дальше и заводило задачу «Сделал X» — теперь честно говорим
@@ -891,9 +933,9 @@ def rules(text: str, channel: str) -> Reply | None:
     if nh is not None and 0 <= nh <= 5 and dt is not None and not m \
             and not EVENT_NOUN_RX.search(low) and not ACTION_VERB_RX.search(t) \
             and not re.match(r"^\s*напомни\b", low):
-        _pending_set(channel, "nighthour|" + json.dumps({"orig": t, "hour": nh}, ensure_ascii=False))
+        _, _d = _ask(channel, "nighthour|" + json.dumps({"orig": t, "hour": nh}, ensure_ascii=False))
         return Reply(f"«В {nh}» — это ночью в {nh:02d}:00 или днём в {nh + 12:02d}:00? "
-                     f"Ответьте «ночью» или «днём», сэр.", ["clarify"],
+                     f"Ответьте «ночью» или «днём», сэр.{_d}", ["clarify"],
                      buttons=[("🌙 Ночью", "ночью"), ("☀️ Днём", "днём")])
     if dt and not is_deadline and not explicit_task and not action_task and (m or EVENT_NOUN_RX.search(low) or (has_clock and len(rest.split()) <= 8)):
         title = _clean_event_title(rest)
@@ -903,19 +945,19 @@ def rules(text: str, channel: str) -> Reply | None:
         if (pr := _past_reply(title, dt)):
             return pr
         ev = calendar.add_event(title, dt, remind_minutes=remind, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, remind)), ["add_event"])
+        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, remind)) + _past_tail(dt), ["add_event"])
 
     # ---- «напомни маме позвонить» без времени: спрашиваем когда ----
     if not dt and re.match(r"^\s*напомни\b", low) and len(t.split()) <= 10:
         what = re.sub(r"^\s*напомни(?:\s+мне)?\s*(?:что\s+(?:надо|нужно)\s+)?", "", t, flags=re.I).strip(" ,.-—:")
         if what:
-            _pending_set(channel, "remind|" + what)
-            return Reply(f"Напомнить «{what}» — когда, сэр? Например: «завтра в 10» или «через час».", ["clarify"],
+            _, _d = _ask(channel, "remind|" + what)
+            return Reply(f"Напомнить «{what}» — когда, сэр? Например: «завтра в 10» или «через час».{_d}", ["clarify"],
                          buttons=[("⏰ Через час", "через час"), ("🌅 Завтра в 10", "завтра в 10"),
                                   ("🌙 Вечером", "вечером"), ("❌ Нет", "нет")])
         # Батч 2: голое «напомни» — тоже спрашиваем (что и когда), а не молчим.
-        _pending_set(channel, "remind|")
-        return Reply("Что напомнить и когда, сэр? Например: «напомни завтра в 10 позвонить маме».", ["clarify"])
+        _, _d = _ask(channel, "remind|")
+        return Reply(f"Что напомнить и когда, сэр? Например: «напомни завтра в 10 позвонить маме».{_d}", ["clarify"])
 
     # ---- задача ----
     m = TASK_RX.match(t)
@@ -940,7 +982,7 @@ def rules(text: str, channel: str) -> Reply | None:
                 hint += " Автоперенос вкл: не закроете — переедет на завтра."
             if due and (nh := ambiguous_night_hour(t)) is not None and due.hour == nh + 12:
                 hint += f" «В {nh}» понял как {due:%H:%M}; если имелось в виду {nh:02d}:00 — скажите «в {nh} утра»."
-            return Reply(say("task", title=tk.title) + fmt_due(due) + hint, ["add_task"])
+            return Reply(say("task", title=tk.title) + fmt_due(due) + hint + _past_tail(due), ["add_task"])
 
     # ---- заметка ----
     m = NOTE_RX.match(t)
@@ -954,8 +996,8 @@ def rules(text: str, channel: str) -> Reply | None:
     _told = bool(re.search(r"\b[а-яё]{2,}(?:ал|ил|ел|ул|ыл|ял)(?:а|и|о|ась|ись|ся)?\b", rest.lower()))   # «устал», «сдал», «сходила» — уже случилось
     if dt and rest and not _looks_like_question(t) and len(t.split()) <= 12 and (_time_set or EVENT_NOUN_RX.search(low) or ACTION_VERB_RX.search(rest) or not _told) \
             and not (re.match(r"^\s*(?:новый\s+)?(?:заказ|проект)\b", t, re.I) and parse_amount(t)[0] is not None):   # заказ с суммой — модели (add_order)
-        _pending_set(channel, t)
-        return Reply(f"«{rest}» — {fmt_dt(dt)}. Это событие в календарь или задача с дедлайном? Ответьте «календарь» или «задача», сэр.", ["clarify"],
+        _, _d = _ask(channel, t)
+        return Reply(f"«{rest}» — {fmt_dt(dt)}. Это событие в календарь или задача с дедлайном? Ответьте «календарь» или «задача», сэр.{_d}", ["clarify"],
                      buttons=[("📅 Календарь", "календарь"), ("📋 Задача", "задача")])
 
     return None
@@ -1178,10 +1220,16 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
         _pending_clear(channel)
         rm = 0 if re.search(r"через", text, re.I) else 10
         ev = calendar.add_event(title, dt, remind_minutes=rm, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, rm)), ["add_event"])
+        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, rm)) + _past_tail(dt), ["add_event"])
     m = CLARIFY_RX.match(text) or _CLARIFY_TAIL_RX.match(text)
     if not m:
         return None
+    if NO_RX.match(text):
+        # «нет» гасит самый свежий вопрос: перевод спросили позже календаря — отмена ему,
+        # календарный слот живёт дальше (иначе одно «нет» молча хоронит оба вопроса)
+        tts = quick.transfer_pending_state(channel)
+        if tts is not None and (datetime.now() - tts[1]).total_seconds() <= PENDING_TTL_SEC and tts[1] > ts:
+            return None
     _pending_clear(channel)
     kind = m.group(2).lower()
     dt, rest = parse_datetime(orig)
@@ -1190,11 +1238,11 @@ def _resolve_pending(text: str, channel: str) -> Reply | None:
         return pr
     if kind.startswith(("календар", "событи", "напомина")):
         ev = calendar.add_event(title, dt, remind_minutes=30, source=channel)
-        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, 30)), ["add_event"])
+        return Reply(say("event", title=ev.title, when=fmt_dt(ev.start), remind=_remind_at(ev.start, 30)) + _past_tail(dt), ["add_event"])
     if kind.startswith(("задач", "дел")):
         dt = task_due(dt, parse_datetime_ex(orig)[2])
         tk = tasks.add_task(title, dt, source=channel)
-        return Reply(say("task", title=tk.title) + fmt_due(dt), ["add_task"])
+        return Reply(say("task", title=tk.title) + fmt_due(dt) + _past_tail(dt), ["add_task"])
     if kind.startswith(("заметк", "мысл", "мозг")):
         brain_notes.add_note(orig, source=channel)
         return Reply(say("note"), ["add_note"])

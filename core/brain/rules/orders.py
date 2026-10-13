@@ -28,8 +28,9 @@ from ..agent import (
     Reply,
     _MONTH_N,
     _MONTH_TARGET_RX,
+    _ask,
     _pending_consume,
-    _pending_set,
+    _pending_peek,
     money,
     say,
 )
@@ -66,7 +67,9 @@ def pay_ask_rule(text: str, low: str, channel: str) -> Reply | None:
     «доход» → обычный доход; «нет» — не пишем. Чужой слот не трогаем."""
     from core.services import finance as _finance
 
-    p = _pending_consume(channel, prefix="pay_ask|")   # TTL + one-shot; чужой слот цел
+    # peek-first: чужое сообщение вопрос не снимает (как generic-путь и judge),
+    # забираем слот только на распознанном ответе — иначе «пополни с кубышки» молча хоронит вопрос
+    p = _pending_peek(channel, "pay_ask|")
     if not p:
         return None
     orig, _ts = p
@@ -94,8 +97,10 @@ def pay_ask_rule(text: str, low: str, channel: str) -> Reply | None:
         if o is None:
             return Reply(f"Заказ{(' «' + q + '»') if q else ''} не нашёл, сэр — не выдумываю. "
                          f"Скажите «заказ: …», чтобы завести, или «доход», чтобы записать {money(amount)} как обычный доход.", [])
+        _pending_consume(channel, prefix="pay_ask|")
         return record_order_payment(o.id if hasattr(o, "id") else o["id"], amount, channel, pay_date)
     if re.match(r"^\s*(?:это\s+)?(доход|обычный\s+доход)\s*[.!]*\s*$", text, re.I):
+        _pending_consume(channel, prefix="pay_ask|")
         try:
             tx = _finance.add_transaction(amount, "income", None, (q or "доход"), source=channel, date=pay_date)
         except _finance.FinanceError as e:
@@ -103,6 +108,7 @@ def pay_ask_rule(text: str, low: str, channel: str) -> Reply | None:
         s = _finance.summary(1)
         return Reply(say("income", amount=money(tx.amount), category=tx.category, balance=money(s["total_balance"])), ["add_income"])
     if NO_RX.match(text):
+        _pending_consume(channel, prefix="pay_ask|")
         return Reply("Ок, не записываю.", [])
     # «это заказ кот прод» / «заказ кот прод» / голое имя заказа — платёж к нему.
     # Раньше такое падало мимо всех веток: слот снимался, а 10к терялись (жалоба с «Кот прод»).
@@ -120,10 +126,12 @@ def pay_ask_rule(text: str, low: str, channel: str) -> Reply | None:
         from core.services import orders
         o = orders.find_order(name)
         if o is None:
+            _pending_consume(channel, prefix="pay_ask|")
             return Reply(f"Заказ «{name}» не нашёл, сэр — не выдумываю. "
                          f"Скажите «заказ: …», чтобы завести, или «доход», чтобы записать {money(amount)} как обычный доход.", [])
+        _pending_consume(channel, prefix="pay_ask|")
         return record_order_payment(o.id if hasattr(o, "id") else o["id"], amount, channel, pay_date)
-    return None   # заговорили о другом — вопрос уже снят (consume), ничего не пишем
+    return None   # чужое сообщение — вопрос живёт дальше (peek, не consume)
 
 
 def orders_rule(text: str, low: str, channel: str) -> Reply | None:
@@ -225,7 +233,7 @@ def orders_rule(text: str, low: str, channel: str) -> Reply | None:
                         v = orders.order_view(orders.get_order(oid))
                         return Reply(f"Оплата {money(amount)} по «{v['title']}» — в доходах" + (f" за {pay_date:%d.%m}" if pay_date else "") + "." + (f" Осталось {money(v['left'])}." if v["left"] > 0 else " Заказ закрыт как оплаченный ✓"), ["order_payment"])
                     return None
-                _pending_set(channel, "pay_ask|" + json.dumps(
+                _, _d = _ask(channel, "pay_ask|" + json.dumps(
                     {"amount": amount, "q": q, "oid": oid,
                      "date": pay_date.isoformat() if pay_date else None}, ensure_ascii=False))
                 if oid:
@@ -235,14 +243,14 @@ def orders_rule(text: str, low: str, channel: str) -> Reply | None:
                     except Exception:
                         title = q or "заказ"
                     return Reply(f"«{t.strip()}» — это оплата по заказу «{title}» ({money(amount)}) или обычный доход? "
-                                 f"Ответьте «заказ» или «доход», сэр.", ["clarify"],
+                                 f"Ответьте «заказ» или «доход», сэр.{_d}", ["clarify"],
                                  buttons=[("📦 " + title[:24], "заказ"), ("💰 Доход", "доход"), ("❌ Нет", "нет")])
                 if q:
                     return Reply(f"Заказа «{q}» не нашёл, сэр — не выдумываю. "
-                                 f"Записать {money(amount)} как обычный доход? Ответьте «доход» или «нет».", ["clarify"],
+                                 f"Записать {money(amount)} как обычный доход? Ответьте «доход» или «нет».{_d}", ["clarify"],
                                  buttons=[("💰 Доход", "доход"), ("❌ Нет", "нет")])
                 return Reply(f"«{t.strip()}» — это оплата по заказу или обычный доход? "
-                             f"Ответьте «заказ» или «доход», сэр.", ["clarify"],
+                             f"Ответьте «заказ» или «доход», сэр.{_d}", ["clarify"],
                              buttons=[("📦 Заказ", "заказ"), ("💰 Доход", "доход"), ("❌ Нет", "нет")])
     m = ORDER_RX.match(t)
     if m:
