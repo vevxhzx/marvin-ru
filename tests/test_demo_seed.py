@@ -265,7 +265,7 @@ def test_demo_looks_like_a_living_assistant(fresh_db):
 
 def test_demo_shows_a_feature_plain_datasets_lack(fresh_db):
     """Просроченная задача и долг — то, чего в обычных демо-данных нет."""
-    from datetime import datetime, timedelta
+    from datetime import datetime
 
     from core.services import finance
 
