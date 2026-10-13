@@ -25,6 +25,16 @@ export function contrast(hexA, hexB) {
 export const INK_DARK = '#101114'
 export const INK_LIGHT = '#ffffff'
 
+/** Свой цвет из настроек: строгий #rrggbb в нижнем регистре или null.
+    Принимаем #abc/#aabbcc с/без решётки; всё остальное (имена, var(), мусор) — null. */
+export function normHex(v) {
+  if (typeof v !== 'string') return null
+  let s = v.trim().replace(/^#/, '')
+  if (/^[0-9a-f]{3}$/i.test(s)) s = s.split('').map((c) => c + c).join('')
+  if (!/^[0-9a-f]{6}$/i.test(s)) return null
+  return `#${s.toLowerCase()}`
+}
+
 /** Цвет текста поверх фона: берём тот из двух кандидатов, что даёт больший контраст. */
 export function pickInk(bg) {
   return contrast(bg, INK_DARK) >= contrast(bg, INK_LIGHT) ? INK_DARK : INK_LIGHT

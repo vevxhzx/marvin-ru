@@ -622,7 +622,7 @@ function Appearance() {
           <span className={mode === 'dark' ? 'on' : ''} onClick={() => setMode('dark')}>{t('st.theme_dark')}</span>
         </div>
         <div className="lbl">{t('st.accent_now2')}</div>
-        <SwatchRow value={activeAcc} onChange={applyAccent} />
+        <SwatchRow value={activeAcc} onChange={applyAccent} custom />
         <div className="lbl">{t('st.tint2')}</div>
         <div className="sg">
           {[['neutral', t('tint.neutral')], ['warm', t('tint.warm')], ['cool', t('tint.cool')], ['ink', t('tint.ink')], ['accent', t('tint.accent')]].map(([id, label]) => (
@@ -651,7 +651,7 @@ function Appearance() {
               {t('st.page_color_hint')}
             </p>
             {PAGE_ACCENT_LIST.map(([id, label]) => (
-              <SwatchRow key={id} label={label} showDefault
+              <SwatchRow key={id} label={label} showDefault custom
                 value={(p.pageAccents || {})[id] || ''}
                 onChange={(hex) => setPageAccent(id, hex)} />
             ))}

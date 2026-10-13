@@ -4,7 +4,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  lumOf, contrast, pickInk, fitAccentInk, ACCENT_PALETTE, INK_DARK, INK_LIGHT,
+  lumOf, contrast, pickInk, fitAccentInk, normHex, ACCENT_PALETTE, INK_DARK, INK_LIGHT,
 } from '../web/src/lib/color.js'
 
 test('яркость: белый = 1, чёрный ≈ 0', () => {
@@ -51,6 +51,28 @@ test('достаточный контраст — фон не меняется',
     const { bg, ink } = fitAccentInk(hex)
     assert.equal(bg, hex, `${hex} should stay untouched (ink=${ink})`)
     assert.ok(contrast(bg, ink) >= 4.5)
+  }
+})
+
+test('normHex: свой цвет из настроек — строгий #rrggbb или null', () => {
+  assert.equal(normHex('#0a3cff'), '#0a3cff')
+  assert.equal(normHex('#ABC'), '#aabbcc')
+  assert.equal(normHex('abc'), '#aabbcc')
+  assert.equal(normHex('#AbC123'), '#abc123')
+  assert.equal(normHex('red'), null)
+  assert.equal(normHex('#12345'), null)
+  assert.equal(normHex('#gggggg'), null)
+  assert.equal(normHex(''), null)
+  assert.equal(normHex(null), null)
+  assert.equal(normHex('var(--accent)'), null)
+})
+
+test('свой цвет: текст поверх любого валидного hex считается той же математикой', () => {
+  for (const hex of ['#123456', '#abcdef', '#fedcba', '#808080']) {
+    const norm = normHex(hex)
+    assert.equal(norm, hex.toLowerCase())
+    const { bg, ink } = fitAccentInk(norm)
+    assert.ok(contrast(bg, ink) >= 4.5, `${hex}: ${contrast(bg, ink).toFixed(2)}`)
   }
 })
 
