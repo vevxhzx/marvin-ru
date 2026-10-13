@@ -49,7 +49,7 @@
 ```bash
 python -m venv .venv && . .venv/bin/activate     # Windows: .venv\Scripts\activate
 pip install -r requirements.txt pytest
-python -m pytest tests -q                         # ~320 тестов, без сети
+python -m pytest tests -q                         # ~1660 тестов, без сети
 python run.py --no-tg                             # ядро без Telegram, сайт на :8765
 cd web && npm ci && npm run dev                   # фронт с hot reload на :5173 (проксирует /api на :8765)
 ```
@@ -60,7 +60,7 @@ cd web && npm ci && npm run dev                   # фронт с hot reload н�
 
 ```bash
 npm ci && npx tsx server.ts     # сайт на :3000, своё состояние в data/server-state.json
-npm test                        # 17 API-тестов на :3999 — не запускайте их рядом со стендом на :3000
+npm test                        # 29 тестов (17 API + 12 контраст/a11y) на :3999 — не запускайте их рядом со стендом на :3000
 ```
 
 Чат этого стенда умеет ходить в настоящую модель: ключ кладётся в `.env` в корне (файл в `.gitignore`,
@@ -77,6 +77,6 @@ LLM_MODEL=gpt-4o-mini                                # модель; по умо
 в ⚙ Настройки → система → состояние («внешняя модель»). Работа с облаком и локальной моделью описана в
 [`brain.md`](brain.md); секреты — в `config.yaml` / `.env`, они не попадают в git.
 
-Стек: Python 3.11+ · FastAPI · SQLite (SQLModel) · aiogram 3 · APScheduler · Ollama · faster-whisper · Vosk · Silero/edge-tts · React + Vite + Tailwind.
+Стек: Python 3.10+ · FastAPI · SQLite (SQLModel) · aiogram 3 · APScheduler · Ollama · faster-whisper · Vosk · Silero/edge-tts · React + Vite + Tailwind.
 
 Лицензия — [Apache 2.0](../LICENSE): свободное использование и форки, с сохранением авторства (`NOTICE`, ссылка на оригинал) и пометкой изменённых файлов. Pull request'ы приветствуются — особенно новые фразы-шаблоны в `core/brain/quick.py` и тесты к ним.
