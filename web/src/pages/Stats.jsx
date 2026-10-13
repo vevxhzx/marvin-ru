@@ -105,10 +105,7 @@ export default function Stats() {
                   ) : null}
                 </div>
                 {showMoney ? (
-                  <div className="muted mt-2 text-md">
-                    {t('st.spend_per_turn')}: ${perTurn.toFixed(4)}
-                    {sp.uncpriced ? ` · ${t('st.spend_uncpriced_n', { count: sp.uncpriced })}` : ''}
-                  </div>
+                  <div className="muted mt-2 text-md">{t('st.spend_per_turn')}: ${perTurn.toFixed(4)}</div>
                 ) : null}
               </div>
 
@@ -226,8 +223,10 @@ function Metric({ icon, label, value }) {
   )
 }
 
-/* Разбивка: полоса «сколько токенов» + цифры. Денег нет → честная плашка «без цены»,
- * а не ноль с двумя нулями, который читается как «бесплатно». */
+/* Разбивка: полоса «сколько токенов» + цифры. Стоимость неизвестна → честная плашка
+ * «без цены», а не $0.0000, который читается как «бесплатно».
+ * Ряд, где токенов не было вовсе (ход по правилам), полосу не рисует: нулевая полоса
+ * с минимальной шириной выглядела бы как «модель почти не работала», а тут её не было. */
 function Breakdown({ rows, showMoney, fmtNumber, emptyText }) {
   const { t } = useI18n()
   const max = Math.max(1, ...rows.map((r) => r.tokens))
@@ -243,15 +242,17 @@ function Breakdown({ rows, showMoney, fmtNumber, emptyText }) {
                 {fmtNumber(r.tokens)} · {fmtNumber(r.n)} {t('st.spend_runs_short')}
               </span>
             </div>
-            <div className="mt-1.5 h-[4px] w-full overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
-              <div
-                className="h-full rounded-full"
-                style={{
-                  width: `${Math.max(2, Math.round((r.tokens / max) * 100))}%`,
-                  background: r.free ? 'var(--ink-3)' : 'var(--accent)',
-                }}
-              />
-            </div>
+            {r.tokens ? (
+              <div className="mt-1.5 h-[4px] w-full overflow-hidden rounded-full" style={{ background: 'var(--fill-2)' }}>
+                <div
+                  className="h-full rounded-full"
+                  style={{
+                    width: `${Math.max(2, Math.round((r.tokens / max) * 100))}%`,
+                    background: r.free ? 'var(--ink-3)' : 'var(--accent)',
+                  }}
+                />
+              </div>
+            ) : null}
           </div>
           <Cost usd={r.usd} priced={r.priced} showMoney={showMoney} />
         </div>
