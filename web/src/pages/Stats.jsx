@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Cpu, Wallet, ArrowDownToLine, ArrowUpFromLine, Tag } from 'lucide-react'
+import { Cpu, ArrowDownToLine, ArrowUpFromLine, Tag } from 'lucide-react'
 import { api } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { useLoad } from '../lib/useLoad'
@@ -23,8 +23,7 @@ import { Card, Empty, ErrorState, ListSkeleton, Num, PageHead, Pills, Pressable,
 
 const PERIODS = [[7, 'st.spend_p7'], [30, 'st.spend_p30'], [90, 'st.spend_p90']]
 
-/* Правило без локальной модели → токенов не было, платить не надо. Название пути
- * приезжает с сервера (route_ru), но ключа слов нет — значит это оно. */
+/* Путь без модели («правила») токенов не тратит вообще — платить за него нечем. */
 const isFreeRoute = (r) => r === 'rules' || r === 'none'
 
 /* Подпись пути: сервер присылает route_ru по-русски, но интерфейс бывает английским —

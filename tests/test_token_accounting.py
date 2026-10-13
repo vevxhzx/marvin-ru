@@ -168,6 +168,214 @@ def test_usage_note_ignores_empty_calls():
     assert llm_base.usage_now().n_calls == 0
 
 
+# ============================================================ 2б. провайдеры действительно отмечают usage
+# Парсеры выше проверяют формат, а эти тесты — что вызовы вставлены в те провайдеры,
+# где должны быть: иначе счётчик останется пустым при живом облаке.
+
+
+class _Resp:
+    """Фейковый ответ провайдера: ровно те методы, которые трогает код cloud/ollama/lmstudio."""
+
+    def __init__(self, payload, status_code=200):
+        self.payload = payload
+        self.status_code = status_code
+        self.text = str(payload)
+
+    def json(self):
+        return self.payload
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            import httpx
+            raise httpx.HTTPStatusError(str(self.status_code), request=None, response=None)
+
+
+def _cloud_ready(monkeypatch, model: str = DS):
+    """Облако включено, модель задана, анонимайзер и маршруты не трогают сеть."""
+    from core.brain import llm
+
+    monkeypatch.setattr(llm, "MODE", "hybrid")
+    monkeypatch.setattr(llm, "CLOUD_PROVIDER", "openrouter")
+    monkeypatch.setattr(llm, "CLOUD_KEY", "k")
+    monkeypatch.setattr(llm, "CLOUD_MODEL", model)
+    monkeypatch.setattr(llm, "anonymize", lambda t: t)
+    monkeypatch.setattr(llm, "resolve_cloud_model", lambda force=False: _sleep(model))
+    monkeypatch.setattr(llm, "_cloud_stream", lambda b, h, s: _sleep(None))
+    monkeypatch.setattr(llm, "_cloud_routes", lambda: [("прямо", None)])
+    return llm
+
+
+async def _sleep(value):
+    return value
+
+
+# ВАЖНО: счётчик живёт в ContextVar, а asyncio.run() выполняет корутину в СВОЕЙ копии
+# контекста. Поэтому usage_now() читаем ВНУТРИ той же корутины, что и вызов модели,
+# иначе увидим пустой счётчик из внешнего контекста (и это не баг, а смысл ContextVar).
+
+
+def test_cloud_chat_counts_openrouter_usage(monkeypatch):
+    import asyncio
+
+    llm = _cloud_ready(monkeypatch)
+    payload = {"model": DS, "choices": [{"message": {"content": "ок"}, "finish_reason": "stop"}],
+               "usage": {"prompt_tokens": 321, "completion_tokens": 12}}
+
+    async def post(path, body, headers, timeout=None):
+        return _Resp(payload)
+
+    monkeypatch.setattr(llm, "_cloud_post", post)
+
+    async def scenario():
+        llm_base.usage_reset()
+        out = await llm.cloud_chat("S", "привет")
+        return out, llm_base.usage_now()
+
+    out, u = asyncio.run(scenario())
+    assert out == "ок"
+    assert (u.prompt_tokens, u.completion_tokens) == (321, 12)
+    assert u.models == [DS]
+
+
+def test_cloud_chat_counts_retried_request_separately(monkeypatch):
+    """Ответ обрезан по max_tokens, запрос ушёл второй раз — платят дважды, значит считаем дважды.
+
+    Иначе статистика врёт в сторону «меньше»: хозяин видит половину реального счёта."""
+    import asyncio
+
+    llm = _cloud_ready(monkeypatch)
+    seq = [
+        # первый ответ: всё ушло в размышления, content пуст, finish_reason=length → будет повтор
+        _Resp({"model": DS, "choices": [{"message": {"content": "", "reasoning": "…"},
+                                          "finish_reason": "length"}],
+               "usage": {"prompt_tokens": 100, "completion_tokens": 50}}),
+        # повтор с max_tokens=4096: ответ нормальный
+        _Resp({"model": DS, "choices": [{"message": {"content": "ок"}, "finish_reason": "stop"}],
+               "usage": {"prompt_tokens": 100, "completion_tokens": 20}}),
+    ]
+    calls: list = []
+
+    async def post(path, body, headers, timeout=None):
+        calls.append(body.get("max_tokens"))
+        return seq[min(len(calls) - 1, len(seq) - 1)]
+
+    monkeypatch.setattr(llm, "_cloud_post", post)
+
+    async def scenario():
+        llm_base.usage_reset()
+        out = await llm.cloud_chat("S", "привет")
+        return out, llm_base.usage_now()
+
+    out, u = asyncio.run(scenario())
+    assert out == "ок" and len(calls) == 2, "ожидался повтор запроса с увеличенным лимитом"
+    assert (u.prompt_tokens, u.completion_tokens) == (200, 70)
+
+
+def test_cloud_tools_chat_counts_usage(monkeypatch):
+    """Путь с инструментами (режим cloud) тоже считает токены — там их больше всего."""
+    import asyncio
+
+    llm = _cloud_ready(monkeypatch)
+    payload = {"choices": [{"message": {"content": "", "tool_calls": [
+        {"id": "c1", "type": "function",
+         "function": {"name": "add_task", "arguments": '{"title": "купить хлеб"}'}}]}}],
+        "usage": {"prompt_tokens": 700, "completion_tokens": 33}}
+
+    async def post(path, body, headers, timeout=None):
+        return _Resp(payload)
+
+    monkeypatch.setattr(llm, "_cloud_post", post)
+
+    async def scenario():
+        llm_base.usage_reset()
+        out = await llm.cloud_tools_chat([{"role": "user", "content": "задача: купить хлеб"}],
+                                          [{"type": "function", "function": {"name": "add_task"}}])
+        return out, llm_base.usage_now()
+
+    out, u = asyncio.run(scenario())
+    assert out and out["tool_calls"][0]["name"] == "add_task"
+    assert (u.prompt_tokens, u.completion_tokens) == (700, 33)
+
+
+def test_ollama_chat_counts_usage(monkeypatch):
+    """Локальная модель денег не стоит, но токены показываем: по ним видно объём и скорость."""
+    import asyncio
+
+    from core.brain import llm
+
+    monkeypatch.setattr(llm, "LMSTUDIO_ENABLED", False)
+    payload = {"done": True, "prompt_eval_count": 640, "eval_count": 48,
+               "message": {"content": "ок", "tool_calls": []}}
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            return _Resp(payload)
+
+    monkeypatch.setattr(llm, "_local_client", lambda t: _Client())
+
+    async def scenario():
+        llm_base.usage_reset()
+        out = await llm.ollama_chat([{"role": "user", "content": "привет"}])
+        return out, llm_base.usage_now()
+
+    out, u = asyncio.run(scenario())
+    assert out["content"] == "ок"
+    assert (u.prompt_tokens, u.completion_tokens) == (640, 48)
+
+
+def test_usage_does_not_leak_from_one_task_to_another(monkeypatch):
+    """Фоновая задача не приписывает свои токены ходу хозяина.
+
+    Именно ради этого счётчик на ContextVar: у фоновой задачи (уборка памяти, напоминания)
+    своя копия контекста, её set() не виден в ходе, который её запустил."""
+    import asyncio
+
+    from core.brain import llm
+
+    monkeypatch.setattr(llm, "LMSTUDIO_ENABLED", False)
+
+    class _Client:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, url, json=None):
+            return _Resp({"done": True, "prompt_eval_count": 300, "eval_count": 30,
+                          "message": {"content": "фон", "tool_calls": []}})
+
+    monkeypatch.setattr(llm, "_local_client", lambda t: _Client())
+
+    async def scenario():
+        llm_base.usage_reset()
+
+        async def background():
+            return await llm.ollama_chat([{"role": "user", "content": "фоновая уборка"}])
+
+        task = asyncio.create_task(background())
+        await asyncio.sleep(0.05)             # фоновый вызов успел отметить токены у себя
+        own = await llm.ollama_chat([{"role": "user", "content": "мой ход"}])
+        await task
+        return own, llm_base.usage_now()
+
+    out, u = asyncio.run(scenario())
+    assert out["content"] == "фон"
+    assert (u.prompt_tokens, u.completion_tokens) == (300, 30), "в ход хозяина попал чужой вызов"
+
+
 # ============================================================ 3. журнал
 def test_finish_writes_tokens_of_the_turn(fresh_db, no_price):
     trace.start("расскажи анекдот", "web")

@@ -348,7 +348,6 @@ async def cloud_chat(system: str, user_text: str, history: list[dict] | None = N
                 r.raise_for_status()
                 data = r.json()
                 _note_cloud_usage(data, body.get("model", ""))
-                _note_cloud_usage(data, body.get("model", ""))
                 msg = (data.get("choices") or [{}])[0].get("message") or {}
                 text = strip_think(msg.get("content") or "")
                 _reasoning_only = not text and bool((msg.get("reasoning") or msg.get("reasoning_content") or "").strip())

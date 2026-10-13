@@ -69,7 +69,7 @@ def register(app) -> None:
 
     Вызывается из `core/api/app.py` ДО регистрации статики и SPA-catch-all.
     """
-    from . import boards, chat, finance, learn, mind, orders, pc, people, system, tasks
+    from . import boards, chat, finance, learn, mind, orders, pc, people, setup, system, tasks
 
     finance.register(app)
     orders.register(app)
