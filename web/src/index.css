@@ -3194,9 +3194,12 @@ html[data-pwa="standalone"] body { overscroll-behavior: none; }
 /* курсорного спотлайта карточек нет (удалён вместе с .liq-amb): остаются только
    статичная стеклянная рамка ::after и tilt в Today.jsx. */
 
-/* ---------- герой: полупрозрачный градиент + вода + пузыри + conic-рамка ---------- */
+/* ---------- герой: полупрозрачный градиент + вода + пузыри + conic-рамка ----------
+   Заливка — от акцента приложения (--acc), а не захардкоженная синяя: иначе смена
+   цвета в настройках главную карточку не трогала. Тот же профиль прозрачности,
+   что был (60%/32%), только оттенок едет за --acc; белый текст и тень как были. */
 #p-today .home-hero {
-  background: linear-gradient(160deg, rgba(80, 110, 255, .55), rgba(30, 30, 150, .35)) !important;
+  background: linear-gradient(160deg, color-mix(in srgb, var(--acc) 60%, transparent), color-mix(in srgb, var(--acc) 32%, transparent)) !important;
   -webkit-backdrop-filter: blur(26px) saturate(1.9) brightness(1.06);
   backdrop-filter: blur(26px) saturate(1.9) brightness(1.06);
 }
