@@ -32,6 +32,51 @@ def _assistant_test_env():
     yield
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _config_file_isolated(tmp_path_factory):
+    """Ни один тест не пишет в `config.yaml` разработчика — и его содержимое не влияет на тесты.
+
+    Зачем. `core/config.py::_config_file()` читает `JARVIS_CONFIG` при каждом вызове, а запись
+    конфига идёт через неё (`write_settings`). Раньше тесты, которые пишут конфиг, полагались на
+    то, что нужный путь подменён их собственной фикстурой. Стоило одному из них остаться без
+    подмены — он создавал настоящий `config.yaml` в корне репозитория, и со второго прогона
+    весь набор читал его вместо `config.example.yaml`.
+
+    Наблюдалось как три «загадочных» падения: тесты зрения читали `brain.mode` из подсунутого
+    файла (`local` вместо `hybrid` в примере) и падали на `local_only()`. То есть результат
+    прогона зависел от того, что осталось в папке от прошлого раза, — для одиночной машины
+    и для CI это разные миры.
+
+    Что делаем. На всю сессию уводим `JARVIS_CONFIG` во временную папку:
+      * если настоящий `config.yaml` есть — копируем его (тесты видят ровно те настройки,
+        к которым привыкли, но менять могут только копию);
+      * если его нет — указываем на несуществующий путь, чтобы `setup_done()` остался `False`
+        (на него завязаны тесты мастера установки и проверки редиректа).
+    Тесты с собственной подменой пути (`monkeypatch.setenv`) перекрывают её внутри теста —
+    как и раньше.
+
+    Фикстура сессионная: `monkeypatch` на этом уровне недоступен, поэтому переменную среды
+    ставим и снимаем вручную.
+    """
+    import shutil
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    real = root / "config.yaml"
+    target = tmp_path_factory.mktemp("marvin-config") / "config.yaml"
+    if real.exists():
+        shutil.copy(real, target)
+    previous = os.environ.get("JARVIS_CONFIG") or os.environ.get("ASSISTANT_CONFIG")
+    key = "JARVIS_CONFIG" if os.environ.get("JARVIS_CONFIG") or not os.environ.get("ASSISTANT_CONFIG") else "ASSISTANT_CONFIG"
+    os.environ["JARVIS_CONFIG"] = str(target)
+    yield
+    if previous is None:
+        os.environ.pop("JARVIS_CONFIG", None)
+        os.environ.pop("ASSISTANT_CONFIG", None)
+    else:
+        os.environ[key] = previous
+
+
 @pytest.fixture(autouse=True)
 def _lmstudio_off(monkeypatch):
     """LM Studio в тестах выключен: иначе на машине с включённым LM Studio тесты
