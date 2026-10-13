@@ -20,7 +20,7 @@ import { ImportButton } from '../components/Widgets'
 import { useRefresh } from '../App'
 import { Plus, Search, Trash2, X, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, ChevronRight, EyeOff, Settings2 } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
-import { useCardLayout, CardCtl } from '../lib/layout'
+import { useCardLayout, CardCtl, useWide, usePressResize } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
 import { usePhone } from '../lib/motion'
@@ -57,7 +57,7 @@ const SEG_ROW_M = 'fade-x max-[820px]:!flex-nowrap max-[820px]:!overflow-x-auto'
    Числа потока (доходы, регулярные, платежи по долгам, свободно) — это строки внутри раздела
    «поток денег», поэтому в списке он один. */
 const FIN_CARDS = ['flow', 'budgets', 'upcoming']
-const FIN_CARD_WIDTHS = { flow: 12, budgets: 12, upcoming: 12 }
+const FIN_CARD_WIDTHS = { flow: 4, budgets: 4, upcoming: 4 }
 const FIN_CARD_LABELS = { flow: 'fin.flow_month', budgets: 'fin.c_budgets', upcoming: 'fin.c_upcoming' }
 
 /* Честная оценка «когда накоплю»: при темпе 5 000 ₽ в месяц — без обещаний точности */
@@ -333,7 +333,16 @@ export default function Finance() {
   const [txCategory, setTxCategory] = useState('all')
   const [txAccount, setTxAccount] = useState('all')
   const [cardsEdit, setCardsEdit] = useState(false)
-  const { order: cardOrder, setOrder: setCardOrder, move, reset: resetCards } = useCardLayout('finance', FIN_CARDS, FIN_CARD_WIDTHS)
+  const { order: cardOrder, setOrder: setCardOrder, widths: cardWidths, touched: cardTouched, move, setWidth, reset: resetCards } = useCardLayout('finance', FIN_CARDS, FIN_CARD_WIDTHS)
+  const wide = useWide()
+  const resize = usePressResize({ enabled: cardsEdit && wide, setWidth })
+  /** ширину из настроек применяем, только если её задали жестом: старые сохранённые 12 — не в счёт */
+  const finCard = (id) => {
+    const saved = cardTouched[id] ? cardWidths[id] : FIN_CARD_WIDTHS[id]
+    const { style, ...h } = resize.bind(id, saved)
+    const custom = wide && (cardTouched[id] || (resize.live && resize.live.id === id))
+    return { ...h, style: { ...(custom ? { gridColumn: `span ${resize.widthOf(id, saved)}` } : {}), ...style } }
+  }
   const pageAcc = usePageAccent('finance')
   const reveal = useReveal(tab)
 
@@ -829,7 +838,7 @@ export default function Finance() {
               /* Поток денег: четыре строки-числа и полоса долей */
               if (id === 'flow') {
                 return (
-                  <section key="flow" data-reveal className={`relative fg-card glass fg-flow col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="flow" data-reveal {...finCard('flow')} className={`relative fg-card glass fg-flow col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.flow_month')}</h2></div>
@@ -864,7 +873,7 @@ export default function Finance() {
               /* Лимиты по категориям: строки с полосками */
               if (id === 'budgets') {
                 return (
-                  <section key="budgets" data-reveal className={`relative fg-card glass fg-limits col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                  <section key="budgets" data-reveal {...finCard('budgets')} className={`relative fg-card glass fg-limits col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                     {ctl}
                     <div className="hd flex-wrap">
                       <div className="min-w-0"><h2 className="trunc">{t('fin.budgets_month')}</h2></div>
@@ -925,7 +934,7 @@ export default function Finance() {
                 nextPayments.reduce((s, r) => s + (daysUntil(r.on) === i ? Number(r.amount) || 0 : 0), 0))
               const stripMax = Math.max(1, ...stripByDay)
               return (
-                <section key="upcoming" data-reveal className={`relative fg-card glass fg-upcoming col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
+                <section key="upcoming" data-reveal {...finCard('upcoming')} className={`relative fg-card glass fg-upcoming col-span-12 min-[821px]:col-span-4 ${CARD_M}`}>
                   {ctl}
                   <div className="hd flex-wrap">
                     <div className="min-w-0"><h2 className="trunc">{t('fin.c_upcoming')}</h2></div>

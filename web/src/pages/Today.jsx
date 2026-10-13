@@ -30,7 +30,7 @@ import { useRefresh } from '../App'
 import TaskSheet from '../components/TaskSheet'
 import { EventSheet } from './Calendar'
 import { usePrefs, usePageAccent } from '../lib/prefs'
-import { useCardLayout, CardCtl, useWide } from '../lib/layout'
+import { useCardLayout, CardCtl, useWide, usePressResize } from '../lib/layout'
 import { useTimer, mmss } from './Orders'
 
 import { ScreenTimeBentoWidget } from '../components/ReportCards'
@@ -165,11 +165,12 @@ export default function Today({ openChat, address = '' }) {
 
   // Режим настройки главной: порядок и ширина блоков
   const [editMode, setEditMode] = useState(false)
-  const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth } = /* Порядок берём из DEFAULT_ORDER (герой с балансом → касса → списки), а не из порядка
+  const { order: widgetOrder, setOrder: setWidgetOrder, widths: widgetWidths, move, drop: dropWidget, cycleWidth, setWidth } = /* Порядок берём из DEFAULT_ORDER (герой с балансом → касса → списки), а не из порядка
    объявления виджетов: иначе первыми оказывались сводка дня и время за ПК.
    Ключ хранения новый — старые сохранённые порядки игнорируются. */
   useCardLayout('today2', DEFAULT_ORDER, DEFAULT_WIDTHS)
   const wide = useWide()
+  const resize = usePressResize({ enabled: editMode && wide, setWidth })
   const phone = usePhone()          // ≤820px: телефонная раскладка по макету
   const pageAcc = usePageAccent('today')
   const [addSheetOpen, setAddSheetOpen] = useState(false)
@@ -437,7 +438,9 @@ export default function Today({ openChat, address = '' }) {
      На телефоне блок — тоже карточка (макет): одна колонка, отступ 21px, радиус из токена, без
      тени и без хайрлайна; разделение тоном. На десктопе вид остаётся прежним. */
   const blockProps = (id, idx = 0) => {
-    const span = widgetWidths[id] || DEFAULT_WIDTHS[id] || 6
+    const saved = widgetWidths[id] || DEFAULT_WIDTHS[id] || 6
+    const span = resize.widthOf(id, saved)
+    const { style: rbStyle, ...rbProps } = resize.bind(id, saved)
     const surface = PANELS.has(id)
     const cls = surface
       ? (id === 'balance' ? `c hero home-hero ${HERO_M}` : id === 'chart' ? 'c chart' : 'c')
@@ -449,7 +452,8 @@ export default function Today({ openChat, address = '' }) {
     // data-reveal блокам больше не ставим (иначе двойное появление с useReveal).
     return {
       className: `${editMode ? 'wig ' : ''}wsec liq liq-${id} ${cls} ${pad} ${CARD_LIGHT_M}`,
-      style: { '--wspan': span, '--i': idx },
+      ...rbProps,
+      style: { '--wspan': span, '--i': idx, ...rbStyle },
       draggable: editMode || undefined,
       onDragStart: editMode ? (e) => handleDragStart(e, id) : undefined,
       onDragOver: editMode ? handleDragOver : undefined,

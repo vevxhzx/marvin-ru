@@ -9,7 +9,7 @@ import TaskSheet from '../components/TaskSheet'
 import Aims from '../components/Aims'
 import { usePrefs, prefs as PREFS } from '../lib/prefs'
 import { usePageAccent } from '../lib/prefs'
-import { useCardLayout, CardCtl } from '../lib/layout'
+import { useCardLayout, CardCtl, useWide, usePressResize } from '../lib/layout'
 import { useI18n, fmtWeekday } from '../lib/i18n'
 import { usePhone } from '../lib/motion'
 import '../tasks-glass.css'
@@ -43,6 +43,7 @@ const cardM = (pad = '!p-[var(--card-pad)]') =>
    the old layout (done/list/empty/sort cards of the bento grid) has no blocks to
    reuse, and a stale order would hide the counters from an existing user. */
 const BLOCKS = ['stats', 'list']
+const BLOCK_WIDTHS = { stats: 12, list: 8 }
 const BLOCK_TITLES = { stats: 'tk.open', list: 'nav.tasks' }
 
 /* Заголовок списка для каждого вида */
@@ -409,7 +410,14 @@ export default function Tasks() {
   const [{ tasksSort = 'priority' }] = usePrefs()
   const sortFn = SORT_FN[tasksSort] || SORT_FN.priority
   const [cardsEdit, setCardsEdit] = useState(false)
-  const { order: blockOrder, setOrder: setBlockOrder, move, reset: resetBlocks } = useCardLayout('tasks2', BLOCKS)
+  const { order: blockOrder, setOrder: setBlockOrder, widths: blockWidths, touched: blockTouched, move, setWidth, reset: resetBlocks } = useCardLayout('tasks2', BLOCKS, BLOCK_WIDTHS)
+  const wide = useWide()
+  const resize = usePressResize({ enabled: cardsEdit && wide, setWidth })
+  /* список можно растянуть жестом «зажать и тянуть»; колонка справа добирает остаток ряда */
+  const listSaved = blockTouched.list ? blockWidths.list : BLOCK_WIDTHS.list
+  const listW = resize.widthOf('list', listSaved)
+  const listCustom = wide && (blockTouched.list || (resize.live && resize.live.id === 'list'))
+  const { style: listGripStyle, ...listGrip } = resize.bind('list', listSaved)
   const pageAcc = usePageAccent('tasks')
   const phone = usePhone()          // ≤820px: телефонная раскладка по макету
   /* row flashes on arrival and leaves nicely when closed. 1050ms — как в макете:
@@ -800,7 +808,8 @@ export default function Tasks() {
               Строки без изменений разметки: dot приоритета, заголовок,
               чип due-tag, chevron — одевает tasks-glass.css. */}
           {blockOrder.includes('list') && (
-            <section className={`relative s12 tg-list glass ${cardM()}`} style={{ '--i': 1 }}>
+            <section className={`relative s12 tg-list glass ${cardM()}`} {...listGrip}
+              style={{ '--i': 1, ...(listCustom ? { gridColumn: `span ${listW}` } : {}), ...listGripStyle }}>
               {ctl('list')}
               <div
                 className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2"
@@ -893,7 +902,7 @@ export default function Tasks() {
               div, не aside — index.css прячет aside на телефоне, а колонка там
               остаётся, стеком под списком. Те же данные, что уже загружены. */}
           {blockOrder.includes('list') && (
-            <div className="s12 tg-side">
+            <div className="s12 tg-side" style={listCustom ? { gridColumn: `span ${listW <= 9 ? 12 - listW : 12}` } : undefined}>
               <section className={`tg-card glass ${cardM()}`} style={{ '--i': 2 }}>
                 <div className="hd">
                   <h2 className="h3">{t('common.today')}</h2>

@@ -3,7 +3,7 @@ import { api, hhmm, isAllDay, MONTHS_NOM, MONTHS as MONTHS_GEN, isSameDay, toLoc
 import { Sheet, Field, DateTimeField, Empty, useToast, ListSkeleton, PageHead, Card, ErrorState } from '../components/ui'
 import { useRefresh } from '../App'
 import { Plus, Check, ChevronLeft, Settings2 } from 'lucide-react'
-import { useCardLayout, CardCtl, useWide } from '../lib/layout'
+import { useCardLayout, CardCtl, useWide, usePressResize } from '../lib/layout'
 import '../cal-glass.css'
 import { usePageAccent } from '../lib/prefs'
 import { usePhone } from '../lib/motion'
@@ -319,7 +319,8 @@ export default function Calendar() {
   const wide = useWide()
   const pageAcc = usePageAccent('calendar')
   const [cardsEdit, setCardsEdit] = useState(false)
-  const { order: cardOrder, widths: cardWidths, move, cycleWidth } = useCardLayout('calendar', CAL_CARDS, CAL_WIDTHS)
+  const { order: cardOrder, widths: cardWidths, move, cycleWidth, setWidth } = useCardLayout('calendar', CAL_CARDS, CAL_WIDTHS)
+  const resize = usePressResize({ enabled: cardsEdit && wide, setWidth })
   /** карточки, которые есть в текущем виде, в сохранённом порядке */
   const shown = (view === 'month' ? ['month', 'day', 'upcoming'] : ['week', 'upcoming'])
     .filter((id) => cardOrder.includes(id))
@@ -327,8 +328,14 @@ export default function Calendar() {
   const cardSt = (id, extra = {}) => ({
     order: cardOrder.indexOf(id),
     ...extra,
-    ...(wide ? { gridColumn: `span ${cardWidths[id] || CAL_WIDTHS[id]}` } : {}),
+    ...(wide ? { gridColumn: `span ${resize.widthOf(id, cardWidths[id] || CAL_WIDTHS[id])}` } : {}),
+    ...resize.bind(id).style,
   })
+  /** обработчики жеста «зажать и тянуть» для контейнера карточки */
+  const cardGrip = (id) => {
+    const { style, ...h } = resize.bind(id, cardWidths[id] || CAL_WIDTHS[id])
+    return h
+  }
   const cardCtl = (id) => (
     <CardCtl id={id} order={cardOrder} edit={cardsEdit} wide={wide}
       onMove={move} onWidth={cycleWidth} width={cardWidths[id] || CAL_WIDTHS[id]}
@@ -575,7 +582,7 @@ export default function Calendar() {
         {/* Вид «Месяц» */}
         {view === 'month' && (
           <>
-            <Card className={`s8 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 3, minHeight: phone ? undefined : '560px', ...cardSt('month') }}>
+            <Card className={`s8 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 3, minHeight: phone ? undefined : '560px', ...cardSt('month') }} {...cardGrip('month')}>
               {cardCtl('month')}
               <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2 className="h3">{MONTHS_GEN[cursor.getMonth()]} {cursor.getFullYear()}</h2>
@@ -651,7 +658,7 @@ export default function Calendar() {
               </div>
             </Card>
 
-            <Card className={`s4 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 4, minHeight: '560px', ...cardSt('day') }}>
+            <Card className={`s4 r flex flex-col ${CARD_M_LIGHT}`} style={{ '--i': 4, minHeight: '560px', ...cardSt('day') }} {...cardGrip('day')}>
               {cardCtl('day')}
               <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
                 <h2>{isSameDay(selected, today) ? t('common.today') : dayLabel(selected)}</h2>
@@ -724,7 +731,7 @@ export default function Calendar() {
 
         {/* Вид «Неделя» */}
         {view === 'week' && (
-          <Card className={`s12 r ${CARD_M_LIGHT}`} style={{ '--i': 3, ...cardSt('week') }}>
+          <Card className={`s12 r ${CARD_M_LIGHT}`} style={{ '--i': 3, ...cardSt('week') }} {...cardGrip('week')}>
             {cardCtl('week')}
             <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
               <h2 className="h3">{t('cal.week_plan')}</h2>
@@ -819,7 +826,7 @@ export default function Calendar() {
 
         {/* Карточка: Ближайшие события (s12) — класс cal-upcoming: на телефоне строки
             перекладываем в две линии (см. cal-glass.css), список «Сегодня» не трогаем */}
-        <Card className={`s12 r ${CARD_M_LIGHT} cal-upcoming`} style={{ '--i': 5, ...cardSt('upcoming') }}>
+        <Card className={`s12 r ${CARD_M_LIGHT} cal-upcoming`} style={{ '--i': 5, ...cardSt('upcoming') }} {...cardGrip('upcoming')}>
           {cardCtl('upcoming')}
           <div className="hd" style={cardsEdit ? { paddingRight: 128 } : undefined}>
             <h2 className="h3">{t('nextup.title')}</h2>
