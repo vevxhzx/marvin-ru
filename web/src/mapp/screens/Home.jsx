@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowUpRight, Brain, Clapperboard, Users } from 'lucide-react'
 import { api, hhmm, isSameDay, money } from '../../lib/api'
 import { localeOf, useI18n } from '../../lib/i18n'
-import { Avatar, BigMoney, Card, IconTile, MarvinOrb, Overline, SectionHead, TaskCheck } from '../ui.jsx'
+import { Avatar, BigMoney, Card, IconTile, MEmpty, MLoadError, MLoading, MarvinOrb, Overline, SectionHead, TaskCheck } from '../ui.jsx'
 
 const goDefault = (id) => {
   const map = { brain: '/mind', orders: '/orders', people: '/people', finance: '/finance', tasks: '/tasks', calendar: '/calendar', settings: '/settings', chat: null }
@@ -149,14 +149,9 @@ export default function MHome(props = {}) {
   const past = useMemo(() => (txs ? buildPast(txs, balance) : []), [txs, balance])
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={() => window.location.reload()}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!dash) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!dash) return <MLoading rows={4} rowH={60} avatar={false} />
 
   return (
     <div>
@@ -165,7 +160,7 @@ export default function MHome(props = {}) {
           <Overline>{now.toLocaleDateString(localeOf(), { weekday: 'long', day: 'numeric', month: 'long' })}</Overline>
           <h1 className="mt-1.5 text-[32px] font-bold leading-[1.05] tracking-[-0.025em]">{t(greetKey(now.getHours()))}</h1>
         </div>
-        <button onClick={() => go('settings')} aria-label={t('m.profile')} className="relative mt-0.5 transition active:scale-90">
+        <button type="button" onClick={() => go('settings')} aria-label={t('m.profile')} className="relative mt-0.5 transition active:scale-90">
           <Avatar initials={initials} hue={0} size={42} className="ring-2 ring-white/25" />
           <span className="absolute -right-0.5 -top-0.5 h-3 w-3 rounded-full bg-[#ff5c7a] ring-2 ring-[#3446a3]" />
         </button>
@@ -187,6 +182,7 @@ export default function MHome(props = {}) {
             {/* фразы уходят в ядро — оно русское в любом режиме интерфейса */}   {/* i18n-raw */}
             {[['m.chip_plan', 'план дня'], ['m.chip_debts', 'кто мне должен'], ['m.chip_delay', 'что можно отложить']].map(([k, raw]) => (
               <button
+                type="button"
                 key={k}
                 onClick={() => chatWith(raw)}
                 className="shrink-0 rounded-full border border-white/15 bg-white/[0.08] px-3.5 py-2 text-[13px] font-medium text-white/85 transition active:scale-95"
@@ -199,7 +195,7 @@ export default function MHome(props = {}) {
       </div>
 
       <div className="mt-3 px-4">
-        <div onClick={() => go('finance')} role="button" tabIndex={0} aria-label={t('m.balance')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); go('finance') } }} className="m-hero holo-border relative cursor-pointer overflow-hidden rounded-[30px] p-5 transition active:scale-[0.985]">
+        <button type="button" onClick={() => go('finance')} aria-label={t('m.balance')} className="m-hero holo-border relative block w-full cursor-pointer overflow-hidden rounded-[30px] p-5 text-left transition active:scale-[0.985]">
           <div className="pointer-events-none absolute -right-12 -top-16 h-48 w-48 rounded-full bg-white/20 blur-2xl" />
           <div className="relative flex items-center justify-between">
             <span className="text-[15px] font-semibold">{t('m.balance')}</span>
@@ -221,13 +217,13 @@ export default function MHome(props = {}) {
               [t('m.free'), Number(fin.cashflow?.free ?? fin.safe?.free ?? 0)],
               [lowShort ? t('m.by_date', { date: lowShort }) : t('m.forecast'), Number(dash?.forecast?.low ?? balance)],
             ].map(([l, v]) => (
-              <div key={l} className="m-tile rounded-[18px] px-2.5 py-2.5">
-                <div className="text-[11.5px] text-white/75">{l}</div>
-                <div className="tnum mt-0.5 whitespace-nowrap text-[14.5px] font-semibold">{money(v)}</div>
+              <div key={l} className="m-tile min-w-0 rounded-[18px] px-2.5 py-2.5">
+                <div className="truncate text-[11.5px] text-white/75">{l}</div>
+                <div className="tnum mt-0.5 truncate text-[14.5px] font-semibold" title={money(v)}>{money(v)}</div>
               </div>
             ))}
           </div>
-        </div>
+        </button>
       </div>
 
       <div className="mt-7 px-4">
@@ -241,7 +237,16 @@ export default function MHome(props = {}) {
             {nowLine}
             <span className="h-px flex-1 bg-[#ff5c7a]/30" />
           </div>
-          {agenda.length === 0 && <div className="px-3 py-3 text-[14px] text-white/50">{t('m.empty_sub')}</div>}
+          {agenda.length === 0 && (
+            <MEmpty
+              className="px-3"
+              compact
+              glyph="calendar"
+              text={t('m.home_empty')}
+              sub={t('m.home_empty_sub')}
+              hint={t('m.home_hint')}
+            />
+          )}
           {agenda.map((a, i) => (
             <div key={a.id} className={`flex items-center gap-3 rounded-[20px] px-3 py-3${i < agenda.length - 1 ? ' border-b border-white/[0.05]' : ''}`}>
               <div className="tnum w-11 shrink-0 text-[13px] font-semibold text-white/80">{hhmm(a.at)}</div>
@@ -273,7 +278,7 @@ export default function MHome(props = {}) {
                 {t('m.pace', { v: money(avgDay) })}
               </div>
             </div>
-            <button onClick={() => go('finance')} aria-label={t('m.open')} className="grid h-9 w-9 place-items-center rounded-full bg-white/[0.07] text-white/70">
+            <button type="button" onClick={() => go('finance')} aria-label={t('m.open')} className="grid h-9 w-9 place-items-center rounded-full bg-white/[0.07] text-white/70">
               <ArrowUpRight size={17} />
             </button>
           </div>
@@ -289,7 +294,7 @@ export default function MHome(props = {}) {
 
       <div className="mt-4 grid grid-cols-3 gap-2.5 px-4">
         {shortcuts.map((s) => (
-          <button key={s.id} onClick={() => go(s.id)} className="m-glass rounded-[22px] p-3.5 text-left transition active:scale-[0.96]">
+          <button type="button" key={s.id} onClick={() => go(s.id)} className="m-glass rounded-[22px] p-3.5 text-left transition active:scale-[0.96]">
             <IconTile icon={s.icon} color={s.color} />
             <div className="mt-3 text-[14px] font-semibold">{s.label}</div>
             <div className="text-[12px] text-white/55">{s.value}</div>
@@ -301,6 +306,7 @@ export default function MHome(props = {}) {
           <span className="max-w-[60vw] truncate text-[13.5px]">{toastMsg.text}</span>
           {toastMsg.action && (
             <button
+              type="button"
               onClick={() => { toastMsg.action.fn(); setToastMsg(null) }}
               className="shrink-0 rounded-full bg-white/10 px-3 py-1.5 text-[13px] font-medium"
             >
@@ -318,7 +324,7 @@ export function MCashChart({ past = [], future = [] }) {
   const { t } = useI18n()
   const W = 318, H = 170, B = 22
   const vals = [...past.map((p) => p.balance), ...future.map((p) => p.balance)]
-  if (!vals.length) return <div className="mt-4 text-[13px] text-white/45">{t('m.loading')}</div>
+  if (!vals.length) return <div className="mt-4 text-[13px] leading-snug text-white/50">{t('m.cash_empty')}</div>
   let min = Math.min(0, ...vals), max = Math.max(0, ...vals)
   if (max - min < 1) { max += 1; min -= 1 }
   const pad = (max - min) * 0.08; min -= pad; max += pad

@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ArrowUp, ChevronLeft, Ellipsis, Mic } from 'lucide-react'
 import { api, chatStream } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
-import { MarvinOrb } from '../ui.jsx'
+import { MError, MListSkeleton, MarvinOrb } from '../ui.jsx'
 
 const fromServer = (h) => (h || []).map((m, i) => ({
   id: m.id ?? `h${i}`,
@@ -24,14 +24,21 @@ const SUGGEST = ['что сегодня главное?', 'кто мне дол�
 export default function MChat({ seed, go, toast }) {
   const { t } = useI18n()
   const [msgs, setMsgs] = useState(null)
+  const [histErr, setHistErr] = useState(false)
   const [text, setText] = useState('')
   const [busy, setBusy] = useState(false)
   const listRef = useRef(null)
   const idRef = useRef(1000)
 
-  useEffect(() => {
-    api.chatHistory(60).then((h) => setMsgs(fromServer(h))).catch(() => setMsgs([]))
-  }, [])
+  /* История — с состоянием: раньше сбой превращался в «переписки нет», то есть
+     пустой чат выглядел как новый. Теперь это ошибка с кнопкой «ещё раз». */
+  const loadHistory = () => {
+    setHistErr(false)
+    api.chatHistory(60)
+      .then((h) => setMsgs(fromServer(h)))
+      .catch(() => { setHistErr(true); setMsgs([]) })
+  }
+  useEffect(() => { loadHistory() }, [])
 
   useEffect(() => {
     const el = listRef.current
@@ -74,6 +81,7 @@ export default function MChat({ seed, go, toast }) {
     <div data-testid="m-chat" className="anim-screen absolute inset-0 flex flex-col">
       <div className="relative z-30 flex items-center gap-3 px-4 pb-3 pt-[56px]">
         <button
+          type="button"
           onClick={() => go('home')}
           aria-label={t('common.back')}
           data-testid="m-chat-back"
@@ -90,6 +98,7 @@ export default function MChat({ seed, go, toast }) {
           </div>
         </div>
         <button
+          type="button"
           aria-label={t('common.more_actions')}
           data-testid="m-chat-more"
           onClick={() => toast(t('m.soon_sub'))}
@@ -108,13 +117,20 @@ export default function MChat({ seed, go, toast }) {
         }}
       >
         {msgs === null && (
-          <div className="space-y-3 pt-2">
-            {[70, 45, 60].map((w, i) => (
-              <div key={i} className="anim-fade h-9 rounded-2xl bg-white/[0.07]" style={{ width: `${w}%` }} />
-            ))}
+          <div role="status" aria-live="polite" aria-busy="true" aria-label={t('m.loading')} className="px-1 pt-2">
+            <MListSkeleton n={3} rowH={44} avatar={false} />
           </div>
         )}
-        {msgs !== null && msgs.length === 0 && (
+        {histErr && msgs !== null && (
+          <MError
+            className="mb-3"
+            compact
+            onRetry={loadHistory}
+            title={t('m.chat_hist_err')}
+            sub={t('m.chat_hist_err_sub')}
+          />
+        )}
+        {msgs !== null && !histErr && msgs.length === 0 && (
           <div className="flex h-full flex-col items-start justify-end pb-4">
             <div className="text-[19px] font-semibold">{t('chat.hello')}</div>
             <div className="mt-1 text-[13.5px] leading-relaxed text-white/60">{t('chat.hello_hint')}</div>
@@ -135,6 +151,7 @@ export default function MChat({ seed, go, toast }) {
                 {m.retry && (
                   <div className="mt-2">
                     <button
+                      type="button"
                       onClick={() => send(m.retry)}
                       className="rounded-full bg-white/10 px-3.5 py-1.5 text-[13px] font-medium"
                     >
@@ -162,6 +179,7 @@ export default function MChat({ seed, go, toast }) {
         <div className="no-scrollbar -mx-4 mb-2.5 flex gap-2 overflow-x-auto px-4">
           {SUGGEST.map((s) => (
             <button
+              type="button"
               key={s}
               onClick={() => send(s)}
               className="m-glass shrink-0 rounded-full px-3.5 py-2 text-[13px] font-medium text-white/85 transition active:scale-95"

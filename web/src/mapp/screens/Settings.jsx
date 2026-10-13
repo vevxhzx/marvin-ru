@@ -9,7 +9,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Activity, Brain, ChevronRight, Database, Mic, Plug, User } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
-import { Avatar, Card, IconTile, Overline, ScreenTitle, Toggle } from '../ui.jsx'
+import { Avatar, Card, IconTile, MEmpty, MLoadError, MLoading, Overline, ScreenTitle, Toggle } from '../ui.jsx'
 
 const cx = (...parts) => parts.filter(Boolean).join(' ')
 
@@ -34,6 +34,7 @@ const prettyKey = (key) => String(key || '').split('.').pop().replace(/_/g, ' ')
 /* Основной счёт — выпадашка из живых счетов (флаг is_main в БД, а не строка конфига).
    Выбор сразу пишет флаг и конфиг: мама на телефоне не должна думать про «Сохранить». */
 function MMainAccount({ onDone, notify }) {
+  const { t } = useI18n()
   const [accs, setAccs] = useState()
   useEffect(() => { api.accounts().then((a) => setAccs(Array.isArray(a) ? a : [])).catch(() => setAccs(null)) }, [])
   if (!Array.isArray(accs)) return null
@@ -53,10 +54,10 @@ function MMainAccount({ onDone, notify }) {
   const fmt = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`
   return (
     <select
-      aria-label="main-account"
+      aria-label={t('m.set_main_acc')}
+      title={t('m.set_main_acc')}
       value={cur}
       onChange={(e) => pick(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
       style={{ colorScheme: 'dark' }}
       className="m-glass max-w-[150px] shrink-0 rounded-xl bg-transparent px-2.5 py-2 text-[13.5px] text-white outline-none"
     >
@@ -135,14 +136,9 @@ export default function MSettings({ go }) {
   }
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={load}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!items) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!items) return <MLoading rows={6} rowH={58} avatar={false} />
 
   const name = items.find((x) => x.key === 'owner.name')?.value || t('common.sir')
   const initial = String(name).trim().charAt(0).toUpperCase() || '?'
@@ -174,31 +170,59 @@ export default function MSettings({ go }) {
               {g.rows.map((r, i) => {
                 const editing = editKey === r.key
                 const title = r.label || prettyKey(r.key)
+                /* Ряд — не клик целиком: внутри живут свои контролы (тумблер, выпадашка,
+                   поле правки), а кнопка внутри role="button" невалидна. Поэтому тап по
+                   строке — это отдельная <button> слева, а контролы стоят рядом. */
+                const openable = r.type !== 'bool' && r.key !== 'finance.main_account' && !editing
                 return (
                 <div
                   key={r.key}
                   data-testid={`m-set-row-${r.key}`}
-                  role="button"
-                  tabIndex={0}
-                  aria-label={title}
-                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && r.type !== 'bool' && r.key !== 'finance.main_account' && !editing) { e.preventDefault(); startEdit(r) } }}
-                  onClick={() => { if (r.type !== 'bool' && r.key !== 'finance.main_account' && !editing) startEdit(r) }}
                   className={cx(
                     'flex items-center gap-3 px-4 py-3.5 transition active:bg-white/[0.04]',
+                    editing && 'flex-wrap',
                     i < g.rows.length - 1 && !editing && 'border-b border-white/[0.06]',
                   )}
                 >
-                  <IconTile icon={g.icon} color={g.color} />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-[15.5px] font-medium">{title}</div>
-                    <div className="truncate text-[12.5px] text-white/50">{r.key}</div>
-                  </div>
+                  {openable ? (
+                    <button
+                      type="button"
+                      onClick={() => startEdit(r)}
+                      aria-label={title}
+                      title={title}
+                      className="-m-2 flex min-w-0 flex-1 items-center gap-3 rounded-[12px] p-2 text-left max-[359px]:basis-full"
+                    >
+                      <IconTile icon={g.icon} color={g.color} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[15.5px] font-medium">{title}</span>
+                        <span className="block truncate text-[12.5px] text-white/50">{r.key}</span>
+                      </span>
+                      {!editing && (
+                        <span className="flex min-w-0 shrink-0 items-center gap-1.5">
+                          <span className="max-w-[110px] truncate text-[13.5px] text-white/50">
+                            {r.secret ? '•••' : shortVal(r.value)}
+                          </span>
+                          <ChevronRight size={17} className="shrink-0 text-white/35" />
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    <>
+                      <IconTile icon={g.icon} color={g.color} />
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate text-[15.5px] font-medium">{title}</div>
+                        <div className="truncate text-[12.5px] text-white/50">{r.key}</div>
+                      </div>
+                    </>
+                  )}
                   {r.key === 'finance.main_account' ? (
                     <MMainAccount onDone={load} notify={setNote} />
                   ) : r.type === 'bool' ? (
                     <Toggle on={!!r.value} onChange={() => flip(r)} label={title} />
                   ) : editing ? (
-                    <div className="flex min-w-0 shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                    /* на 320 px поле правки уезжает на вторую строку — иначе
+                       подпись ряда сжимается до «Имя …» */
+                    <div className="flex min-w-0 shrink-0 items-center gap-1.5 max-[359px]:ml-12 max-[359px]:basis-full max-[359px]:shrink">
                       <input
                         autoFocus
                         value={editVal}
@@ -208,30 +232,30 @@ export default function MSettings({ go }) {
                         inputMode={r.type === 'int' ? 'numeric' : undefined}
                         placeholder={r.secret ? t('st.pass_or_token') : shortVal(r.value)}
                         aria-label={title}
-                        className="m-glass w-[130px] rounded-xl px-3 py-2 text-[14px] outline-none"
+                        className="m-glass w-[104px] rounded-xl px-3 py-2 text-[14px] outline-none min-[360px]:w-[130px]"
                       />
                       <button
+                        type="button"
                         aria-label={t('common.save')}
+                        title={t('common.save')}
                         onClick={() => saveEdit(r)}
                         className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-white/[0.12] text-[15px] transition active:scale-90"
                       >
                         ✓
                       </button>
                     </div>
-                  ) : (
-                    <div className="flex min-w-0 shrink-0 items-center gap-1.5">
-                      <span className="max-w-[120px] truncate text-[13.5px] text-white/50">
-                        {r.secret ? '•••' : shortVal(r.value)}
-                      </span>
-                      <ChevronRight size={17} className="shrink-0 text-white/35" />
-                    </div>
-                  )}
+                  ) : null}
                 </div>
                 )
               })}
             </Card>
           </div>
         ))}
+        {groups.length === 0 && (
+          <Card className="px-4 py-5">
+            <MEmpty compact glyph="mind" text={t('m.set_empty')} sub={t('m.set_empty_sub')} />
+          </Card>
+        )}
       </div>
 
       {note && (

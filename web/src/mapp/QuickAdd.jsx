@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { api, money } from '../lib/api'
 import { t as T, useI18n } from '../lib/i18n'
-import { Overline, Pill } from './ui.jsx'
+import { Overline, Pill, useSheetFocus } from './ui.jsx'
 
 const cx = (...parts) => parts.filter(Boolean).join(' ')
 
@@ -114,6 +114,8 @@ export default function MQuickAdd({ onClose, toast, go }) {
   const [busy, setBusy] = useState(false)
   const ref = useRef(null)
   const iv = useRef(0)
+  /* Esc + ловушка Tab + возврат фокуса на кнопку «+» — как у десктопного Sheet. */
+  const sheetRef = useSheetFocus(!closing, () => close())
 
   useEffect(() => {
     const el = ref.current
@@ -128,17 +130,13 @@ export default function MQuickAdd({ onClose, toast, go }) {
   }
   useEffect(() => { grow(ref.current) }, [text])
   useEffect(() => () => window.clearInterval(iv.current), [])
-  useEffect(() => {
-    const k = (e) => { if (e.key === 'Escape') close() }
-    window.addEventListener('keydown', k)
-    return () => window.removeEventListener('keydown', k)
-  }, []) // eslint-disable-line
 
   const p = text.trim() ? parsePreview(text) : null
   const kind = override || p?.kind || 'task'
   const K = KINDS.find((k) => k.id === kind) || KINDS[0]
 
   const close = () => {
+    if (closing) return
     setClosing(true)
     window.setTimeout(onClose, 280)
   }
@@ -192,6 +190,7 @@ export default function MQuickAdd({ onClose, toast, go }) {
         )}
       />
       <div
+        ref={sheetRef}
         role="dialog"
         aria-modal="true"
         aria-label={t('m.qa_title')}
@@ -208,6 +207,7 @@ export default function MQuickAdd({ onClose, toast, go }) {
             <h3 className="mt-1 text-[25px] font-bold tracking-[-0.02em]">{t('m.qa_title')}</h3>
           </div>
           <button
+            type="button"
             onClick={close}
             aria-label={t('common.close')}
             data-testid="m-qa-close"
@@ -264,6 +264,7 @@ export default function MQuickAdd({ onClose, toast, go }) {
           <div className="no-scrollbar -mx-5 mt-3 flex gap-2 overflow-x-auto px-5">
             {EXAMPLES.map((e) => (
               <button
+                type="button"
                 key={e}
                 onClick={() => setText(e)}
                 className="shrink-0 rounded-full border border-white/12 bg-white/[0.05] px-3.5 py-2 text-[13px] text-white/75 transition active:scale-95"
@@ -280,6 +281,7 @@ export default function MQuickAdd({ onClose, toast, go }) {
             const Icon = k.icon
             return (
               <button
+                type="button"
                 key={k.id}
                 onClick={() => setOverride(k.id === override ? null : k.id)}
                 aria-pressed={on}
@@ -303,6 +305,7 @@ export default function MQuickAdd({ onClose, toast, go }) {
 
         <div className="mt-5 flex items-center gap-3">
           <button
+            type="button"
             onClick={listen}
             aria-label={t('m.qa_voice')}
             data-testid="m-qa-mic"
@@ -315,6 +318,7 @@ export default function MQuickAdd({ onClose, toast, go }) {
             <Mic size={22} className="relative" />
           </button>
           <button
+            type="button"
             onClick={submit}
             disabled={!p || listening || busy}
             data-testid="m-qa-send"

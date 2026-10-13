@@ -4,10 +4,15 @@
  * Rows3 (rows-3), Ellipsis, House, Banknote, Clapperboard — есть; вместо
  * отсутствующего CircleQuestionMark — CircleHelp. Здесь используются только
  * Check и ChevronLeft. Вместо cn()/clsx — локальный cx().
+ *
+ * Состояния (загрузка/пусто/ошибка) НЕ дублируются: в конце файла тонкие
+ * обёртки над десктопными примитивами components/ui.jsx — та же логика,
+ * мобильный размер и отступы.
  */
-import { useRef } from 'react'
+import { useEffect, useRef } from 'react'
 import { Check, ChevronLeft } from 'lucide-react'
 import { getLang, useI18n } from '../lib/i18n'
+import { Empty, ErrorState, ListSkeleton, Skeleton } from '../components/ui'
 
 const cx = (...parts) => parts.filter(Boolean).join(' ')
 
@@ -44,6 +49,7 @@ export function ScreenTitle({ overline, title, count, subtitle, right, back, onB
     <div className="px-5 pt-1">
       {onBack && (
         <button
+          type="button"
           onClick={onBack}
           data-testid="m-back"
           className="m-glass -ml-1 mb-3 inline-flex h-8 items-center gap-0.5 rounded-full pl-1.5 pr-3 text-[13.5px] font-medium text-white/80 transition active:scale-95"
@@ -72,7 +78,7 @@ export function SectionHead({ title, action, onAction, className }) {
     <div className={cx('mb-3 flex items-baseline justify-between px-1', className)}>
       <h2 className="text-[19px] font-semibold tracking-[-0.015em]">{title}</h2>
       {action && (
-        <button onClick={onAction} className="text-[13px] font-medium text-[#a9bbff] transition active:opacity-60">
+        <button type="button" onClick={onAction} className="text-[13px] font-medium text-[#a9bbff] transition active:opacity-60">
           {action}
         </button>
       )}
@@ -80,14 +86,16 @@ export function SectionHead({ title, action, onAction, className }) {
   )
 }
 
+/* Сумма героя. Размер по ширине экрана: на 320 px «−1 234 567 ₽» в 54 px
+   не влезает в карточку, поэтому верхняя граница — 13.5vw. Числа не режем. */
 export function BigMoney({ value, size = 52, className }) {
   return (
     <div
-      className={cx('tnum flex items-baseline gap-2 font-semibold leading-none tracking-[-0.035em]', className)}
-      style={{ fontSize: size }}
+      className={cx('tnum flex min-w-0 items-baseline gap-1.5 font-semibold leading-none tracking-[-0.035em] sm:gap-2', className)}
+      style={{ fontSize: `min(${size}px, 13.5vw)` }}
     >
-      {num(value)}
-      <span className="font-medium text-white/60" style={{ fontSize: size * 0.5 }}>
+      <span className="min-w-0 truncate">{num(value)}</span>
+      <span className="shrink-0 font-medium text-white/60" style={{ fontSize: '0.5em' }}>
         ₽
       </span>
     </div>
@@ -98,6 +106,7 @@ export function BigMoney({ value, size = 52, className }) {
 export function IconBtn({ icon: Icon, onClick, active, dot, size = 40, label, className, testid }) {
   return (
     <button
+      type="button"
       aria-label={label}
       onClick={onClick}
       data-testid={testid}
@@ -127,6 +136,7 @@ export function Segmented({ options, value, onChange, className, size = 'md' }) 
       />
       {options.map((o) => (
         <button
+          type="button"
           key={o.id}
           onClick={() => onChange(o.id)}
           className={cx(
@@ -150,6 +160,7 @@ export function ScrollTabs({ options, value, onChange }) {
       <div className="m-glass inline-flex gap-1 rounded-full p-1">
         {options.map((o) => (
           <button
+            type="button"
             key={o.id}
             onClick={(e) => {
               onChange(o.id)
@@ -174,6 +185,7 @@ export function ScrollTabs({ options, value, onChange }) {
 export function Chip({ active, children, onClick, count, className }) {
   return (
     <button
+      type="button"
       onClick={onClick}
       className={cx(
         'inline-flex h-9 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-4 text-[13px] font-medium transition-all active:scale-95',
@@ -263,6 +275,7 @@ export function MarvinOrb({ size = 40, className }) {
 export function Toggle({ on, onChange, label }) {
   return (
     <button
+      type="button"
       role="switch"
       aria-checked={on}
       aria-label={label}
@@ -293,6 +306,7 @@ export function TaskCheck({ done, priority, onToggle, size = 26 }) {
   const pad = Math.max(0, (44 - size) / 2)
   return (
     <button
+      type="button"
       aria-label={done ? t('m.task_reopen') : t('m.task_close')}
       onClick={(e) => {
         e.stopPropagation()
@@ -333,4 +347,106 @@ export function IconTile({ icon: Icon, color, size = 36, radius = 12 }) {
       <Icon size={Math.round(size * 0.5)} strokeWidth={2} />
     </div>
   )
+}
+
+/* ───────── состояния экранов: обёртки над десктопными примитивами ─────────
+ * Логика (retry, роли, aria, «меньше движения») — в components/ui.jsx и
+ * components/States.jsx. Здесь только вид: ширина телефона, отступы и то, что
+ * состояние всегда лежит на тёмной карточке, а не на голом градиенте. */
+
+/** Скелет списка на телефоне: строки по --tap, аватар как у настоящих строк. */
+export function MListSkeleton({ n = 4, rowH = 56, avatar = true, className }) {
+  return (
+    <div className={cx('px-1', className)}>
+      <ListSkeleton n={n} rowH={rowH} avatar={avatar} />
+    </div>
+  )
+}
+
+/** Одна «плашка» вместо контента: пока данных нет, высота не прыгает. */
+export function MSkeleton({ h = 80, w, radius = 'var(--r-md)', className, style }) {
+  return <Skeleton h={h} w={w} radius={radius} className={className} style={style} />
+}
+
+/** Пусто: что это за раздел и что сделать, чтобы стало не пусто (DESIGN.md). */
+export function MEmpty({ glyph, icon, text, sub, hint, onHint, action, compact, className }) {
+  return (
+    <div className={cx('m-empty', className)}>
+      <Empty
+        glyph={glyph} icon={icon} text={text} sub={sub} hint={hint}
+        onHint={onHint} action={action} compact={compact}
+      />
+    </div>
+  )
+}
+
+/** Ошибка загрузки: что случилось + кнопка «проверить снова» (retry — onRetry). */
+export function MError({ onRetry, title, sub, detail, compact, className }) {
+  return (
+    <div className={cx('m-state-error', className)}>
+      <ErrorState title={title} sub={sub} detail={detail} onRetry={onRetry} compact={compact} />
+    </div>
+  )
+}
+
+/* Экраны повторяли один и тот же блок «загружаю…» семь раз — вынесли сюда,
+   чтобы правка была одна. Подпись для скринридера — на самом контейнере. */
+export function MLoading({ rows = 4, rowH = 56, avatar = true, className }) {
+  const { t } = useI18n()
+  return (
+    <div className={cx('px-4 pt-6', className)} role="status" aria-live="polite" aria-busy="true" aria-label={t('m.loading')}>
+      <MListSkeleton n={rows} rowH={rowH} avatar={avatar} />
+    </div>
+  )
+}
+
+/** Полноэкранная ошибка с повтором — то, что было инлайном в каждом экране. */
+export function MLoadError({ onRetry, title, sub, className }) {
+  const { t } = useI18n()
+  return (
+    <div className={cx('px-4 pt-10', className)}>
+      <MError onRetry={onRetry} title={title || t('m.load_err')} sub={sub || t('m.load_err_sub')} />
+    </div>
+  )
+}
+
+/** Ловушка фокуса + Esc + возврат фокуса — как в десктопном Sheet (ui.jsx).
+ * Мобильные шторки (QuickAdd, календарь) рисуются сами, поэтому поведение
+ * вынесено в хук: одна реализация на обе шторки вместо копипасты. */
+const FOCUSABLE = 'a[href], button, input, select, textarea, [tabindex]'
+export function useSheetFocus(open, onClose) {
+  const rootRef = useRef(null)
+  const closeRef = useRef(onClose)
+  closeRef.current = onClose
+  /* Кто открыл — ловим на первом рендере (до эффектов, иначе фокус уже увели на
+     поле внутри шторки). Значение НЕ сбрасываем: в StrictMode эффект вызывается
+     дважды, и сброс увёл бы фокус на поле, а не на вызвавший элемент. */
+  const openerRef = useRef(null)
+  if (openerRef.current === null && typeof document !== 'undefined') {
+    openerRef.current = document.activeElement
+  }
+  useEffect(() => {
+    if (!open) return undefined
+    const onKey = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); closeRef.current?.(); return }
+      if (e.key !== 'Tab') return
+      const root = rootRef.current
+      if (!root) return
+      const nodes = [...root.querySelectorAll(FOCUSABLE)].filter((el) =>
+        !el.disabled && el.tabIndex >= 0 && el.getClientRects().length > 0)
+      if (!nodes.length) return
+      const i = nodes.indexOf(document.activeElement)
+      if (e.shiftKey && i <= 0) { e.preventDefault(); nodes[nodes.length - 1].focus() }
+      else if (!e.shiftKey && (i === -1 || i === nodes.length - 1)) { e.preventDefault(); nodes[0].focus() }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => {
+      window.removeEventListener('keydown', onKey, true)
+      const back = openerRef.current
+      if (back && back !== document.body && back.isConnected && typeof back.focus === 'function') {
+        back.focus({ preventScroll: true })
+      }
+    }
+  }, [open])
+  return rootRef
 }

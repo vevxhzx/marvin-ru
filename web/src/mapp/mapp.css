@@ -181,6 +181,51 @@
 .mapp-root .typing-dot { animation: m-typing 1.2s infinite; }
 .mapp-root .pulse-ring { animation: m-pulseRing 1.6s ease-out infinite; }
 
+/* ── состояния: обёртки над десктопными примитивами (Empty/ErrorState/Skeleton) ──
+   Десктопные .empty/.state/.sk живут на токенах --sf2/--fill/--ink-2, которые в
+   мобильной копии не заданы. Здесь задаём их мобильные значения (тёмно-синяя
+   подложка в тон карточки m-card) и снимаем лишние отступы. Логика — в
+   components/ui.jsx, здесь только вид. */
+.mapp-root .empty,
+.mapp-root .state {
+  --sf: #141a45;
+  --sf2: #1c2560;
+  --fill: rgba(255, 255, 255, 0.07);
+  --fill-2: rgba(255, 255, 255, 0.12);
+  --ink: #ffffff;
+  --ink-2: rgba(255, 255, 255, 0.72);
+  --ink-3: rgba(255, 255, 255, 0.55);
+  --line: rgba(255, 255, 255, 0.12);
+  --line-2: rgba(255, 255, 255, 0.2);
+  --red: #ff8fa3;
+  --neg: #ff8fa3;
+  --pos: #7cf0c0;
+  --warn: #ffd581;
+}
+
+/* глиф и рамка пустоты/ошибки берут токены выше (плашка рисуется инлайном) */
+
+/* состояние появления — то же, что у карточек, но мягче */
+.mapp-root .m-empty,
+.mapp-root .m-state-error {
+  animation: m-fade 0.25s ease both;
+}
+
+/* на телефоне пустота не должна занимать пол-экрана */
+.mapp-root .m-empty .empty {
+  padding-block: 10px 6px;
+}
+.mapp-root .m-empty .empty-glyph {
+  width: 34px;
+  height: 34px;
+}
+
+/* скелетон на тёмном: полосы чуть светлее карточки, иначе не читается */
+.mapp-root .sk {
+  --fill: rgba(255, 255, 255, 0.07);
+  --fill-2: rgba(255, 255, 255, 0.13);
+}
+
 @keyframes m-screenIn {
   from { opacity: 0; transform: translateY(10px); }
   to { opacity: 1; transform: none; }

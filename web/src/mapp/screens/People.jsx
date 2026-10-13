@@ -6,7 +6,7 @@ import { CalendarDays, MessageCircle, Phone, Sparkles } from 'lucide-react'
 import { api, listOf, money, shortDate } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
 import { CLIENT_STAGES, CLIENT_STAGE_TONE, clientStageLabel } from '../../lib/crm'
-import { Avatar, Card, Chip, Pill, ScreenTitle } from '../ui.jsx'
+import { Avatar, Card, Chip, MEmpty, MLoadError, MLoading, Pill, ScreenTitle } from '../ui.jsx'
 
 const initialsOf = (s) => (s || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('') || '?'
 const hueOf = (s) => [...String(s || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % 6
@@ -97,14 +97,9 @@ export default function MPeople() {
   }
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={load}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!list) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!list) return <MLoading rows={5} rowH={74} />
 
   const showFunnel = group === 'all' || group === 'clients'
 
@@ -147,6 +142,7 @@ export default function MPeople() {
             <div className="mt-2.5 grid grid-cols-4 gap-1">
               {['lead', 'negotiation', 'client', 'permanent'].map((s) => (
                 <button
+                  type="button"
                   key={s}
                   onClick={() => { setStage(stage === s ? null : s); setGroup('clients') }}
                   className={`rounded-[14px] px-2 py-1.5 text-left transition active:scale-95${stage === s ? ' bg-white/[0.14]' : ''}`}
@@ -165,7 +161,15 @@ export default function MPeople() {
           <PersonCard key={p.id} p={p} stageKey={stages[p.id]?.stage} next={steps[p.id]} hint={hintFor(p)} onToast={toast} />
         ))}
         {filtered.length === 0 && (
-          <Card className="px-6 py-10 text-center text-[14px] text-white/55">{t('m.empty_brain')}</Card>
+          <Card className="px-4 py-5">
+            <MEmpty
+              compact
+              glyph="search"
+              text={stage || group !== 'all' ? t('m.search_none') : t('m.people_empty')}
+              sub={stage || group !== 'all' ? t('m.search_none_sub') : t('m.people_empty_sub')}
+              hint={stage || group !== 'all' ? undefined : t('m.people_hint')}
+            />
+          </Card>
         )}
       </div>
 
@@ -208,7 +212,7 @@ function PersonCard({ p, stageKey, next, hint, onToast }) {
         <div className="mt-3 flex items-center gap-2.5 rounded-[16px] bg-[#7d95ff]/14 px-3 py-2.5">
           <Sparkles size={14} className="shrink-0 text-[#a9bbff]" />
           <span className="min-w-0 flex-1 truncate text-[13px] leading-snug text-[#c9d4ff]">{hint}</span>
-          <button onClick={() => onToast(t('m.write_toast', { name: p.name }))} className="shrink-0 text-[13px] font-semibold text-white">{t('m.reply')}</button>
+          <button type="button" onClick={() => onToast(t('m.write_toast', { name: p.name }))} className="shrink-0 text-[13px] font-semibold text-white">{t('m.reply')}</button>
         </div>
       )}
 
@@ -220,10 +224,10 @@ function PersonCard({ p, stageKey, next, hint, onToast }) {
           </div>
         ) : <div className="flex-1" />}
         <div className="flex shrink-0 gap-1.5">
-          <button aria-label={t('m.reply')} onClick={() => onToast(t('m.write_toast', { name: p.name }))} className="grid h-9 w-9 place-items-center rounded-full bg-white/[0.08] text-white/80 transition active:scale-90">
+          <button type="button" aria-label={t('m.reply')} onClick={() => onToast(t('m.write_toast', { name: p.name }))} className="grid h-9 w-9 place-items-center rounded-full bg-white/[0.08] text-white/80 transition active:scale-90">
             <MessageCircle size={16} />
           </button>
-          <button aria-label={t('m.call_toast', { name: p.name })} onClick={() => onToast(t('m.call_toast', { name: p.name }))} className="grid h-9 w-9 place-items-center rounded-full bg-white/[0.08] text-white/80 transition active:scale-90">
+          <button type="button" aria-label={t('m.call_toast', { name: p.name })} onClick={() => onToast(t('m.call_toast', { name: p.name }))} className="grid h-9 w-9 place-items-center rounded-full bg-white/[0.08] text-white/80 transition active:scale-90">
             <Phone size={16} />
           </button>
         </div>

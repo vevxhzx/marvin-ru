@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowDownLeft, ArrowUpRight, Plus } from 'lucide-react'
 import { api, catColor, catLabel, money, parseNum, shortDate } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
-import { Avatar, BigMoney, Card, HUES, Overline, Pill, ScreenTitle, ScrollTabs, SectionHead, Segmented } from '../ui.jsx'
+import { Avatar, BigMoney, Card, HUES, MEmpty, MLoadError, MLoading, Overline, Pill, ScreenTitle, ScrollTabs, SectionHead, Segmented } from '../ui.jsx'
 
 const MINUS = '−'
 const initialsOf = (s) => String(s || '?').trim().split(/\s+/).slice(0, 2).map((w) => w[0]).join('').toUpperCase() || '?'
@@ -66,14 +66,9 @@ export default function MFinance() {
   ], [t])
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={load}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!sum && !fc) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!sum && !fc) return <MLoading rows={4} rowH={70} avatar={false} />
 
   return (
     <div>
@@ -306,19 +301,19 @@ function Ops({ txs, onMutate }) {
   return (
     <div className="mt-4 space-y-4 px-4">
       <div className="grid grid-cols-2 gap-2">
-        <Card className="rounded-[22px] p-4">
+        <Card className="min-w-0 rounded-[22px] p-4">
           <div className="flex items-center gap-1.5 text-[12px] text-white/55">
-            <ArrowDownLeft size={14} className="text-[#7cf0c0]" />
+            <ArrowDownLeft size={14} className="shrink-0 text-[#7cf0c0]" />
             {t('m.came')}
           </div>
-          <div className="tnum mt-1 text-[19px] font-semibold text-[#7cf0c0]">+{money(income)}</div>
+          <div className="tnum mt-1 truncate text-[17px] font-semibold text-[#7cf0c0] min-[360px]:text-[19px]" title={`+${money(income)}`}>+{money(income)}</div>
         </Card>
-        <Card className="rounded-[22px] p-4">
+        <Card className="min-w-0 rounded-[22px] p-4">
           <div className="flex items-center gap-1.5 text-[12px] text-white/55">
-            <ArrowUpRight size={14} className="text-[#ff9aac]" />
+            <ArrowUpRight size={14} className="shrink-0 text-[#ff9aac]" />
             {t('m.gone')}
           </div>
-          <div className="tnum mt-1 text-[19px] font-semibold">{MINUS}{money(expense)}</div>
+          <div className="tnum mt-1 truncate text-[17px] font-semibold min-[360px]:text-[19px]" title={`${MINUS}${money(expense)}`}>{MINUS}{money(expense)}</div>
         </Card>
       </div>
       {groups.map(([k, list]) => (
@@ -340,7 +335,11 @@ function Ops({ txs, onMutate }) {
           </Card>
         </div>
       ))}
-      {groups.length === 0 && <div className="py-6 text-center text-[14px] text-white/45">{t('m.list_empty')}</div>}
+      {groups.length === 0 && (
+        <Card className="px-4 py-5">
+          <MEmpty compact glyph="money" text={t('m.f_ops_empty')} sub={t('m.f_ops_sub')} hint={t('m.f_hint')} />
+        </Card>
+      )}
       <form onSubmit={submit} className="flex h-[54px] items-center gap-2 rounded-full border border-white/10 bg-[#0f1640]/75 pl-4 pr-1.5 transition focus-within:border-[#7d95ff]/50">
         <Plus size={20} className="shrink-0 text-[#8ea3ff]" />
         <input
@@ -354,12 +353,14 @@ function Ops({ txs, onMutate }) {
           onChange={(e) => setAmount(e.target.value)}
           placeholder={t('common.amount')}
           inputMode="decimal"
-          className="tnum w-[76px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40"
+          aria-label={t('common.amount')}
+          className="tnum w-[58px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40 min-[360px]:w-[76px]"
         />
         <button
           type="button"
           onClick={() => setKind((k) => (k === 'expense' ? 'income' : 'expense'))}
-          className={`shrink-0 rounded-full px-3 py-2 text-[13px] font-semibold${kind === 'income' ? ' bg-[#3ddc97]/20 text-[#7cf0c0]' : ' bg-white/10 text-white/70'}`}
+          aria-label={t(kind === 'income' ? 'm.income' : 'm.expense')}
+          className={`shrink-0 rounded-full px-2.5 py-2 text-[13px] font-semibold min-[360px]:px-3${kind === 'income' ? ' bg-[#3ddc97]/20 text-[#7cf0c0]' : ' bg-white/10 text-white/70'}`}
         >
           {t(kind === 'income' ? 'm.income' : 'm.expense')}
         </button>
@@ -412,11 +413,15 @@ function Accounts({ accounts, onMutate }) {
           <div className="tnum text-[15.5px] font-semibold">{money(a.balance)}</div>
         </Card>
       ))}
-      {accounts.length === 0 && <div className="py-6 text-center text-[14px] text-white/45">{t('m.list_empty')}</div>}
+      {accounts.length === 0 && (
+        <Card className="px-4 py-5">
+          <MEmpty compact glyph="debt" text={t('m.f_acc_empty')} sub={t('m.f_acc_sub')} />
+        </Card>
+      )}
       <form onSubmit={submit} className="flex h-[54px] items-center gap-2 rounded-full border border-white/10 bg-[#0f1640]/75 pl-4 pr-1.5 transition focus-within:border-[#7d95ff]/50">
         <Plus size={20} className="shrink-0 text-[#8ea3ff]" />
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('m.acc_new')} className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-white/40" />
-        <input value={balance} onChange={(e) => setBalance(e.target.value)} placeholder={t('common.amount')} inputMode="decimal" className="tnum w-[76px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40" />
+        <input value={balance} onChange={(e) => setBalance(e.target.value)} placeholder={t('common.amount')} inputMode="decimal" aria-label={t('common.amount')} className="tnum w-[58px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40 min-[360px]:w-[76px]" />
         {name && <button type="submit" aria-label={t('common.add')} className="m-fab anim-pop grid h-10 w-10 shrink-0 place-items-center rounded-full text-white"><ArrowUpRight size={18} strokeWidth={2.5} /></button>}
       </form>
     </div>
@@ -468,7 +473,7 @@ function Debts({ debts, sum, onMutate }) {
           <div className="mt-3 flex items-center justify-between gap-2">
             <Pill tone={d.closed ? 'green' : 'gray'}>{d.closed ? t('m.debt_closed') : t('m.left', { v: money(d.remaining) })}</Pill>
             {!d.closed && payId !== d.id && (
-              <button onClick={() => { setPayId(d.id); setPayAmt('') }} className="shrink-0 rounded-full bg-white/10 px-3 py-1.5 text-[13px] font-medium transition active:scale-95">
+              <button type="button" onClick={() => { setPayId(d.id); setPayAmt('') }} className="shrink-0 rounded-full bg-white/10 px-3 py-1.5 text-[13px] font-medium transition active:scale-95">
                 {t('m.debt_pay')}
               </button>
             )}
@@ -481,11 +486,15 @@ function Debts({ debts, sum, onMutate }) {
           )}
         </Card>
       ))}
-      {debts.length === 0 && <div className="py-6 text-center text-[14px] text-white/45">{t('m.list_empty')}</div>}
+      {debts.length === 0 && (
+        <Card className="px-4 py-5">
+          <MEmpty compact glyph="debt" text={t('m.f_debt_empty')} sub={t('m.f_debt_sub')} />
+        </Card>
+      )}
       <form onSubmit={submit} className="flex h-[54px] items-center gap-2 rounded-full border border-white/10 bg-[#0f1640]/75 pl-4 pr-1.5 transition focus-within:border-[#7d95ff]/50">
         <Plus size={20} className="shrink-0 text-[#8ea3ff]" />
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('m.debt_new')} className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-white/40" />
-        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t('common.amount')} inputMode="decimal" className="tnum w-[76px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40" />
+        <input value={amount} onChange={(e) => setAmount(e.target.value)} placeholder={t('common.amount')} inputMode="decimal" aria-label={t('common.amount')} className="tnum w-[58px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40 min-[360px]:w-[76px]" />
         {(title || amount) && <button type="submit" aria-label={t('common.add')} className="m-fab anim-pop grid h-10 w-10 shrink-0 place-items-center rounded-full text-white"><ArrowUpRight size={18} strokeWidth={2.5} /></button>}
       </form>
     </div>
@@ -518,7 +527,11 @@ function Subs({ recurring }) {
           ))}
         </Card>
       )}
-      {subs.length === 0 && <div className="py-6 text-center text-[14px] text-white/45">{t('m.list_empty')}</div>}
+      {subs.length === 0 && (
+        <Card className="px-4 py-5">
+          <MEmpty compact glyph="money" text={t('m.f_sub_empty')} sub={t('m.f_sub_sub')} />
+        </Card>
+      )}
     </div>
   )
 }
@@ -564,7 +577,7 @@ function Goals({ goals, onMutate }) {
               <span>{t('m.goal_of', { v: money(g.target) })}</span>
             </div>
             {putId !== g.id ? (
-              <button onClick={() => { setPutId(g.id); setPutAmt('') }} className="mt-3 rounded-full bg-white/10 px-3 py-1.5 text-[13px] font-medium transition active:scale-95">
+              <button type="button" onClick={() => { setPutId(g.id); setPutAmt('') }} className="mt-3 rounded-full bg-white/10 px-3 py-1.5 text-[13px] font-medium transition active:scale-95">
                 {t('m.goal_put')}
               </button>
             ) : (
@@ -576,11 +589,15 @@ function Goals({ goals, onMutate }) {
           </Card>
         )
       })}
-      {goals.length === 0 && <div className="py-6 text-center text-[14px] text-white/45">{t('m.list_empty')}</div>}
+      {goals.length === 0 && (
+        <Card className="px-4 py-5">
+          <MEmpty compact glyph="mind" text={t('m.f_goal_empty')} sub={t('m.f_goal_sub')} />
+        </Card>
+      )}
       <form onSubmit={submit} className="flex h-[54px] items-center gap-2 rounded-full border border-white/10 bg-[#0f1640]/75 pl-4 pr-1.5 transition focus-within:border-[#7d95ff]/50">
         <Plus size={20} className="shrink-0 text-[#8ea3ff]" />
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder={t('m.goal_new')} className="min-w-0 flex-1 bg-transparent text-[15px] outline-none placeholder:text-white/40" />
-        <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={t('common.amount')} inputMode="decimal" className="tnum w-[76px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40" />
+        <input value={target} onChange={(e) => setTarget(e.target.value)} placeholder={t('common.amount')} inputMode="decimal" aria-label={t('common.amount')} className="tnum w-[58px] shrink-0 bg-transparent text-right text-[15px] outline-none placeholder:text-white/40 min-[360px]:w-[76px]" />
         {(title || target) && <button type="submit" aria-label={t('common.add')} className="m-fab anim-pop grid h-10 w-10 shrink-0 place-items-center rounded-full text-white"><ArrowUpRight size={18} strokeWidth={2.5} /></button>}
       </form>
     </div>

@@ -71,6 +71,7 @@ export function MScroll({ title, onBack, children }) {
       >
         {onBack && (
           <button
+            type="button"
             onClick={onBack}
             aria-label={t('common.back')}
             data-testid="m-compact-back"
@@ -110,6 +111,7 @@ export function BottomNav({ active, onTab, onPlus }) {
           const Icon = x.icon
           return (
             <button
+              type="button"
               key={x.id}
               onClick={() => onTab(x.id)}
               data-testid={`m-tab-${x.id}`}
@@ -127,6 +129,7 @@ export function BottomNav({ active, onTab, onPlus }) {
         })}
       </nav>
       <button
+        type="button"
         onClick={onPlus}
         aria-label={t('common.add')}
         data-testid="m-fab"
@@ -155,6 +158,7 @@ export function MToast({ data, onClose, raised }) {
       <span className="flex-1 text-[14px] leading-snug">{data.text}</span>
       {data.action && (
         <button
+          type="button"
           data-testid="m-toast-action"
           onClick={() => {
             try { data.action.fn() } catch {}

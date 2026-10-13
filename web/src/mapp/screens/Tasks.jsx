@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ArrowUp, ArrowUpDown, Check, ChevronDown, Clock, ListChecks, Plus, Repeat, Search, X } from 'lucide-react'
 import { api, hhmm, isAllDay, isSameDay, money, shortDate } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
-import { Card, Count, Overline, Pill, ScreenTitle, Segmented, TaskCheck } from '../ui.jsx'
+import { Card, Count, MEmpty, MLoadError, MLoading, Overline, Pill, ScreenTitle, Segmented, TaskCheck } from '../ui.jsx'
 
 const day0 = (d = new Date()) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x }
 const prStr = (p) => (p === 1 ? 'high' : p === 3 ? 'low' : 'mid')
@@ -112,14 +112,9 @@ export default function MTasks() {
   }
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={load}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!all) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!all) return <MLoading rows={5} rowH={62} />
 
   return (
     <div>
@@ -127,7 +122,7 @@ export default function MTasks() {
         title={t('m.tasks_title')}
         subtitle={t('m.tasks_sub', { open: open.length, today: todayCount })}
         right={(
-          <button aria-label={t('common.search')} onClick={() => setSearch((s) => (s === null ? '' : null))} className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.07] text-white/70">
+          <button type="button" aria-label={t('common.search')} onClick={() => setSearch((s) => (s === null ? '' : null))} className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.07] text-white/70">
             {search !== null ? <X size={18} /> : <Search size={18} />}
           </button>
         )}
@@ -185,7 +180,7 @@ export default function MTasks() {
         )}
       </div>
       <div className="relative z-20 mt-4 flex items-center justify-between px-5">
-        <button onClick={() => setSortOpen((o) => !o)} className="flex h-8 items-center gap-1.5 text-[13px] font-medium text-white/70">
+        <button type="button" onClick={() => setSortOpen((o) => !o)} className="flex h-8 items-center gap-1.5 text-[13px] font-medium text-white/70">
           <ArrowUpDown size={14} />
           {sortLabel}
           <ChevronDown size={14} className={`transition${sortOpen ? ' rotate-180' : ''}`} />
@@ -195,6 +190,7 @@ export default function MTasks() {
           <div className="anim-rise absolute left-4 top-9 w-56 rounded-[20px] border border-white/10 bg-[#121a46]/95 p-1.5 shadow-[0_24px_48px_-12px_rgba(0,0,0,0.65)] backdrop-blur-xl">
             {[['importance', 'm.sort_imp'], ['due', 'm.sort_due'], ['new', 'm.sort_new']].map(([k, key]) => (
               <button
+                type="button"
                 key={k}
                 onClick={() => { setSort(k); setSortOpen(false) }}
                 className="flex w-full items-center justify-between rounded-[14px] px-3 py-2.5 text-[14px] transition hover:bg-white/5"
@@ -218,10 +214,30 @@ export default function MTasks() {
           </Card>
         ))}
         {groups.length === 0 && (
-          <Card className="px-6 py-10 text-center">
-            <div className="text-[34px]">✦</div>
-            <div className="mt-2 text-[16px] font-semibold">{t('m.empty')}</div>
-            <div className="mt-1 text-[13px] text-white/55">{t('m.empty_sub')}</div>
+          <Card className="px-4 py-6">
+            {search ? (
+              <MEmpty
+                compact
+                glyph="search"
+                text={t('m.search_none')}
+                sub={t('m.search_none_sub')}
+              />
+            ) : view === 'done' ? (
+              <MEmpty
+                compact
+                glyph="tasks"
+                text={t('m.tasks_empty_done')}
+                sub={t('m.tasks_empty_done_sub')}
+              />
+            ) : (
+              <MEmpty
+                compact
+                glyph="tasks"
+                text={t('m.tasks_empty')}
+                sub={t('m.tasks_empty_sub')}
+                hint={t('m.tasks_hint')}
+              />
+            )}
           </Card>
         )}
       </div>
@@ -230,6 +246,7 @@ export default function MTasks() {
           <span className="max-w-[60vw] truncate text-[13.5px]">{toastMsg.text}</span>
           {toastMsg.action && (
             <button
+              type="button"
               onClick={() => { toastMsg.action.fn(); setToastMsg(null) }}
               className="shrink-0 rounded-full bg-white/10 px-3 py-1.5 text-[13px] font-medium"
             >

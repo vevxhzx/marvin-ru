@@ -3,10 +3,10 @@
  * POST/PUT/DELETE /api/events, POST /api/events/:id/done.
  * Кит из ../ui.jsx, стили m-*. */
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronLeft, ChevronRight, MapPin, Plus, Sparkles, Video } from 'lucide-react'
+import { ChevronLeft, ChevronRight, MapPin, Plus, Video } from 'lucide-react'
 import { api, hhmm, isAllDay, isSameDay, shortDate, toLocalISO } from '../../lib/api'
 import { localeOf, useI18n } from '../../lib/i18n'
-import { Card, IconBtn, Overline, ScreenTitle, Segmented, TaskCheck } from '../ui.jsx'
+import { Card, IconBtn, MEmpty, MLoadError, MLoading, Overline, ScreenTitle, Segmented, TaskCheck, useSheetFocus } from '../ui.jsx'
 
 const KIND_OF = { event: 'work', task: 'personal', order: 'money' }
 const KIND_COLOR = { work: '#7d95ff', personal: '#c9a7ff', money: '#ffc24d', deadline: '#ff5c7a' }
@@ -109,14 +109,9 @@ export default function MCalendar() {
   const selMon = sel.toLocaleDateString(localeOf(), { month: 'long' })
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={load}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!events) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!events) return <MLoading rows={4} rowH={54} avatar={false} />
 
   return (
     <div>
@@ -126,7 +121,7 @@ export default function MCalendar() {
         right={(
           <>
             {!onTodayView && (
-              <button onClick={goToday} className="m-glass anim-pop h-10 rounded-full px-4 text-[13.5px] font-medium">
+              <button type="button" onClick={goToday} className="m-glass anim-pop h-10 rounded-full px-4 text-[13.5px] font-medium">
                 {t('m.today')}
               </button>
             )}
@@ -169,6 +164,7 @@ export default function MCalendar() {
                 const evs = visible(d)
                 return (
                   <button
+                    type="button"
                     key={d.toISOString()}
                     onClick={() => setSel(d)}
                     className={`flex h-[50px] flex-col items-center justify-center rounded-[14px] transition active:scale-95${out ? ' text-white/25' : ' bg-white/[0.045]'}${isS && !isT ? ' bg-white/[0.14] ring-1 ring-white/30' : ''}`}
@@ -198,6 +194,7 @@ export default function MCalendar() {
               const wd = d.toLocaleDateString(localeOf(), { weekday: 'short' })
               return (
                 <button
+                  type="button"
                   key={d.toISOString()}
                   onClick={() => setSel(d)}
                   className={`flex flex-col items-center gap-1 rounded-[18px] py-2.5 transition active:scale-95${isS ? ' m-active' : ' m-card'}`}
@@ -289,17 +286,19 @@ export default function MCalendar() {
             ))}
           </Card>
         ) : (
-          <Card className="flex items-center gap-3 p-4">
-            <div className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-[#7d95ff]/15 text-[#a9bbff]">
-              <Sparkles size={18} />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-[15px] font-medium">{t('m.free_day')}</div>
-              <div className="text-[12.5px] leading-snug text-white/55">{t('m.free_day_sub')}</div>
-            </div>
-            <button onClick={() => setSheet('new')} className="shrink-0 rounded-full bg-white/10 px-3 py-1.5 text-[13px] font-medium">
-              {t('m.plan')}
-            </button>
+          <Card className="p-4">
+            <MEmpty
+              compact
+              glyph="calendar"
+              text={t('m.cal_empty')}
+              sub={t('m.cal_empty_sub')}
+              hint={t('m.cal_hint')}
+              action={(
+                <button type="button" onClick={() => setSheet('new')} className="shrink-0 rounded-full bg-white/10 px-3.5 py-2 text-[13px] font-medium">
+                  {t('m.new_event')}
+                </button>
+              )}
+            />
           </Card>
         )}
 
@@ -353,6 +352,7 @@ function Legend({ hidden, onToggle }) {
         const off = hidden.includes(k)
         return (
           <button
+            type="button"
             key={k}
             onClick={() => onToggle(k)}
             className={`inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[12px] font-medium transition active:scale-95${off ? ' text-white/35 line-through' : ' bg-white/[0.06] text-white/75'}`}
@@ -402,11 +402,21 @@ function EventSheet({ ev, day, onClose, onDone, notify }) {
     try { await api.doneEvent(ev.id, !ev.done); onDone() } catch (err) { notify(String(err?.message || err)); setSaving(false) }
   }
 
+  /* Шторка события: role=dialog + ловушка фокуса + Esc + возврат фокуса —
+     тот же контракт, что у десктопного Sheet, только разметка мобильная. */
+  const rootRef = useSheetFocus(true, onClose)
+
   return (
-    <div className="anim-fade fixed inset-0 z-50" aria-hidden="true">
-      <button type="button" aria-label={t('common.close')} onClick={onClose} className="absolute inset-0 cursor-default border-0 bg-black/60 p-0" />
+    <div className="anim-fade fixed inset-0 z-50">
+      <button type="button" aria-hidden="true" tabIndex={-1} onClick={onClose} className="absolute inset-0 cursor-default border-0 bg-black/60 p-0" />
       <div className="absolute inset-x-0 bottom-0 flex justify-center p-4">
-      <div className="anim-sheet m-card w-full max-w-[420px] rounded-[26px] p-5" onClick={(e) => e.stopPropagation()}>
+      <div
+        ref={rootRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label={isNew ? t('m.new_event') : t(ev.kind === 'order' ? 'm.ev_orders' : 'm.ev_meetings')}
+        className="anim-sheet m-card w-full max-w-[420px] rounded-[26px] p-5"
+      >
         {synthetic ? (
           <>
             <Overline>{t(ev.kind === 'order' ? 'm.ev_orders' : 'm.ev_tasks')}</Overline>
@@ -415,8 +425,8 @@ function EventSheet({ ev, day, onClose, onDone, notify }) {
               {shortDate(ev?.start)}{ev?.start && !isAllDay(ev.start) ? ` · ${hhmm(ev.start)}` : ''}
             </div>
             <div className="mt-4 flex justify-end gap-2">
-              <button onClick={onClose} className="rounded-full bg-white/10 px-4 py-2.5 text-[14px] font-medium">{t('m.cancel')}</button>
-              <button onClick={toggleDone} disabled={saving} className="m-active rounded-full px-4 py-2.5 text-[14px] font-semibold">
+              <button type="button" onClick={onClose} className="rounded-full bg-white/10 px-4 py-2.5 text-[14px] font-medium">{t('m.cancel')}</button>
+              <button type="button" onClick={toggleDone} disabled={saving} className="m-active rounded-full px-4 py-2.5 text-[14px] font-semibold">
                 {t(ev.done ? 'm.reopen' : 'm.done')}
               </button>
             </div>
@@ -445,13 +455,13 @@ function EventSheet({ ev, day, onClose, onDone, notify }) {
               placeholder={t('m.place_ph')}
               className="mt-2.5 w-full rounded-[16px] border border-white/10 bg-white/[0.05] px-4 py-3 text-[15px] outline-none placeholder:text-white/35 focus:border-[#7d95ff]/50"
             />
-            <div className="mt-4 flex items-center justify-between gap-2">
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
               {!isNew ? (
                 <button type="button" onClick={remove} disabled={saving} className="px-2 py-2.5 text-[14px] font-medium text-[#ff9aac]">
                   {t('m.del')}
                 </button>
               ) : <span />}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap justify-end gap-2">
                 {!isNew && (
                   <button type="button" onClick={toggleDone} disabled={saving} className="rounded-full bg-white/10 px-4 py-2.5 text-[14px] font-medium">
                     {t(ev.done ? 'm.reopen' : 'm.done')}

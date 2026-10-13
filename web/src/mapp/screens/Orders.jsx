@@ -6,7 +6,7 @@ import { CircleHelp, Clock } from 'lucide-react'
 import { api, money, shortDate } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
 import { NEXT_STEP, ORDER_STAGES, ORDER_STAGE_LABEL, stageOf } from '../../lib/crm'
-import { Avatar, BigMoney, Card, Chip, Pill, ScreenTitle, Segmented } from '../ui.jsx'
+import { Avatar, BigMoney, Card, Chip, MEmpty, MLoadError, MLoading, Pill, ScreenTitle, Segmented } from '../ui.jsx'
 
 const initialsOf = (s) => (s || '?').split(/\s+/).slice(0, 2).map((w) => w[0]?.toUpperCase() || '').join('') || '?'
 const hueOf = (s) => [...String(s || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % 6
@@ -64,14 +64,9 @@ export default function MOrders() {
   const toStage = (o, stage) => act(() => api.crmSetStage(o.id, stage), t('m.stage_done', { what: t(ORDER_STAGE_LABEL[stage] || stage) }))
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={load}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!orders) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!orders) return <MLoading rows={4} rowH={92} avatar={false} />
 
   return (
     <div>
@@ -79,7 +74,7 @@ export default function MOrders() {
         overline={t('m.in_work', { count: inWork.length })}
         title={t('m.orders')}
         right={(
-          <button aria-label={t('howto.title')} onClick={() => toast(t('howto.subtitle'))} className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.07] text-white/70 transition active:scale-90">
+          <button type="button" aria-label={t('howto.title')} onClick={() => toast(t('howto.subtitle'))} className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.07] text-white/70 transition active:scale-90">
             <CircleHelp size={18} />
           </button>
         )}
@@ -91,6 +86,7 @@ export default function MOrders() {
           <div className="relative flex items-center justify-between gap-2">
             <span className="text-[15px] font-semibold">{t('m.await_pay')}</span>
             <button
+              type="button"
               onClick={() => { setFree((f) => !f); toast(free ? t('m.busy_toast') : t('m.free_toast')) }}
               className="m-tile flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12.5px] font-medium transition active:scale-95"
             >
@@ -115,7 +111,7 @@ export default function MOrders() {
       {pulse?.enabled && (pulse.late || []).length > 0 && (
         <div className="mt-3 space-y-1.5 px-4">
           {pulse.late.slice(0, 3).map((x) => (
-            <button key={x.order_id} onClick={() => setFilter('await')} className="flex w-full items-center gap-2 rounded-[16px] bg-white/[0.06] px-3.5 py-2.5 text-left text-[13px] text-white/75 transition active:scale-[0.98]">
+            <button type="button" key={x.order_id} onClick={() => setFilter('await')} className="flex w-full items-center gap-2 rounded-[16px] bg-white/[0.06] px-3.5 py-2.5 text-left text-[13px] text-white/75 transition active:scale-[0.98]">
               <span className="h-2 w-2 shrink-0 rounded-full bg-[#ffc24d] shadow-[0_0_8px_#ffc24d]" />
               <span className="min-w-0 flex-1 truncate"><b className="font-medium text-white/90">{x.client || x.title}</b> · {money(x.left)} · {t('m.days_n', { count: x.days })}</span>
             </button>
@@ -141,7 +137,11 @@ export default function MOrders() {
           </div>
           <div className="mt-3 space-y-3 px-4">
             {list.map((o) => <OrderCard key={o.id} o={o} onPay={() => payFull(o)} onStage={(s) => toStage(o, s)} />)}
-            {list.length === 0 && <Card className="px-6 py-10 text-center text-[14px] text-white/55">{t('m.empty_orders')}</Card>}
+            {list.length === 0 && (
+              <Card className="px-4 py-5">
+                <MEmpty compact glyph="memory" text={t('m.orders_empty')} sub={t('m.orders_empty_sub')} hint={t('m.orders_hint')} />
+              </Card>
+            )}
           </div>
         </div>
       ) : (
@@ -249,10 +249,10 @@ function OrderCard({ o, onPay, onStage }) {
       </div>
       <div className="mt-3 flex gap-2">
         {(o.left || 0) > 0 && o.status !== 'new' && o.status !== 'cancelled' && (
-          <button onClick={onPay} className="h-10 flex-1 rounded-full bg-white text-[13.5px] font-semibold text-[#2b3a9a] transition active:scale-[0.97]">{t('m.pay')}</button>
+          <button type="button" onClick={onPay} className="h-10 flex-1 rounded-full bg-white text-[13.5px] font-semibold text-[#2b3a9a] transition active:scale-[0.97]">{t('m.pay')}</button>
         )}
         {next && (
-          <button onClick={() => onStage(next.stage)} className="h-10 flex-1 rounded-full border border-white/15 bg-white/[0.07] text-[13.5px] font-medium text-white/85 transition active:scale-[0.97]">
+          <button type="button" onClick={() => onStage(next.stage)} className="h-10 flex-1 rounded-full border border-white/15 bg-white/[0.07] text-[13.5px] font-medium text-white/85 transition active:scale-[0.97]">
             {t('m.next', { what: t(next.text) })}
           </button>
         )}

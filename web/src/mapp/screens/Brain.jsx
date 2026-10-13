@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUp, Camera, Image, LayoutGrid, Link, Link2, Mic, Play, Rows3, Search } from 'lucide-react'
 import { api, listOf, relTime } from '../../lib/api'
 import { useI18n } from '../../lib/i18n'
-import { Card, Chip, ScreenTitle } from '../ui.jsx'
+import { Card, Chip, MEmpty, MLoadError, MLoading, ScreenTitle } from '../ui.jsx'
 
 const URL_RE = /https?:\/\/[^\s]+/
 const imgSrc = (s) => (!s ? '' : String(s).startsWith('http') ? String(s) : `/media/${s}`)
@@ -77,14 +77,9 @@ export default function MBrain() {
   }
 
   if (err) {
-    return (
-      <div className="px-5 pt-10 text-center">
-        <div className="text-[15px] text-white/70">{t('m.load_err')}</div>
-        <button className="m-glass mt-3 rounded-full px-4 py-2 text-[13.5px]" onClick={load}>{t('m.retry')}</button>
-      </div>
-    )
+    return <MLoadError onRetry={load} />
   }
-  if (!notes) return <div className="px-5 pt-10 text-[15px] text-white/50">{t('m.loading')}</div>
+  if (!notes) return <MLoading rows={4} rowH={78} avatar={false} />
 
   const filters = [
     { id: 'all', label: t('m.fl_all') },
@@ -102,7 +97,7 @@ export default function MBrain() {
         count={total}
         subtitle={t('m.brain_sub')}
         right={(
-          <button aria-label={t('common.search')} onClick={() => toast(t('m.brain_sub'))} className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.07] text-white/70 transition active:scale-90">
+          <button type="button" aria-label={t('common.search')} onClick={() => toast(t('m.brain_sub'))} className="grid h-10 w-10 place-items-center rounded-full bg-white/[0.07] text-white/70 transition active:scale-90">
             <Search size={18} />
           </button>
         )}
@@ -119,18 +114,19 @@ export default function MBrain() {
             className="w-full resize-none bg-transparent px-2 pt-1 text-[16px] leading-snug outline-none placeholder:text-white/35"
           />
           <div className="mt-1 flex items-center gap-1">
-            <button aria-label={t('m.fl_voice')} onClick={() => toast(t('m.saved_brain'))} className="grid h-10 w-10 place-items-center rounded-full text-white/60 transition active:bg-white/10">
+            <button type="button" aria-label={t('m.fl_voice')} onClick={() => toast(t('m.saved_brain'))} className="grid h-10 w-10 place-items-center rounded-full text-white/60 transition active:bg-white/10">
               <Mic size={19} />
             </button>
-            <button aria-label={t('m.fl_photo')} onClick={() => photoRef.current?.click()} className="grid h-10 w-10 place-items-center rounded-full text-white/60 transition active:bg-white/10">
+            <button type="button" aria-label={t('m.fl_photo')} onClick={() => photoRef.current?.click()} className="grid h-10 w-10 place-items-center rounded-full text-white/60 transition active:bg-white/10">
               <Camera size={19} />
             </button>
             <input ref={photoRef} type="file" accept="image/*" className="hidden" tabIndex={-1} aria-hidden="true" onChange={onPhoto} />
-            <button aria-label={t('m.fl_links')} onClick={save} disabled={!text.trim()} className="grid h-10 w-10 place-items-center rounded-full text-white/60 transition active:bg-white/10 disabled:opacity-40">
+            <button type="button" aria-label={t('m.fl_links')} onClick={save} disabled={!text.trim()} className="grid h-10 w-10 place-items-center rounded-full text-white/60 transition active:bg-white/10 disabled:opacity-40">
               <Link size={19} />
             </button>
             <span className="ml-1 hidden text-[12px] text-white/40 min-[360px]:inline">{t('m.tags_self')}</span>
             <button
+              type="button"
               onClick={save}
               disabled={!text.trim() || busy}
               aria-label={t('m.save')}
@@ -149,10 +145,13 @@ export default function MBrain() {
           ))}
         </div>
         <div className="m-glass flex shrink-0 rounded-full p-1">
-          {[{ id: 'list', Icon: Rows3 }, { id: 'grid', Icon: LayoutGrid }].map(({ id, Icon }) => (
+          {[{ id: 'list', Icon: Rows3, label: t('m.view_list') }, { id: 'grid', Icon: LayoutGrid, label: t('m.view_grid') }].map(({ id, Icon, label }) => (
             <button
+              type="button"
               key={id}
-              aria-label={id}
+              aria-label={label}
+              title={label}
+              aria-pressed={view === id}
               onClick={() => setView(id)}
               className={`grid h-8 w-8 place-items-center rounded-full transition${view === id ? ' m-active text-white' : ' text-white/55'}`}
             >
@@ -172,7 +171,17 @@ export default function MBrain() {
         </div>
       )}
       {items.length === 0 && (
-        <div className="px-4"><Card className="px-6 py-10 text-center text-[14px] text-white/55">{t('m.empty_brain')}</Card></div>
+        <div className="px-4">
+          <Card className="px-4 py-5">
+            <MEmpty
+              compact
+              glyph={filter === 'all' ? 'mind' : 'search'}
+              text={filter === 'all' ? t('m.brain_empty') : t('m.search_none')}
+              sub={filter === 'all' ? t('m.brain_empty_sub') : t('m.search_none_sub')}
+              hint={filter === 'all' ? t('m.brain_hint') : undefined}
+            />
+          </Card>
+        </div>
       )}
 
       {toastMsg && (
@@ -198,10 +207,12 @@ function NoteCard({ n }) {
 
       {n.kind === 'voice' && (
         <div className="mt-2.5">
+          {/* проигрывания в мобильной копии нет (бэкенд отдаёт только длительность),
+              поэтому play нарисован, но не кликабелен: ложная кнопка хуже плашки. */}
           <div className="flex items-center gap-3 rounded-[18px] bg-white/[0.06] p-2.5 pr-3.5">
-            <button aria-label={t('m.fl_voice')} className="m-active grid h-9 w-9 shrink-0 place-items-center rounded-full">
+            <span aria-hidden="true" title={t('m.voice_nodata')} className="m-active grid h-9 w-9 shrink-0 place-items-center rounded-full">
               <Play size={15} fill="white" />
-            </button>
+            </span>
             <div className="h-2 min-w-0 flex-1 overflow-hidden rounded-full bg-white/15">
               <div className="h-full w-1/4 rounded-full bg-white/70" />
             </div>
