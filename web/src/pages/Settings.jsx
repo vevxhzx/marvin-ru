@@ -1459,9 +1459,48 @@ function SRow({ label, hint, wide, children }) {
 
 /* Одна настройка из config.yaml. Раскладка строки одинаковая для всех типов: переключатель,
    сегмент или поле — справа от подписи. */
+function MainAccountSelect({ value, onSync }) {
+  /* Основной счёт — выпадашка из живых счетов. Источник правды — флаг is_main в БД
+     (строку finance.main_account после первого запуска никто не читает), поэтому выбор
+     сразу пишет и флаг, и конфиг — без зависимости от кнопки «Сохранить». */
+  const [, show] = useToast()
+  const [accs, setAccs] = useState()
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { api.accounts().then((a) => setAccs(Array.isArray(a) ? a : [])).catch(() => setAccs(null)) }, [])
+  if (accs === undefined) {
+    return <div className="input" aria-busy="true"><span className="faint">…</span></div>
+  }
+  if (accs === null) {
+    // счета не загрузились — старое текстовое поле, чтобы не оставаться без управления
+    return <input className="input" value={value ?? ''} onChange={(e) => onSync(e.target.value)} autoComplete="off" />
+  }
+  const main = accs.find((a) => a.is_main)?.name || ''
+  const cur = accs.some((a) => a.name === main) ? main : ''
+  const pick = async (name) => {
+    const a = accs.find((x) => x.name === name)
+    if (!a || a.name === main) return
+    setBusy(true)
+    try {
+      await api.updateAccount(a.id, { is_main: true })
+      await api.saveSettings({ 'finance.main_account': a.name })
+      setAccs((list) => (list || []).map((x) => ({ ...x, is_main: x.name === a.name })))
+      onSync(a.name)
+    } catch (e) { show.err(e) } finally { setBusy(false) }
+  }
+  const fmt = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`
+  return (
+    <select className="input" value={cur} disabled={busy} onChange={(e) => pick(e.target.value)} aria-label="main-account">
+      {cur === '' && <option value="">—</option>}
+      {accs.map((a) => <option key={a.id ?? a.name} value={a.name}>{a.name} · {fmt(a.balance)}</option>)}
+    </select>
+  )
+}
 function SettingField({ it, value, onChange, providers }) {
   const { t, lang } = useI18n()
   const [reveal, setReveal] = useState(false)
+  if (it.key === 'finance.main_account') {
+    return <SRow label={it.label}><MainAccountSelect value={value} onSync={onChange} /></SRow>
+  }
   if (it.key === 'brain.cloud.provider') {
     return <SRow wide label={t('st.provider')}><Seg value={value || 'gemini'} onChange={onChange} options={['openrouter', 'groq', 'nvidia', 'deepseek', 'gemini', 'custom'].map((p) => [p, PROV_LABELS[p]])} /></SRow>
   }

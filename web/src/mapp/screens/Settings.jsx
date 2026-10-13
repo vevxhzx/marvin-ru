@@ -31,6 +31,41 @@ const shortVal = (v) => {
 /* Человеческое имя настройки: у API есть label, запасной — последний сегмент ключа. */
 const prettyKey = (key) => String(key || '').split('.').pop().replace(/_/g, ' ')
 
+/* Основной счёт — выпадашка из живых счетов (флаг is_main в БД, а не строка конфига).
+   Выбор сразу пишет флаг и конфиг: мама на телефоне не должна думать про «Сохранить». */
+function MMainAccount({ onDone, notify }) {
+  const [accs, setAccs] = useState()
+  useEffect(() => { api.accounts().then((a) => setAccs(Array.isArray(a) ? a : [])).catch(() => setAccs(null)) }, [])
+  if (!Array.isArray(accs)) return null
+  const main = accs.find((a) => a.is_main)?.name || ''
+  const cur = accs.some((a) => a.name === main) ? main : ''
+  const pick = async (name) => {
+    const a = accs.find((x) => x.name === name)
+    if (!a || a.name === main) return
+    try {
+      await api.updateAccount(a.id, { is_main: true })
+      await api.saveSettings({ 'finance.main_account': a.name })
+      onDone()
+    } catch (e) {
+      notify(String(e?.message || e))
+    }
+  }
+  const fmt = (n) => `${Number(n || 0).toLocaleString('ru-RU')} ₽`
+  return (
+    <select
+      aria-label="main-account"
+      value={cur}
+      onChange={(e) => pick(e.target.value)}
+      onClick={(e) => e.stopPropagation()}
+      style={{ colorScheme: 'dark' }}
+      className="m-glass max-w-[150px] shrink-0 rounded-xl bg-transparent px-2.5 py-2 text-[13.5px] text-white outline-none"
+    >
+      {cur === '' && <option value="">—</option>}
+      {accs.map((a) => <option key={a.id ?? a.name} value={a.name}>{a.name} · {fmt(a.balance)}</option>)}
+    </select>
+  )
+}
+
 export default function MSettings({ go }) {
   const { t } = useI18n()
   const [items, setItems] = useState(null)
@@ -146,8 +181,8 @@ export default function MSettings({ go }) {
                   role="button"
                   tabIndex={0}
                   aria-label={title}
-                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && r.type !== 'bool' && !editing) { e.preventDefault(); startEdit(r) } }}
-                  onClick={() => { if (r.type !== 'bool' && !editing) startEdit(r) }}
+                  onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && r.type !== 'bool' && r.key !== 'finance.main_account' && !editing) { e.preventDefault(); startEdit(r) } }}
+                  onClick={() => { if (r.type !== 'bool' && r.key !== 'finance.main_account' && !editing) startEdit(r) }}
                   className={cx(
                     'flex items-center gap-3 px-4 py-3.5 transition active:bg-white/[0.04]',
                     i < g.rows.length - 1 && !editing && 'border-b border-white/[0.06]',
@@ -158,7 +193,9 @@ export default function MSettings({ go }) {
                     <div className="truncate text-[15.5px] font-medium">{title}</div>
                     <div className="truncate text-[12.5px] text-white/50">{r.key}</div>
                   </div>
-                  {r.type === 'bool' ? (
+                  {r.key === 'finance.main_account' ? (
+                    <MMainAccount onDone={load} notify={setNote} />
+                  ) : r.type === 'bool' ? (
                     <Toggle on={!!r.value} onChange={() => flip(r)} label={title} />
                   ) : editing ? (
                     <div className="flex min-w-0 shrink-0 items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
