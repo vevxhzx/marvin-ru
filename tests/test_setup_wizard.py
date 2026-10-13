@@ -173,6 +173,19 @@ def test_setup_api_available_from_localhost(method, path, body):
     assert r.status_code < 500, f"{method} {path} упал: {r.status_code} {r.text[:200]}"
 
 
+def test_master_tests_never_write_to_the_real_config():
+    """Ни один тест мастера не должен создавать/менять config.yaml в корне репозитория.
+
+    `write_settings()` копирует config.example.yaml, если файла нет, — то есть тест
+    без JARVIS_CONFIG тихо оставил бы настоящий config.yaml (и allow_cloud: true из
+    шаблона, который потом роняет чужие тесты). Страховка на весь файл: cfg_file стоит
+    autouse, поэтому config.yaml хозяина недостижим из этих тестов.
+    """
+    from core.config import _config_file
+    real = (ROOT / "config.yaml").resolve()
+    assert _config_file().resolve() != real, "тест мастера пишет в настоящий config.yaml"
+
+
 def test_docker_token_counts_as_local(monkeypatch):
     """В Docker браузер приходит с адреса моста, а не с loopback — там «свой компьютер»
     определяется ключом (auth.IN_DOCKER), и мастер должен открыться."""
@@ -183,10 +196,17 @@ def test_docker_token_counts_as_local(monkeypatch):
 
 
 # ============================ фикстуры: временный config.yaml ============================
-@pytest.fixture
+@pytest.fixture(autouse=True)
 def cfg_file(tmp_path, monkeypatch):
-    """Копия боевого шаблона настроек во временный файл: write_settings/edit работают
-    по-настоящему, но config.yaml хозяина не трогаем."""
+    """Временный config.yaml для КАЖДОГО теста файла (autouse — не по забывчивости).
+
+    Мастер пишет настройки по-настоящему, и `config.write_settings()` сам создаёт
+    config.yaml из config.example.yaml, если файла нет. Без autouse-фикстуры любой
+    тест, дёрнувший POST /api/setup/save, создал бы НАСТОЯЩИЙ config.yaml в корне
+    репозитория и оставил бы там записанные значения (и allow_cloud: true из
+    шаблона, который ломает чужие тесты). Фикстура переводит JARVIS_CONFIG в
+    tmp_path — боевой файл не трогаем НИКОГДА.
+    """
     p = tmp_path / "config.yaml"
     shutil.copy(ROOT / "config.example.yaml", p)
     monkeypatch.setenv("JARVIS_CONFIG", str(p))
@@ -194,16 +214,13 @@ def cfg_file(tmp_path, monkeypatch):
 
 
 @pytest.fixture
-def secret_cfg_file(tmp_path, monkeypatch):
-    """Временный config.yaml с заведомо секретными значениями."""
-    p = tmp_path / "config.yaml"
-    shutil.copy(ROOT / "config.example.yaml", p)
-    text = p.read_text(encoding="utf-8")
+def secret_cfg_file(cfg_file):
+    """Тот же временный config.yaml, но с заведомо секретными значениями."""
+    text = cfg_file.read_text(encoding="utf-8")
     text = text.replace('token: ""', f'token: "{SECRET_TOKEN}"', 1)
     text = text.replace('api_key: ""', f'api_key: "{SECRET_CLOUD}"', 1)
-    p.write_text(text, encoding="utf-8")
-    monkeypatch.setenv("JARVIS_CONFIG", str(p))
-    return p
+    cfg_file.write_text(text, encoding="utf-8")
+    return cfg_file
 
 
 @pytest.fixture
@@ -495,10 +512,25 @@ def test_check_gemini(cfg_file, mock_http):
     assert SECRET_GEMINI not in json.dumps(body, ensure_ascii=False)
 
 
-def test_check_cloud_does_not_leak_key_into_log(cfg_file, mock_http, caplog):
+@pytest.fixture
+def httpx_logs_on(monkeypatch):
+    """Включить INFO-лог httpx на время проверки.
+
+    `run.py:94` глушит логгер httpx до WARNING (чтобы не сыпать журнал запросами).
+    Тест обязан проверять ОПАСНЫЙ случай — когда логи включены, — поэтому уровень
+    выставляем сами: иначе результат зависел бы от того, импортировал ли кто-нибудь
+    run.py раньше по списку тестов, и проверка молча проходила бы вхолостую.
+    """
+    lg = logging.getLogger("httpx")
+    monkeypatch.setattr(lg, "level", logging.INFO)
+    return lg
+
+
+def test_check_cloud_does_not_leak_key_into_log(cfg_file, mock_http, caplog, httpx_logs_on):
     mock_http["handler"] = lambda req: httpx.Response(200, json={"data": []})
     with caplog.at_level(logging.INFO):
         _client().post("/api/setup/check/cloud", json={"provider": "groq", "api_key": SECRET_CLOUD})
+    assert "groq.com" in caplog.text, "проверка бессмысленна, если httpx вообще не логирует"
     assert SECRET_CLOUD not in caplog.text
 
 
@@ -541,14 +573,15 @@ def test_check_telegram_network_error_asks_for_proxy(cfg_file, mock_http):
     assert SECRET_TOKEN not in json.dumps(body, ensure_ascii=False)
 
 
-def test_check_telegram_never_writes_token_to_log(cfg_file, mock_http, caplog):
+def test_check_telegram_never_writes_token_to_log(cfg_file, mock_http, caplog, httpx_logs_on):
     """httpx логирует каждый запрос на INFO, а адрес Bot API содержит токен —
     мастер обязан это резать (иначе токен бота осядет в logs/*.log)."""
     mock_http["handler"] = lambda req: httpx.Response(200, json=_tg_body())
     with caplog.at_level(logging.INFO):
         _client().post("/api/setup/check/telegram", json={"token": SECRET_TOKEN})
+    assert "getMe" in caplog.text, "проверка бессмысленна, если httpx вообще не логирует"
     assert SECRET_TOKEN not in caplog.text
-    assert "bot" in caplog.text, "проверка бессмысленна, если httpx вообще не логирует"
+    assert "<токен>" in caplog.text, "адрес должен остаться в журнале, но без токена"
 
 
 def test_telegram_owner_waits_for_first_message(cfg_file, mock_http):
