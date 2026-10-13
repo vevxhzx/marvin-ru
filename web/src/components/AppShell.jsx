@@ -376,9 +376,21 @@ function inboxParts(it) {
   const icon = (INBOX_KINDS.find(([re]) => re.test(`${kind} ${head}`)) || [null, '🔔'])[1]
   return { head: head || raw.replace(/\*/g, '').trim(), icon }
 }
-function InboxPanel({ inbox, onClose }) {
+function InboxPanel({ inbox, onClose, anchorRef }) {
   const { t } = useI18n()
   const ref = useRef(null)
+  const [pos, setPos] = useState(null)
+  useLayoutEffect(() => {
+    const measure = () => {
+      const el = anchorRef?.current
+      if (!el || typeof window === 'undefined') return
+      const r = el.getBoundingClientRect()
+      setPos({ top: Math.round(r.bottom + 8), right: Math.max(8, Math.round(window.innerWidth - r.right)) })
+    }
+    measure()
+    window.addEventListener('resize', measure)
+    return () => window.removeEventListener('resize', measure)
+  }, [anchorRef])
   useEffect(() => {
     const h = (e) => { if (!ref.current?.contains(e.target)) onClose() }
     const k = (e) => e.key === 'Escape' && onClose()
@@ -389,7 +401,7 @@ function InboxPanel({ inbox, onClose }) {
   return createPortal(
     <>
     <button type="button" aria-label={t('common.close')} onClick={onClose} className="fixed inset-0 z-[70] cursor-default border-0 bg-black/40 p-0 backdrop-blur-[2px]" style={{ animation: 'fade .18s var(--ease-out)' }} />
-    <div ref={ref} role="dialog" aria-label={t('inbox.title')} className="elevated fixed right-3 top-[72px] z-[75] w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-2xl !p-0 sm:right-5" style={{ animation: 'rise .22s var(--ease-out)' }}>
+    <div ref={ref} role="dialog" aria-label={t('inbox.title')} className="elevated fixed z-[75] w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-2xl !p-0" style={{ animation: 'rise .22s var(--ease-out)', top: pos ? pos.top : 72, right: pos ? pos.right : 12 }}>
       <div className="flex h-[54px] items-center justify-between gap-3 border-b hair px-4">
         <div className="min-w-0 truncate text-[15px] font-semibold leading-none tracking-tight">{t('inbox.title')}</div>
         {inbox.items.length > 0 && <button className="faint shrink-0 rounded-full px-2.5 py-1.5 text-sm leading-none transition-colors hover:bg-[var(--fill-2)] hover:text-accent" onClick={inbox.clear}>{t('inbox.clear')}</button>}
@@ -632,6 +644,7 @@ export default function AppShell({
   const head = headOf(pathKey)
   const contentRef = useRef(null)
   const headRef = useRef(null)
+  const bellRef = useRef(null)
   const [headH, setHeadH] = useState(0)
   const [moreOpen, setMoreOpen] = useState(false)
   const [captureOpen, setCaptureOpen] = useState(false)
@@ -718,7 +731,7 @@ export default function AppShell({
                     <HeadStatus live={live} busy={busy} />
                   </>
                 )}
-                <div className="ib" onClick={onInbox} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
+                <div ref={bellRef} className="ib" onClick={onInbox} style={{ cursor: 'pointer' }} role="button" tabIndex={0}
                   aria-label={t('inbox.title')} onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onInbox() } }}>
                   <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14V9a5 5 0 0 1 10 0v5l1.5 1.5h-13zM8.5 18h3"/></svg>
                   {inbox.unread > 0 && <u></u>}
@@ -731,7 +744,7 @@ export default function AppShell({
               </div>
               {/* Центр уведомлений — порталом в body (см. InboxPanel): в шапке
                   backdrop-filter, без портала бэкдроп темнил только шапку */}
-              {inboxOpen && <InboxPanel inbox={inbox} onClose={onInbox} />}
+              {inboxOpen && <InboxPanel inbox={inbox} onClose={onInbox} anchorRef={bellRef} />}
             </div>
           </div>
 
