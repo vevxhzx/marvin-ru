@@ -22,6 +22,7 @@ import json
 import logging
 import re
 import shutil
+import sys
 import threading
 import time
 
@@ -33,6 +34,7 @@ from tests.test_core import fresh_db  # noqa: F401  (autouse: временная
 from core.config import ROOT
 from core.api.app import app
 from core.api.routers import setup as setup_api
+from core.services import core_restart
 
 HTML = ROOT / "core" / "api" / "setup.html"
 
@@ -386,11 +388,11 @@ def test_pull_error_is_honest(cfg_file, mock_http):
         return httpx.Response(200, json={"models": []})
 
     mock_http["handler"] = handler
-    _client().post("/api/setup/ollama/pull", json={"model": "нет-такой:0b"})
+    _client().post("/api/setup/ollama/pull", json={"model": "no-such-model:0b"})
     deadline = time.monotonic() + 15
     st = {}
     while time.monotonic() < deadline:
-        st = _client().get("/api/setup/ollama/pull/нет-такой:0b").json()
+        st = _client().get("/api/setup/ollama/pull/no-such-model:0b").json()
         if st["status"] in ("success", "error"):
             break
         time.sleep(0.05)
@@ -649,15 +651,16 @@ def test_save_of_masked_secret_does_not_wipe_it(secret_cfg_file):
 # ============================ 9. /restart ============================
 @pytest.fixture
 def restart_state(monkeypatch):
-    """Чистое состояние перезапуска и подменённые «spawn»/«выход» — pytest не убьём."""
+    """Чистое состояние перезапуска и подменённые «spawn»/«выход» — pytest не убьём.
+    Подменяем куски `core/services/core_restart.py`, сам план считается по-настоящему."""
     monkeypatch.setattr(setup_api, "_RESTART_RESULT", None)
     calls = {"spawn": 0, "exit": 0}
-    monkeypatch.setattr(setup_api, "_spawn_relauncher",
+    monkeypatch.setattr(core_restart, "spawn_relauncher",
                         lambda *a, **k: calls.__setitem__("spawn", calls["spawn"] + 1) or True)
-    monkeypatch.setattr(setup_api, "_schedule_exit",
+    monkeypatch.setattr(core_restart, "schedule_exit",
                         lambda *a, **k: calls.__setitem__("exit", calls["exit"] + 1))
-    monkeypatch.setattr(setup_api, "_supervisor", lambda: "start.bat")
-    monkeypatch.setattr(setup_api, "_is_test_run", lambda: False)
+    monkeypatch.setattr(core_restart, "supervisor", lambda: "start.bat")
+    monkeypatch.setattr(core_restart, "is_test_run", lambda: False)
     return calls
 
 
@@ -675,8 +678,8 @@ def test_restart_is_honest_and_idempotent(restart_state):
 
 
 def test_restart_spawns_new_core_without_supervisor(monkeypatch, restart_state):
-    monkeypatch.setattr(setup_api, "_supervisor", lambda: None)
-    monkeypatch.setattr(setup_api, "_relaunch_argv", lambda: ["python", "run.py"])
+    monkeypatch.setattr(core_restart, "supervisor", lambda: None)
+    monkeypatch.setattr(core_restart, "relaunch_argv", lambda: ["python", "run.py"])
     body = _client().post("/api/setup/restart").json()
     assert body["ok"] is True and body["how"] == "spawn"
     assert restart_state["spawn"] == 1
@@ -687,25 +690,38 @@ def test_restart_spawns_new_core_without_supervisor(monkeypatch, restart_state):
 def test_restart_refuses_to_kill_the_test_process(monkeypatch):
     """Под тестами (ASSISTANT_TEST=1) ядро не перезапускаем — честно говорим «вручную»."""
     monkeypatch.setattr(setup_api, "_RESTART_RESULT", None)
-    monkeypatch.setattr(setup_api, "_is_test_run", lambda: True)
-    monkeypatch.setattr(setup_api, "_spawn_relauncher",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("перезапуск в тестах нельзя")))
-    monkeypatch.setattr(setup_api, "_schedule_exit",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("выход в тестах нельзя")))
+
+    def _boom(*a, **k):
+        raise AssertionError("перезапуск в тестах недопустим")
+
+    monkeypatch.setattr(core_restart, "spawn_relauncher", _boom)
+    monkeypatch.setattr(core_restart, "schedule_exit", _boom)
     body = _client().post("/api/setup/restart").json()
     assert body["ok"] is False
     assert body["manual"] is True and body["detail"]
+    assert core_restart.is_test_run(), "фикстуры сессии должны держать ASSISTANT_TEST=1"
 
 
 def test_restart_without_launcher_says_manual(monkeypatch):
     """Запуск не через run.py (uvicorn/wsgi/стенд) — перезапуск себе не вернуть:
     говорим правду, а не изображаем перезапуск."""
     monkeypatch.setattr(setup_api, "_RESTART_RESULT", None)
-    monkeypatch.setattr(setup_api, "_relaunch_argv", lambda: None)
-    monkeypatch.setattr(setup_api, "_is_test_run", lambda: False)
+    monkeypatch.setattr(core_restart, "relaunch_argv", lambda: None)
+    monkeypatch.setattr(core_restart, "supervisor", lambda: None)
+    monkeypatch.setattr(core_restart, "is_test_run", lambda: False)
     body = _client().post("/api/setup/restart").json()
     assert body["ok"] is False and body["manual"] is True
     assert "ручн" in body["detail"].lower()
+
+
+def test_relaunch_argv_keeps_run_py_and_flags(monkeypatch):
+    """Команда перезапуска — тот же интерпретатор и тот же run.py с флагом --no-tg."""
+    monkeypatch.setattr(sys, "argv", ["C:\\app\\run.py", "--no-tg", "лишнее"])
+    argv = core_restart.relaunch_argv()
+    assert argv is not None
+    assert argv[1].endswith("run.py") and argv[2:] == ["--no-tg"]
+    monkeypatch.setattr(sys, "argv", ["pytest.exe", "tests"])
+    assert core_restart.relaunch_argv() is None, "не run.py — перезапуск себе не вернуть"
 
 
 # ============================ 10. мастер и редирект /setup ============================

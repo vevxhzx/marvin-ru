@@ -39,7 +39,6 @@ import platform
 import re
 import shutil
 import subprocess
-import sys
 import threading
 import time
 from pathlib import Path
@@ -50,6 +49,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from ...config import ROOT, read_settings, setup_done, write_settings
+from ...services import core_restart
 
 router = APIRouter(prefix="/api/setup")
 log = logging.getLogger("jarvis.api.setup")
@@ -184,11 +184,12 @@ async def state():
     running, models = await _probe_tags()
     from ...brain import llm
     want = (llm.OLLAMA_MODEL or "").strip()
-    have = _have_model(models, want)
     return {
         "done": setup_done(),
         "settings": settings,
         "keys": keys,
+        # одна проба Ollama на весь ответ: /state открывается на каждом первом заходе
+        # и не должен спрашивать её дважды подряд
         "ollama": {
             "running": running,
             "models": models,
@@ -196,9 +197,8 @@ async def state():
             # та же проверка, что llm.embed_available(), но по уже полученному
             # списку моделей — без второго запроса к Ollama
             "embed_ready": any(m.split(":")[0] == (llm.EMBED_MODEL or "").split(":")[0] for m in models),
-            "have_model": bool(want) and have,
+            "have_model": _have_model(models, want),
         },
-        "restart_required": bool(setup_done() and not (await llm.ollama_available())),
     }
 
 
@@ -734,104 +734,35 @@ _RESTART_RESULT: Optional[dict] = None
 _RESTART_LOCK = threading.Lock()
 
 
-def _relaunch_argv() -> Optional[list[str]]:
-    """Команда, которой можно поднять это же ядро снова: тот же интерпретатор и тот же run.py.
-    None — процесс запущен не через run.py (uvicorn/wsgi/тест), и перезапуск себе не вернуть."""
-    entry = ROOT / "run.py"
-    if not entry.exists() or os.path.basename(sys.argv[0] or "") not in ("run.py", "run.pyc"):
-        return None
-    flags = [a for a in sys.argv[1:] if a == "--no-tg"]   # сохраняем только флаги запуска
-    return [sys.executable, str(entry), *flags]
-
-
-def _supervisor() -> Optional[str]:
-    """Есть ли скрипт-надзиратель, который перезапустит нас сам (start.bat / start.command).
-    Тогда достаточно выйти — новое окно не нужно (иначе получится два ядра)."""
-    try:
-        import psutil
-        cmd = " ".join(psutil.Process(os.getppid()).cmdline() or [])
-    except Exception:
-        return None
-    low = (cmd or "").lower()
-    for marker in ("start.bat", "start.command", "start.sh", "launcher.sh", "launchd"):
-        if marker in low:
-            return marker
-    return None
-
-
-def _spawn_relauncher(argv: list[str]) -> bool:
-    """Поднять новое ядро отдельным процессом: сначала пережидаем собственный PID,
-    чтобы новый экземпляр не отобрал порт у ещё живого."""
-    code = ("import os,subprocess,sys,time\n"
-            "pid,root=int(sys.argv[1]),sys.argv[2]\n"
-            "for _ in range(240):\n"
-            "    try: os.kill(pid,0)\n"
-            "    except OSError: break\n"
-            "    time.sleep(0.25)\n"
-            "subprocess.Popen(sys.argv[3:],cwd=root)\n")
-    kw: dict = {"cwd": str(ROOT), "close_fds": True}
-    if os.name == "nt":
-        kw["creationflags"] = getattr(subprocess, "CREATE_NEW_CONSOLE", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
-    else:
-        kw["start_new_session"] = True
-    subprocess.Popen([sys.executable, "-c", code, str(os.getpid()), str(ROOT), *argv], **kw)
-    return True
-
-
-def _schedule_exit(delay: float = 1.2) -> None:
-    """Выйти из процесса, дав ответу уйти браузеру. os._exit, а не sys.exit:
-    иначе uvicorn успевает закрыть сокеты и повиснуть на finally (см. run.py)."""
-    def _bye() -> None:
-        time.sleep(delay)
-        os._exit(0)
-
-    threading.Thread(target=_bye, daemon=True).start()
-
-
-def _is_test_run() -> bool:
-    """Тесты/стенды (ASSISTANT_TEST=1) ядро не перезапускают — иначе pytest просто умрёт."""
-    return bool(os.getenv("ASSISTANT_TEST") or os.getenv("JARVIS_TEST"))
-
-
-def _restart_plan() -> dict:
-    """Что реально можно сделать. Честность важнее удобства: если надёжно нельзя —
-    так и говорим «перезапустите вручную»."""
-    if _is_test_run():
-        return {"ok": False, "manual": True, "how": "test",
-                "detail": "тестовый запуск — ядро не перезапускаю"}
-    argv = _relaunch_argv()
-    if argv is None:
-        return {"ok": False, "manual": True, "how": "unknown",
-                "detail": "Ядро запущено не через run.py — перезапустите его вручную (start.bat), настройки уже сохранены."}
-    sup = _supervisor()
-    if sup:
-        return {"ok": True, "manual": False, "how": "supervisor", "detail": f"Перезапускаю через {sup}."}
-    return {"ok": True, "manual": False, "how": "spawn", "detail": "Перезапускаю ядро в новом окне."}
-
-
 @router.post("/restart")
 async def restart():
     """Перезапуск ядра после мастера. Повторный вызов ничего не делает (идемпотентно):
-    второй клик не должен плодить процессы."""
+    второй клик не должен плодить процессы.
+
+    Вся работа с процессами живёт в `core/services/core_restart.py` — там же написано,
+    почему её не может быть здесь: в `core/api` запрещены синхронные паузы
+    (tests/test_review_e_errors.py::test_no_time_sleep_in_api_package), а перезапуск
+    без паузы и «уйти из процесса» не сделать.
+    """
     global _RESTART_RESULT
     plan: dict
     exit_now = False
     with _RESTART_LOCK:
         if _RESTART_RESULT is not None:
             return {**_RESTART_RESULT, "already": True}
-        plan = _restart_plan()
+        plan = core_restart.plan()
         if plan["ok"]:
             if plan["how"] == "spawn":
                 try:
-                    _spawn_relauncher(_relaunch_argv() or [])
+                    core_restart.spawn_relauncher(core_restart.relaunch_argv() or [])
                 except Exception as e:
                     log.warning("не смог поднять новое ядро: %s", type(e).__name__)
                     plan = {"ok": False, "manual": True, "how": "spawn",
                             "detail": f"Не смог запустить новое ядро ({type(e).__name__}). Перезапустите вручную."}
             else:
-                exit_now = True          # надзиратель поднимет нас сам
+                exit_now = True          # надзиратель (start.bat) поднимет нас сам
         _RESTART_RESULT = plan
     if exit_now:
-        _schedule_exit()
+        core_restart.schedule_exit()
     log.info("перезапуск после мастера: %s", plan.get("how"))
     return plan
