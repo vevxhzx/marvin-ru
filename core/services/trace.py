@@ -122,7 +122,7 @@ def finish(route: str = "none", actions: list[str] | None = None, ok: bool = Tru
     acts = list(actions or [])
     try:
         last_model = _last_model()          # ДО сброса счётчика: usage_now() его обнулит
-        prompt, completion, cost = _usage_of(c)
+        prompt, completion, cost = _usage_of()
         row = Run(text=c.text, channel=c.channel, route=route or "none", model=c.model or last_model,
                   tools=",".join(c.tools)[:500], actions=",".join(acts)[:300], steps=c.steps,
                   ms=int((time.monotonic() - c.t0) * 1000),
@@ -137,8 +137,8 @@ def finish(route: str = "none", actions: list[str] | None = None, ok: bool = Tru
         return None
 
 
-def _usage_of(c: "_Current") -> tuple[int, int, float]:
-    """(prompt, completion, доллары) за текущий ход. Любой сбой — честные нули."""
+def _usage_of() -> tuple[int, int, float]:
+    """(prompt, completion, доллары) за текущий ход; счётчик обнуляется. Любой сбой — честные нули."""
     try:
         from ..brain.llm import base as llm_base
         u = llm_base.usage_now()
