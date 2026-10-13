@@ -9,7 +9,7 @@
 */
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
+import { flushSync, createPortal } from 'react-dom'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { Sun, Moon, Monitor, Square, Play, Search, MoreHorizontal, MessageCircle, HelpCircle, Download, Timer } from 'lucide-react'
 import Chat from './Chat'
@@ -358,7 +358,24 @@ function Sidebar({ live, busy, hiddenNav = [] }) {
   )
 }
 
-/* ---------- центр уведомлений: выпадающий список под шапкой ---------- */
+/* ---------- центр уведомлений: панель поверх всего.
+   Порталом в body: липкая стеклянная шапка (backdrop-filter) даёт containing block
+   для fixed-потомков — без портала бэкдроп темнил только шапку при прокрутке.
+   Пункты — структурой (иконка/заголовок/мета), бэкенд шлёт сырой markdown. ---------- */
+const INBOX_KINDS = [
+  [/задач/i, '📌'], [/осталось/i, '⏳'], [/напомина/i, '⏰'],
+  [/отмен/i, '↩️'], [/мысль|иде[яйю]/i, '💭'], [/мозг|памят/i, '🧠'], [/оплат|деньг|трат|бюджет/i, '💰'],
+]
+function inboxParts(it) {
+  const raw = String(it.title || '')
+  const m = raw.match(/^\*\*(.+?)\*\*\s*·?\s*/)
+  const kind = m ? m[1].replace(/\*/g, '').trim() : ''
+  let head = (m ? raw.slice(m[0].length) : raw).replace(/\*\*/g, '').trim()
+  const cut = head.search(/[.!?]\s+(?=[А-ЯЁA-Z0-9«"“])/)
+  if (cut > 0) head = head.slice(0, cut + 1).trim()
+  const icon = (INBOX_KINDS.find(([re]) => re.test(`${kind} ${head}`)) || [null, '🔔'])[1]
+  return { head: head || raw.replace(/\*/g, '').trim(), icon }
+}
 function InboxPanel({ inbox, onClose }) {
   const { t } = useI18n()
   const ref = useRef(null)
@@ -369,33 +386,39 @@ function InboxPanel({ inbox, onClose }) {
     return () => { document.removeEventListener('mousedown', h); document.removeEventListener('keydown', k) }
   }, [onClose])
   useEffect(() => { const t = setTimeout(inbox.markAll, 1200); return () => clearTimeout(t) }, []) // eslint-disable-line
-  return (
+  return createPortal(
     <>
     <button type="button" aria-label={t('common.close')} onClick={onClose} className="fixed inset-0 z-[70] cursor-default border-0 bg-black/40 p-0 backdrop-blur-[2px]" style={{ animation: 'fade .18s var(--ease-out)' }} />
-    <div ref={ref} className="elevated absolute right-5 top-[calc(100%+6px)] z-[75] w-[340px] max-w-[calc(100vw-24px)] overflow-hidden !p-0" style={{ animation: 'rise .22s var(--ease-out)' }}>
-      <div className="flex min-h-[48px] items-center justify-between gap-3 border-b hair px-4 py-2">
+    <div ref={ref} role="dialog" aria-label={t('inbox.title')} className="elevated fixed right-3 top-[72px] z-[75] w-[min(360px,calc(100vw-24px))] overflow-hidden rounded-2xl !p-0 sm:right-5" style={{ animation: 'rise .22s var(--ease-out)' }}>
+      <div className="flex h-[54px] items-center justify-between gap-3 border-b hair px-4">
         <div className="min-w-0 truncate text-[15px] font-semibold leading-none tracking-tight">{t('inbox.title')}</div>
-        {inbox.items.length > 0 && <button className="faint -mr-2 shrink-0 rounded-full px-2.5 py-1.5 text-sm leading-none transition-colors hover:bg-[var(--fill-2)] hover:text-accent" onClick={inbox.clear}>{t('inbox.clear')}</button>}
+        {inbox.items.length > 0 && <button className="faint shrink-0 rounded-full px-2.5 py-1.5 text-sm leading-none transition-colors hover:bg-[var(--fill-2)] hover:text-accent" onClick={inbox.clear}>{t('inbox.clear')}</button>}
       </div>
       <div className="scroll-thin max-h-[calc(60vh/var(--ui-zoom))] overflow-y-auto">
         {inbox.items.length === 0 ? (
           <div className="px-5 py-8 text-center">
-            <div className="text-[14px] font-medium leading-snug">{t('inbox.quiet')}</div>
+            <div className="text-[22px] leading-none" aria-hidden="true">🔔</div>
+            <div className="mt-3 text-[14px] font-medium leading-snug">{t('inbox.quiet')}</div>
             <div className="muted mt-1 text-sm">{t('inbox.quiet_hint', { name: lower() })}</div>
           </div>
-        ) : inbox.items.map((it) => (
-          <div key={it.id} className="flex items-start gap-3 border-b hair px-4 py-3 last:border-0">
-            <span className={`mt-[7px] h-2 w-2 shrink-0 rounded-full ${it.read ? '' : 'dot-live'}`} style={{ background: it.read ? 'var(--line-2)' : 'var(--accent)', color: 'var(--accent)' }} />
-            <div className="min-w-0 flex-1">
-              <div className="break-words text-md leading-snug">{it.title}</div>
-              <div className="faint mt-1 text-xs leading-snug">{[it.sub, relTime(it.at)].filter(Boolean).join(' · ')}</div>
+        ) : inbox.items.map((it) => {
+          const p = inboxParts(it)
+          return (
+            <div key={it.id} className="flex items-start gap-3 border-b hair px-4 py-3 last:border-0">
+              <span className="relative grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-[var(--fill-2)] text-[16px] leading-none" aria-hidden="true">
+                {p.icon}
+                {!it.read && <i className="absolute -right-0.5 -top-0.5 h-2.5 w-2.5 rounded-full border-2 border-[var(--card)] bg-[var(--accent)]" />}
+              </span>
+              <div className="min-w-0 flex-1">
+                <div className="line-clamp-2 break-words text-[14px] font-medium leading-snug">{p.head}</div>
+                {(() => { const meta = [it.sub, relTime(it.at)].filter(Boolean).join(' · '); return meta ? <div className="faint mt-1 text-xs leading-snug">{meta}</div> : null })()}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
     </div>
-    </>
-  )
+    </>, document.body)
 }
 
 /* ---------- переход между разделами ----------
@@ -706,8 +729,8 @@ export default function AppShell({
                   <MessageCircle size={18} aria-hidden="true" />
                 </button>
               </div>
-              {/* Центр уведомлений якорим на саму шторку: она липкая, и панель должна
-                  ездить вместе с кнопкой, а не отрываться от неё при прокрутке */}
+              {/* Центр уведомлений — порталом в body (см. InboxPanel): в шапке
+                  backdrop-filter, без портала бэкдроп темнил только шапку */}
               {inboxOpen && <InboxPanel inbox={inbox} onClose={onInbox} />}
             </div>
           </div>
