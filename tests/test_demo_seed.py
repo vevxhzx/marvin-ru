@@ -111,8 +111,6 @@ def test_clear_demo_never_touches_real_data(fresh_db):
     Это самый важный тест фичи: очистка идёт по маркеру (`source == "demo"` / манифест),
     а не по «похоже на демо», поэтому чужая строка, созданная рядом и позже, не пострадает.
     """
-    from core.services import finance
-
     real = _real_world(fresh_db)
     before = _snapshot()            # до демо в базе только реальные строки
 
@@ -192,8 +190,6 @@ def test_seed_demo_twice_does_not_duplicate(fresh_db):
 # ============================================================ без дублей и без перетирания
 def test_seed_does_not_duplicate_accounts_or_categories(fresh_db):
     """`account.name` и `category.name` — unique: демо не создаёт вторых счетов/категорий."""
-    from core.services import finance
-
     real = _real_world(fresh_db)   # на базе с реальными данными
     accounts_before = {a.name for a in _rows(db.Account)}
     cats_before = {c.name for c in _rows(db.Category)}

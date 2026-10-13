@@ -373,7 +373,7 @@ DEMO_CLIENTS = (
     ("Лампа", "Айдентика: ролик на тридцать секунд", 45_000, "done", -6, 12.0, "Сдано, ждём оплату", True),
     ("ВкусВилл", "Серия карточек для приложения", 30_000, "new", 9, 8.0, "ТЗ пришло, смету ещё не считали", False),
 )
-DEMO_DEBT = ("Кредит на технику", 144_000, 72_000, 14.9, "Т-Банк", 15)
+DEMO_DEBT = ("Кредит на технику", 144_000, 72_000, 14.9, "Т-Банк")
 DEMO_GOALS = (
     # (название, цель, отложено, срок через N дней, иконка)
     ("Подушка на четыре месяца", 300_000, 96_000, 150, "🛟"),
@@ -422,7 +422,7 @@ def _seed_account(m: dict) -> str:
     return acc.name
 
 
-def _seed_clients_orders(m: dict) -> list[int]:
+def _seed_clients_orders(m: dict, ref: datetime) -> list[int]:
     """Клиенты и заказы. Возвращает id заказов, по которым уже пришли деньги (оплаченные)."""
     paid: list[int] = []
     for name, title, price, status, deadline_days, hours, notes, got_paid in DEMO_CLIENTS:
@@ -432,7 +432,7 @@ def _seed_clients_orders(m: dict) -> list[int]:
         # чужого «Пятёрочку» удалять при очистке нельзя
         if c is not None and c.name == name and name not in existed:
             _rec(m, "client", c.id, name=c.name)
-        o = orders.add_order(title, price, client=name, deadline=_at(now(), deadline_days, "18:00", past=deadline_days > 0),
+        o = orders.add_order(title, price, client=name, deadline=_at(ref, deadline_days, "18:00", past=deadline_days > 0),
                              notes=notes, estimate_h=hours, status=status, source=DEMO_SOURCE)
         _rec(m, "order", o.id)
         if got_paid:
@@ -462,7 +462,7 @@ def _seed_debt(m: dict, account: str, ref: datetime) -> None:
     `Recurring`, а её потом проводит планировщик с `source="system"` — вне нашего маркера, и такие
     авто-платежи пережили бы очистку. Цифры остатка вполне хватает, чтобы демо было живым.
     """
-    title, total, remaining, rate, creditor, _pay_day = DEMO_DEBT
+    title, total, remaining, rate, creditor = DEMO_DEBT
     d = finance.add_debt(title, total, payment=0, rate=rate, creditor=creditor, remaining=remaining,
                          source=DEMO_SOURCE)
     _rec(m, "debt", d.id, title=d.title)
@@ -540,7 +540,7 @@ def seed_demo() -> dict:
     ref = now()
     try:
         account = _seed_account(m)
-        paid_orders = _seed_clients_orders(m)
+        paid_orders = _seed_clients_orders(m, ref)
         _seed_finance(m, account, paid_orders, ref)
         _seed_debt(m, account, ref)
         _seed_goals(m, ref)
