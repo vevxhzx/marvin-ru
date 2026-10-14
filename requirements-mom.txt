@@ -2,22 +2,31 @@
 # Выкинуты torch (~550 МБ), faster-whisper (+ctranslate2/nvidia, ~300 МБ),
 # av+numpy (~50 МБ): маме они не нужны — мозг и ввод через Groq, озвучка через Edge.
 # Все импорты выкинутого в коде ленивые — без них заводится.
-fastapi>=0.115
-uvicorn[standard]>=0.30
-python-multipart>=0.0.9
-sqlmodel>=0.0.22,<0.0.23
-aiogram>=3.13
-apscheduler>=3.10,<4
-pyyaml>=6
-httpx[socks]>=0.27
-aiohttp-socks>=0.9
-cryptography>=42
-python-dateutil>=2.9
-segno>=1.6
-num2words>=0.5
-psutil>=5.9
-Pillow>=10
-pdfplumber>=0.11
-openpyxl>=3.1
-edge-tts>=6.1
-a2wsgi>=1.7  # PythonAnywhere free умеет только WSGI — мост ASGI(FastAPI)->WSGI
+#
+# Версии зафиксированы строго (==): плавающие >= однажды уже дали расхождение
+# со стендом, после которого каждый запрос висел до harakiri. Этот набор проверен:
+# полный сьют зелёный, WSGI-проба отвечает за доли секунды.
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+sqlmodel==0.0.22
+aiogram==3.31.0
+apscheduler==3.11.3
+pyyaml==6.0.3
+httpx[socks]==0.28.1
+aiohttp-socks==0.9
+cryptography==50.0.1
+python-dateutil==2.9.0.post0
+segno==1.6.6
+num2words==0.5.14
+psutil==7.2.2
+Pillow==12.3.0
+pdfplumber==0.11.10
+openpyxl==3.1.5
+edge-tts==7.2.8
+a2wsgi==1.10.10  # PythonAnywhere free умеет только WSGI — мост ASGI(FastAPI)->WSGI
+# Транзитивные, но критичные для связки (Starlette меняла поведение receive между мажорами):
+starlette==1.6.0
+anyio==4.15.1
+SQLAlchemy==2.0.52
+pydantic==2.13.5
