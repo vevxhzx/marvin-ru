@@ -22,10 +22,13 @@ def _set_cloud(monkeypatch, **kw):
 
 
 # ---------------------------------------------------------------- режим reasoning
-def test_defaults_are_exactly_the_old_behaviour():
+def test_defaults_are_exactly_the_old_behaviour(monkeypatch):
     """Пустая настройка = прежние параметры запроса, ничего не поменялось само собой."""
     from core.brain import llm
 
+    # Герметичность: без этого читался brain.cloud из моего config.yaml (там reasoning: off),
+    # и «дефолты» проверялись не дефолтные. Пустой неймспейс = ровно дефолты.
+    _set_cloud(monkeypatch)
     assert llm.reasoning_mode() == "auto"
     assert llm._reasoning_body("chat") == {"effort": "minimal", "exclude": True}
     assert llm._reasoning_body("tools") == {"exclude": True}

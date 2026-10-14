@@ -316,6 +316,10 @@ def test_system_prompt_within_budget_and_keeps_important_blocks(monkeypatch):
     """Потолок включён — важные блоки (характер, безопасность, отказы) не режутся НИКОГДА."""
     from core.brain import agent, budget, persona
 
+    # Герметичность: длина промпта зависит от persona.style (пример: swag ~5к, у меня neutral ~1.8к).
+    # Потолок нечего ужимать, если промпт короче него, — пиним стиль из примера, как на CI.
+    monkeypatch.setattr(persona, "STYLE", "swag")
+    monkeypatch.setattr(persona, "HUMOR", 7)
     full = persona.system_prompt(compact=False)
     monkeypatch.setattr(budget, "system_max_chars", lambda: 10 ** 9)
     assert agent._system() == full          # потолок не задан → промпт как был

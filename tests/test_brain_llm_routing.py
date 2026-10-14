@@ -379,6 +379,9 @@ def test_cloud_openrouter_suppresses_reasoning(monkeypatch):
     monkeypatch.setattr(llm, "MODE", "hybrid")
     monkeypatch.setattr(llm, "CLOUD_PROVIDER", "openrouter")
     monkeypatch.setattr(llm, "CLOUD_KEY", "k")
+    # Герметичность: reasoning читался из моего config.yaml (там off), а тест проверяет
+    # подавление именно в auto. Без пина зеленел только без локального конфига / на CI.
+    monkeypatch.setattr(llm, "reasoning_mode", lambda: "auto")
     monkeypatch.setattr(llm, "anonymize", lambda t: t)
     monkeypatch.setattr(llm, "resolve_cloud_model", lambda force=False: asyncio.sleep(0, result="deepseek/deepseek-r1:free"))
     monkeypatch.setattr(llm, "_cloud_post", fake_post)

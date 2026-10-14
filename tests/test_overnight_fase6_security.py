@@ -57,6 +57,7 @@ def test_screen_never_goes_to_cloud_without_explicit_optin(monkeypatch):
 
 def test_screen_goes_to_cloud_only_when_explicitly_allowed(monkeypatch):
     from core.brain import llm
+    monkeypatch.setattr(llm, "MODE", "hybrid")  # герметичность: мой config.yaml в local, а там облако запрещено
     monkeypatch.setattr(llm, "VISION_CLOUD_OK", True)      # пользователь явно разрешил
     monkeypatch.setattr(llm, "VISION_WHERE", "cloud")
     monkeypatch.setattr(llm, "CLOUD_PROVIDER", "groq")
@@ -86,6 +87,7 @@ def test_vision_allow_cloud_setting_default_is_documented_false():
 def test_screen_endpoint_never_uses_cloud_fallback_in_auto(monkeypatch):
     """Скриншот с ПК (/api/vision/ask) в режиме auto НЕ уходит в облако «запасным путём» — только local."""
     from core.brain import llm
+    monkeypatch.setattr(llm, "MODE", "hybrid")  # герметичность: мой config.yaml в local, а там облако запрещено
     monkeypatch.setattr(llm, "VISION_CLOUD_OK", True)
     monkeypatch.setattr(llm, "VISION_WHERE", "auto")
     monkeypatch.setattr(llm, "CLOUD_PROVIDER", "groq")
@@ -108,6 +110,7 @@ def test_screen_endpoint_never_uses_cloud_fallback_in_auto(monkeypatch):
 
 def test_screen_endpoint_uses_cloud_when_explicitly_selected(monkeypatch):
     from core.brain import llm
+    monkeypatch.setattr(llm, "MODE", "hybrid")  # герметичность: мой config.yaml в local, а там облако запрещено
     monkeypatch.setattr(llm, "VISION_CLOUD_OK", True)
     monkeypatch.setattr(llm, "VISION_WHERE", "cloud")
     monkeypatch.setattr(llm, "CLOUD_PROVIDER", "groq")
