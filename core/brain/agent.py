@@ -1556,7 +1556,7 @@ def _resolve_undo(text: str, channel: str) -> Reply | None:
     return None
 
 
-_SAVED_RX = re.compile(r"\b(запис[ая]|записал|сохран[ия]|сохранил|запомн[ию]|запомнил|добав[ия]л|зафиксир|внес|внёс)\w*", re.I)
+_SAVED_RX = re.compile(r"\b(запис[ая]|записал|сохран[ия]|сохранил|запомн[ию]|запомнил|добав[ия]л|зафиксир|внес|внёс|напомн(?:ю|ить|яю))\w*", re.I)
 
 # «распредели это на задачи» — явная просьба разобрать реплику (обычно предыдущую, длинную) на записи.
 # Такое сообщение списком не является, но и отвечать планом текстом нельзя: раньше модель выдавала красивое
@@ -1669,6 +1669,71 @@ _SAVE_REQUEST_RX = re.compile(r"\b(?:запиши|запишу|записать|
                               r"запомни|запомню|запомнить|создай|создам|создать|напомни|напомню|поставь|"
                               r"постави|внеси|внесу|внести|зафиксируй|фиксируй)\b", re.I)
 _NOTE_REQUEST_RX = re.compile(r"\b(?:заметк\w*|мысл\w*|мозг)\w*", re.I)
+
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+# ОБЕЩАНИЕ «НАПОМНЮ»: модель пообещала напомнить, но инструмент не вызвала.
+#
+# Прод 14.10: «чуть позже напомни...» → «Напомню тебе через час», а в базе пусто
+# (route=ollama, tools='', actions=''). Причина — двойная: _SAVED_RX вообще не знал
+# слова «напомню» (обещание не распознавалось), а _self_record на vague-время падал
+# в заметку (не тот тип). Поэтому обещание материализуется отдельным путём, а не через
+# общий _self_record: событие + пинг ровно в срок + кнопка штатной отмены.
+# Длина текста не важна (это одно обязательство, а не разбор списка), поэтому проверка
+# стоит ДО _too_long_for_rules. Просьбы в тексте нет (модель пообещала сама) — не пишем:
+# это был бы спам, а не исполнение.
+# ─────────────────────────────────────────────────────────────────────────────────────────────
+_REMIND_PROMISE_RX = re.compile(r"\bнапомн(?:ю|ить|яю)\w*", re.I)
+_REMIND_REFUSAL_RX = re.compile(r"не\s+(?:буду|стану|смогу|могу|хочу|надо)?\s*напомн\w*|не\s+надо\s+напомина", re.I)
+_REMIND_REQUEST_RX = re.compile(r"\bнапомн(?:и|ить|ишь|ите)\w*|напоминани[еяю]\w*", re.I)
+_REMIND_OFFSET_RX = re.compile(r"через\s+(?:(\d+)\s*)?(минут\w*|час\w*|полчаса|день|дня|дней|недел\w*)", re.I)
+_REMIND_UNIT_MIN = (("полчаса", 30), ("минут", 1), ("час", 60),
+                    ("день", 1440), ("дня", 1440), ("дней", 1440), ("недел", 10080))
+
+
+def _remind_promise(content: str, text: str) -> bool:
+    """Модель пообещала напомнить, хозяин просил, отказа не было."""
+    return bool(content and text
+                and _REMIND_PROMISE_RX.search(content)
+                and not _REMIND_REFUSAL_RX.search(content)
+                and _REMIND_REQUEST_RX.search(text))
+
+
+def _remind_offset_minutes(answer: str, text: str) -> int | None:
+    """Через сколько минут обещано: сначала из обещания («через час» — это то, что
+    человек будет держать в голове), потом из просьбы. None — срока нет нигде."""
+    for src in (answer, text):
+        m = _REMIND_OFFSET_RX.search(src or "")
+        if not m:
+            continue
+        num, unit = m.group(1), m.group(2).lower()
+        for key, per in _REMIND_UNIT_MIN:
+            if unit.startswith(key):
+                return (int(num) if num else 1) * per
+    return None
+
+
+def _remind_title(text: str) -> str:
+    """Заголовок из слов хозяина: цель после «чтобы» — это и есть суть напоминания."""
+    m = re.search(r"чтоб[ы]?\s+(.+?)[.!?…]*$", (text or ""), re.I | re.S)
+    raw = (m.group(1) if m else text) or ""
+    title = _clean_event_title(raw) or raw
+    title = re.sub(r"\s+", " ", title).strip(" ,.-—:")[:120]
+    if not title:
+        return "Напоминание"
+    return title[0].upper() + title[1:]
+
+
+def _materialize_remind(text: str, content: str, channel: str, via: str) -> Reply:
+    """Обещание в событие: пинг ровно в срок (remind_minutes=0 — иначе сработает
+    заранее), запись через сервис (журнал отмен пишется сам), ответ модели оставляем —
+    в нём тепло, а точное время и кнопка дописываются хвостом."""
+    minutes = _remind_offset_minutes(content, text) or 60
+    when = datetime.now().replace(second=0, microsecond=0) + timedelta(minutes=minutes)
+    title = _remind_title(text)
+    ev = calendar.add_event(title, when, remind_minutes=0, source=channel)
+    tail = f"\n\n⏰ Поставил на {ev.start:%H:%M} — если передумаешь, жми «❌ Отменить»."
+    log.info("[%s] обещание «напомню» без инструмента → событие #%s на %s", channel, ev.id, ev.start)
+    return Reply(content.rstrip() + tail, ["add_event"], via, buttons=[("❌ Отменить", "отмени")])
 
 
 def _may_self_record(text: str) -> bool:
@@ -2307,6 +2372,14 @@ async def via_ollama(text: str, channel: str, with_tools: bool = True) -> Reply 
                         # жалобу «ничего не записалось» заметкой не делаем — это была бы вторая ложь сверх первой
                         content = ("Понял: значит, не записал. Так и скажи мне — «распредели это на задачи», "
                                    "и я разберу твоё прошлое сообщение по пунктам.")
+                    elif _remind_promise(content, text):
+                        # Обещание «напомню» — материализуем в событие до всех остальных веток:
+                        # длина тут не при чём, а _self_record ниже на vague-время упал бы в заметку.
+                        return _materialize_remind(text, content, channel, via)
+                    elif _REMIND_REFUSAL_RX.search(content) and _REMIND_REQUEST_RX.search(text):
+                        # Модель прямо отказалась напоминать — уважаем отказ: её ответ оставляем
+                        # как есть, а _self_record ниже создал бы заметку позади отказа (новая ложь).
+                        return Reply(content, actions, via)
                     elif _too_long_for_rules(text):
                         # Длинное сообщение раньше просто получало ложное «записал задачи» — ручной разбор тут
                         # не угадываем (списком мог быть разобран сортировщик выше), но и врать не оставляем.

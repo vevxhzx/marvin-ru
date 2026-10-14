@@ -576,3 +576,83 @@ def test_system_prompt_has_tool_honesty_guard():
         p = system_prompt(compact)
         assert "ТОЛЬКО через инструменты" in p, compact
         assert "не заявляй" in p, compact
+
+# ---------------------------------------------------------------- 6. Обещание «напомню» без инструмента
+# Прод 14.10: «чуть позже напомни...» → модель ответила «Напомню тебе через час»,
+# а в базе ничего не появилось (run: route=ollama, tools='', actions='').
+# Обещание должно материализоваться в событие + кнопку отмены, а не висеть текстом.
+PROMISE_TEXT = "все кайф спасибо, чуть позже напомни чтобы я данные актуализировал по финансам"
+PROMISE_ANSWER = ("**Финансы: время обновить данные**\n\nНапомню тебе через час: открой инструменты "
+                  "и актуализируй данные по финансам.\n\nМяу. Через 60 минут — обновляем цифры.")
+
+
+def _promise_brain(monkeypatch, answer=PROMISE_ANSWER):
+    """Модель отвечает обещанием и не зовёт инструменты — как было в проде."""
+    _offline(monkeypatch)
+    from core.brain import llm
+
+    async def fake_chat(messages, tools=None, **kw):
+        return {"content": answer, "tool_calls": []}
+
+    async def _yes_true(*a, **k):
+        return True
+
+    # Герметичность: via_ollama gated на local_available() — без этого тест требовал
+    # живой LM Studio/Ollama на машине (на CI их нет, и путь уходил в «мозг не запущен»).
+    monkeypatch.setattr(llm, "local_available", _yes_true)
+    monkeypatch.setattr(llm, "ollama_chat", fake_chat)
+
+
+def test_saved_rx_catches_remind_promise():
+    from core.brain.agent import _claims_saved
+    assert _claims_saved("Напомню тебе через час")
+    assert _claims_saved("напомнить — сделаю")
+
+
+def test_remind_offset_minutes():
+    from core.brain.agent import _remind_offset_minutes
+    assert _remind_offset_minutes("Напомню тебе через час", "") == 60
+    assert _remind_offset_minutes("Через 60 минут — обновляем", "") == 60
+    assert _remind_offset_minutes("напомню через 15 минут", "") == 15
+    assert _remind_offset_minutes("напомню через 2 часа", "") == 120
+    assert _remind_offset_minutes("напомню", "напомни завтра") is None
+
+
+def test_remind_promise_without_tool_creates_event(monkeypatch):
+    _promise_brain(monkeypatch)
+    from core.services import calendar
+    before = datetime.now()
+    r = _handle(PROMISE_TEXT, "rem-promise")
+    assert "add_event" in r.actions, (r.actions, r.text)
+    evs = calendar.list_events(before, before + timedelta(days=2), limit=50)
+    assert len(evs) == 1, [e.title for e in evs]
+    ev = evs[0]
+    assert 50 * 60 <= (ev.start - before).total_seconds() <= 70 * 60, ev.start
+    assert ev.remind_minutes == 0, "пинг ровно в срок, а не за 30 минут до"
+    assert "через час" in r.text, "теплое обещание модели оставляем, а не затираем"
+    assert r.buttons == [("❌ Отменить", "отмени")], r.buttons
+
+
+def test_remind_cancel_button_undoes_event(monkeypatch):
+    _promise_brain(monkeypatch)
+    from core.services import calendar
+    before = datetime.now()
+    r = _handle(PROMISE_TEXT, "rem-cancel")
+    assert "add_event" in r.actions
+    assert len(calendar.list_events(before, before + timedelta(days=2), limit=50)) == 1
+    r2 = _handle("отмени", "rem-cancel")
+    if "undo" not in r2.actions:
+        r3 = _handle("да", "rem-cancel")
+        assert "undo" in r3.actions, (r2.text, r3.text)
+    assert calendar.list_events(before, before + timedelta(days=2), limit=50) == []
+
+
+def test_remind_refusal_is_left_alone(monkeypatch):
+    """Модель отказалась («не напомню») — уважаем отказ, ничего не пишем.
+    Текст — мимо правил (не начинается с «напомни»): нужен именно путь модели."""
+    _promise_brain(monkeypatch, answer="Не напомню завтра, сам следи за временем.")
+    from core.services import calendar
+    before = datetime.now()
+    r = _handle("слушай, чуть позже напомни мне про отчет, а то точно забуду", "rem-refuse")
+    assert calendar.list_events(before, before + timedelta(days=2), limit=50) == []
+    assert "add_event" not in r.actions
