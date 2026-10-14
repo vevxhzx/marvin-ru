@@ -749,7 +749,10 @@ def test_restart_without_launcher_says_manual(monkeypatch):
 
 def test_relaunch_argv_keeps_run_py_and_flags(monkeypatch):
     """Команда перезапуска — тот же интерпретатор и тот же run.py с флагом --no-tg."""
-    monkeypatch.setattr(sys, "argv", ["C:\\app\\run.py", "--no-tg", "лишнее"])
+    from core.config import ROOT
+    # Путь — через ROOT с родными разделителями: на Linux бэкслэш не разделитель,
+    # и Path("C:\\app\\run.py").name вернул бы всю строку целиком (зеленело только на Windows).
+    monkeypatch.setattr(sys, "argv", [str(ROOT / "run.py"), "--no-tg", "extra"])
     argv = core_restart.relaunch_argv()
     assert argv is not None
     assert argv[1].endswith("run.py") and argv[2:] == ["--no-tg"]
