@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Cpu, ArrowDownToLine, ArrowUpFromLine, Tag } from 'lucide-react'
+import { Cpu, ArrowDownToLine, ArrowUpFromLine, Activity, Flame, Tag } from 'lucide-react'
 import { api } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { useLoad } from '../lib/useLoad'
@@ -66,6 +66,19 @@ export default function Stats() {
   /* А вот пустое состояние с полем цены — только когда цена не настроена и есть что считать. */
   const noPrice = !!sp && !sp.priced && (sp.tokens_in > 0 || sp.tokens_out > 0)
 
+  /* Вторая строка hero — из той же сводки (sp), без новых запросов. Топ считаем по путям:
+   * они не пересекаются (каждый ход — ровно один путь), а модели внутри пути могут делиться.
+   * Среднее — на все ходы периода, а не только с токенами: иначе «правила» его занизят. */
+  const byRoute = Object.entries(sp?.by_route || {})
+  const topRoute = byRoute.length
+    ? byRoute
+      .map(([k, v]) => ({ name: routeName(t, k, v.ru), tokens: (v.tokens_in || 0) + (v.tokens_out || 0) }))
+      .sort((a, b) => b.tokens - a.tokens)[0]
+    : null
+  const avgTokens = sp && sp.runs
+    ? Math.round(((sp.tokens_in || 0) + (sp.tokens_out || 0)) / sp.runs)
+    : 0
+
   return (
     <div className="pg space-y-6">
       <PageHead
@@ -123,6 +136,25 @@ export default function Stats() {
                 <Metric icon={<Cpu size={15} />} label={t('st.spend_runs')} value={fmtNumber(sp.runs)} />
               </div>
             </div>
+
+            {(topRoute?.tokens > 0 || avgTokens > 0) && (
+              <div className="mt-5 flex flex-wrap gap-x-8 gap-y-4 border-t border-white/25 pt-4">
+                {topRoute?.tokens > 0 && (
+                  <Metric
+                    icon={<Flame size={15} />}
+                    label={t('st.spend_top')}
+                    value={`${topRoute.name} — ${fmtNumber(topRoute.tokens)}`}
+                  />
+                )}
+                {avgTokens > 0 && (
+                  <Metric
+                    icon={<Activity size={15} />}
+                    label={t('st.spend_avg')}
+                    value={fmtNumber(avgTokens)}
+                  />
+                )}
+              </div>
+            )}
 
             {/* Нет цены — кнопка прямо к настройкам: путь короткий, искать нечего. */}
             {noPrice ? (
@@ -210,12 +242,13 @@ export default function Stats() {
   )
 }
 
-/* Одна цифра с подписью и иконкой: тон токенов тот же, что у стрелок вверх/вниз. */
+/* Одна цифра с подписью и иконкой: тон токенов тот же, что у стрелок вверх/вниз.
+ * Иконка — в молочном черниле hero: обычный --ink-3 тонул в светлой части градиента. */
 function Metric({ icon, label, value }) {
   return (
     <div className="min-w-0">
       <div className="label flex items-center gap-1.5">
-        <span className="text-[var(--ink-3)]">{icon}</span>
+        <span className="text-[var(--hero-ink-70)]">{icon}</span>
         {label}
       </div>
       <div className="num tnum mt-1 text-[22px] font-semibold tracking-[-0.03em]">{value}</div>

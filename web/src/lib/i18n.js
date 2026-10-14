@@ -1741,6 +1741,8 @@ export const DICT = {
   'st.spend_tokens_in': { ru: 'Токенов ушло в модель', en: 'Tokens sent to the model' },
   'st.spend_tokens_out': { ru: 'Токенов ответила модель', en: 'Tokens the model replied with' },
   'st.spend_runs': { ru: 'ходов с токенами', en: 'turns with tokens' },
+  'st.spend_top': { ru: 'больше всего съел', en: 'biggest consumer' },
+  'st.spend_avg': { ru: 'в среднем на ход', en: 'average per turn' },
   'st.spend_by_route': { ru: 'По путям ответа', en: 'By answer route' },
   'st.spend_by_model': { ru: 'По моделям', en: 'By model' },
   'st.spend_turns': { ru: 'Последние ходы', en: 'Recent turns' },
