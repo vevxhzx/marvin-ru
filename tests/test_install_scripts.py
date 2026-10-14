@@ -64,7 +64,9 @@ LEGACY_STRICT = {
 
 # Документы, где перечислены скриппы запуска. Если скрипт удалили или переименовали,
 # а документация — нет, читатель получает инструкцию «двойной клик», которая не работает.
-DOCS_WITH_SCRIPTS = ("README.md", "AGENTS.md", "ARCHITECTURE.md", "FEATURES.md")
+# AGENTS.md здесь нет сознательно: это внутренний рабочий документ, он живёт только
+# на моей машине и в git не попадает (см. .gitignore) — сканировать его на CI не из чего.
+DOCS_WITH_SCRIPTS = ("README.md", "ARCHITECTURE.md", "FEATURES.md")
 
 _SCRIPT_REF = re.compile(r"[\\/]([\w.\-]+\.(?:command|bat))|([\w\-]+\.(?:command|bat))")
 

@@ -65,8 +65,13 @@ docs/audit.md
 docs/redesign-*.md
 docs/second-*.md
 docs/PROGRESS-merge.md
+docs/clarify-logic-audit.md
+docs/design-audit.md
 PLAN.md
 REVIEW.md
+# --- внутренние рабочие документы: живут только на моей машине, в git им не место ---
+AGENTS.md
+PROGRESS.md
 
 # --- publish guard: secret-like files (publish.bat aborts on these) ---
 *.pem
