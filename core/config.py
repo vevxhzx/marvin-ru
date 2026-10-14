@@ -267,6 +267,8 @@ EDITABLE: dict[str, tuple[str, str, bool]] = {
     "brain.lmstudio.base_url": ("str", "Адрес LM Studio (/v1 допишется сам, можно голый хост)", False),
     "brain.lmstudio.model": ("str", "Модель, загруженная в LM Studio (должна совпадать с запущенной)", False),
     "brain.lmstudio.use": ("str", "Что отдать LM Studio: main — основные ответы / small — мини-задачи (судья, уборка памяти)", False),
+    "brain.lmstudio.embed_model": ("str", "Модель эмбеддингов в LM Studio (напр. nomic-embed-text). Пусто = считать через Ollama", False),
+    "brain.lmstudio.small_model": ("str", "Отдельная маленькая модель для судьи и мини-задач. Пусто = та же, что и основная", False),
     "voice.enabled": ("bool", "Голосовые сообщения в Telegram распознавать", False),
     "voice.stt.device": ("str", "Устройство Whisper: cpu / cuda", False),
     "owner.timezone": ("str", "Часовой пояс (Europe/Moscow)", False),

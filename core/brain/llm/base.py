@@ -35,6 +35,8 @@ __all__ = [
     "LMSTUDIO_ENABLED",
     "LMSTUDIO_MODEL",
     "LMSTUDIO_USE",
+    "LMSTUDIO_EMBED_MODEL",
+    "LMSTUDIO_SMALL_MODEL",
     "MARK_SOURCE",
     "MODE",
     "OLLAMA_KEEP_ALIVE",
@@ -188,6 +190,12 @@ LMSTUDIO_MODEL = (str(getattr(_lms, "model", "") or "") or "google/gemma-4-e4b")
 LMSTUDIO_USE = (str(getattr(_lms, "use", "") or "") or "main").strip().lower()
 if LMSTUDIO_USE not in ("main", "small"):
     LMSTUDIO_USE = "main"
+# Модель для эмбеддингов в LM Studio (OpenAI-совместимый /v1/embeddings). Пусто = считаем
+# только через Ollama, как раньше. Поэтому у того, кто ничего не настраивал, поведение
+# не меняется: лишнего запроса к LM Studio не будет.
+LMSTUDIO_EMBED_MODEL = (str(getattr(_lms, "embed_model", "") or "") or "").strip()
+# Отдельная маленькая модель для судьи и мини-задач. Пусто = та же, что и основной чат.
+LMSTUDIO_SMALL_MODEL = (str(getattr(_lms, "small_model", "") or "") or "").strip()
 _LMS_MODELS_CACHE: tuple[float, list[str]] = (0.0, [])   # модели, загруженные в LM Studio (кэш 60 с)
 _SMALL_MISSING: set[str] = set()   # модели, которых нет в Ollama — не долбить каждый раз
 _SMALL_SEEN: set[str] = set()      # чтобы «на месте» написать один раз, а не при каждой проверке   # 4096 не хватало: схемы инструментов + промпт + история ≈ 4.5–5k токенов → Ollama резала промпт и обрывала ответ
@@ -330,7 +338,8 @@ def strip_think(text: str | None) -> str:
 
 def reload_lmstudio_settings() -> None:
     """LM Studio меняется с сайта без перезапуска: перечитать адрес, модель и роль."""
-    global LMSTUDIO_ENABLED, LMSTUDIO_BASE, LMSTUDIO_MODEL, LMSTUDIO_USE, _LMS_MODELS_CACHE
+    global LMSTUDIO_ENABLED, LMSTUDIO_BASE, LMSTUDIO_MODEL, LMSTUDIO_USE, \
+        LMSTUDIO_EMBED_MODEL, LMSTUDIO_SMALL_MODEL, _LMS_MODELS_CACHE
     from ... import config as _c
     _c.refresh()
     lms = getattr(_c.cfg.brain, "lmstudio", None)
@@ -340,6 +349,8 @@ def reload_lmstudio_settings() -> None:
     LMSTUDIO_USE = (str(getattr(lms, "use", "") or "") or "main").strip().lower()
     if LMSTUDIO_USE not in ("main", "small"):
         LMSTUDIO_USE = "main"
+    LMSTUDIO_EMBED_MODEL = (str(getattr(lms, "embed_model", "") or "") or "").strip()
+    LMSTUDIO_SMALL_MODEL = (str(getattr(lms, "small_model", "") or "") or "").strip()
     _LMS_MODELS_CACHE = (0.0, [])
 
 

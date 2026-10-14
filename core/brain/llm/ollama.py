@@ -173,7 +173,8 @@ async def small_chat(system: str, user: str, json_mode: bool = True, num_predict
     if lmstudio_role() in ("main", "small") and await _lms_mod.lmstudio_available():
         # мини-задачи отданы LM Studio (роль small — или main, где LM Studio делает вообще всё локальное)
         try:
-            out = await _lmstudio_chat(messages, temperature=0.1, json_mode=json_mode, num_predict=num_predict)
+            out = await _lmstudio_chat(messages, temperature=0.1, json_mode=json_mode,
+                                       num_predict=num_predict, model=_base.LMSTUDIO_SMALL_MODEL)
             SMALL_LAST.update({"at": time.time(), "task": (system[:40] + "…") if len(system) > 40 else system})
             return out.get("content") or ""
         except Exception as e:
@@ -332,12 +333,27 @@ async def ollama_chat(messages: list[dict], tools: list[dict] | None = None, tem
 
 
 async def embed(texts: list[str]) -> list[list[float]] | None:
-    """Локальные эмбеддинги через Ollama (модель EMBED_MODEL). None — если модели/Ollama нет.
-    В игровом режиме — тоже None: иначе фоновая индексация памяти подгрузит модель эмбеддингов в видеокарту прямо во время игры."""
+    """Локальные эмбеддинги. Сначала LM Studio (если там настроена embed-модель), иначе Ollama.
+    None — модели нет ни там, ни там.
+
+    Раньше эмбеддинги были единственной причиной держать поднятой Ollama, даже когда вся
+    остальная локальная работа ушла в LM Studio. Теперь второй движок не обязателен: у кого
+    `brain.lmstudio.embed_model` задан, тот считает векторы в LM Studio и Ollama может быть
+    не запущена вовсе. У кого не задан — поведение прежнее, лишних обращений к LM Studio нет.
+
+    В игровом режиме — всегда None: иначе фоновая индексация памяти подгрузит модель
+    эмбеддингов в видеокарту прямо во время игры."""
     if not texts:
         return []
     if _base.GAME_MODE:
         return None
+    try:
+        from . import lmstudio as _lms
+        got = await _lms.lmstudio_embed(texts)
+        if got:
+            return got
+    except Exception as e:  # pragma: no cover — не роняем память из-за LM Studio
+        log.debug("lmstudio embed path failed: %s", e)
     try:
         async with _base._local_client(120) as c:
             r = await c.post(f"{_base.OLLAMA_URL}/api/embed", json={"model": _base.EMBED_MODEL, "input": texts})
@@ -351,8 +367,15 @@ async def embed(texts: list[str]) -> list[list[float]] | None:
 
 
 async def embed_available() -> bool:
+    """Есть ли где-то локально модель эмбеддингов: в LM Studio или в Ollama."""
     if _base.GAME_MODE:
         return False
+    try:
+        from . import lmstudio as _lms
+        if await _lms.lmstudio_embed_model():
+            return True
+    except Exception:  # pragma: no cover
+        pass
     try:
         async with _base._local_client(5) as c:
             r = await c.get(f"{_base.OLLAMA_URL}/api/tags")

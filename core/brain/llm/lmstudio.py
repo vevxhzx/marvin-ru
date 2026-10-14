@@ -17,6 +17,8 @@ __all__ = [
     "lmstudio_active_model",
     "lmstudio_available",
     "lmstudio_check",
+    "lmstudio_embed",
+    "lmstudio_embed_model",
     "lmstudio_models",
     "lmstudio_role",
     "reload_lmstudio",
@@ -107,12 +109,54 @@ async def lmstudio_active_model() -> str:
     return _base.LMSTUDIO_MODEL
 
 
+async def lmstudio_embed_model() -> str:
+    """Модель для эмбеддингов: настроенная, если она РЕАЛЬНО загружена в LM Studio, иначе ''.
+
+    Проверка по списку моделей, а не по конфигу: незагруженная модель в LM Studio на
+    /v1/embeddings не ответит, и мы молча уйдём считать через Ollama — как раньше.
+    Пустая настройка означает «считаем только через Ollama», лишнего запроса не будет."""
+    if not _base.LMSTUDIO_ENABLED or not _base.LMSTUDIO_EMBED_MODEL:
+        return ""
+    try:
+        ids = await lmstudio_models()
+    except Exception:
+        return ""
+    return _base.LMSTUDIO_EMBED_MODEL if _base.LMSTUDIO_EMBED_MODEL in ids else ""
+
+
+async def lmstudio_embed(texts: list[str]) -> list[list[float]] | None:
+    """Векторы из LM Studio (OpenAI-формат /v1/embeddings). None — считаем через Ollama.
+
+    Смысл: раньше эмбеддинги были единственной причиной держать поднятой Ollama, даже когда
+    вся остальная локальная работа ушла в LM Studio. Теперь достаточно одного движка."""
+    if not texts:
+        return []
+    model = await lmstudio_embed_model()
+    if not model:
+        return None
+    try:
+        async with _base._local_client(120) as c:
+            r = await c.post(f"{_base.LMSTUDIO_BASE}/embeddings", json={"model": model, "input": texts})
+            if r.status_code != 200:
+                log.debug("lmstudio embed: %s %s", r.status_code, r.text[:120])
+                return None
+            data = r.json().get("data") or []
+        out = [[float(x) for x in (row.get("embedding") or [])] for row in data]
+        return out or None
+    except Exception as e:
+        log.debug("lmstudio embed failed: %s", e)
+        return None
+
+
 async def _lmstudio_chat(messages: list[dict], temperature: float = 0.3,
-                         json_mode: bool = False, num_predict: int = 512) -> dict:
+                         json_mode: bool = False, num_predict: int = 512,
+                         model: str = "") -> dict:
     """Запрос в LM Studio (OpenAI-формат /chat/completions).
-    Возврат — как у ollama_chat: {'content', 'tool_calls': []}. Модель берётся
-    загруженная (см. lmstudio_active_model) — сверять название не нужно."""
-    model = await lmstudio_active_model()
+    Возврат — как у ollama_chat: {'content', 'tool_calls': []}. По умолчанию модель берётся
+    загруженная (см. lmstudio_active_model) — сверять название не нужно. Явный `model`
+    используется для мини-задач: судье и подколам можно дать отдельную маленькую модель,
+    чтобы они не гоняли ту же, что и основной чат."""
+    model = model or await lmstudio_active_model()
     payload: dict[str, Any] = {"model": model, "messages": messages, "stream": False,
                                "temperature": temperature, "max_tokens": num_predict,
                                # без «размышлений»: иначе думающие модели (qwen3/gemma) тратят лимит
