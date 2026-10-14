@@ -1,6 +1,7 @@
 # Бэкенд LM Studio (OpenAI-совместимый /chat/completions).
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -21,8 +22,100 @@ __all__ = [
     "lmstudio_embed_model",
     "lmstudio_models",
     "lmstudio_role",
+    "lmstudio_unload",
     "reload_lmstudio",
+    "reload_lmstudio_small",
 ]
+
+def _lms_exe() -> str | None:
+    """Путь к консоли `lms` рядом с LM Studio. None — консоли нет, выгружать нечем (не ошибка)."""
+    import os
+    import shutil
+    import sys
+    if sys.platform == "win32":
+        cand = os.path.join(os.path.expanduser("~"), ".lmstudio", "bin", "lms.exe")
+    else:
+        cand = os.path.join(os.path.expanduser("~"), ".lmstudio", "bin", "lms")
+    if os.path.isfile(cand):
+        return cand
+    return shutil.which("lms")
+
+
+def _is_loopback(base: str) -> bool:
+    try:
+        from urllib.parse import urlsplit
+        return (urlsplit(str(base or "")).hostname or "").lower() in ("127.0.0.1", "localhost", "::1")
+    except Exception:
+        return False
+
+
+def _run_unload(exe: str, model_id: str) -> int:
+    """Один синхронный вызов `lms unload`. Без всплывающего окна на Windows."""
+    import subprocess
+    import sys
+    kw: dict = {"timeout": 60, "capture_output": True}
+    if sys.platform == "win32":
+        si = subprocess.STARTUPINFO()
+        si.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        kw["startupinfo"] = si
+    return subprocess.run([exe, "unload", model_id], **kw).returncode
+
+
+async def lmstudio_unload(ids: list[str] | None = None) -> list[str]:
+    """Выгрузить модели LM Studio из видеопамяти (игровой режим). Возвращает выгруженные id.
+
+    Никогда не бросает: нет консоли / чужая машина / таймаут — возвращаем то, что успели,
+    остальное в debug-лог. Embed-модель не трогаем сознательно: она крошечная, а поднимать
+    её по требованию после игры некому (сервер сам её не поднимет)."""
+    if not _base.LMSTUDIO_ENABLED:
+        return []
+    want = [i for i in (ids if ids is not None else [_base.LMSTUDIO_MODEL, _base.LMSTUDIO_SMALL_MODEL]) if i]
+    if not want:
+        return []
+    if not _is_loopback(_base.LMSTUDIO_BASE):
+        log.debug("lmstudio unload: base %s не локальный — чужие модели не трогаем", _base.LMSTUDIO_BASE)
+        return []
+    exe = _lms_exe()
+    if not exe:
+        log.debug("lmstudio unload: нет lms CLI рядом")
+        return []
+    out = []
+    for mid in want:
+        try:
+            rc = await asyncio.to_thread(_run_unload, exe, mid)
+            if rc == 0:
+                out.append(mid)
+            else:
+                log.debug("lmstudio unload %s: exit %s", mid, rc)
+        except Exception as e:  # pragma: no cover — выгрузка не имеет права ломать игровой режим
+            log.debug("lmstudio unload %s: %s", mid, e)
+    return out
+
+
+async def reload_lmstudio_small() -> bool:
+    """После игры: поднять обратно малую модель (судья), если задана. Основной чат её
+    не ждёт — вызывается фоном вместе с reload_lmstudio. Уже загружена — не трогаем."""
+    if not _base.LMSTUDIO_ENABLED or not _base.LMSTUDIO_SMALL_MODEL:
+        return False
+    try:
+        ids = await lmstudio_models()
+    except Exception:
+        return False
+    if _base.LMSTUDIO_SMALL_MODEL in ids:
+        return True
+    try:
+        import httpx
+        root = _base.LMSTUDIO_BASE[:-len("/v1")] if _base.LMSTUDIO_BASE.lower().endswith("/v1") else _base.LMSTUDIO_BASE
+        async with httpx.AsyncClient(timeout=180) as c:
+            r = await c.post(f"{root}/api/v1/models/load",
+                             json={"model": _base.LMSTUDIO_SMALL_MODEL, "context_length": 2048})
+            ok = r.status_code == 200
+        log.info("LM Studio: малая модель %s %s", _base.LMSTUDIO_SMALL_MODEL, "поднята обратно" if ok else f"не поднялась ({r.status_code})")
+        return ok
+    except Exception as e:
+        log.debug("lmstudio small reload failed: %s", e)
+        return False
+
 
 async def reload_lmstudio() -> bool:
     """После игры: если модель LM Studio выгружена (TTL/игра) — поднять обратно через API.
