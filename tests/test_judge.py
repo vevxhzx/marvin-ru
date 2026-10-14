@@ -112,6 +112,45 @@ def test_judge_disabled(monkeypatch):
     assert "judge" not in r.actions
 
 
+# --------------------------------------------------------------- калибровка денежной тройки
+def test_prompt_pins_money_boundaries():
+    """Промпт фиксирует границы, на которых модели систематически ошибаются.
+
+    Стенд tools/judge_bench.py показал: «отдал Ване 2000» все три модели (4B, 2B, 1.5B)
+    уверенно кладут в expense вместо debt, «700 продукты» — в order вместо expense,
+    причём с confidence 1.00. Порогом это не лечится (замер распределения — conf не
+    отделяет верные ответы от неверных), поэтому граница правится примерами в промпте,
+    а не числом в коде."""
+    from core.services import judge as J
+    for needle in ("отдал Ване", "перевёл маме", "debt",
+                   "продукты", "такси", "expense",
+                   "взял заказ", "order"):
+        assert needle in J.PROMPT, f"в промпте нет границы: {needle!r}"
+
+
+def test_prompt_teaches_low_confidence_for_ambiguous():
+    """Промпт учит отказываться на двусмысленном — примером, а не только правилом.
+
+    Правило «двусмысленная — confidence ниже 0.6» в промпте уже было, но модели его
+    игнорировали (все ответы шли с 1.00). Пример «20000 за монтаж» с низкой уверенностью
+    показывает, КОГДА его применять: получил деньги или взял работу — без контекста
+    не решить, пусть лучше спросит."""
+    from core.services import judge as J
+    assert "двусмыслен" in J.PROMPT
+    assert "0.4" in J.PROMPT or "0,4" in J.PROMPT
+
+
+def test_kind_outside_allowed_clamps_to_ask(monkeypatch):
+    """Страж на случай, если модель вернула тип не из разрешённых: уверенность режется
+    до 0.5 — ниже порога, бот спрашивает, а не пишет наугад."""
+    import asyncio
+
+    from core.services import judge as J
+    _brain(monkeypatch, _sure("event", 0.95))
+    kind, via = asyncio.run(J.decide("сайт 15000", ("expense", "income", "order")))
+    assert kind is None and via != "none"
+
+
 # ---------------------------------------------------------------- «это задача»
 def test_fix_moves_expense_to_debt(monkeypatch):
     """«отдал Ване 2000» записалось тратой → «это долг» → трата откачена, долг записан, урок сохранён."""
