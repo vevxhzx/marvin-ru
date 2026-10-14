@@ -18,11 +18,34 @@ pytest подхватывает ИМПОРТИРОВАННУЮ autouse-фикс�
 """
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
+import tempfile
+from pathlib import Path
 
 import pytest
 
 os.environ.setdefault("ASSISTANT_TEST", "1")
+
+# Тесты НЕ ДОЛЖНЫ трогать боевую data/jarvis.db.
+#
+# Что случилось: `core/config.py` читает JARVIS_DB_PATH при ИМПОРТЕ, то есть раньше любой
+# фикстуры. Тест, который забыл про `fresh_db`, писал прямо в живую базу. Одна ночная
+# сессия тестов добавила туда 8 событий («Зубной», «Встреча с Ваней»), 5 задач, 11 заметок,
+# 25 строк памяти и трату 700 ₽, которая ушла с реального счёта. Всё это потом пришлось
+# вычищать вручную — тестовые строки стоили пользователю реальных данных.
+#
+# Поэтому путь к БД задаётся здесь, на импорте conftest, ДО того как тесты увидят `core`:
+# тесты получают отдельную пустую базу во временной папке и физически не могут достать
+# до боевой. `setdefault` — если разработчик задал путь сам, уважаем его.
+_TEST_DB_DIR = tempfile.mkdtemp(prefix="marvin-test-db-")
+os.environ.setdefault("JARVIS_DB_PATH", str(Path(_TEST_DB_DIR) / "jarvis.db"))
+
+
+@atexit.register
+def _drop_test_db() -> None:
+    shutil.rmtree(_TEST_DB_DIR, ignore_errors=True)
 
 
 @pytest.fixture(autouse=True)
