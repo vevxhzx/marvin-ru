@@ -24,6 +24,57 @@ def test_wsgi_wraps_asgi_for_pythonanywhere():
     )
 
 
+def test_scheduler_runs_without_lifespan():
+    """a2wsgi не выполняет startup-хендлеры (проверено пробой: startup executed: False),
+    а планировщик без живого loop мёртв: напоминания и бэкапы на копии мамы не работали бы.
+    Поэтому wsgi.py крутит его в отдельном демоническом потоке со своим loop."""
+    import threading
+    import wsgi
+
+    started = threading.Event()
+
+    class FakeSch:
+        running = False
+
+        def start(self):
+            started.set()
+
+    t = wsgi._start_scheduler_thread(FakeSch())
+    assert started.wait(timeout=10), "планировщик не стартовал в фоне"
+    assert t.daemon, "поток обязан быть демоном, иначе процесс не завершится"
+
+
+def test_scheduler_thread_runs_jobs():
+    """Паттерн «поток + свой loop» работает с установленной версией APScheduler:
+    задача, запланированная на +1 с, реально срабатывает."""
+    import threading
+    import wsgi
+    from apscheduler.schedulers.asyncio import AsyncIOScheduler
+    from apscheduler.triggers.date import DateTrigger
+    from datetime import datetime, timedelta
+
+    fired = threading.Event()
+    sch = AsyncIOScheduler()
+    sch.add_job(fired.set, DateTrigger(run_date=datetime.now() + timedelta(seconds=1)))
+    wsgi._start_scheduler_thread(sch)
+    try:
+        assert fired.wait(timeout=15), "задача в потоке планировщика не сработала"
+    finally:
+        sch.shutdown(wait=False)
+
+
+def test_scheduler_thread_never_raises():
+    """Упавший старт планировщика не роняет воркер: воркер без напоминаний лучше,
+    чем 504 на каждый запрос."""
+    import wsgi
+
+    class Boom:
+        def start(self):
+            raise RuntimeError("boom")
+
+    wsgi._start_scheduler_thread(Boom())  # не должно бросить
+
+
 def test_wsgi_application_is_wsgi_callable():
     try:
         import a2wsgi  # noqa: F401

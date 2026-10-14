@@ -47,6 +47,45 @@ except ImportError:  # pragma: no cover — локально a2wsgi не нуж�
     application = app  # type: ignore[assignment]
 
 
+def _start_scheduler_thread(sch):
+    """Крутить планировщик в отдельном демоническом потоке со своим event loop.
+
+    Зачем: a2wsgi не выполняет lifespan/startup-хендлеры (проверено пробой —
+    startup executed: False), а AsyncIOScheduler без живого loop мёртв. Без этого
+    на копии мамы тихо не работали бы напоминания, дайджесты и бэкапы.
+    Никогда не бросает: упавший старт планировщика не должен ронять воркер.
+    """
+    import asyncio
+    import logging
+    import threading
+
+    async def _amain() -> None:
+        sch.start()
+        await asyncio.Event().wait()  # крутимся вечно внутри run_until_complete
+
+    def _run() -> None:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(_amain())
+        except Exception as e:  # pragma: no cover — воркер важнее планировщика
+            logging.getLogger("jarvis.deploy").warning("scheduler thread stopped: %s", e)
+        finally:
+            loop.close()
+
+    t = threading.Thread(target=_run, name="marvin-scheduler", daemon=True)
+    t.start()
+    return t
+
+
+# Стартуем планировщик сразу, а не в lifespan: под WSGI lifespan не выполняется.
+# В тестах не стартуем (ASSISTANT_TEST=1 выставляет conftest): 28 живых задач в тестовом
+# процессе не нужны. Отключается и явно: ASSISTANT_WSGI_SCHEDULER=0.
+_sch_thread = None
+if _sch is not None and os.getenv("ASSISTANT_TEST") != "1" and os.getenv("ASSISTANT_WSGI_SCHEDULER", "1") == "1":
+    _sch_thread = _start_scheduler_thread(_sch)
+
+
 @app.on_event("startup")
 async def _wsgi_startup() -> None:
     """Планировщик в процессе воркера (АП, бесплатный тариф без крона).
