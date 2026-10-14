@@ -658,18 +658,22 @@ def test_game_mode_unloads_then_warms_and_blocks_embeddings(monkeypatch):
     async def fake_unload():
         calls.append("unload"); return True
 
+    async def fake_lms_unload(ids=None):
+        calls.append("lms-unload"); return []
+
     async def fake_warm():
         calls.append("warm"); return True
     monkeypatch.setattr(llm, "unload_ollama", fake_unload)
+    monkeypatch.setattr(llm, "lmstudio_unload", fake_lms_unload)
     monkeypatch.setattr(llm, "warm_ollama", fake_warm)
 
     async def run():
         await llm.set_game_mode(True)
-        assert llm.GAME_MODE and calls == ["unload"]
+        assert llm.GAME_MODE and calls == ["unload", "lms-unload"]
         assert await llm.embed(["x"]) is None and await llm.embed_available() is False
         msg = await llm.set_game_mode(False)
         await asyncio.sleep(0)   # фоновой задаче прогрева дать выполниться
-        assert not llm.GAME_MODE and calls == ["unload", "warm"] and "прогревается" in msg
+        assert not llm.GAME_MODE and calls == ["unload", "lms-unload", "warm"] and "прогревается" in msg
     asyncio.run(run())
 
 

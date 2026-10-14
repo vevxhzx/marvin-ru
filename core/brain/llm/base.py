@@ -214,13 +214,14 @@ GAME_MODE = False      # «игровой режим»: локальную мо�
 
 
 async def set_game_mode(on: bool) -> str:
-    from .lmstudio import reload_lmstudio
+    from .lmstudio import lmstudio_unload, reload_lmstudio, reload_lmstudio_small
     from .ollama import unload_ollama, warm_ollama
     global GAME_MODE, _AVAIL_CACHE
     GAME_MODE = on
     _AVAIL_CACHE = (0.0, False)   # сбросить кэш доступности: после «игра окончена» модель должна вернуться сразу
     if on:
         freed = await unload_ollama()
+        lms_out = await lmstudio_unload()   # никогда не бросает: нет CLI — просто пустой список
         try:
             from ...voice import stt as _stt
             whisper_freed = _stt.unload_stt()
@@ -228,14 +229,16 @@ async def set_game_mode(on: bool) -> str:
             log.debug("whisper unload failed: %s", e)
             whisper_freed = False
         tail = " + whisper выгружен из видеопамяти" if whisper_freed else ""
-        return ("Игровой режим: локальная модель выгружена из видеопамяти" + tail + ", до отмены отвечаю только через облако "
-                "(команды-шаблоны работают как обычно). «Игра окончена» — вернуть.") if freed else \
+        lms_tail = f" + LM Studio выгружен ({len(lms_out)})" if lms_out else ""
+        return ("Игровой режим: локальная модель выгружена из видеопамяти" + tail + lms_tail + ", до отмены отвечаю только через облако "
+                "(команды-шаблоны работают как обычно). «Игра окончена» — вернуть.") if (freed or lms_out) else \
                "Игровой режим включён (Ollama не отвечала — выгружать нечего). Всё в облако, сэр."
     # выход из игры: модель грузим обратно СЕЙЧАС, в фоне (3–4 ГБ с диска в видеокарту — 5–15 с), а не при первой команде,
     # иначе первый ответ после катки ждал бы загрузку целиком
     import asyncio
     asyncio.get_running_loop().create_task(warm_ollama())
     asyncio.get_running_loop().create_task(reload_lmstudio())
+    asyncio.get_running_loop().create_task(reload_lmstudio_small())
     return "Игровой режим выключен, локальный мозг прогревается — через несколько секунд в строю. Как сыграли, сэр?"
 EMBED_MODEL = getattr(cfg.brain.ollama, "embed_model", None) or "nomic-embed-text"
 
