@@ -328,6 +328,18 @@ def write_settings(changes: dict[str, object]) -> list[str]:
         import shutil
         shutil.copy(ROOT / "config.example.yaml", path)
     lines = path.read_text(encoding="utf-8").splitlines()
+    # Файл пустой или из одних комментариев — писать поверх нечего. Без этой проверки следующая
+    # же правка настроек пересобирала файл из ОДНОГО изменённого ключа, и весь config.yaml
+    # (токен, ключи, режим мозга) исчезал: так он сжался с 9 КБ до трёх строк и пережил
+    # ежедневные бэкапы, пока не заметили. Пустой config = потерянные настройки → лечим шаблоном.
+    if not [ln for ln in lines if ln.strip() and not ln.lstrip().startswith("#")]:
+        import logging as _logging
+
+        _logging.getLogger("jarvis.config").warning(
+            "config.yaml пустой или без настроек (%s) — восстановлен из config.example.yaml", path)
+        import shutil as _shutil
+        _shutil.copy(ROOT / "config.example.yaml", path)
+        lines = path.read_text(encoding="utf-8").splitlines()
     changed: list[str] = []
     for key, val in changes.items():
         if key not in EDITABLE:
@@ -418,7 +430,19 @@ def write_settings(changes: dict[str, object]) -> list[str]:
             else:
                 lines.insert(ins, rendered)
         changed.append(key)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # Запись через временный файл + копия прежнего рядом: оборванный процесс (перезапуск,
+    # выключение, краш) больше не может оставить config.yaml наполовину записанным.
+    # .bak в .gitignore, ключи туда не попадают (папка проекта приватная, файл и так локальный).
+    import os as _os
+    import shutil as _shutil
+    if path.exists() and path.stat().st_size:
+        try:
+            _shutil.copy2(path, path.with_name(path.name + ".bak"))
+        except OSError as e:
+            logging.getLogger("jarvis.config").warning("не смог сохранить config.yaml.bak: %s", e)
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    _os.replace(tmp, path)
     return changed
 
 
