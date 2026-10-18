@@ -2,12 +2,12 @@
 
 Использование на PythonAnywhere (вкладка Web → Add a new web app → Manual → Python 3.x):
   Source code: путь к копии проекта (git clone).
-  Virtualenv: окружение с `pip install -r requirements-mom.txt` (лёгкий набор, уже включает a2wsgi).
+  Virtualenv: окружение с `pip install -r requirements-hosted.txt` (лёгкий набор, уже включает a2wsgi).
   WSGI file: указать этот файл (4 строки: sys.path + from wsgi import application).
   Static files: /assets/ → <проект>/web/site/assets (остальное отдаёт сам FastAPI).
 
 Первый запуск: откроется мастер? Нет — мастер только локальный. Перед заливкой заполните
-config.yaml (brain.mode=cloud, brain.cloud.*, server.password, owner.*) — см. docs/mom-deploy.md.
+config.yaml (brain.mode=cloud, brain.cloud.*, server.password, owner.*) — см. docs/hosted-deploy.md.
 Переменные окружения вместо секретов в файле: CLOUD_API_KEY, ASSISTANT_PASSWORD.
 """
 import os
@@ -52,7 +52,7 @@ def _start_scheduler_thread(sch):
 
     Зачем: a2wsgi не выполняет lifespan/startup-хендлеры (проверено пробой —
     startup executed: False), а AsyncIOScheduler без живого loop мёртв. Без этого
-    на копии мамы тихо не работали бы напоминания, дайджесты и бэкапы.
+    на облачном инстансе тихо не работали бы напоминания, дайджесты и бэкапы.
     Никогда не бросает: упавший старт планировщика не должен ронять воркер.
     """
     import asyncio

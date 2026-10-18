@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""Второй ассистент на этом же ПК — для мамы (или любого близкого человека). Запускается из mama.bat.
+"""Второй ассистент на этом же ПК — для другого человека (близкого, друга, коллеги).
+Запускается из second_copy.bat.
 
 Что делает, по шагам и с вопросами:
   1. копирует проект в соседнюю папку (без вашей базы, конфига и голосовых моделей);
-  2. спрашивает, как обращаться к хозяйке, токен нового бота и ключ Groq (проверяет живьём);
-  3. ловит её Telegram-ID автоматически — ей достаточно нажать Start у бота;
+  2. спрашивает, как обращаться к пользователю, токен нового бота и ключ Groq (проверяет живьём);
+  3. ловит его Telegram-ID автоматически — ему достаточно нажать Start у бота;
   4. пишет config.yaml копии: только облако, порт 8766, без голоса на ПК, без анонимайзера, мягкий характер;
   5. по желанию — второй Tailscale Funnel (порт 8443) для кнопки «Открыть» и ярлык в автозагрузку.
 
@@ -32,7 +33,7 @@ sys.path.insert(0, str(SRC))
 PORT = 8766          # сайт второй копии (у вашего — 8765)
 FUNNEL_PORT = 8443   # публичный порт второго Funnel (у вашего — 443)
 SKIP_DIRS = {"data", ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "web", "vendor", ".git"}
-SKIP_FILES = {"config.yaml", "mama.bat", "mama_setup.py"}
+SKIP_FILES = {"config.yaml", "second_copy.bat", "second_copy.py"}
 
 
 def ask(prompt: str, default: str = "", secret: bool = False) -> str:
@@ -71,8 +72,8 @@ def copy_project(dst: Path) -> None:
     # её start.bat — с другим заголовком окна: два одинаковых «Marvin» на панели задач не различить
     try:
         bat = (dst / "start.bat").read_text(encoding="utf-8", errors="replace")
-        bat = bat.replace("title Marvin\r\n", "title Marvin - MAMA (port 8766)\r\n", 1).replace("title Marvin\n", "title Marvin - MAMA (port 8766)\n", 1)
-        bat = bat.replace("echo Jarvis is ALREADY RUNNING", "echo Jarvis (mama) is ALREADY RUNNING").replace("echo Jarvis stopped.", "echo Jarvis (mama) stopped.")
+        bat = bat.replace("title Marvin\r\n", "title Marvin - COPY (port 8766)\r\n", 1).replace("title Marvin\n", "title Marvin - COPY (port 8766)\n", 1)
+        bat = bat.replace("echo Jarvis is ALREADY RUNNING", "echo Jarvis (copy) is ALREADY RUNNING").replace("echo Jarvis stopped.", "echo Jarvis (copy) stopped.")
         (dst / "start.bat").write_text(bat, encoding="utf-8")
     except OSError as e:
         print(f"  (start.bat копии без своего заголовка: {e})")
@@ -220,12 +221,12 @@ def setup_funnel() -> str | None:
     code, _ = tailscale("version", timeout=10)
     if code is None:
         print("  Tailscale не найден — кнопки «Открыть» пока не будет. Поставьте Tailscale, пройдите funnel.bat")
-        print("  у себя, потом запустите mama.bat ещё раз — он добавит только этот шаг.")
+        print("  у себя, потом запустите second_copy.bat ещё раз — он добавит только этот шаг.")
         return None
     _, st = tailscale("funnel", "status")
     m = re.search(r"(https://[\w.-]+\.ts\.net)", st)
     if not m:
-        print("  У вашего ассистента Funnel ещё не включён (funnel.bat). Сначала он, потом снова mama.bat.")
+        print("  У вашего ассистента Funnel ещё не включён (funnel.bat). Сначала он, потом снова second_copy.bat.")
         return None
     base = m.group(1)
     if f":{FUNNEL_PORT}" in st and str(PORT) in st:
@@ -252,13 +253,13 @@ def add_autostart(dst: Path, title: str) -> None:
 
 def main() -> int:
     print("\n  ================================================")
-    print("    Marvin для мамы — вторая копия на этом ПК")
+    print("    Marvin — вторая копия на этом ПК (для другого человека)")
     print("  ================================================")
     print("  Понадобятся: токен нового бота (@BotFather → /newbot) и ключ Groq")
-    print("  (console.groq.com/keys, бесплатно, лучше отдельный аккаунт). Телефон мамы — под рукой.")
+    print("  (console.groq.com/keys, бесплатно, лучше отдельный аккаунт). Его телефон — под рукой.")
 
     hr("1. Папка")
-    default_dst = str(SRC.parent / (SRC.name + "-mama"))
+    default_dst = str(SRC.parent / (SRC.name + "-copy"))
     dst = Path(ask("Куда положить копию", default_dst))
     if dst.resolve() == SRC.resolve():
         print("  Это та же папка. Нужна другая."); return 1
@@ -273,11 +274,11 @@ def main() -> int:
     else:
         hr("2. Обращение")
         assistant = "Марвин"
-        owner = ask("Как ему обращаться к ней («мам», «Наталья», «Наталья Петровна»)", "мам")
+        owner = ask("Как к нему обращаться («мам», «Наталья», «Наталья Петровна»)", "мам")
         tz = ask("Часовой пояс", "Europe/Moscow")
 
         hr("3. Telegram-бот")
-        print("  В Telegram: @BotFather → /newbot → имя (например «Помощник мамы») → юзернейм (…_bot) → скопируйте токен.")
+        print("  В Telegram: @BotFather → /newbot → имя (например «Помощник») → юзернейм (…_bot) → скопируйте токен.")
         proxy = ""
         while True:
             token = ask("Токен бота")
@@ -288,14 +289,14 @@ def main() -> int:
             if "VPN" in res["detail"] and not proxy:
                 proxy = ask("Прокси для Telegram (как у вашего ассистента; пусто — попробовать снова)", "")
                 proxy = "" if proxy in ("-", "нет") else proxy
-        print(f"\n  Теперь с ТЕЛЕФОНА МАМЫ откройте https://t.me/{res['username']} и нажмите «Start».")
-        print("  (Можно с вашего телефона, если бот будет у вас — тогда ID будет ваш.)")
+        print(f"\n  Теперь с ЕГО ТЕЛЕФОНА откройте https://t.me/{res['username']} и нажмите «Start».")
+        print("  (Можно со своего телефона, если бот будет у вас — тогда ID будет ваш.)")
         print("  Жду до 3 минут…")
         w = asyncio.run(tg_wait_owner(token, proxy, assistant))
         if not w.get("ok"):
-            print("  Сообщений не было. Запустите mama.bat ещё раз, когда телефон будет рядом."); return 1
+            print("  Сообщений не было. Запустите second_copy.bat ещё раз, когда телефон будет рядом."); return 1
         owner_id = w["owner_id"]
-        print(f"        ок: {w['name']} (ID {owner_id}) — бот будет отвечать только ей")
+        print(f"        ок: {w['name']} (ID {owner_id}) — бот будет отвечать только ему")
 
         hr("4. Мозг — облако Groq")
         print("  console.groq.com/keys → Create API Key → скопируйте (начинается на gsk_).")
@@ -313,7 +314,7 @@ def main() -> int:
             "brain.cloud.model": "",   # пусто: модель выбирается из живого списка Groq автоматически
             "brain.vision.where": "cloud", "brain.gemini.anonymize": False, "brain.gemini.mark_source": False,
             "persona.style": "neutral",
-            # голосовые в Telegram — да (мамы любят наговаривать), распознаёт Groq Whisper за секунду; озвучка не нужна
+            # голосовые в Telegram — да (наговаривать удобнее), распознаёт Groq Whisper за секунду; озвучка не нужна
             "voice.enabled": True, "voice.stt.cloud": True, "voice.tts.engine": "off",
             "voice.tts.reply_in_telegram": "never", "finance.main_account": "Карта",
             "server.port": PORT,
@@ -321,7 +322,7 @@ def main() -> int:
         write_config(dst, values)
         print("        config.yaml копии записан")
 
-    hr("5. Кнопка «Открыть» в её Telegram (сайт внутри чата)")
+    hr("5. Кнопка «Открыть» в его Telegram (сайт внутри чата)")
     url = None
     if yes("Настроить сейчас? (нужен Tailscale, как у вашего funnel.bat)"):
         url = setup_funnel()
@@ -333,21 +334,21 @@ def main() -> int:
                 print(f"  ✗ не смог записать адрес: {e}. Впишите вручную: telegram.webapp_url: \"{url}\"")
 
     hr("6. Автозагрузка")
-    if yes("Запускать её копию вместе с Windows (вместе с вашей)?"):
-        add_autostart(dst, "Marvin - mama")
+    if yes("Запускать его копию вместе с Windows (вместе с вашей)?"):
+        add_autostart(dst, "Marvin - copy")
 
     print("\n  ================================================")
     print("    Готово. Что дальше:")
     print(f"     1. Бот работает, пока открыто окно {dst / 'start.bat'} (можно свернуть, закрывать нельзя).")
-    print("     2. Маме: написать боту что угодно — он ответит. Инструкция для неё: docs\\for-mom.md")
-    print("        (перешлите ей файл или распечатайте).")
+    print("     2. Ему: написать боту что угодно — он ответит. Инструкция для него: docs\\quick-start.md")
+    print("        (перешлите ему файл или распечатайте).")
     if url:
-        print(f"     3. Кнопка «Открыть» появится в её боте после запуска. Адрес: {url}")
-    print("     Обе копии независимы: разные боты, базы и ключи; ваш ассистент её сообщений не видит.")
+        print(f"     3. Кнопка «Открыть» появится в его боте после запуска. Адрес: {url}")
+    print("     Обе копии независимы: разные боты, базы и ключи; ваш ассистент его сообщений не видит.")
     print("  ================================================\n")
-    if sys.platform == "win32" and ask("Запустить её копию прямо сейчас? (д/н)", "д").lower().startswith(("д", "y")):
+    if sys.platform == "win32" and ask("Запустить его копию прямо сейчас? (д/н)", "д").lower().startswith(("д", "y")):
         subprocess.Popen(["cmd", "/c", "start", "", str(dst / "start.bat")], cwd=str(dst))
-        print("        открылось второе окно — через ~10 секунд бот отвечает маме. Окно можно свернуть.")
+        print("        открылось второе окно — через ~10 секунд бот отвечает. Окно можно свернуть.")
     return 0
 
 
@@ -355,5 +356,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except KeyboardInterrupt:
-        print("\n  Прервано. Запустите mama.bat снова — сделанное сохранится.")
+        print("\n  Прервано. Запустите second_copy.bat снова — сделанное сохранится.")
         sys.exit(1)

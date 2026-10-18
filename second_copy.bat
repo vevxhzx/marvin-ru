@@ -1,5 +1,5 @@
 @echo off
-title Marvin - second copy for mom
+title Marvin - second copy for another person
 cd /d "%~dp0"
 chcp 65001 >nul
 if not exist .venv\Scripts\python.exe (
@@ -7,6 +7,6 @@ if not exist .venv\Scripts\python.exe (
     pause
     exit /b 1
 )
-.venv\Scripts\python.exe mama_setup.py %*
+.venv\Scripts\python.exe second_copy.py %*
 echo.
 pause

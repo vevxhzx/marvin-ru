@@ -381,7 +381,7 @@ def _clamp_length(x) -> float:
 
 try:
     from piper.config import SynthesisConfig
-except ImportError:  # piper-tts не стоит (CI, облако мамы): конфиг-шим тех же полей
+except ImportError:  # piper-tts не стоит (CI, облачный инстанс): конфиг-шим тех же полей
     from dataclasses import dataclass
 
     @dataclass

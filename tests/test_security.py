@@ -675,7 +675,7 @@ def test_cloud_tools_chat_openai_format(monkeypatch):
 
 
 def test_persona_localize_owner_name(monkeypatch):
-    """Готовые реплики с «сэр» подстраиваются под owner.name (второй ассистент для мамы), пустое — без обращения."""
+    """Готовые реплики с «сэр» подстраиваются под owner.name (второй ассистент для другого человека), пустое — без обращения."""
     from core.brain import persona
     monkeypatch.setattr(persona, "OWNER", "мам")
     assert persona.localize("Есть, сэр. Баланс 5.") == "Есть, мам. Баланс 5."

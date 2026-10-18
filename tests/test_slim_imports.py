@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""SLIM-сборка для облака (mom): без torch/faster-whisper/av/numpy/pdfplumber/openpyxl/psutil
+"""SLIM-сборка для облака: без torch/faster-whisper/av/numpy/pdfplumber/openpyxl/psutil
 ядро обязано импортироваться (все тяжёлые импорты в коде ленивые).
 
 Hermetic: гоняем импорт в ОТДЕЛЬНОМ процессе с заблокированными пакетами —

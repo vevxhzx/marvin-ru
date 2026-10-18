@@ -10,9 +10,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def test_mom_requirements_include_a2wsgi():
-    text = (ROOT / "requirements-mom.txt").read_text(encoding="utf-8")
-    assert "a2wsgi" in text, "requirements-mom.txt обязан тянуть a2wsgi (ASGI->WSGI мост)"
+def test_hosted_requirements_include_a2wsgi():
+    text = (ROOT / "requirements-hosted.txt").read_text(encoding="utf-8")
+    assert "a2wsgi" in text, "requirements-hosted.txt обязан тянуть a2wsgi (ASGI->WSGI мост)"
 
 
 def test_wsgi_wraps_asgi_for_pythonanywhere():
@@ -26,7 +26,7 @@ def test_wsgi_wraps_asgi_for_pythonanywhere():
 
 def test_scheduler_runs_without_lifespan():
     """a2wsgi не выполняет startup-хендлеры (проверено пробой: startup executed: False),
-    а планировщик без живого loop мёртв: напоминания и бэкапы на копии мамы не работали бы.
+    а планировщик без живого loop мёртв: напоминания и бэкапы в облачном инстансе не работали бы.
     Поэтому wsgi.py крутит его в отдельном демоническом потоке со своим loop."""
     import threading
     import wsgi
@@ -55,10 +55,14 @@ def test_scheduler_thread_runs_jobs():
 
     fired = threading.Event()
     sch = AsyncIOScheduler()
-    sch.add_job(fired.set, DateTrigger(run_date=datetime.now() + timedelta(seconds=1)))
+    # Отступ 3 с, а не 1: на CI (две параллельные копии сьюта) поток с loop стартует дольше секунды,
+    # и задача с run_date «+1 с» к моменту старта считалась пропущенной — дефолтный
+    # misfire_grace_time у APScheduler 1 с. С запасом по времени и длинным grace_time флейка нет.
+    sch.add_job(fired.set, DateTrigger(run_date=datetime.now() + timedelta(seconds=3)),
+                misfire_grace_time=120)
     wsgi._start_scheduler_thread(sch)
     try:
-        assert fired.wait(timeout=15), "задача в потоке планировщика не сработала"
+        assert fired.wait(timeout=30), "задача в потоке планировщика не сработала"
     finally:
         sch.shutdown(wait=False)
 
@@ -81,7 +85,7 @@ def test_wsgi_application_is_wsgi_callable():
     except ImportError:
         import pytest
 
-        pytest.skip("a2wsgi не стоит локально (на PythonAnywhere ставится из requirements-mom.txt)")
+        pytest.skip("a2wsgi не стоит локально (в облаке ставится из requirements-hosted.txt)")
     code = (
         "import inspect, wsgi; "
         "sig = inspect.signature(wsgi.application.__call__); "

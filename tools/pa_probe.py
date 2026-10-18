@@ -4,7 +4,7 @@
 летало. Этот скрипт отвечает на вопрос «виснет в нашем коде или в транспорте»:
 запускается в консоли PA одной командой, без кавычек и длинных строк:
 
-    cd ~/mom-marvin && timeout 120 .venv/bin/python tools/pa_probe.py
+    cd ~/marvin-hosted && timeout 120 .venv/bin/python tools/pa_probe.py
 
 Исходы:
 - мгновенно `STATUS: 200 BYTES: ...` — приложение невиновно, виснет транспорт uWSGI;

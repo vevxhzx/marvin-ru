@@ -108,14 +108,15 @@ _UVICORN_LOG_CONFIG = {
 }
 
 def _instance_label() -> str:
-    """Чем эта копия отличается от «главной»: имя папки + порт. Вторая копия («marvin-mama», 8766) — видно в заголовке окна,
-    в первой строке лога и в диспетчере задач, иначе два одинаковых окна не различить."""
+    """Чем эта копия отличается от «главной»: имя папки + порт. Вторая копия (другой человек,
+    порт 8766) — видно в заголовке окна, в первой строке лога и в диспетчере задач,
+    иначе два одинаковых окна не различить."""
     from core.config import ROOT
     port = int(getattr(getattr(cfg, "server", None), "port", 8765) or 8765)
     name = ROOT.name
-    if name.lower().endswith("-mama") or "mama" in name.lower():
-        return f"для мамы · {name} · :{port}"
-    return f"{name} · :{port}" if port != 8765 else ""
+    if port != 8765:
+        return f"вторая копия · {name} · :{port}"
+    return ""
 
 
 def _set_console_title(label: str) -> None:
