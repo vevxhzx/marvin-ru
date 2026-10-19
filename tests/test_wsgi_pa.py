@@ -45,26 +45,28 @@ def test_scheduler_runs_without_lifespan():
 
 
 def test_scheduler_thread_runs_jobs():
-    """Паттерн «поток + свой loop» работает с установленной версией APScheduler:
-    задача, запланированная на +1 с, реально срабатывает."""
+    """Поток «свой loop» действительно крутит loop: колбэк, поставленный в start(),
+    срабатывает. Это ровно то, что нужно AsyncIOScheduler (он планирует задачи в
+    running loop), но без зависимости от таймера APScheduler: на CI задача с run_date
+    «+N с» то и дело считалась пропущенной, и тест падал при живом коде."""
     import threading
+
     import wsgi
-    from apscheduler.schedulers.asyncio import AsyncIOScheduler
-    from apscheduler.triggers.date import DateTrigger
-    from datetime import datetime, timedelta
 
     fired = threading.Event()
-    sch = AsyncIOScheduler()
-    # Отступ 3 с, а не 1: на CI (две параллельные копии сьюта) поток с loop стартует дольше секунды,
-    # и задача с run_date «+1 с» к моменту старта считалась пропущенной — дефолтный
-    # misfire_grace_time у APScheduler 1 с. С запасом по времени и длинным grace_time флейка нет.
-    sch.add_job(fired.set, DateTrigger(run_date=datetime.now() + timedelta(seconds=3)),
-                misfire_grace_time=120)
-    wsgi._start_scheduler_thread(sch)
-    try:
-        assert fired.wait(timeout=30), "задача в потоке планировщика не сработала"
-    finally:
-        sch.shutdown(wait=False)
+
+    class FakeSch:
+        running = False
+
+        def start(self):
+            import asyncio
+
+            # Внутри start() уже работает loop нашего потока — вешаем на него колбэк.
+            asyncio.get_running_loop().call_later(0.1, fired.set)
+            self.running = True
+
+    wsgi._start_scheduler_thread(FakeSch())
+    assert fired.wait(timeout=15), "loop в потоке планировщика не выполнил колбэк — планировщик был бы мёртв"
 
 
 def test_scheduler_thread_never_raises():
