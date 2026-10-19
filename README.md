@@ -20,49 +20,49 @@
 </p>
 
 <p align="center">
-  <img src="docs/img/demo.gif" alt="Фраза на главной → Marvin записал событие и показал карточку действия" width="880">
+  <img src="docs/img/demo.webp" alt="Фраза на главной → Marvin записал событие и показал карточку действия" width="880">
 </p>
 
 <p align="center">
-  <img src="docs/img/home-dark.png" alt="Главная в тёмной теме" width="430">
-  <img src="docs/img/home-light.png" alt="Главная в светлой теме: приветствие, поле ввода и карточка баланса" width="430">
+  <img src="docs/img/home-dark.webp" alt="Главная в тёмной теме" width="430">
+  <img src="docs/img/home-light.webp" alt="Главная в светлой теме: приветствие, поле ввода и карточка баланса" width="430">
 </p>
 
 <details>
 <summary><b>Ещё скриншоты: все разделы и телефон</b></summary>
 
 <p align="center">
-  <img src="docs/img/finance.png" alt="Финансы: баланс, касса на 30 дней и поток в месяц" width="620">
-  <img src="docs/img/orders.png" alt="Заказы: воронка из девяти стадий и подсказка на первом заходе" width="620">
+  <img src="docs/img/finance.webp" alt="Финансы: баланс, касса на 30 дней и поток в месяц" width="620">
+  <img src="docs/img/orders.webp" alt="Заказы: воронка из девяти стадий и подсказка на первом заходе" width="620">
 </p>
 <p align="center">
-  <img src="docs/img/tasks.png" alt="Задачи: плоский список с крупными чекбоксами" width="620">
-  <img src="docs/img/calendar.png" alt="Календарь: месяц и неделя" width="620">
+  <img src="docs/img/tasks.webp" alt="Задачи: плоский список с крупными чекбоксами" width="620">
+  <img src="docs/img/calendar.webp" alt="Календарь: месяц и неделя" width="620">
 </p>
 <p align="center">
-  <img src="docs/img/mind.png" alt="Мозг: мысли списком" width="430">
-  <img src="docs/img/memory.png" alt="Память: факты, которые Marvin о вас помнит" width="430">
-  <img src="docs/img/people.png" alt="Люди: клиенты и их ближайшие шаги" width="430">
+  <img src="docs/img/mind.webp" alt="Мозг: мысли списком" width="430">
+  <img src="docs/img/memory.webp" alt="Память: факты, которые Marvin о вас помнит" width="430">
+  <img src="docs/img/people.webp" alt="Люди: клиенты и их ближайшие шаги" width="430">
 </p>
 <p align="center">
-  <img src="docs/img/board.png" alt="Доска проекта" width="430">
-  <img src="docs/img/chat.png" alt="Чат: одна история с Telegram" width="430">
-  <img src="docs/img/palette.png" alt="Палитра команд Ctrl+K" width="430">
+  <img src="docs/img/board.webp" alt="Доска проекта" width="430">
+  <img src="docs/img/chat.webp" alt="Чат: одна история с Telegram" width="430">
+  <img src="docs/img/palette.webp" alt="Палитра команд Ctrl+K" width="430">
 </p>
 <p align="center">
-  <img src="docs/img/settings.png" alt="Настройки: разделы открываются шторкой" width="430">
+  <img src="docs/img/settings.webp" alt="Настройки: разделы открываются шторкой" width="430">
 </p>
 <p align="center">
   <b>Телефон</b>
 </p>
 <p align="center">
-  <img src="design-audit/shots/mob/today.jpg" alt="Телефон: главная" width="210">
-  <img src="design-audit/shots/mob/finance.jpg" alt="Телефон: финансы" width="210">
-  <img src="design-audit/shots/mob/tasks.jpg" alt="Телефон: задачи" width="210">
-  <img src="design-audit/shots/mob/orders.jpg" alt="Телефон: заказы" width="210">
-  <img src="design-audit/shots/mob/mind.jpg" alt="Телефон: мозг" width="210">
-  <img src="design-audit/shots/mob/calendar.jpg" alt="Телефон: календарь" width="210">
-  <img src="design-audit/shots/mob/settings.jpg" alt="Телефон: настройки" width="210">
+  <img src="docs/img/mobile/today.jpg" alt="Телефон: главная" width="210">
+  <img src="docs/img/mobile/finance.jpg" alt="Телефон: финансы" width="210">
+  <img src="docs/img/mobile/tasks.jpg" alt="Телефон: задачи" width="210">
+  <img src="docs/img/mobile/orders.jpg" alt="Телефон: заказы" width="210">
+  <img src="docs/img/mobile/mind.jpg" alt="Телефон: мозг" width="210">
+  <img src="docs/img/mobile/calendar.jpg" alt="Телефон: календарь" width="210">
+  <img src="docs/img/mobile/settings.jpg" alt="Телефон: настройки" width="210">
 </p>
 
 </details>

@@ -1,4 +1,4 @@
-// Дизайн-скрины для аудита: 10 экранов × desktop/mobile в design-audit/shots/.
+// Дизайн-скрины для локального аудита: 10 экранов × desktop/mobile в shots/ (в git не попадают).
 // Вьюпорт (не fullPage): как видит хозяин — на ПК контент по центру с пустотой по бокам.
 // Не тест: ничего не ассертит, только снимает. Падает только если страница не открылась.
 import fs from 'node:fs'
@@ -8,7 +8,7 @@ import { test, expect } from '../helpers/index.js'
 import { TABS, openApp, openTab, expectRendered } from '../helpers/index.js'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
-const SHOTS = path.resolve(HERE, '..', '..', '..', 'design-audit', 'shots')
+const SHOTS = path.resolve(HERE, '..', '..', '..', 'shots')
 const IGNORE = [/\/api\/events\/stream/, /favicon/i]
 
 test.describe('design shots', () => {
