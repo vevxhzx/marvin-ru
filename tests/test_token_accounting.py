@@ -63,13 +63,15 @@ def no_price(monkeypatch):
 
 
 # ============================================================ 1. миграция
-def test_v17_is_the_next_free_version():
+def test_v18_is_the_next_free_version():
     """Новая миграция обязана быть следующим свободным номером (иначе её не применить)."""
     versions = [v for v, _, _ in migrations.MIGRATIONS]
     assert versions == sorted(versions), "версии миграций должны идти по возрастанию"
-    assert versions[-1] == 17, "следующая свободная версия — 17"
+    assert versions[-1] == 18, "следующая свободная версия — 18"
     assert len(set(versions)) == len(versions), "номер миграции не переиспользуется"
-    assert "run" in [m[1] for m in migrations.MIGRATIONS][-1]
+    # v17 — учёт токенов; проверяем, что она на месте, хотя последняя уже v18
+    descriptions = {v: d for v, d, _ in migrations.MIGRATIONS}
+    assert "run" in descriptions[17]
 
 
 def _cols(eng, table: str = "run") -> set[str]:

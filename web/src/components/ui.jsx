@@ -705,14 +705,29 @@ export function useDoneFlash(ms = 1100) {
 }
 
 /* ---------- уведомления: один глобальный стек (Toaster в App), страницы зовут useToast()/toast() ---------- */
+/* action: { label, onClick } — кнопка прямо в тосте (например, «вернуть» после
+   мягкого удаления). Обратная совместимость: toast(title), toast(title, { sub, kind, ms })
+   и старый show(msg, kind, sub) работают как раньше. */
 const _toasts = { list: [], subs: new Set(), seq: 0 }
 const _emit = () => _toasts.subs.forEach((f) => f([..._toasts.list]))
-export function toast(title, { sub, kind = '', ms } = {}) {
-  const id = ++_toasts.seq
-  _toasts.list = [..._toasts.list.slice(-3), { id, title, sub, kind }]
+const TOAST_MS = (kind, action, ms) => ms || (kind === 'err' ? 4200 : action ? 6500 : 2600)
+function dismissToast(id) {
+  const found = _toasts.list.find((t) => t.id === id)
+  if (!found || found.out) return
+  _toasts.list = _toasts.list.map((t) => (t.id === id ? { ...t, out: true } : t))
   _emit()
-  setTimeout(() => { _toasts.list = _toasts.list.map((t) => (t.id === id ? { ...t, out: true } : t)); _emit() }, ms || (kind === 'err' ? 4200 : 2600))
-  setTimeout(() => { _toasts.list = _toasts.list.filter((t) => t.id !== id); _emit() }, (ms || (kind === 'err' ? 4200 : 2600)) + 240)
+  setTimeout(() => {
+    _toasts.list = _toasts.list.filter((t) => t.id !== id)
+    _emit()
+  }, 240)
+}
+export function toast(title, { sub, kind = '', ms, action } = {}) {
+  const id = ++_toasts.seq
+  _toasts.list = [..._toasts.list.slice(-3), { id, title, sub, kind, action }]
+  _emit()
+  const ttl = TOAST_MS(kind, action, ms)
+  setTimeout(() => { _toasts.list = _toasts.list.map((t) => (t.id === id ? { ...t, out: true } : t)); _emit() }, ttl)
+  setTimeout(() => { _toasts.list = _toasts.list.filter((t) => t.id !== id); _emit() }, ttl + 240)
   return id
 }
 export function Toaster() {
@@ -724,10 +739,24 @@ export function Toaster() {
       {list.map((t) => (
         <div key={t.id} className={`toast toast-in ${t.kind} ${t.out ? 'out' : ''}`}>
           <span className="toast-ic">{t.kind === 'err' ? <X size={14} /> : <Check size={14} />}</span>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="font-medium leading-snug">{t.title}</div>
             {t.sub && <div className="muted mt-0.5 text-sm leading-snug">{t.sub}</div>}
           </div>
+          {t.action && (
+            <button
+              type="button"
+              className="mt-0.5 shrink-0 rounded-full px-3 py-1 text-sm font-medium"
+              style={{ background: 'var(--fill-2)', color: 'var(--ink)' }}
+              onClick={() => {
+                const fn = t.action.onClick
+                dismissToast(t.id)
+                try { Promise.resolve(fn?.()).catch(() => {}) } catch {}
+              }}
+            >
+              {t.action.label}
+            </button>
+          )}
         </div>
       ))}
     </div>,
@@ -738,7 +767,22 @@ export function Toaster() {
    Заглавный <Toast> нигде не используется (только строчный toast) — заглушка удалена. */
 export function useToast() {
   const [t] = useState({ msg: '', kind: '' })
-  const show = (msg, kind = '', sub) => { if (msg) toast(msg, { kind: kind === 'err' ? 'err' : kind || 'ok', sub }) }
+  /* show(msg, kind, sub) — прежний вид; show(msg, { kind, sub, ms, action }) — новый.
+     Объект во втором аргументе не ломает старые вызовы show(msg, 'err', sub). */
+  const show = (msg, kind = '', sub, extra) => {
+    if (!msg) return
+    if (kind && typeof kind === 'object') {
+      const o = kind
+      toast(msg, {
+        kind: o.kind === 'err' ? 'err' : o.kind || 'ok',
+        sub: o.sub,
+        ms: o.ms,
+        action: o.action,
+      })
+      return
+    }
+    toast(msg, { kind: kind === 'err' ? 'err' : kind || 'ok', sub, ...(extra || {}) })
+  }
   show.err = (e) => show(typeof e === 'string' ? e : (e?.message || T('common.error')), 'err')
   return [t, show]
 }

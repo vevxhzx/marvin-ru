@@ -225,6 +225,12 @@ class DebtIn(BaseModel):
     rate: float = 0
     pay_day: int = 1
     creditor: Optional[str] = None
+    # расширенная карточка (v18)
+    kind: str = "credit"
+    credit_limit: float = 0
+    color: str = ""
+    note: str = ""
+    remind_days: Optional[int] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -240,6 +246,7 @@ class PayIn(BaseModel):
     amount: float
     account: Optional[str] = None
     date: Optional[datetime] = None
+    note: Optional[str] = None
 
 
 class DebtPatch(BaseModel):
@@ -247,10 +254,28 @@ class DebtPatch(BaseModel):
     creditor: Optional[str] = None
     total: Optional[float] = None
     remaining: Optional[float] = None
+    paid: Optional[float] = None          # альтернатива remaining: выплачено = total − remaining
     payment: Optional[float] = None
     rate: Optional[float] = None
     pay_day: Optional[int] = None
+    kind: Optional[str] = None
+    credit_limit: Optional[float] = None
+    color: Optional[str] = None
+    note: Optional[str] = None
+    remind_days: Optional[int] = None
+    sort_order: Optional[int] = None
     closed: Optional[bool] = None
+
+
+class DebtOrderIn(BaseModel):
+    ids: list[int]
+
+
+class DebtPaymentPatch(BaseModel):
+    amount: Optional[float] = None
+    account: Optional[str] = None
+    date: Optional[datetime] = None
+    note: Optional[str] = None
 
 
 class RecurringIn(BaseModel):

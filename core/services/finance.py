@@ -9,6 +9,7 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from dateutil.relativedelta import relativedelta
 from sqlmodel import select
+from sqlalchemy import func
 from starlette.exceptions import HTTPException as _HTTPException
 
 from ..db import cached, icontains, Account, Category, Debt, Recurring, Transaction, log_action, remember, session
@@ -1115,8 +1116,48 @@ def process_due_recurring() -> list[Recurring]:
 
 
 # ---------- долги ----------
+DEBT_KINDS = ("credit", "credit_card", "installment", "personal", "receivable")
+_DEBT_KIND_ALIASES = {
+    "credit": "credit", "credit_card": "credit_card", "card": "credit_card", "кредитка": "credit_card",
+    "installment": "installment", "рассрочка": "installment", "personal": "personal", "личный": "personal",
+    "receivable": "receivable", "мне_должны": "receivable", "мне должны": "receivable",
+}
+
+
+def _debt_kind(value: object) -> str:
+    """Тип долга: неизвестное значение не роняет форму — считаем обычным кредитом."""
+    s = str(value or "").strip().lower().replace("-", "_")
+    return _DEBT_KIND_ALIASES.get(s, "credit")
+
+
+def _debt_color(value: object) -> str:
+    """Цвет карточки: пусто или #rgb/#rrggbb. Мусор игнорируем, чтобы не сломать стиль."""
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    if re.fullmatch(r"#[0-9a-fA-F]{3}|#[0-9a-fA-F]{6}", s):
+        return s.lower()
+    return ""
+
+
+def _remind_days(value: object) -> int:
+    if value in (None, ""):
+        try:
+            from ..config import cfg
+            value = getattr(getattr(cfg, "finance", None), "debt_reminder_days", 3)
+        except Exception:
+            value = 3
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        n = 3
+    return max(0, min(60, n))
+
+
 def add_debt(title: str, total: float, payment: float = 0, rate: float = 0, pay_day: int = 1,
-             creditor: str | None = None, remaining: float | None = None, source: str = "tg") -> Debt:
+             creditor: str | None = None, remaining: float | None = None, source: str = "tg",
+             kind: str = "credit", credit_limit: float = 0, color: str = "", note: str = "",
+             remind_days: int | None = None) -> Debt:
     title = _title(title)
     total = _num(total, "Сумма долга", 0, strict_min=True)
     remaining = total if remaining in (None, "") else _num(remaining, "Остаток", 0, total)
@@ -1125,9 +1166,19 @@ def add_debt(title: str, total: float, payment: float = 0, rate: float = 0, pay_
         raise FinanceError(f"Платёж {money(payment)} больше самого долга {money(total)}")
     rate = _rate(rate)
     pay_day = _day(pay_day)
+    kind = _debt_kind(kind)
+    credit_limit = _num(credit_limit or 0, "Лимит", 0)
+    if kind == "credit_card" and credit_limit <= 0:
+        # кредитка без явного лимита: считаем лимитом изначальную сумму — карточка не будет пустой
+        credit_limit = total
+    color = _debt_color(color)
+    note = str(note or "").strip()[:2000]
+    remind_days = _remind_days(remind_days)
     with session() as s:
+        next_order = int(s.exec(select(func.max(Debt.sort_order))).one() or 0) + 1
         d = Debt(title=title, creditor=creditor, total=total, remaining=remaining,
-                 payment=payment, rate=rate, pay_day=pay_day)
+                 payment=payment, rate=rate, pay_day=pay_day, kind=kind, credit_limit=credit_limit,
+                 color=color, note=note, remind_days=remind_days, sort_order=next_order)
         s.add(d)
         s.commit()
         s.refresh(d)
@@ -1139,27 +1190,35 @@ def add_debt(title: str, total: float, payment: float = 0, rate: float = 0, pay_
     return d
 
 
-def list_debts(include_closed: bool = False) -> list[Debt]:
+def list_debts(include_closed: bool = False, include_deleted: bool = False) -> list[Debt]:
     with session() as s:
         q = select(Debt)
+        if not include_deleted:
+            q = q.where(Debt.deleted_at.is_(None))
         if not include_closed:
             q = q.where(Debt.closed == False)  # noqa: E712
-        return list(s.exec(q))
+        rows = list(s.exec(q))
+    # ручной порядок; равные/нулевые — по id, чтобы список не прыгал
+    return sorted(rows, key=lambda d: ((d.sort_order or 0) or (d.id or 0), d.id or 0))
 
 
 def find_debt(debt_id_or_title: int | str) -> Debt | None:
     with session() as s:
         if isinstance(debt_id_or_title, int) or str(debt_id_or_title).isdigit():
-            return s.get(Debt, int(debt_id_or_title))
-        d = s.exec(select(Debt).where(Debt.closed == False, icontains(Debt.title, debt_id_or_title))).first()  # noqa: E712
+            d = s.get(Debt, int(debt_id_or_title))
+            return d if d and d.deleted_at is None else None
+        d = s.exec(select(Debt).where(Debt.closed == False, Debt.deleted_at.is_(None),  # noqa: E712
+                                      icontains(Debt.title, debt_id_or_title))).first()
         if d:
             return d
         from .match import best
-        return best(s.exec(select(Debt).where(Debt.closed == False)).all(), str(debt_id_or_title), min_score=0.66)  # noqa: E712
+        return best(s.exec(select(Debt).where(Debt.closed == False, Debt.deleted_at.is_(None)).order_by(Debt.sort_order)).all(),  # noqa: E712
+                    str(debt_id_or_title), min_score=0.66)
 
 
 def pay_debt(debt_id_or_title: int | str, amount: float, auto: bool = False,
-             account: str | None = None, source: str = "tg", date: datetime | None = None) -> Debt | None:
+             account: str | None = None, source: str = "tg", date: datetime | None = None,
+             note: str | None = None) -> Debt | None:
     """Платёж по долгу: уменьшает остаток И создаёт трату «Долги» (одна операция, связанная с долгом).
     Нельзя внести больше остатка и нельзя платить по закрытому долгу."""
     d = find_debt(debt_id_or_title)
@@ -1170,13 +1229,18 @@ def pay_debt(debt_id_or_title: int | str, amount: float, auto: bool = False,
     if auto:
         amount = min(float(amount), d.remaining)  # финальный платёж бывает меньше обычного
     amount = _num(amount, "Платёж", 0, max_=d.remaining, strict_min=True)
-    add_transaction(amount, "expense", "Долги", f"Платёж: {d.title}" + (" (авто)" if auto else ""),
+    comment = (str(note or "").strip() or None)
+    # «Мне должны» — это не расход, а возврат: деньги приходят на счёт, долг уменьшается.
+    flow = "income" if d.kind == "receivable" else "expense"
+    default_note = (f"Возврат долга: {d.title}" if flow == "income" else f"Платёж: {d.title}" + (" (авто)" if auto else ""))
+    add_transaction(amount, flow, "Долги" if flow == "expense" else None, comment or default_note,
                     account, source="system" if auto else source, date=date, debt_id=d.id)
     with session() as s:
         d = s.get(Debt, d.id)
         d.remaining = round(max(0.0, d.remaining - amount), 2)
         if d.remaining == 0:
             d.closed = True
+            d.closed_at = datetime.now()
             for r in s.exec(select(Recurring).where(Recurring.debt_id == d.id)).all():
                 r.active = False; s.add(r)
         s.add(d)
@@ -1193,7 +1257,9 @@ def debt_payments(debt_id: int) -> list[Transaction]:
 
 
 def update_debt(debt_id: int, **fields) -> Debt:
-    """Правка долга с проверками: остаток ≤ суммы, платёж ≤ остатка, день 1–31. Связанный регулярный платёж обновляется."""
+    """Правка долга с проверками: остаток ≤ суммы, платёж ≤ остатка, день 1–31.
+    `paid` — удобный вход формы: выплачено, остаток = сумма − выплачено.
+    Связанный регулярный платёж обновляется."""
     with session() as s:
         d = s.get(Debt, debt_id)
         if not d:
@@ -1202,9 +1268,15 @@ def update_debt(debt_id: int, **fields) -> Debt:
             d.title = _title(fields["title"])
         if fields.get("creditor") is not None:
             d.creditor = fields["creditor"].strip() or None
+        if fields.get("kind") is not None:
+            d.kind = _debt_kind(fields["kind"])
         if fields.get("total") is not None:
             d.total = _num(fields["total"], "Сумма долга", 0, strict_min=True)
-        if fields.get("remaining") is not None:
+        if fields.get("paid") is not None:
+            # форма правит «выплачено» — остаток выводим из него
+            paid = _num(fields["paid"], "Выплачено", 0, d.total)
+            d.remaining = round(max(0.0, d.total - paid), 2)
+        elif fields.get("remaining") is not None:
             d.remaining = _num(fields["remaining"], "Остаток", 0, d.total)
         elif d.remaining > d.total:
             raise FinanceError(f"Остаток {money(d.remaining)} больше новой суммы долга — сначала поправьте остаток")
@@ -1214,8 +1286,24 @@ def update_debt(debt_id: int, **fields) -> Debt:
             d.rate = _rate(fields["rate"])
         if fields.get("pay_day") is not None:
             d.pay_day = _day(fields["pay_day"])
+        if fields.get("credit_limit") is not None:
+            d.credit_limit = _num(fields["credit_limit"], "Лимит", 0)
+        if fields.get("color") is not None:
+            d.color = _debt_color(fields["color"])
+        if fields.get("note") is not None:
+            d.note = str(fields["note"] or "").strip()[:2000]
+        if fields.get("remind_days") is not None:
+            d.remind_days = _remind_days(fields["remind_days"])
+        if fields.get("sort_order") is not None:
+            try:
+                d.sort_order = int(fields["sort_order"])
+            except (TypeError, ValueError):
+                pass
         if d.payment > d.total:
             raise FinanceError(f"Платёж {money(d.payment)} больше самого долга {money(d.total)}")
+        if d.kind == "credit_card" and d.credit_limit <= 0:
+            d.credit_limit = d.total
+        was_closed = d.closed
         if fields.get("closed") is not None:
             d.closed = bool(fields["closed"])
             if d.closed:
@@ -1224,6 +1312,10 @@ def update_debt(debt_id: int, **fields) -> Debt:
             d.closed = True
         elif fields.get("closed") is None:
             d.closed = False
+        if d.closed and not was_closed:
+            d.closed_at = datetime.now()
+        elif not d.closed:
+            d.closed_at = None
         s.add(d)
         _sync_account_to_debt(s, d)
         # синхронизируем регулярный платёж
@@ -1243,14 +1335,23 @@ def update_debt(debt_id: int, **fields) -> Debt:
         return d
 
 
-def delete_debt(debt_id: int) -> bool:
-    """Удаляет долг и его регулярный платёж. Проведённые платежи (операции) остаются в истории."""
+def delete_debt(debt_id: int, soft: bool = True) -> bool:
+    """Удаляет долг. По умолчанию мягко: запись скрывается, платежи/история остаются,
+    и «вернуть» из уведомления работает. Жёсткое удаление — soft=False (внутренние вызовы)."""
     with session() as s:
         d = s.get(Debt, debt_id)
-        if not d:
+        if not d or d.deleted_at is not None:
             return False
         for r in s.exec(select(Recurring).where(Recurring.debt_id == d.id)).all():
             s.delete(r)
+        if soft:
+            d.deleted_at = datetime.now()
+            d.closed = True
+            d.closed_at = d.closed_at or datetime.now()
+            s.add(d)
+            remember(s, "finance", f"Долг «{d.title}» удалён (можно вернуть)", "debt", d.id)
+            s.commit()
+            return True
         for t in s.exec(select(Transaction).where(Transaction.debt_id == d.id)).all():
             t.debt_id = None; s.add(t)
         for a in s.exec(select(Account).where(Account.debt_id == d.id)).all():
@@ -1258,6 +1359,170 @@ def delete_debt(debt_id: int) -> bool:
         remember(s, "finance", f"Долг «{d.title}» удалён", "debt", d.id)
         s.delete(d); s.commit()
         return True
+
+
+def restore_debt(debt_id: int) -> Debt:
+    """Вернуть мягко удалённый долг: снова в списке, напоминания и регулярный платёж оживают."""
+    with session() as s:
+        d = s.get(Debt, debt_id)
+        if not d:
+            raise FinanceNotFound("Долг не найден")
+        d.deleted_at = None
+        d.closed = d.remaining <= 0
+        d.closed_at = None if not d.closed else (d.closed_at or datetime.now())
+        s.add(d)
+        if not d.closed and d.payment > 0:
+            rec = s.exec(select(Recurring).where(Recurring.debt_id == d.id)).first()
+            if rec:
+                rec.active = True
+                rec.amount = d.payment
+                rec.day = d.pay_day
+                rec.next_date = _next_date(d.pay_day, "monthly")
+                s.add(rec)
+            else:
+                s.add(Recurring(title=f"Платёж: {d.title}", amount=d.payment, kind="expense", category="Долги",
+                                period="monthly", day=d.pay_day, next_date=_next_date(d.pay_day, "monthly"), debt_id=d.id))
+        s.commit(); s.refresh(d)
+        return d
+
+
+def reorder_debts(ids: list[int]) -> int:
+    """Ручной порядок карточек (drag-and-drop): sort_order = позиция в списке."""
+    n = 0
+    with session() as s:
+        for pos, did in enumerate(ids, start=1):
+            d = s.get(Debt, int(did))
+            if d:
+                d.sort_order = pos
+                s.add(d)
+                n += 1
+        s.commit()
+    return n
+
+
+def next_pay_date(day: int, start: datetime | None = None) -> datetime:
+    """Ближайшая дата платежа с учётом дня месяца (31 → последний день короткого месяца)."""
+    now = start or datetime.now()
+    y, m = now.year, now.month
+    cand = _date_for_month(y, m, day)
+    if cand < now.replace(hour=0, minute=0, second=0, microsecond=0):
+        y, m = (y + 1, 1) if m == 12 else (y, m + 1)
+        cand = _date_for_month(y, m, day)
+    return cand
+
+
+def _date_for_month(year: int, month: int, day: int) -> datetime:
+    from calendar import monthrange
+    last = monthrange(year, month)[1]
+    return datetime(year, month, min(max(1, day), last))
+
+
+def debt_summary(debts: list[Debt] | None = None) -> dict:
+    """Сводка для верхней карточки: ближайший платёж, сумма минимальных за месяц,
+    дата свободы и переплата по процентам (только по долгам с известным прогнозом)."""
+    rows = [d for d in (debts if debts is not None else list_debts()) if not d.closed]
+    nearest = None
+    for d in rows:
+        if d.remaining <= 0:
+            continue
+        when = next_pay_date(d.pay_day)
+        amount = d.payment or 0
+        if nearest is None or when < nearest["_when"]:
+            nearest = {"id": d.id, "title": d.title, "creditor": d.creditor, "date": when.strftime("%d.%m.%Y"),
+                       "amount": amount, "days": max(0, (when.date() - datetime.now().date()).days), "_when": when}
+    if nearest:
+        nearest.pop("_when", None)
+    min_total = round(sum(d.payment or 0 for d in rows), 2)
+    close_dates: list[datetime] = []
+    overpay = 0.0
+    overpay_known = False
+    for d in rows:
+        fc = debt_forecast(d)
+        if fc.get("months") is not None and fc.get("overpay") is not None:
+            overpay += float(fc["overpay"])
+            overpay_known = True
+        if fc.get("months") and fc.get("months") > 0:
+            close_dates.append(datetime.now() + relativedelta(months=int(fc["months"])))
+    return {
+        "count": len(rows),
+        "remaining_total": round(sum(d.remaining for d in rows), 2),
+        "total_total": round(sum(d.total for d in rows), 2),
+        "payment_total": min_total,
+        "nearest": nearest,
+        "close_date": max(close_dates).strftime("%d.%m.%Y") if close_dates else None,
+        "overpay": round(overpay, 2) if overpay_known else None,
+    }
+
+
+def update_debt_payment(debt_id: int, tx_id: int, **fields) -> Transaction:
+    """Правка платежа по долгу: дата, сумма, счёт, комментарий. Остаток долга и баланс счёта
+    пересчитываются честно: старый платёж откатывается, новый проводится."""
+    with session() as s:
+        t = s.get(Transaction, tx_id)
+        if not t or t.debt_id != debt_id:
+            raise FinanceNotFound("Платёж не найден")
+        d = s.get(Debt, debt_id)
+        if not d:
+            raise FinanceNotFound("Долг не найден")
+        new_amount = t.amount if fields.get("amount") is None else _num(fields["amount"], "Сумма", 0, strict_min=True)
+        back = min(d.total, d.remaining + t.amount)
+        if new_amount > back:
+            raise FinanceError(f"Платёж не может быть больше остатка долга ({money(back)})")
+        new_account = (fields.get("account") or "").strip() or t.account
+        if new_account != t.account:
+            _account_exists(s, new_account)
+        # баланс: снять старую операцию
+        _apply(s, t, -1)
+        t.amount = new_amount
+        t.account = new_account
+        if "note" in fields:
+            t.note = (str(fields["note"] or "").strip() or None)
+        if fields.get("date"):
+            dt = fields["date"] if isinstance(fields["date"], datetime) else datetime.fromisoformat(str(fields["date"]))
+            if dt > datetime.now() + timedelta(days=1):
+                raise FinanceError("Дата не может быть в будущем")
+            t.date = dt
+        _apply(s, t, +1)
+        d.remaining = round(max(0.0, back - new_amount), 2)
+        d.closed = d.remaining <= 0
+        d.closed_at = datetime.now() if d.closed else None
+        s.add(t); s.add(d)
+        _sync_account_to_debt(s, d)
+        remember(s, "finance", f"Исправлен платёж по долгу «{d.title}»: {money(new_amount)}, остаток {money(d.remaining)}", "debt", d.id)
+        s.commit(); s.refresh(t)
+        return t
+
+
+def delete_debt_payment(debt_id: int, tx_id: int) -> bool:
+    """Удалить платёж: остаток долга возвращается, деньги возвращаются на счёт."""
+    with session() as s:
+        t = s.get(Transaction, tx_id)
+        if not t or t.debt_id != debt_id:
+            raise FinanceNotFound("Платёж не найден")
+    return delete_transaction(tx_id)
+
+
+def debt_due_soon() -> list[tuple[Debt, int]]:
+    """Долги, по которым пора напомнить: до платежа ≤ remind_days дней и в этом месяце ещё не напоминали.
+    Возвращает [(долг, дней до платежа)]."""
+    out: list[tuple[Debt, int]] = []
+    today = datetime.now().date()
+    for d in list_debts():
+        if d.closed or d.remaining <= 0 or int(d.remind_days or 0) <= 0:
+            continue
+        when = next_pay_date(d.pay_day).date()
+        days = (when - today).days
+        if 0 <= days <= int(d.remind_days) and d.last_remind != f"{when:%Y-%m}":
+            out.append((d, days))
+    return out
+
+
+def mark_debt_reminded(debt_id: int, month: str) -> None:
+    with session() as s:
+        d = s.get(Debt, debt_id)
+        if d:
+            d.last_remind = month
+            s.add(d); s.commit()
 
 
 def debt_forecast(d: Debt) -> dict:

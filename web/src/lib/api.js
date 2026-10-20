@@ -140,11 +140,19 @@ export const api = {
   delAccount: (id) => req('DELETE', `/api/finance/accounts/${id}`),
   linkDebtAccount: (accountId, debtId) => req('POST', `/api/finance/accounts/${accountId}/link-debt`, { debt_id: debtId }),
   unlinkDebtAccount: (accountId) => req('DELETE', `/api/finance/accounts/${accountId}/link-debt`),
-  debts: () => req('GET', '/api/finance/debts'),
+  // archived=true — только погашенные, false — только активные, без аргумента — все
+  debts: (archived = null) => req('GET', `/api/finance/debts${archived == null ? '' : `?archived=${archived}`}`),
+  debtSummary: () => req('GET', '/api/finance/debts/summary'),
   addDebt: (d) => req('POST', '/api/finance/debts', d),
+  // extra: { account, date, note } — бэкенд PayIn принимает все три
   payDebt: (id, amount, extra = {}) => req('POST', `/api/finance/debts/${id}/pay`, { amount, ...extra }),
   updateDebt: (id, d) => req('PUT', `/api/finance/debts/${id}`, d),
   delDebt: (id) => req('DELETE', `/api/finance/debts/${id}`),
+  restoreDebt: (id) => req('POST', `/api/finance/debts/${id}/restore`),
+  reorderDebts: (ids) => req('POST', '/api/finance/debts/order', { ids }),
+  debtPayments: (id) => req('GET', `/api/finance/debts/${id}/payments`),
+  updateDebtPayment: (debtId, txId, patch) => req('PUT', `/api/finance/debts/${debtId}/payments/${txId}`, patch),
+  deleteDebtPayment: (debtId, txId) => req('DELETE', `/api/finance/debts/${debtId}/payments/${txId}`),
   // all=true — вместе с паузами: иначе «Зарплата»/«Аренда» на паузе невидимы и не редактируются
   recurring: (all = false) => req('GET', `/api/finance/recurring${all ? '?all=true' : ''}`),
   addRecurring: (r) => req('POST', '/api/finance/recurring', r),

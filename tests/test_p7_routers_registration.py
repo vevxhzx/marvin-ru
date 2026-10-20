@@ -49,9 +49,14 @@ FINANCE_ROUTES = [
     ("POST", "/api/finance/accounts/{aid}/link-debt"),
     ("DELETE", "/api/finance/accounts/{aid}/link-debt"),
     ("GET", "/api/finance/debts"),
+    ("GET", "/api/finance/debts/summary"),
+    ("POST", "/api/finance/debts/order"),
     ("POST", "/api/finance/debts"),
     ("POST", "/api/finance/debts/{debt_id}/pay"),
     ("GET", "/api/finance/debts/{debt_id}/payments"),
+    ("PUT", "/api/finance/debts/{debt_id}/payments/{tx_id}"),
+    ("DELETE", "/api/finance/debts/{debt_id}/payments/{tx_id}"),
+    ("POST", "/api/finance/debts/{debt_id}/restore"),
     ("PUT", "/api/finance/debts/{debt_id}"),
     ("DELETE", "/api/finance/debts/{debt_id}"),
     ("GET", "/api/finance/recurring"),
@@ -218,11 +223,12 @@ def _router_routes(name):
     return sorted((x.path, tuple(sorted(x.methods))) for x in r.routes)
 
 
-def test_finance_router_has_exactly_48_routes():
-    # 42 роута шага 7.0 + 6 роутов режима жизни (services/regime.py) + 2 связки долг↔кредитка — только добавление
+def test_finance_router_has_exactly_55_routes():
+    # 42 роута шага 7.0 + 6 режима жизни + 2 связки долг↔кредитка + 5 карточки долгов
+    # (summary, order, restore, правка/удаление платежа) — только добавление
     got = _router_routes("finance")
     want = sorted((p, (m,)) for m, p in FINANCE_ROUTES)
-    assert len(got) == 50
+    assert len(got) == 55
     assert got == want
 
 

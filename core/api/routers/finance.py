@@ -26,8 +26,8 @@ from ...db import Debt, Event, Link, Note, Recurring, Task, Transaction, session
 from ...services import finance, goals, insights, regime
 from .._shared import broadcast
 from ..schemas import (TxIn, TxPatch, CategoryIn, CategoryPatch, BalanceIn, AccountIn, AccountPatch, DebtIn,
-                       PayIn, DebtPatch, RecurringIn, RecurringPatch, GoalIn, GoalPatch, GoalPut,
-                       RegimeIn, RegimePatch, RegimeApplyIn)
+                       PayIn, DebtPatch, DebtOrderIn, DebtPaymentPatch, RecurringIn, RecurringPatch, GoalIn,
+                       GoalPatch, GoalPut, RegimeIn, RegimePatch, RegimeApplyIn)
 
 router = APIRouter()
 
@@ -288,10 +288,16 @@ def fin_account_del(aid: int):
 
 
 @router.get("/api/finance/debts")
-def fin_debts():
+def fin_debts(archived: bool | None = None):
+    """Все долги, кроме мягко удалённых. archived=true — только погашенные (архив),
+    archived=false — только активные, без параметра — и те и другие."""
+    rows = finance.list_debts(include_closed=True)
+    if archived is not None:
+        rows = [d for d in rows if bool(d.closed) == bool(archived)]
     out = []
-    for d in finance.list_debts(include_closed=True):
+    for d in rows:
         row = {**d.model_dump(), **finance.debt_forecast(d)}
+        row["paid"] = round(max(0.0, (d.total or 0) - (d.remaining or 0)), 2)
         try:
             acc = finance.debt_linked_account(d.id)
             row["linked_account"] = {"id": acc.id, "name": acc.name, "balance": acc.balance} if acc else None
@@ -301,15 +307,36 @@ def fin_debts():
     return out
 
 
+@router.get("/api/finance/debts/summary")
+def fin_debts_summary():
+    return finance.debt_summary(finance.list_debts())
+
+
+@router.post("/api/finance/debts/order")
+def fin_debts_order(p: DebtOrderIn):
+    return {"ok": True, "updated": finance.reorder_debts(p.ids)}
+
+
+@router.post("/api/finance/debts/{debt_id}/restore")
+def fin_debt_restore(debt_id: int):
+    try:
+        d = finance.restore_debt(debt_id)
+    except finance.FinanceNotFound:
+        raise HTTPException(404)
+    return {**d.model_dump(), **finance.debt_forecast(d)}
+
+
 @router.post("/api/finance/debts")
 def fin_debt_add(d: DebtIn):
-    x = finance.add_debt(d.title, d.total, d.payment, d.rate, d.pay_day, d.creditor, d.remaining)
+    x = finance.add_debt(d.title, d.total, d.payment, d.rate, d.pay_day, d.creditor, d.remaining,
+                         kind=d.kind, credit_limit=d.credit_limit, color=d.color, note=d.note,
+                         remind_days=d.remind_days)
     return {**x.model_dump(), **finance.debt_forecast(x)}
 
 
 @router.post("/api/finance/debts/{debt_id}/pay")
 def fin_debt_pay(debt_id: int, p: PayIn):
-    d = finance.pay_debt(debt_id, p.amount, account=p.account, source="web", date=p.date)
+    d = finance.pay_debt(debt_id, p.amount, account=p.account, source="web", date=p.date, note=p.note)
     if not d:
         raise HTTPException(404)
     return {**d.model_dump(), **finance.debt_forecast(d)}
@@ -322,6 +349,26 @@ def fin_debt_payments(debt_id: int):
     if not any(d.id == debt_id for d in finance.list_debts(include_closed=True)):
         raise HTTPException(404)
     return finance.debt_payments(debt_id)
+
+
+@router.put("/api/finance/debts/{debt_id}/payments/{tx_id}")
+def fin_debt_payment_update(debt_id: int, tx_id: int, p: DebtPaymentPatch):
+    try:
+        return finance.update_debt_payment(debt_id, tx_id, **p.model_dump(exclude_unset=True))
+    except finance.FinanceNotFound as e:
+        raise HTTPException(404, str(e))
+    except finance.FinanceError as e:
+        raise HTTPException(400, str(e))
+
+
+@router.delete("/api/finance/debts/{debt_id}/payments/{tx_id}")
+def fin_debt_payment_del(debt_id: int, tx_id: int):
+    try:
+        if not finance.delete_debt_payment(debt_id, tx_id):
+            raise HTTPException(404)
+    except finance.FinanceNotFound:
+        raise HTTPException(404)
+    return {"ok": True}
 
 
 @router.put("/api/finance/debts/{debt_id}")

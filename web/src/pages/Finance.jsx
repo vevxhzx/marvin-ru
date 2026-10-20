@@ -18,8 +18,11 @@ import CashChart from '../components/CashChart'
 import LifeRegime from '../components/LifeRegime'
 import { ImportButton } from '../components/Widgets'
 import { useRefresh } from '../App'
-import { Plus, Search, Trash2, X, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, ChevronRight, EyeOff, Settings2 } from 'lucide-react'
+import { Plus, Search, Trash2, X, Edit2, CreditCard, Wallet, Landmark, PiggyBank, Target, ChevronLeft, ChevronRight, ChevronDown, GripVertical, Calculator, History, EyeOff, Settings2 } from 'lucide-react'
 import { Techniques } from '../components/FinanceSmart'
+import { SwatchRow } from '../components/ColorSwatches'
+import { normHex, pickInk } from '../lib/color'
+import { debtView, sortDebts, payoffPlan, DEBT_SORTS } from '../lib/debts'
 import { useCardLayout, CardCtl, useWide, usePressResize } from '../lib/layout'
 import { usePageAccent } from '../lib/prefs'
 import { useI18n, localeOf, t as T } from '../lib/i18n'
@@ -145,6 +148,34 @@ function IconBtn({ onClick, title, children, danger }) {
 /* Полоса прогресса акцент → роза (фолбэк .gc-debts/.gc-goals). Свечение — акцентом, как .gau в референсе. */
 const GRAD_BAR = 'linear-gradient(90deg, var(--acc), var(--neg))'
 const BAR_GLOW = '0 0 14px color-mix(in srgb, var(--acc) 55%, transparent)'
+
+/* Долги: порядок карточек помним в localStorage, типы — ключами словаря
+   (фильтр sortDebts живёт в lib/debts.js, здесь только подписи). */
+const DEBT_SORT_KEY = 'jarvis.fin.debts.sort'
+const DEBT_KIND_KEY = {
+  credit: 'fin.debt_kind_credit',
+  credit_card: 'fin.debt_kind_credit_card',
+  installment: 'fin.debt_kind_installment',
+  personal: 'fin.debt_kind_personal',
+  receivable: 'fin.debt_kind_receivable',
+}
+const DEBT_SORT_KEY_OF = {
+  manual: 'fin.debt_sort_manual',
+  amount: 'fin.debt_sort_amount',
+  rate: 'fin.debt_sort_rate',
+  day: 'fin.debt_sort_day',
+  progress: 'fin.debt_sort_progress',
+}
+function readDebtSort() {
+  try {
+    const v = localStorage.getItem(DEBT_SORT_KEY)
+    return DEBT_SORTS.includes(v) ? v : 'manual'
+  } catch { return 'manual' }
+}
+const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
+const pctOf = (part, all) => (all > 0 ? Math.max(0, Math.min(100, Math.round((part / all) * 100))) : 0)
+/* Длина окружности кольца (r = 52): одна константа на сводку и цели. */
+const DONUT_C = 2 * Math.PI * 52
 
 /* Банка-копилка из мокапа ver6 (rGoal): уровень воды = процент цели,
    две волны едут навстречу друг другу (мокап .wv и .wv.b), стекло — полупрозрачный
@@ -301,6 +332,733 @@ function CarRow({ count, label, children }) {
   )
 }
 
+/* ---------------- ДОЛГИ: карточка, панель, калькулятор, редактор платежа ---------------- */
+
+/* Плашка типа долга: кредитка/кредит/рассрочка/личный/мне должны.
+   Цвет берётся из --acc карточки (если задан свой цвет долга) — см. DebtCard. */
+function DebtTypeBadge({ kind, t }) {
+  return (
+    <span
+      className="inline-flex items-center rounded-full px-2 py-0.5 text-[length:var(--fs-xs)] font-medium"
+      style={{ background: 'color-mix(in srgb, var(--acc) 18%, transparent)', color: 'var(--ink-2)' }}
+    >
+      {t(DEBT_KIND_KEY[kind] || DEBT_KIND_KEY.credit)}
+    </span>
+  )
+}
+
+/* Карточка долга. Для кредитки главное — «использовано из лимита», для остальных —
+   остаток и выплаченная доля. Клик по карточке/шеврону раскрывает историю платежей;
+   кнопки внутри клик не перехватывают. Архивная карточка read-only. */
+function DebtCard({
+  d, t, fmt, open, pays, archived, manual, className = '', style,
+  cardRef, dragHandle, onToggle, onEdit, onPay, onEditPayment, onDeletePayment, onDelete,
+}) {
+  const v = debtView(d)
+  const name = d.title || d.name || ''
+  const accent = normHex(d.color)
+  const colorStyle = accent ? { '--acc': accent, '--accent-ink': pickInk(accent) } : undefined
+  const closedOn = d.closed_at
+    ? new Date(d.closed_at).toLocaleDateString(localeOf(), { day: '2-digit', month: '2-digit', year: 'numeric' })
+    : (d.close_date || t('fin.debt_na'))
+
+  return (
+    <section
+      ref={cardRef}
+      data-car
+      data-debt-id={d.id}
+      className={`c s4 glass-card gc-debts ${CARD_M_LIGHT} ${className}`}
+      data-reveal
+      style={{ ...colorStyle, ...style }}
+      onClick={(e) => { if (!e.target.closest('button,a,input,select,textarea,label')) onToggle() }}
+    >
+      {/* Свой цвет долга: перекрываем розовую кромку .gc-debts её же геометрией.
+          zIndex нужен, чтобы встать поверх ::after (он рисуется последним). */}
+      {accent && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: 'absolute', left: 0, top: 12, bottom: 12, width: 4, borderRadius: 99,
+            background: accent, boxShadow: `0 0 12px ${accent}`, opacity: 0.95,
+            pointerEvents: 'none', zIndex: 1,
+          }}
+        />
+      )}
+      <div className="flex items-start gap-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <DebtTypeBadge kind={v.kind} t={t} />
+            {manual && !archived && (
+              <button
+                type="button"
+                className="btn-icon cursor-grab touch-none"
+                title={t('fin.debt_drag')}
+                aria-label={t('fin.debt_drag')}
+                onClick={(e) => e.stopPropagation()}
+                {...(dragHandle || {})}
+              >
+                <GripVertical size={15} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <h2 className="clamp-2 mt-1.5" style={{ fontSize: 'var(--fs-base)', fontWeight: 600, color: 'var(--ink)' }}>{name}</h2>
+          {d.creditor && <div className="muted mt-0.5 trunc text-[length:var(--fs-xs)]">{d.creditor}</div>}
+        </div>
+        <button
+          type="button"
+          className="btn-icon shrink-0"
+          aria-expanded={!!open}
+          aria-label={open ? t('common.close') : t('fin.debt_history')}
+          title={open ? t('common.close') : t('fin.debt_history')}
+          onClick={(e) => { e.stopPropagation(); onToggle() }}
+        >
+          <ChevronDown size={16} aria-hidden="true" style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+        </button>
+      </div>
+
+      <BigMoney value={v.remaining} format={fmt.int} label={fmt.money(v.remaining)} fs="clamp(22px, 2.4vw, 30px)" />
+      <div className="progress fg-debtbar mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(v.pct)}>
+        <div style={{ width: `${v.pct > 0 ? Math.max(2, v.pct) : 0}%`, background: GRAD_BAR, boxShadow: BAR_GLOW }} />
+      </div>
+
+      {v.isCard ? (
+        <div className="muted mt-2 text-[length:var(--fs-xs)]">
+          {t('fin.debt_used_of_limit', { used: fmt.money(v.remaining), limit: fmt.money(v.limit) })}
+        </div>
+      ) : (
+        <div className="muted mt-2 text-[length:var(--fs-xs)]">
+          {t('fin.paid_out')} <b className={`num ${v.paid > 0 ? 'pos' : ''}`}>{fmt.money(v.paid)}</b> (<b className="num">{fmt.int(v.pct)} %</b>) · {t('fin.of')} {fmt.money(v.total)}
+        </div>
+      )}
+
+      {!archived && (v.payment > 0 || v.payDay > 0) && (
+        <div className="faint mt-1 text-[length:var(--fs-xs)]">
+          {v.payment > 0 ? `${t('fin.debt_min_payment')}: ${fmt.money(v.payment)} · ` : ''}
+          {t('fin.day_of_month', { d: v.payDay })}
+        </div>
+      )}
+      {d.linked_account && (
+        <div className="muted mt-1 text-[length:var(--fs-xs)]">
+          ↔ {t('fin.debt_kind_credit_card')}: <b>{d.linked_account.name}</b> · {fmt.money(Math.abs(Number(d.linked_account.balance) || 0))}
+        </div>
+      )}
+
+      {archived ? (
+        <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
+          <span className="due-tag">{t('fin.debt_closed_on', { date: closedOn })}</span>
+          <RowActions>
+            <IconBtn danger title={t('common.delete_title')} onClick={onDelete}><Trash2 size={14} /></IconBtn>
+          </RowActions>
+        </div>
+      ) : (
+        <div className="mt-3">
+          <RowActions>
+            <button type="button" className="btn btn-sm fg-pay" onClick={onPay}>{t('fin.make_payment')}</button>
+            <IconBtn onClick={onEdit} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
+            <IconBtn danger title={t('common.delete_title')} onClick={onDelete}><Trash2 size={14} /></IconBtn>
+          </RowActions>
+        </div>
+      )}
+
+      {open && (
+        <div className="mt-3 border-t pt-3" style={{ borderColor: 'var(--line)' }} onClick={(e) => e.stopPropagation()}>
+          <div className="mb-1 flex items-center gap-2">
+            <History size={13} className="faint" aria-hidden="true" />
+            <span className="muted text-[length:var(--fs-xs)]">{t('fin.debt_history')}</span>
+            {pays?.rows?.length ? <span className="faint text-[length:var(--fs-xs)]">· {pays.rows.length}</span> : null}
+          </div>
+          {pays?.loading ? (
+            <Skeleton h={42} />
+          ) : pays?.error ? (
+            <div className="neg text-[length:var(--fs-xs)]">{t('fin.debt_pay_load_err')}</div>
+          ) : !pays?.rows?.length ? (
+            <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_no_payments')}</div>
+          ) : (
+            <div>
+              {pays.rows.map((p) => (
+                <div key={p.id} className="flex items-start gap-1.5 py-2" style={{ borderTop: '1px solid var(--line)' }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-baseline justify-between gap-x-2">
+                      <b className="num">{fmt.money(p.amount)}</b>
+                      <span className="faint text-[length:var(--fs-xs)]">{shortDate(p.date)}</span>
+                    </div>
+                    <div className="muted mt-0.5 break-words text-[length:var(--fs-xs)]">
+                      {p.account || t('fin.no_charge')}{p.note ? ` · ${p.note}` : ''}
+                    </div>
+                  </div>
+                  {!archived && (
+                    <>
+                      <IconBtn onClick={() => onEditPayment(p)} title={t('fin.debt_pay_edit')}><Edit2 size={13} /></IconBtn>
+                      <IconBtn danger onClick={() => onDeletePayment(p)} title={t('fin.debt_pay_delete')}><Trash2 size={13} /></IconBtn>
+                    </>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/* Вся вкладка «Долги»: сводка, план, сортировка/архив/калькулятор и карточки.
+   Живёт отдельным компонентом, чтобы страница не обрастала состоянием аккордеона,
+   drag-and-drop и подтверждений — всё это нужно только здесь. */
+function DebtsPanel({ debts = [], summary, accounts = [], fmt, onAdd, onEdit, onPay, onChanged }) {
+  const { t } = useI18n()
+  const [, show] = useToast()
+  const [archive, setArchive] = useState(false)
+  const [sort, setSort] = useState(readDebtSort)
+  const [openId, setOpenId] = useState(null)
+  const [pays, setPays] = useState({})
+  const [ask, setAsk] = useState(null)
+  const [payEdit, setPayEdit] = useState(null)   // { debt, payment }
+  const [calcOpen, setCalcOpen] = useState(false)
+  const [drag, setDrag] = useState(null)         // { id, order } — предпросмотр перетаскивания
+  const dragRef = useRef(null)
+  const cleanupRef = useRef(null)
+  const cardsRef = useRef(new Map())
+  const listRef = useRef([])
+
+  const active = useMemo(() => debts.filter((d) => !d.closed), [debts])
+  const closed = useMemo(() => debts.filter((d) => d.closed), [debts])
+  const list = useMemo(
+    () => sortDebts(archive ? closed : active, archive ? 'manual' : sort),
+    [archive, active, closed, sort],
+  )
+  listRef.current = list
+
+  const agg = summary || {
+    count: active.length,
+    remaining_total: active.reduce((s, d) => s + (Number(d.remaining) || 0), 0),
+    total_total: active.reduce((s, d) => s + (Number(d.total) || 0), 0),
+    payment_total: active.reduce((s, d) => s + (Number(d.payment) || 0), 0),
+    nearest: null,
+    close_date: null,
+    overpay: null,
+  }
+  const paidTotal = Math.max(0, (Number(agg.total_total) || 0) - (Number(agg.remaining_total) || 0))
+  const debtPct = pctOf(paidTotal, Number(agg.total_total) || 0)
+
+  const byId = useMemo(() => new Map(list.map((d) => [d.id, d])), [list])
+  const viewList = drag ? drag.order.map((id) => byId.get(id)).filter(Boolean) : list
+
+  const loadPays = async (id, force = false) => {
+    if (!id) return
+    if (!force && pays[id]?.rows) return
+    setPays((p) => ({ ...p, [id]: { loading: true, rows: p[id]?.rows || [] } }))
+    try {
+      const rows = await api.debtPayments(id)
+      setPays((p) => ({ ...p, [id]: { loading: false, rows: rows || [] } }))
+    } catch {
+      setPays((p) => ({ ...p, [id]: { loading: false, rows: [], error: true } }))
+    }
+  }
+
+  // после любого изменения долга история открытой карточки перечитывается
+  useEffect(() => {
+    setPays({})
+    if (openId) loadPays(openId, true)
+  }, [debts]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => () => cleanupRef.current?.(), [])
+
+  // Добавили долг, стоя в архиве, — показываем активные: иначе новая карточка
+  // «пропадает» и кажется, что сохранение не сработало.
+  const prevActiveRef = useRef(active.length)
+  useEffect(() => {
+    if (archive && active.length > prevActiveRef.current) setArchive(false)
+    prevActiveRef.current = active.length
+  }, [active.length, archive])
+
+  const toggle = (d) => {
+    if (openId === d.id) { setOpenId(null); return }
+    setOpenId(d.id)
+    if (!pays[d.id]?.rows) loadPays(d.id)
+  }
+
+  const askDelete = (d) => setAsk({
+    title: t('fin.del_debt_q_name', { name: d.title || d.name || '' }),
+    text: t('fin.del_debt_text'),
+    run: async () => {
+      await api.delDebt(d.id)
+      setOpenId(null)
+      onChanged()
+      // мягкое удаление: возврат прямо из тоста (POST restore)
+      show(t('fin.debt_deleted'), {
+        action: {
+          label: t('fin.debt_undo'),
+          onClick: async () => {
+            try {
+              await api.restoreDebt(d.id)
+              onChanged()
+              show(t('fin.debt_restored'))
+            } catch (e) { show.err(e) }
+          },
+        },
+      })
+    },
+  })
+
+  const askDeletePayment = (d, p) => setAsk({
+    title: t('fin.debt_del_pay_q'),
+    text: t('fin.debt_del_pay_text'),
+    run: async () => {
+      await api.deleteDebtPayment(d.id, p.id)
+      await loadPays(d.id, true)
+      onChanged()
+      show(t('fin.debt_pay_deleted'))
+    },
+  })
+
+  const changeSort = (v) => {
+    setSort(v)
+    try { localStorage.setItem(DEBT_SORT_KEY, v) } catch {}
+  }
+
+  /* Перетаскивание за ручку: HTML5 draggable на телефоне не работает, поэтому
+     pointer events + elementFromPoint. Слушатели вешаем на window и снимаем
+     в cleanup — карточки переставляются прямо во время жеста. */
+  const startDrag = (e, d) => {
+    if (archive || sort !== 'manual' || dragRef.current) return
+    if (e.pointerType === 'mouse' && e.button !== 0) return
+    e.preventDefault()
+    e.stopPropagation()
+    const startOrder = listRef.current.map((x) => x.id)
+    const st = { id: d.id, sx: e.clientX, sy: e.clientY, order: startOrder, startOrder, moved: false, overId: null }
+    dragRef.current = st
+    setDrag({ id: d.id, order: startOrder })
+
+    const move = (ev) => {
+      const cur = dragRef.current
+      if (!cur) return
+      if (!cur.moved && Math.hypot(ev.clientX - cur.sx, ev.clientY - cur.sy) < 8) return
+      cur.moved = true
+      ev.preventDefault()
+      const node = document.elementFromPoint(ev.clientX, ev.clientY)
+      let overId = Number(node?.closest?.('[data-debt-id]')?.getAttribute('data-debt-id') || 0)
+      if (!overId) {
+        let best = null
+        let bestD = Infinity
+        for (const [id, el] of cardsRef.current.entries()) {
+          if (id === cur.id) continue
+          const r = el.getBoundingClientRect()
+          const dx = ev.clientX - (r.left + r.width / 2)
+          const dy = ev.clientY - (r.top + r.height / 2)
+          const dist = dx * dx + dy * dy
+          if (dist < bestD) { bestD = dist; best = { id, r } }
+        }
+        if (best) overId = best.id
+      }
+      if (!overId || overId === cur.id || overId === cur.overId) return
+      cur.overId = overId
+      const ids = cur.order.filter((x) => x !== cur.id)
+      const idx = ids.indexOf(overId)
+      if (idx < 0) return
+      const el = cardsRef.current.get(overId)
+      const r = el?.getBoundingClientRect()
+      const after = r
+        ? (ev.clientY > r.top + r.height / 2 || (ev.clientY >= r.top && ev.clientY <= r.bottom && ev.clientX > r.left + r.width / 2))
+        : false
+      ids.splice(idx + (after ? 1 : 0), 0, cur.id)
+      cur.order = ids
+      setDrag({ id: cur.id, order: [...ids] })
+    }
+
+    const stop = (ev) => {
+      const cur = dragRef.current
+      dragRef.current = null
+      cleanupRef.current?.()
+      cleanupRef.current = null
+      setDrag(null)
+      if (ev?.type === 'pointercancel' || !cur?.moved) return
+      if (cur.order.join(',') === cur.startOrder.join(',')) return
+      api.reorderDebts(cur.order)
+        .then(() => { show(t('fin.debt_order_saved')); onChanged() })
+        .catch((err) => show.err(err))
+    }
+
+    window.addEventListener('pointermove', move, { passive: false })
+    window.addEventListener('pointerup', stop)
+    window.addEventListener('pointercancel', stop)
+    cleanupRef.current = () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', stop)
+      window.removeEventListener('pointercancel', stop)
+    }
+  }
+
+  const planMonthly = Number(agg.payment_total) || active.reduce((s, d) => s + (Number(d.payment) || 0), 0)
+
+  return (
+    <>
+      <div className="bento mt-4">
+        {/* Сводка: остаток, кольцо выплаченного и число активных долгов */}
+        <section className={`c s4 glass-card gc-debts fg-debt-top ${CARD_M_LIGHT}`} data-reveal>
+          <div className="min-w-0">
+            <div className="hd flex-wrap">
+              <div className="min-w-0"><h2 className="trunc">{t('fin.total_debt')}</h2></div>
+            </div>
+            <BigMoney value={agg.remaining_total} format={fmt.int} label={fmt.money(agg.remaining_total)} fs="clamp(24px, 2.6vw, 34px)" />
+            <div className="muted mt-2 text-[length:var(--fs-md)]">{t('fin.n_active_debt', { count: agg.count })}</div>
+          </div>
+          <div className="fg-donut" role="img" aria-label={`${t('fin.paid_out')} ${debtPct} %`}>
+            <svg viewBox="0 0 120 120" aria-hidden="true">
+              <circle className="fg-track" cx="60" cy="60" r="52" strokeWidth="12" />
+              <circle
+                className="fg-val"
+                cx="60"
+                cy="60"
+                r="52"
+                strokeWidth="12"
+                strokeLinecap="round"
+                strokeDasharray={DONUT_C}
+                strokeDashoffset={DONUT_C * (1 - debtPct / 100)}
+                transform="rotate(-90 60 60)"
+              />
+            </svg>
+            <div className="fg-donut-ct">
+              <b className="num">{debtPct}&nbsp;%</b>
+              <span>{t('fin.paid_out')}</span>
+            </div>
+          </div>
+        </section>
+
+        {/* Второй блок: ближайший платёж, минимальные платежи, свобода и переплата */}
+        <section className={`c s8 ${CARD_M_LIGHT}`} data-reveal>
+          <div className="hd"><div className="min-w-0"><h2 className="trunc">{t('fin.debt_plan')}</h2></div></div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-4 min-[821px]:grid-cols-4">
+            <div className="min-w-0">
+              <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_nearest')}</div>
+              {agg.nearest ? (
+                <>
+                  <div className="num mt-1" style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>{fmt.money(agg.nearest.amount)}</div>
+                  <div className="muted mt-0.5 text-[length:var(--fs-xs)]">
+                    {agg.nearest.date}{agg.nearest.title || agg.nearest.creditor ? ` · ${[agg.nearest.title, agg.nearest.creditor].filter(Boolean).join(' · ')}` : ''}
+                  </div>
+                  <div className="faint text-[length:var(--fs-xs)]">
+                    {agg.nearest.days === 0 ? t('fin.due_today') : t('fin.in_days', { count: agg.nearest.days })}
+                  </div>
+                </>
+              ) : (
+                <div className="muted mt-1 text-[length:var(--fs-sm)]">{t('fin.debt_no_payment')}</div>
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_min_month')}</div>
+              <div className="num mt-1" style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>{fmt.money(agg.payment_total || 0)}</div>
+            </div>
+            <div className="min-w-0">
+              <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_freedom')}</div>
+              <div className="num mt-1" style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>{agg.close_date || t('fin.debt_na')}</div>
+            </div>
+            <div className="min-w-0">
+              <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_overpay')}</div>
+              <div className="num mt-1" style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>
+                {agg.overpay == null ? t('fin.debt_na') : fmt.money(agg.overpay)}
+              </div>
+              {agg.overpay == null && <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_overpay_na')}</div>}
+            </div>
+          </div>
+        </section>
+
+        {/* Список: активные/архив, сортировка, калькулятор */}
+        <section className={`c s12 ${CARD_M_LIGHT}`} data-reveal>
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="seg" role="group" aria-label={t('fin.debt_status')}>
+              <button type="button" className={!archive ? 'on' : ''} aria-pressed={!archive} onClick={() => setArchive(false)}>
+                {t('fin.debt_active')} <span className="num faint">{active.length}</span>
+              </button>
+              <button type="button" className={archive ? 'on' : ''} aria-pressed={archive} onClick={() => setArchive(true)}>
+                {t('fin.debt_archive', { count: closed.length })}
+              </button>
+            </div>
+            <div className="ml-auto flex flex-wrap items-center gap-2">
+              <label className="faint text-[length:var(--fs-xs)]" htmlFor="debt-sort">{t('fin.debt_sort')}</label>
+              <select
+                id="debt-sort"
+                className="input !min-h-0 !w-auto !py-1.5 !text-[length:var(--fs-sm)]"
+                value={sort}
+                onChange={(e) => changeSort(e.target.value)}
+              >
+                {DEBT_SORTS.map((k) => <option key={k} value={k}>{t(DEBT_SORT_KEY_OF[k])}</option>)}
+              </select>
+              <button type="button" className="btn-soft btn-sm" onClick={() => setCalcOpen(true)}>
+                <Calculator size={14} aria-hidden="true" /> {t('fin.debt_calc')}
+              </button>
+            </div>
+          </div>
+          {!archive && sort === 'manual' && active.length > 1 && (
+            <div className="faint mt-2 text-[length:var(--fs-xs)]">{t('fin.debt_drag_hint')}</div>
+          )}
+        </section>
+
+        {archive ? (
+          !closed.length ? (
+            <section className={`c s12 ${CARD_M_LIGHT}`} data-reveal>
+              <Empty glyph="debt" text={t('fin.debt_archived_empty')} sub={t('fin.debt_archived_empty_sub')} compact />
+            </section>
+          ) : (
+            <CarRow count={closed.length} label={t('fin.debt_archive', { count: closed.length })}>
+              {viewList.map((d) => (
+                <DebtCard
+                  key={d.id}
+                  d={d}
+                  t={t}
+                  fmt={fmt}
+                  archived
+                  open={openId === d.id}
+                  pays={pays[d.id]}
+                  onToggle={() => toggle(d)}
+                  onDelete={() => askDelete(d)}
+                />
+              ))}
+            </CarRow>
+          )
+        ) : !active.length ? (
+          <section className={`c s12 ${CARD_M_LIGHT}`} data-reveal>
+            <Empty glyph="debt" text={t('td.clean')} sub={t('td.nothing_missed')}
+              action={<button type="button" className="btn" onClick={onAdd}><Plus size={15} /> {t('fin.add_debt')}</button>} />
+          </section>
+        ) : (
+          <CarRow count={active.length} label={t('fin.total_debt')}>
+            {viewList.map((d) => (
+              <DebtCard
+                key={d.id}
+                d={d}
+                t={t}
+                fmt={fmt}
+                open={openId === d.id}
+                pays={pays[d.id]}
+                manual={sort === 'manual'}
+                cardRef={(el) => { if (el) cardsRef.current.set(d.id, el); else cardsRef.current.delete(d.id) }}
+                dragHandle={sort === 'manual' ? { onPointerDown: (e) => startDrag(e, d) } : null}
+                onToggle={() => toggle(d)}
+                onEdit={() => onEdit(d)}
+                onPay={() => onPay(d)}
+                onDelete={() => askDelete(d)}
+                onEditPayment={(p) => setPayEdit({ debt: d, payment: p })}
+                onDeletePayment={(p) => askDeletePayment(d, p)}
+              />
+            ))}
+          </CarRow>
+        )}
+      </div>
+
+      <DebtPaymentSheet
+        open={!!payEdit}
+        debt={payEdit?.debt}
+        payment={payEdit?.payment}
+        accounts={accounts}
+        onClose={() => setPayEdit(null)}
+        onDone={() => {
+          const d = payEdit?.debt
+          setPayEdit(null)
+          if (d) loadPays(d.id, true)
+          onChanged()
+          show(t('common.saved'))
+        }}
+        onDelete={() => {
+          const d = payEdit?.debt
+          const p = payEdit?.payment
+          setPayEdit(null)
+          if (d && p) askDeletePayment(d, p)
+        }}
+      />
+
+      <DebtCalcSheet open={calcOpen} debts={active} defaultMonthly={planMonthly} onClose={() => setCalcOpen(false)} />
+
+      <Confirm
+        open={!!ask}
+        danger
+        title={ask?.title || ''}
+        text={ask?.text || ''}
+        onClose={() => setAsk(null)}
+        onOk={async () => {
+          const a = ask
+          setAsk(null)
+          if (!a) return
+          try { await a.run() } catch (e) { show.err(e) }
+        }}
+      />
+    </>
+  )
+}
+
+/* Калькулятор погашения: помесячная симуляция из lib/debts.js.
+   «Лавина» гасит сначала дорогой долг, «снежный ком» — самый маленький. */
+function DebtCalcSheet({ open, debts = [], defaultMonthly = 0, onClose }) {
+  const { t } = useI18n()
+  const fmt = useNumFormats()
+  const [monthly, setMonthly] = useState('')
+  const [strategy, setStrategy] = useState('avalanche')
+  // Сбрасываем поля только при открытии: фоновое обновление долгов не должно
+  // затирать сумму, которую пользователь уже ввёл в калькулятор.
+  useEffect(() => {
+    if (!open) return
+    setMonthly(String(Math.round(Number(defaultMonthly) || 0)))
+    setStrategy('avalanche')
+  }, [open]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const plan = useMemo(
+    () => payoffPlan(debts, parseNum(monthly) || 0, strategy),
+    [debts, monthly, strategy],
+  )
+  const fmtMonth = (date) => (date
+    ? date.toLocaleDateString(localeOf(), { month: 'long', year: 'numeric' }).replace(/\s*г\.$/, '')
+    : t('fin.debt_na'))
+
+  return (
+    <Sheet open={open} onClose={onClose} title={t('fin.debt_calc_title')} hint={t('fin.debt_calc_hint')} bodyClass={FIELD_LABEL_M}>
+      <div className="space-y-4">
+        <Field label={t('fin.debt_calc_monthly')}>
+          <Money value={monthly} onChange={setMonthly} min={0} autoFocus />
+        </Field>
+        <Field label={t('fin.debt_calc_strategy')}>
+          <div className="seg">
+            <button type="button" className={strategy === 'avalanche' ? 'on' : ''} aria-pressed={strategy === 'avalanche'} onClick={() => setStrategy('avalanche')}>
+              {t('fin.debt_calc_avalanche')}
+            </button>
+            <button type="button" className={strategy === 'snowball' ? 'on' : ''} aria-pressed={strategy === 'snowball'} onClick={() => setStrategy('snowball')}>
+              {t('fin.debt_calc_snowball')}
+            </button>
+          </div>
+          <div className="faint mt-1 text-[length:var(--fs-xs)]">
+            {strategy === 'avalanche' ? t('fin.debt_calc_avalanche_hint') : t('fin.debt_calc_snowball_hint')}
+          </div>
+        </Field>
+
+        {plan.insufficient && (
+          <div className="rounded-xl px-3 py-2 text-[length:var(--fs-sm)]" style={{ background: 'var(--warn-soft)', color: 'var(--warn-ink)' }}>
+            {t('fin.debt_calc_warn')}
+          </div>
+        )}
+        {plan.capped && (
+          <div className="rounded-xl px-3 py-2 text-[length:var(--fs-sm)]" style={{ background: 'var(--neg-soft)', color: 'var(--neg-ink)' }}>
+            {t('fin.debt_calc_capped')}
+          </div>
+        )}
+
+        {!plan.count ? (
+          <div className="muted text-[length:var(--fs-md)]">{t('fin.debt_calc_empty')}</div>
+        ) : (
+          <>
+            <div>
+              <div className="label mb-1.5">{t('fin.debt_calc_order')}</div>
+              <div className="overflow-x-auto">
+                <table className="w-full" style={{ fontSize: 'var(--fs-sm)' }}>
+                  <thead>
+                    <tr className="faint" style={{ textAlign: 'left' }}>
+                      <th className="py-1 pr-2 font-medium">{t('fin.debt_calc_num')}</th>
+                      <th className="py-1 pr-2 font-medium">{t('fin.debt_calc_debt')}</th>
+                      <th className="py-1 pr-2 font-medium">{t('fin.debt_calc_rate')}</th>
+                      <th className="py-1 pr-2 font-medium">{t('fin.debt_calc_left')}</th>
+                      <th className="py-1 font-medium">{t('fin.debt_calc_close')}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {plan.rows.map((r, i) => (
+                      <tr key={r.id ?? i} style={{ borderTop: '1px solid var(--line)' }}>
+                        <td className="num faint py-1.5 pr-2">{i + 1}</td>
+                        <td className="max-w-[160px] trunc py-1.5 pr-2" title={r.title}>{r.title || t('fin.debt_na')}</td>
+                        <td className="num py-1.5 pr-2">{r.rate > 0 ? `${r.rate.toLocaleString(localeOf(), { maximumFractionDigits: 2 })} %` : t('fin.debt_na')}</td>
+                        <td className="num py-1.5 pr-2">{fmt.money(r.start)}</td>
+                        <td className="num py-1.5 whitespace-nowrap">{r.closeDate ? fmtMonth(r.closeDate) : t('fin.debt_na')}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_calc_freedom')}</div>
+                <div className="num mt-0.5" style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>{plan.freeDate ? fmtMonth(plan.freeDate) : t('fin.debt_na')}</div>
+                {plan.months != null && <div className="muted text-[length:var(--fs-xs)]">{t('fin.debt_calc_months', { count: plan.months })}</div>}
+              </div>
+              <div>
+                <div className="faint text-[length:var(--fs-xs)]">{t('fin.debt_calc_interest')}</div>
+                <div className="num mt-0.5" style={{ fontSize: 'var(--fs-lg)', fontWeight: 600 }}>{fmt.money(plan.totalInterest)}</div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </Sheet>
+  )
+}
+
+/* Редактор платежа: сумма, дата, счёт и комментарий. Сохраняет через
+   updateDebtPayment; удаление — отдельной кнопкой, подтверждение рисует панель. */
+function DebtPaymentSheet({ open, debt, payment, accounts = [], onClose, onDone, onDelete }) {
+  const { t } = useI18n()
+  const [amount, setAmount] = useState('')
+  const [account, setAccount] = useState('')
+  const [date, setDate] = useState('')
+  const [note, setNote] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [, show] = useToast()
+
+  useEffect(() => {
+    if (!open) return
+    setAmount(payment?.amount != null ? String(payment.amount) : '')
+    setAccount(payment?.account || '')
+    setDate(payment?.date ? String(payment.date).slice(0, 10) : toLocalISO(new Date()).slice(0, 10))
+    setNote(payment?.note || '')
+  }, [open, payment])
+
+  const max = Math.max(0, (Number(debt?.remaining) || 0) + (Number(payment?.amount) || 0))
+  const known = accounts.some((a) => a.name === account)
+
+  const submit = async (e) => {
+    if (e) e.preventDefault()
+    const a = parseNum(amount)
+    if (!a || a <= 0 || !debt?.id || !payment?.id) return
+    if (a > max + 0.005) { show(t('fin.debt_pay_err_max'), 'err'); return }
+    setSaving(true)
+    try {
+      await api.updateDebtPayment(debt.id, payment.id, { amount: a, account, date, note: note.trim() })
+      onDone()
+    } catch (err) {
+      show.err(err)
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Sheet open={open} onClose={onClose} title={t('fin.debt_pay_edit')} sub={debt?.title || debt?.name || ''} bodyClass={FIELD_LABEL_M}>
+      <form onSubmit={submit} className="space-y-4">
+        <Field label={t('fin.pay_amount')}>
+          <Money value={amount} onChange={setAmount} min={0} max={max} autoFocus required />
+        </Field>
+        <Field label={t('fin.debt_pay_date')}>
+          <input type="date" className="input" value={date} max={toLocalISO(new Date()).slice(0, 10)} onChange={(e) => setDate(e.target.value)} required />
+        </Field>
+        <Field label={t('fin.charge')} hint={t('fin.charge_hint')}>
+          <select className="input" value={account} onChange={(e) => setAccount(e.target.value)}>
+            <option value="">{t('fin.no_charge')}</option>
+            {!known && account ? <option value={account}>{account}</option> : null}
+            {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
+          </select>
+        </Field>
+        <Field label={t('fin.debt_pay_note')}>
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('fin.debt_pay_note_ph')} />
+        </Field>
+        <div className="flex flex-wrap justify-end gap-2 pt-4">
+          <button type="button" className="btn g mr-auto" style={{ color: 'var(--neg)' }} onClick={onDelete}>
+            {t('fin.debt_pay_delete')}
+          </button>
+          <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
+          <button type="submit" className="btn" disabled={saving || !amount}>{saving ? t('people.saving') : t('common.save')}</button>
+        </div>
+      </form>
+    </Sheet>
+  )
+}
+
 export default function Finance() {
   const { t, lang } = useI18n()
   const L = FIN[lang] || FIN.ru
@@ -311,6 +1069,7 @@ export default function Finance() {
   const [txs, setTxs] = useState([])
   const [accounts, setAccounts] = useState([])
   const [debts, setDebts] = useState([])
+  const [debtSum, setDebtSum] = useState(null)
   const [recurring, setRecurring] = useState([])
   const [goals, setGoals] = useState([])
   const [categories, setCategories] = useState([])
@@ -352,11 +1111,12 @@ export default function Finance() {
 
   const load = async () => {
     try {
-      const [s, t, accs, d, rec, g, cats, tech, fc, bg, rg] = await Promise.all([
+      const [s, t, accs, d, ds, rec, g, cats, tech, fc, bg, rg] = await Promise.all([
         api.finSummary(days).catch(() => null),
         api.txs(days).catch(() => []),
         api.accounts().catch(() => []),
         api.debts().catch(() => []),
+        api.debtSummary().catch(() => null),   // ближайший платёж, свобода и переплата
         api.recurring(true).catch(() => []),   // с паузами: паузы нужно видеть и включать
         api.goals().catch(() => []),
         api.categories().catch(() => []),
@@ -371,6 +1131,7 @@ export default function Finance() {
       setTxs(t || [])
       setAccounts(accs || [])
       setDebts(d || [])
+      setDebtSum(ds || null)
       setRecurring(rec || [])
       setGoals(g || [])
       setCategories(cats || [])
@@ -613,12 +1374,6 @@ export default function Finance() {
     if (tx.kind === 'income') e.in += v
     else if (tx.kind === 'expense') e.out += v
   }
-  // ДОЛГИ (visual-only): кольцо сводки — доля выплаченного, те же debts/total/paid
-  const debtTotalAll = debts.reduce((s, d) => s + (Number(d.total) || 0), 0)
-  const debtPaidAll = debts.reduce((s, d) => s + (Number(d.paid) || 0), 0)
-  const debtPct = debtTotalAll > 0 ? Math.min(100, Math.round((debtPaidAll / debtTotalAll) * 100)) : 0
-  const DONUT_C = 2 * Math.PI * 52
-
   // Экспорт выписки в CSV — повторяет то, что видит пользователь: берём shownTxs
   // (учитывает период, фильтр по счёту/категории и поиск), а не все txs (D2)
   const exportCSV = () => {
@@ -660,7 +1415,7 @@ export default function Finance() {
   const tabLine = tab === 'overview' ? t('fin.sub_overview')
     : tab === 'txs' ? t('fin.n_txs', { count: shownTxs.length })
       : tab === 'accounts' ? t('fin.n_accounts', { count: accounts.length })
-        : tab === 'debts' ? t('fin.n_debts', { count: debts.length })
+        : tab === 'debts' ? t('fin.n_debts', { count: debts.filter((d) => !d.closed).length })
           : tab === 'recurring' ? t('fin.n_rec', { n: recActive.length, paused: recPaused.length ? t('fin.n_rec_paused', { n: recPaused.length }) : '' })
             : tab === 'goals' ? t('fin.n_goals', { count: goals.length })
               : t('tech.title')
@@ -1247,90 +2002,18 @@ export default function Finance() {
         </div>
       )}
 
-      {/* ---------------- ДОЛГИ (ver6: сводка с кольцом + тонкие бары + лаймовая кнопка) ---------------- */}
+      {/* ---------------- ДОЛГИ: сводка, план, сортировка, архив и калькулятор ---------------- */}
       {tab === 'debts' && (
-        <div className="bento mt-4">
-          <section className={`c s4 glass-card gc-debts fg-debt-top ${CARD_M_LIGHT}`} data-reveal>
-            <div className="min-w-0">
-              <div className="hd flex-wrap">
-                <div className="min-w-0"><h2 className="trunc">{t('fin.total_debt')}</h2></div>
-              </div>
-              <BigMoney value={debtsTotal} format={fmt.int} label={money(debtsTotal)} fs="clamp(24px, 2.6vw, 34px)" />
-              <div className="muted mt-2 text-[length:var(--fs-md)]">{t('fin.n_active_debt', { count: debts.length })}</div>
-            </div>
-            <div className="fg-donut" role="img" aria-label={`${t('fin.paid_out')} ${debtPct} %`}>
-              <svg viewBox="0 0 120 120" aria-hidden="true">
-                <circle className="fg-track" cx="60" cy="60" r="52" strokeWidth="12" />
-                <circle
-                  className="fg-val"
-                  cx="60"
-                  cy="60"
-                  r="52"
-                  strokeWidth="12"
-                  strokeLinecap="round"
-                  strokeDasharray={DONUT_C}
-                  strokeDashoffset={DONUT_C * (1 - debtPct / 100)}
-                  transform="rotate(-90 60 60)"
-                />
-              </svg>
-              <div className="fg-donut-ct">
-                <b className="num">{debtPct}&nbsp;%</b>
-                <span>{t('fin.paid_out')}</span>
-              </div>
-            </div>
-          </section>
-          {!debts.length ? (
-            <section className={`c s8 ${CARD_M_LIGHT}`} data-reveal>
-              <Empty glyph="debt" text={t('td.clean')} sub={t('td.nothing_missed')}
-                action={<button type="button" className="btn" onClick={() => { setEditingItem(null); setSheet('debt') }}><Plus size={15} /> {t('fin.add_debt')}</button>} />
-            </section>
-          ) : (
-            <CarRow count={debts.length} label={t('fin.total_debt')}>
-              {debts.map((d) => {
-              const total = d.total || 1
-              const paid = d.paid || 0
-              const left = Math.max(0, total - paid)
-              const pct = Math.min(100, Math.round((paid / total) * 100))
-              return (
-                <section key={d.id} data-car className={`c s4 glass-card gc-debts ${CARD_M_LIGHT}`} data-reveal>
-                  <div className="hd flex-wrap">
-                    <div className="min-w-0"><h2 className="clamp-2" style={{ fontWeight: 600, color: 'var(--ink)' }}>{d.name || d.title}</h2></div>
-                    <small className="trunc">{d.creditor || t('fin.creditor')}</small>
-                  </div>
-                  <BigMoney value={left} format={fmt.int} label={money(left)} fs="clamp(22px, 2.4vw, 30px)" />
-                  <div className="progress fg-debtbar mt-3" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={pct}>
-                    <div style={{ width: `${pct}%`, background: GRAD_BAR, boxShadow: BAR_GLOW }} />
-                  </div>
-                  <div className="muted mt-2 text-[length:var(--fs-xs)]">
-                    {t('fin.paid_out')} <b className="num pos">{fmt.money(paid)}</b> (<b className="num">{fmt.int(pct)} %</b>) · {t('fin.of')} {fmt.money(total)}
-                  </div>
-                  {d.linked_account && (
-                    <div className="muted mt-1 text-[length:var(--fs-xs)]">↔ {L.credit_card}: <b>{d.linked_account.name}</b> · {fmt.money(Math.abs(Number(d.linked_account.balance) || 0))}</div>
-                  )}
-                  <div className="mt-3">
-                    <RowActions>
-                      <button type="button" className="btn btn-sm fg-pay" onClick={() => { setEditingItem(d); setSheet('payDebt') }}>{t('fin.make_payment')}</button>
-                      <IconBtn onClick={() => { setEditingItem(d); setSheet('debt') }} title={t('common.edit')}><Edit2 size={14} /></IconBtn>
-                      <IconBtn
-                        danger
-                        title={t('common.delete_title')}
-                        onClick={() => setAsk({
-                          title: t('fin.del_debt_q_name', { name: d.name || d.title }),
-                          text: t('fin.del_debt_text'),
-                          msg: t('fin.debt_deleted'),
-                          run: () => api.delDebt(d.id),
-                        })}
-                      >
-                        <Trash2 size={14} />
-                      </IconBtn>
-                    </RowActions>
-                  </div>
-                </section>
-              )
-            })}
-            </CarRow>
-          )}
-        </div>
+        <DebtsPanel
+          debts={debts}
+          summary={debtSum}
+          accounts={accounts}
+          fmt={fmt}
+          onAdd={() => { setEditingItem(null); setSheet('debt') }}
+          onEdit={(d) => { setEditingItem(d); setSheet('debt') }}
+          onPay={(d) => { setEditingItem(d); setSheet('payDebt') }}
+          onChanged={() => { load(); bump() }}
+        />
       )}
 
       {/* ---------------- РЕГУЛЯРНЫЕ ---------------- */}
@@ -1469,7 +2152,7 @@ export default function Finance() {
         open={sheet === 'debt'}
         debt={editingItem}
         onClose={() => { setSheet(null); setEditingItem(null) }}
-        onDone={() => { setSheet(null); setEditingItem(null); load(); bump() }}
+        onDone={(msg) => { setSheet(null); setEditingItem(null); load(); bump(); if (msg) show(msg) }}
       />
 
       <PayDebtSheet
@@ -1783,33 +2466,105 @@ function DebtSheet({ open, debt, onClose, onDone }) {
   const isNew = !debt?.id
   const [name, setName] = useState('')
   const [creditor, setCreditor] = useState('')
+  const [kind, setKind] = useState('credit')
   const [total, setTotal] = useState('')
+  const [remaining, setRemaining] = useState('')
+  const [paid, setPaid] = useState('0')
+  const [rate, setRate] = useState('0')
+  const [payment, setPayment] = useState('0')
+  const [payDay, setPayDay] = useState('1')
+  const [limit, setLimit] = useState('0')
+  const [color, setColor] = useState('')
+  const [note, setNote] = useState('')
+  const [remindDays, setRemindDays] = useState('3')
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
   useEffect(() => {
     if (!open) return
+    const tot = Number(debt?.total)
+    const rem = debt?.remaining != null ? Number(debt.remaining) : tot
     setName(debt?.name || debt?.title || '')
     setCreditor(debt?.creditor || '')
-    setTotal(debt?.total != null ? String(debt.total) : '')
+    setKind(debt?.kind || 'credit')
+    setTotal(debt?.total != null ? String(round2(debt.total)) : '')
+    setRemaining(Number.isFinite(rem) ? String(round2(rem)) : '')
+    setPaid(Number.isFinite(tot) && Number.isFinite(rem) ? String(round2(Math.max(0, tot - rem))) : '0')
+    setRate(debt?.rate != null ? String(debt.rate) : '0')
+    setPayment(debt?.payment != null ? String(debt.payment) : '0')
+    setPayDay(debt?.pay_day != null ? String(debt.pay_day) : '1')
+    setLimit(debt?.credit_limit != null ? String(debt.credit_limit) : '0')
+    setColor(debt?.color || '')
+    setNote(debt?.note || '')
+    setRemindDays(debt?.remind_days != null ? String(debt.remind_days) : '3')
   }, [open, debt])
+
+  const nTotal = parseNum(total)
+  const nRemaining = parseNum(remaining)
+  const nPaid = parseNum(paid)
+  const nRate = Number.isNaN(parseNum(rate)) ? 0 : parseNum(rate)
+  const nPayment = Number.isNaN(parseNum(payment)) ? 0 : parseNum(payment)
+  const nDay = Number.isNaN(parseNum(payDay)) ? 0 : parseNum(payDay)
+  const nLimit = Number.isNaN(parseNum(limit)) ? 0 : parseNum(limit)
+  const nRemind = Number.isNaN(parseNum(remindDays)) ? 0 : parseNum(remindDays)
+
+  const errTotal = total !== '' && !(nTotal > 0) ? t('fin.debt_err_total') : ''
+  const errRemaining = total !== '' && (Number.isNaN(nRemaining) || nRemaining < 0 || nRemaining > nTotal) ? t('fin.debt_err_remaining') : ''
+  const errPaid = total !== '' && (Number.isNaN(nPaid) || nPaid < 0 || nPaid > nTotal) ? t('fin.debt_err_paid') : ''
+  const errPayment = nPayment < 0 || nPayment > nTotal ? t('fin.debt_err_payment') : ''
+  const errRate = nRate < 0 || nRate > 1000 ? t('fin.debt_err_rate') : ''
+  const errDay = nDay < 1 || nDay > 31 ? t('fin.debt_err_day') : ''
+  const errRemind = nRemind < 0 || nRemind > 60 ? t('fin.debt_err_remind') : ''
+  const bad = !name.trim() || !(nTotal > 0) || !!(errTotal || errRemaining || errPaid || errPayment || errRate || errDay || errRemind)
+
+  /* Остаток и «выплачено» — две стороны одной суммы: правишь одно, второе
+     пересчитывается, но остаётся редактируемым вручную. */
+  const changeTotal = (v) => {
+    setTotal(v)
+    const nt = parseNum(v)
+    const p = parseNum(paid)
+    if (!Number.isNaN(nt) && !Number.isNaN(p)) setRemaining(String(round2(Math.max(0, nt - p))))
+  }
+  const changePaid = (v) => {
+    setPaid(v)
+    const p = parseNum(v)
+    const nt = parseNum(total)
+    if (!Number.isNaN(p) && !Number.isNaN(nt)) setRemaining(String(round2(Math.max(0, nt - p))))
+  }
+  const changeRemaining = (v) => {
+    setRemaining(v)
+    const r = parseNum(v)
+    const nt = parseNum(total)
+    if (!Number.isNaN(r) && !Number.isNaN(nt)) setPaid(String(round2(Math.max(0, nt - r))))
+  }
 
   const submit = async (e) => {
     if (e) e.preventDefault()
-    if (!name.trim()) return
+    if (bad) return
     setSaving(true)
     try {
       const payload = {
         title: name.trim(),   // API ждёт `title`; `name` — устаревший алиас (422 «Field required»)
-        creditor: creditor.trim() || undefined,
-        total: parseNum(total) || 0,
+        creditor: creditor.trim(),
+        total: round2(nTotal),
+        payment: round2(nPayment) || 0,
+        rate: nRate || 0,
+        pay_day: Math.round(nDay) || 1,
+        kind,
+        credit_limit: round2(nLimit) || 0,
+        color: normHex(color) || '',
+        note: note.trim(),
+        remind_days: Math.round(nRemind) || 0,
       }
       if (isNew) {
+        payload.remaining = round2(nRemaining)
         await api.addDebt(payload)
       } else {
+        // PUT принимает paid: остаток бэкенд пересчитает сам
+        payload.paid = round2(nPaid)
         await api.updateDebt(debt.id, payload)
       }
-      onDone()
+      onDone(t('common.saved'))
     } catch (err) {
       show.err(err)
     } finally {
@@ -1826,12 +2581,50 @@ function DebtSheet({ open, debt, onClose, onDone }) {
         <Field label={t('fin.creditor2')}>
           <input className="input" value={creditor} onChange={(e) => setCreditor(e.target.value)} placeholder={t('fin.creditor_ph')} />
         </Field>
-        <Field label={t('fin.total_amount')}>
-          <Money value={total} onChange={setTotal} min={0} placeholder="50000" required />
+        <Field label={t('fin.debt_kind_field')}>
+          <select className="input" value={kind} onChange={(e) => setKind(e.target.value)}>
+            {Object.keys(DEBT_KIND_KEY).map((k) => <option key={k} value={k}>{t(DEBT_KIND_KEY[k])}</option>)}
+          </select>
         </Field>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <Field label={t('fin.debt_initial')} error={errTotal}>
+            <Money value={total} onChange={changeTotal} min={0} placeholder="50000" required />
+          </Field>
+          <Field label={t('fin.debt_remaining')} error={errRemaining}>
+            <Money value={remaining} onChange={changeRemaining} min={0} max={Number.isNaN(nTotal) ? undefined : nTotal} required />
+          </Field>
+          <Field label={t('fin.debt_paid')} error={errPaid}>
+            <Money value={paid} onChange={changePaid} min={0} max={Number.isNaN(nTotal) ? undefined : nTotal} />
+          </Field>
+          <Field label={t('fin.debt_rate')} error={errRate}>
+            <input className="input num" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder="0" />
+          </Field>
+          <Field label={t('fin.debt_payment')} error={errPayment}>
+            <Money value={payment} onChange={setPayment} min={0} max={Number.isNaN(nTotal) ? undefined : nTotal} />
+          </Field>
+          <Field label={t('fin.debt_pay_day')} error={errDay}>
+            <input className="input num" type="number" min={1} max={31} step={1} value={payDay} onChange={(e) => setPayDay(e.target.value)} />
+          </Field>
+        </div>
+
+        {kind === 'credit_card' && (
+          <Field label={t('fin.debt_limit')} hint={t('fin.debt_limit_hint')}>
+            <Money value={limit} onChange={setLimit} min={0} placeholder="100000" />
+          </Field>
+        )}
+
+        <SwatchRow label={t('fin.debt_color')} value={color} onChange={setColor} showDefault custom />
+        <Field label={t('common.note')}>
+          <textarea className="input" rows={3} value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('fin.debt_note_ph')} />
+        </Field>
+        <Field label={t('fin.debt_remind')} hint={t('fin.debt_remind_hint')} error={errRemind}>
+          <input className="input num" type="number" min={0} max={60} step={1} value={remindDays} onChange={(e) => setRemindDays(e.target.value)} />
+        </Field>
+
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>
-          <button type="submit" className="btn" disabled={saving || !name.trim()}>{saving ? t('people.saving') : t('common.save')}</button>
+          <button type="submit" className="btn" disabled={saving || bad}>{saving ? t('people.saving') : t('common.save')}</button>
         </div>
       </form>
     </Sheet>
@@ -1842,24 +2635,41 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
   const { t } = useI18n()
   const [amount, setAmount] = useState('')
   const [account, setAccount] = useState('none')
+  const [date, setDate] = useState('')
+  const [note, setNote] = useState('')
   const [accErr, setAccErr] = useState('')
   const [saving, setSaving] = useState(false)
   const [, show] = useToast()
 
   // по умолчанию — «не списывать»: счёт пользователь выбирает сам, а не таём первый попавшийся
-  useEffect(() => { if (open) { setAccount('none'); setAccErr('') } }, [open])
+  useEffect(() => {
+    if (!open) return
+    setAccount('none')
+    setAccErr('')
+    setAmount('')
+    setDate(toLocalISO(new Date()).slice(0, 10))
+    setNote('')
+  }, [open, debt])
 
   const submit = async (e) => {
     if (e) e.preventDefault()
     const a = parseNum(amount)
     if (!a || isNaN(a) || !debt?.id) return
-    // PayIn принимает только amount/account/date: «не списывать» бэкенд не умеет,
-    // а пустой счёт превратился бы в основной (деньги всё равно ушли бы) — просим выбрать честно
+    if (debt?.remaining != null && a > Number(debt.remaining) + 0.005) {
+      show(t('fin.debt_pay_err_max'), 'err')
+      return
+    }
+    // «не списывать» бэкенд не умеет, а пустой счёт превратился бы в основной —
+    // просим выбрать честно (деньги всё равно ушли бы)
     if (account === 'none') { setAccErr(t('fin.pick_account')); return }
     setAccErr('')
     setSaving(true)
     try {
-      await api.payDebt(debt.id, a, { account })
+      await api.payDebt(debt.id, a, {
+        account,
+        date: date || undefined,
+        note: note.trim() || undefined,
+      })
       onDone(t('fin.pay_made'))
     } catch (err) {
       show.err(err)
@@ -1872,13 +2682,19 @@ function PayDebtSheet({ open, debt, accounts = [], onClose, onDone }) {
     <Sheet bodyClass={FIELD_LABEL_M} open={open} onClose={onClose} title={t('fin.pay_debt_title', { name: debt?.name || debt?.title || '' })}>
       <form onSubmit={submit} className="space-y-4">
         <Field label={t('fin.pay_amount')}>
-          <Money value={amount} onChange={setAmount} min={0} placeholder="5000" autoFocus required />
+          <Money value={amount} onChange={setAmount} min={0} max={debt?.remaining != null ? Number(debt.remaining) : undefined} placeholder="5000" autoFocus required />
         </Field>
         <Field label={t('fin.charge')} error={accErr} hint={t('fin.charge_hint')}>
           <select className="input" value={account} onChange={(e) => { setAccount(e.target.value); if (accErr) setAccErr('') }}>
             <option value="none">{t('fin.no_charge')}</option>
             {accounts.map((a) => <option key={a.id || a.name} value={a.name}>{a.name}</option>)}
           </select>
+        </Field>
+        <Field label={t('fin.debt_pay_date')}>
+          <input type="date" className="input" value={date} max={toLocalISO(new Date()).slice(0, 10)} onChange={(e) => setDate(e.target.value)} />
+        </Field>
+        <Field label={t('fin.debt_pay_note')}>
+          <input className="input" value={note} onChange={(e) => setNote(e.target.value)} placeholder={t('fin.debt_pay_note_ph')} />
         </Field>
         <div className="flex justify-end gap-2 pt-4">
           <button type="button" className="btn g" onClick={onClose}>{t('common.cancel')}</button>

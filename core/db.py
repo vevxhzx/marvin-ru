@@ -163,7 +163,17 @@ class Debt(SQLModel, table=True):
     rate: float = 0.0                  # годовая ставка, %
     payment: float = 0.0               # ежемесячный платёж
     pay_day: int = 1                   # день месяца
+    # --- расширенная карточка (v18): тип, лимит, цвет, заметка, порядок, напоминания
+    kind: str = Field(default="credit", index=True)  # credit / credit_card / installment / personal / receivable
+    credit_limit: float = 0.0          # лимит кредитки (0 — не задан)
+    color: str = ""                    # акцент карточки (hex или ключ палитры)
+    note: str = ""                     # свободная заметка
+    sort_order: int = 0                # ручной порядок в списке (drag-and-drop)
+    remind_days: int = 3               # за сколько дней напомнить о платеже (0 — не напоминать)
+    last_remind: str = ""              # "YYYY-MM" месяц последнего напоминания — чтобы не дублировать
     closed: bool = False
+    closed_at: Optional[datetime] = None
+    deleted_at: Optional[datetime] = None   # мягкое удаление: список скрыт, «вернуть» доступно
     created_at: datetime = Field(default_factory=now)
 
 

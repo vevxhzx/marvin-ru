@@ -308,6 +308,43 @@ def _v17_run_tokens(conn) -> None:
     add_column(conn, "run", "cost_usd", "FLOAT DEFAULT 0.0")
 
 
+def _v18_debt_card(conn) -> None:
+    """Долги: расширенная карточка (тип, лимит кредитки, цвет, заметка, ручной порядок,
+    напоминания, архив/мягкое удаление).
+
+    Только ADD COLUMN + бэкфилл sort_order = id: существующие долги остаются как были,
+    получают kind='credit', remind_days=3 и стабильный порядок. Значения не пересчитываются.
+    Идемпотентна через add_column(); бэкфилл идёт только по sort_order = 0.
+    Бэкап — штатный backup_before_migration() в apply()."""
+    cols = (
+        ("kind", "VARCHAR DEFAULT 'credit'"),
+        ("credit_limit", "FLOAT DEFAULT 0.0"),
+        ("color", "VARCHAR DEFAULT ''"),
+        ("note", "VARCHAR DEFAULT ''"),
+        ("sort_order", "INTEGER DEFAULT 0"),
+        ("remind_days", "INTEGER DEFAULT 3"),
+        ("last_remind", "VARCHAR DEFAULT ''"),
+        ("closed_at", "DATETIME"),
+        ("deleted_at", "DATETIME"),
+    )
+    for name, ddl in cols:
+        add_column(conn, "debt", name, ddl)
+    if not table_exists(conn, "debt"):
+        return
+    have = column_names(conn, "debt")
+    if "sort_order" in have:
+        conn.execute(text('UPDATE "debt" SET "sort_order" = "id" WHERE "sort_order" = 0'))
+    # Тип по названию: «кредитка/карта» — это кредитная карта, остальное остаётся кредитом.
+    # Значения сумм не трогаем; лимит остаётся 0 и карточка показывает его как изначальную сумму.
+    if "kind" in have:
+        conn.execute(text(
+            'UPDATE "debt" SET "kind" = \'credit_card\' '
+            'WHERE "kind" = \'credit\' AND (LOWER(COALESCE("title",\'\')) LIKE \'%кредитк%\' '
+            'OR LOWER(COALESCE("title",\'\')) LIKE \'%карта%\')'
+        ))
+
+
+
 # Порядковый номер — это версия схемы. Никогда не переиспользуем и не меняем задним числом.
 MIGRATIONS: list[Migration] = [
     (1, "baseline: schema_version", _noop),
@@ -328,6 +365,7 @@ MIGRATIONS: list[Migration] = [
     (15, "память: fact.is_private (замок: в облако не уходит, дефолт открыт)", _v15_fact_private),
     (16, "мост: fact.source_ref (ссылка note:/link: для дедупа, вместо строки в INTEGER)", _v16_fact_source_ref),
     (17, "учёт денег: run.prompt_tokens/completion_tokens/cost_usd (0 = цена не задана, не «бесплатно»)", _v17_run_tokens),
+    (18, "долги: тип/лимит/цвет/заметка/порядок/напоминания/архив (существующие значения не меняются)", _v18_debt_card),
 ]
 
 

@@ -189,7 +189,11 @@ def _real_counts() -> dict[str, int]:
     out = {}
     for table, model in MODELS.items():
         with session() as s:
-            out[table] = sum(1 for row in s.exec(select(model)).all() if row.id not in demo_ids[table])
+            rows = list(s.exec(select(model)).all())
+        if table == "debt":
+            # мягко удалённый долг — уже не «мои данные», он просто ждёт возврата
+            rows = [r for r in rows if getattr(r, "deleted_at", None) is None]
+        out[table] = sum(1 for row in rows if row.id not in demo_ids[table])
     return out
 
 
@@ -313,7 +317,7 @@ def clear_demo() -> dict:
                 one = TABLE_FORMS.get(table, (table,))[0]
                 kept.append(f"{one} «{_name_of(table, rec)}» — {reason}")
                 continue
-            deleter = {"debt": finance.delete_debt, "goal": goals.delete_goal,
+            deleter = {"debt": lambda i: finance.delete_debt(i, soft=False), "goal": goals.delete_goal,
                        "client": orders.delete_client, "account": finance.delete_account}[table]
             try:
                 deleter(rec["id"])

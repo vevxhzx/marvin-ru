@@ -1068,6 +1068,23 @@ def build(notify: Notifier) -> AsyncIOScheduler:
             ping("reminder", text=text, id=f"payshort-{datetime.now():%Y%m%d}")
             await _notify(text)
 
+    async def debt_reminders():
+        """За N дней до платежа по долгу: срок, сумма, кредитор. Раз в месяц на долг."""
+        try:
+            due = finance.debt_due_soon()
+        except Exception as e:  # pragma: no cover
+            log.warning("debt reminders: %s", e); return
+        for d, days in due:
+            when = finance.next_pay_date(d.pay_day)
+            head = "сегодня" if days == 0 else ("завтра" if days == 1 else f"через {days} дн.")
+            text = (f"💳 **ПЛАТЁЖ ПО ДОЛГУ** · {when:%d.%m}\n"
+                    f"**«{d.title}»** — {money(d.payment)} {head}"
+                    + (f"\n{d.creditor}" if d.creditor else "")
+                    + f"\nостаток {money(d.remaining)}")
+            ping("reminder", text=text, id=f"debt{d.id}-{when:%Y%m}")
+            await _notify(text, urgent=True)
+            finance.mark_debt_reminded(d.id, f"{when:%Y-%m}")
+
     async def crm_followups_job():
         """Раз в день: досоздать follow-up по заказам и один раз сообщить о важных (просрочка/неоплата).
         Спама нет: scan идемпотентен (один открытый повод на заказ)."""
@@ -1088,6 +1105,7 @@ def build(notify: Notifier) -> AsyncIOScheduler:
 
     add(timer_tick, "interval", "timer_tick", seconds=20, next_run_time=_soon(20))
     add(payment_check, CronTrigger(hour=10, minute=30), "payment_check")
+    add(debt_reminders, CronTrigger(hour=10, minute=35), "debt_reminders")
     add(crm_followups_job, CronTrigger(hour=9, minute=40), "crm_followups")
     add(evening_review, CronTrigger(hour=21, minute=0), "evening_review")
     add(evening_budget, CronTrigger(hour=21, minute=2), "evening_budget")
